@@ -1,0 +1,31 @@
+=== 1.4 (2011-08-12)
+
+- improved build system (patch from Alon Bar-Lev)
+- support reading cert+key from PKCS12 file (patch from Alon Bar-Lev)
+- support reading key from PEM file
+- added support for sha1/sha256 - default hash is now sha1
+- added flag for commercial signing (default is individual)
+
+
+=== 1.3.1 (2009-08-07)
+
+- support signing of 64-bit executables (fix  from Paul Kendall)
+
+=== 1.3 (2008-01-31)
+
+- fixed padding problem (fix from Ryan Rubley)
+- allow signing of already signed files (fix from Ryan Rubley)
+- added Ryan Rubley's PVK-to-DER guide into the README
+
+=== 1.2 (2005-01-21)
+
+- autoconf:ed (Thanks to Roy Keene)
+- added documentation
+- don't override PKCS7_get_signed_attribute, it wasn't
+  actually needed, it was me being confused.
+- compiles without curl, which means no timestamping
+- version number output
+
+=== 1.1 (2005-01-19)
+
+- Initial release

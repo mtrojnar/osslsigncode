@@ -1,0 +1,10 @@
+- tool for extracting/removing the signature
+- separate timestamping
+- man page
+- verify signatures
+- remove mmap usage to increase portability
+- tests
+- calculate correct PE checksum instead of setting it to 0
+- fix other stuff marked 'XXX'
+- free memory properly :)
+
