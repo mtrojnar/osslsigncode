@@ -6,25 +6,25 @@ osslsigncode
 
 osslsigncode is a small tool that implements part of the functionality
 of the Microsoft tool signcode.exe - more exactly the Authenticode
-signing and timestamping. But osslsigncode is based on OpenSSL and cURL, 
+signing and timestamping. But osslsigncode is based on OpenSSL and cURL,
 and thus should be able to compile on most platforms where these exist.
 
 
 == WHY?
 
 Why not use signcode.exe? Because I don't want to go to a Windows
-machine every time I need to sign a binary - I can compile and build 
-the binaries using Wine on my Linux machine, but I can't sign them 
-since the signcode.exe makes good use of the CryptoAPI in Windows, and 
-these APIs aren't (yet?) fully implemented in Wine, so the signcode.exe 
+machine every time I need to sign a binary - I can compile and build
+the binaries using Wine on my Linux machine, but I can't sign them
+since the signcode.exe makes good use of the CryptoAPI in Windows, and
+these APIs aren't (yet?) fully implemented in Wine, so the signcode.exe
 tool  would fail. And, so, osslsigncode was born.
 
 
 == WHAT CAN IT DO?
 
-It can sign and timestamp EXE or CAB files. It supports the equivalent 
-of signcode.exe's "-j javasign.dll -jp low", i.e. add a valid signature 
-for a CAB file containing Java files. It supports getting the timestamp 
+It can sign and timestamp EXE or CAB files. It supports the equivalent
+of signcode.exe's "-j javasign.dll -jp low", i.e. add a valid signature
+for a CAB file containing Java files. It supports getting the timestamp
 through a proxy as well.
 
 
@@ -32,7 +32,7 @@ through a proxy as well.
 
 The usual way:
 
-  ./configure 
+  ./configure
   make
   make install
 
@@ -40,7 +40,7 @@ The usual way:
 == USAGE
 
 Before you can sign a file you need a Software Publishing
-Certificate (spc) and a corresponding private key. 
+Certificate (spc) and a corresponding private key.
 
 This article provides a good starting point as to how
 to do the signing with the Microsoft signcode.exe:
@@ -50,7 +50,7 @@ to do the signing with the Microsoft signcode.exe:
 To sign with osslsigncode you need the spc file mentioned
 in the article above, and you will also need the private
 key, but not as a pvk file - it must be a simple key file
-on DER format or in PEM format. You can create a DER file 
+on DER format or in PEM format. You can create a DER file
 from the PEM file by doing:
 
   openssl rsa -passin pass:XXXXX -outform der \
@@ -102,33 +102,33 @@ amongst other things that "This digital signature is OK".
 
 (This guide was written by Ryan Rubley)
 
-If you've managed to finally find osslsigncode from some searches, 
-you're most likely going to have a heck of a time getting your SPC 
-and PVK files into the formats osslsigncode wants. 
- 
+If you've managed to finally find osslsigncode from some searches,
+you're most likely going to have a heck of a time getting your SPC
+and PVK files into the formats osslsigncode wants.
+
 On the computer where you originally purchased your certificate, you
-probably had to use IE to get it. Run IE and select Tools/Internet 
-Options from the menu, then under the Content tab, click the Certificates 
+probably had to use IE to get it. Run IE and select Tools/Internet
+Options from the menu, then under the Content tab, click the Certificates
 button. Under the Personal tab, select your certificate and click the
-Export button. On the second page of the wizard, select the PKCS #7 
-Certificate (.P7B) format. This file you export as a *.p7b is what you 
-use instead of your *.spc file. It's the same basic thing, in a different format. 
- 
-For your PVK file, you will need to download a little utility called 
+Export button. On the second page of the wizard, select the PKCS #7
+Certificate (.P7B) format. This file you export as a *.p7b is what you
+use instead of your *.spc file. It's the same basic thing, in a different format.
+
+For your PVK file, you will need to download a little utility called
 PVK.EXE. This can currently be downloaded at
 
- http://support.globalsign.net/en/objectsign/PVK.zip 
+ http://support.globalsign.net/en/objectsign/PVK.zip
 
-Run: pvk -in foo.pvk -nocrypt -out foo.pem 
+Run: pvk -in foo.pvk -nocrypt -out foo.pem
 
-This will convert your PVK file to a PEM file. 
-From there, you can copy the PEM file to a Linux box, and run: 
+This will convert your PVK file to a PEM file.
+From there, you can copy the PEM file to a Linux box, and run:
 
-  openssl rsa -outform der -in foo.pem -out foo.der 
+  openssl rsa -outform der -in foo.pem -out foo.der
 
-This will convert your PEM file to a DER file. 
- 
-You need the *.p7b and *.der files to use osslsigncode, instead of your 
+This will convert your PEM file to a DER file.
+
+You need the *.p7b and *.der files to use osslsigncode, instead of your
 *.spc and *.pvk files.
 
 
@@ -136,10 +136,8 @@ You need the *.p7b and *.der files to use osslsigncode, instead of your
 
 Send an email to mfive@users.sourceforge.net
 
-BUT, if you have questions related to generating spc files, 
-converting between different formats and so on, *please* 
-spend a few minutes searching on google for your particular 
-problem since many people probably already have had your 
+BUT, if you have questions related to generating spc files,
+converting between different formats and so on, *please*
+spend a few minutes searching on google for your particular
+problem since many people probably already have had your
 problem and solved it as well.
-
-
