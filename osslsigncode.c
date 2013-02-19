@@ -272,8 +272,13 @@ static SpcSpOpusInfo* createOpus(const char *desc, const char *url)
 
 #ifdef ENABLE_CURL
 
+static int blob_has_nl = 0;
 static size_t curl_write( void *ptr, size_t sz, size_t nmemb, void *stream)
 {
+	if (sz*nmemb > 0 && !blob_has_nl) {
+		if (memchr(ptr, '\n', sz*nmemb))
+			blob_has_nl = 1;
+	}
     return BIO_write((BIO*)stream, ptr, sz*nmemb);
 }
 
@@ -382,16 +387,20 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy)
 		int i;
 		PKCS7_SIGNER_INFO *info;
 		ASN1_STRING *astr;
-
+		BIO* b64_bin;
 		(void)BIO_flush(bin);
 		b64 = BIO_new(BIO_f_base64());
-		bin = BIO_push(b64, bin);
-		p7 = d2i_PKCS7_bio(bin, NULL);
+		if (!blob_has_nl)
+			BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+		b64_bin = BIO_push(b64, bin);
+		p7 = d2i_PKCS7_bio(b64_bin, NULL);
 		if (p7 == NULL) {
+			BIO_free_all(b64_bin);
 			fprintf(stderr, "Failed to convert timestamp reply\n");
 			ERR_print_errors_fp(stderr);
 			return -1;
 		}
+		BIO_free_all(b64_bin);
 
 		for(i = sk_X509_num(p7->d.sign->cert)-1; i>=0; i--)
 			PKCS7_add_certificate(sig, sk_X509_value(p7->d.sign->cert, i));
