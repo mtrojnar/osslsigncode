@@ -88,6 +88,9 @@
 /* Version number of package */
 #undef VERSION
 
+/* Have libgsf? */
+#undef WITH_GSF
+
 /* Define to 1 if on MINIX. */
 #undef _MINIX
 
