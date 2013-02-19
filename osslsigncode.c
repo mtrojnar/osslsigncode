@@ -58,6 +58,16 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.4 2011/08/12 11:08:12 mfive 
 #include <sys/mman.h>
 #endif
 
+#ifdef WITH_GSF
+#include <gsf/gsf-infile-msole.h>
+#include <gsf/gsf-infile.h>
+#include <gsf/gsf-input-stdio.h>
+#include <gsf/gsf-outfile-msole.h>
+#include <gsf/gsf-outfile.h>
+#include <gsf/gsf-output-stdio.h>
+#include <gsf/gsf-utils.h>
+#endif
+
 #include <openssl/err.h>
 #include <openssl/objects.h>
 #include <openssl/evp.h>
@@ -81,7 +91,7 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.4 2011/08/12 11:08:12 mfive 
 #define SPC_PE_IMAGE_DATA_OBJID  "1.3.6.1.4.1.311.2.1.15"
 #define SPC_CAB_DATA_OBJID       "1.3.6.1.4.1.311.2.1.25"
 #define SPC_TIME_STAMP_REQUEST_OBJID "1.3.6.1.4.1.311.3.2.1"
-
+#define SPC_SIPINFO_OBJID        "1.3.6.1.4.1.311.2.1.30"
 /* 1.3.6.1.4.1.311.4... MS Crypto 2.0 stuff... */
 
 
@@ -211,6 +221,28 @@ ASN1_SEQUENCE(SpcPeImageData) = {
 } ASN1_SEQUENCE_END(SpcPeImageData)
 
 IMPLEMENT_ASN1_FUNCTIONS(SpcPeImageData)
+
+typedef struct {
+    ASN1_INTEGER *a;
+    ASN1_OCTET_STRING *string;
+    ASN1_INTEGER *b;
+    ASN1_INTEGER *c;
+    ASN1_INTEGER *d;
+    ASN1_INTEGER *e;
+    ASN1_INTEGER *f;
+} SpcSipinfo;
+
+ASN1_SEQUENCE(SpcSipinfo) = {
+    ASN1_SIMPLE(SpcSipinfo, a, ASN1_INTEGER),
+    ASN1_SIMPLE(SpcSipinfo, string, ASN1_OCTET_STRING),
+    ASN1_SIMPLE(SpcSipinfo, b, ASN1_INTEGER),
+    ASN1_SIMPLE(SpcSipinfo, c, ASN1_INTEGER),
+    ASN1_SIMPLE(SpcSipinfo, d, ASN1_INTEGER),
+    ASN1_SIMPLE(SpcSipinfo, e, ASN1_INTEGER),
+    ASN1_SIMPLE(SpcSipinfo, f, ASN1_INTEGER),
+} ASN1_SEQUENCE_END(SpcSipinfo)
+
+IMPLEMENT_ASN1_FUNCTIONS(SpcSipinfo)
 
 #ifdef ENABLE_CURL
 
@@ -485,6 +517,10 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, in
         0x00, 0x73, 0x00, 0x6f, 0x00, 0x6c, 0x00, 0x65, 0x00, 0x74,
         0x00, 0x65, 0x00, 0x3e, 0x00, 0x3e, 0x00, 0x3e
     };
+    static const unsigned char msistr[] = {
+        0xf1, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46
+    };
 
     u_char *p;
     int hashlen, l;
@@ -518,6 +554,23 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, in
         i2d_SpcPeImageData(pid, &p);
         p -= l;
         idc->data->type = OBJ_txt2obj(SPC_PE_IMAGE_DATA_OBJID, 1);
+    } else if (type == FILE_TYPE_MSI) {
+        SpcSipinfo *si = SpcSipinfo_new();
+
+        si->a = ASN1_INTEGER_new();
+        ASN1_INTEGER_set(si->a, 1);
+        si->string = M_ASN1_OCTET_STRING_new();
+        M_ASN1_OCTET_STRING_set(si->string, msistr, sizeof(msistr));
+        si->b = ASN1_INTEGER_new();
+        si->c = ASN1_INTEGER_new();
+        si->d = ASN1_INTEGER_new();
+        si->e = ASN1_INTEGER_new();
+        si->f = ASN1_INTEGER_new();
+        l = i2d_SpcSipinfo(si, NULL);
+        p = OPENSSL_malloc(l);
+        i2d_SpcSipinfo(si, &p);
+        p -= l;
+        idc->data->type = OBJ_txt2obj(SPC_SIPINFO_OBJID, 1);
     } else {
         exit(1);
     }
@@ -541,6 +594,78 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, in
     p = *blob;
     i2d_SpcIndirectDataContent(idc, &p);
 }
+
+
+#ifdef WITH_GSF
+static gint msi_base64_decode(gint x)
+{
+    if (x < 10)
+        return x + '0';
+    if (x < (10 + 26))
+        return x - 10 + 'A';
+    if (x < (10 + 26 + 26))
+        return x - 10 - 26 + 'a';
+    if (x == (10 + 26 + 26))
+        return '.';
+    return 1;
+}
+
+static void msi_decode(const guint8 *in, gchar *out)
+{
+    guint count = 0;
+    guint8 *q = (guint8 *)out;
+
+    /* utf-8 encoding of 0x4840 */
+    if (in[0] == 0xe4 && in[1] == 0xa1 && in[2] == 0x80)
+        in += 3;
+
+    while (*in) {
+        guint8 ch = *in;
+        if ((ch == 0xe3 && in[1] >= 0xa0) || (ch == 0xe4 && in[1] < 0xa0)) {
+            *q++ = msi_base64_decode(in[2] & 0x7f);
+            *q++ = msi_base64_decode(in[1] ^ 0xa0);
+            in += 3;
+            count += 2;
+            continue;
+        }
+        if (ch == 0xe4 && in[1] == 0xa0) {
+            *q++ = msi_base64_decode(in[2] & 0x7f);
+            in += 3;
+            count++;
+            continue;
+        }
+        *q++ = *in++;
+        if (ch >= 0xc1)
+            *q++ = *in++;
+        if (ch >= 0xe0)
+            *q++ = *in++;
+        if (ch >= 0xf0)
+            *q++ = *in++;
+        count++;
+    }
+    *q = 0;
+}
+
+/*
+ * Sorry if this code looks a bit silly, but that seems
+ * to be the best solution so far...
+ */
+static gint msi_cmp(gpointer a, gpointer b)
+{
+    gchar *pa = (gchar*)g_utf8_to_utf16(a, -1, NULL, NULL, NULL);
+    gchar *pb = (gchar*)g_utf8_to_utf16(b, -1, NULL, NULL, NULL);
+    gint diff;
+
+    diff = memcmp(pa, pb, MIN(strlen(pa), strlen(pb)));
+    /* apparently the longer wins */
+    if (diff == 0)
+        return strlen(pa) > strlen(pb) ? 1 : -1;
+    g_free(pa);
+    g_free(pb);
+
+    return diff;
+}
+#endif
 
 int main(int argc, char **argv)
 {
@@ -566,6 +691,12 @@ int main(int argc, char **argv)
     int i, len = 0, type = 0, jp = -1, fd = -1, pe32plus = 0, comm = 0;
     unsigned int tmp, peheader = 0, padlen;
     struct stat st;
+
+#ifdef WITH_GSF
+    GsfOutfile *outole;
+    GsfOutput *sink;
+    gsf_init();
+#endif
 
 #if 0
     static u_char spcIndirectDataContext_blob_cab[] = {
@@ -611,6 +742,9 @@ int main(int argc, char **argv)
     static u_char purpose_comm[] = {
         0x30, 0x0c,
         0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x16
+    };
+    static u_char msi_signature[] = {
+        0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1
     };
 
     spcfile = keyfile = pkcs12file = infile = outfile = desc = url = NULL;
@@ -664,16 +798,28 @@ int main(int argc, char **argv)
             proxy = *(++argv);
 #endif
         } else if (!strcmp(*argv, "-v") || !strcmp(*argv, "--version")) {
-            printf(PACKAGE_STRING ", using:\n\t%s\n\t%s\n\nPlease send bug-reports to "
-                   PACKAGE_BUGREPORT
-                   "\n\n",
+            printf(PACKAGE_STRING ", using:\n\t%s\n\t%s\n",
                    SSLeay_version(SSLEAY_VERSION),
 #ifdef ENABLE_CURL
                    curl_version()
 #else
                    "no libcurl available"
 #endif
+               );
+            printf(
+#ifdef WITH_GSF
+                   "\tlibgsf %d.%d.%d\n",
+                   libgsf_major_version,
+                   libgsf_minor_version,
+                   libgsf_micro_version
+#else
+                   "\tno libgsf available\n"
+#endif
                 );
+            printf("\nPlease send bug-reports to "
+                   PACKAGE_BUGREPORT
+                   "\n\n");
+
         } else if (!strcmp(*argv, "-jp")) {
             char *ap;
             if (--argc < 1) usage(argv0);
@@ -742,6 +888,8 @@ int main(int argc, char **argv)
         type = FILE_TYPE_CAB;
     else if (!memcmp(indata, "MZ", 2))
         type = FILE_TYPE_PE;
+    else if (!memcmp(indata, msi_signature, sizeof(msi_signature)))
+        type = FILE_TYPE_MSI;
     else
         DO_EXIT_1("Unrecognized file type: %s\n", infile);
 
@@ -761,6 +909,64 @@ int main(int argc, char **argv)
             DO_EXIT_1("Corrupt PE file - too short: %s\n", infile);
         if (memcmp(indata+peheader, "PE\0\0", 4))
             DO_EXIT_1("Unrecognized DOS file type: %s\n", infile);
+    } else if (type == FILE_TYPE_MSI) {
+#ifdef WITH_GSF
+        GsfInput *src;
+        GsfInfile *ole;
+        GSList *sorted = NULL;
+        guint8 classid[16];
+        gchar decoded[0x40];
+
+        BIO_push(hash, BIO_new(BIO_s_null()));
+
+        src = gsf_input_stdio_new(infile, NULL);
+        if (!src)
+            DO_EXIT_1("Error opening file %s", infile);
+
+        sink = gsf_output_stdio_new(outfile, NULL);
+        if (!sink)
+            DO_EXIT_1("Error opening output file %s", outfile);
+
+        ole = gsf_infile_msole_new(src, NULL);
+        gsf_infile_msole_get_class_id(GSF_INFILE_MSOLE(ole), classid);
+
+        outole = gsf_outfile_msole_new(sink);
+        gsf_outfile_msole_set_class_id(GSF_OUTFILE_MSOLE(outole), classid);
+
+        for (i = 0; i < gsf_infile_num_children(ole); i++) {
+            GsfInput *child = gsf_infile_child_by_index(ole, i);
+            const guint8 *name = gsf_input_name(child);
+            msi_decode(name, decoded);
+            if (!g_strcmp0(decoded, "\05DigitalSignature"))
+                continue;
+
+            sorted = g_slist_insert_sorted(sorted, (gpointer)name, (GCompareFunc)msi_cmp);
+        }
+
+        for (; sorted; sorted = sorted->next) {
+            GsfInput *child =  gsf_infile_child_by_name(ole, (gchar*)sorted->data);
+            msi_decode(sorted->data, decoded);
+            if (child == NULL)
+                continue;
+
+            GsfOutput *outchild = gsf_outfile_new_child(outole, (gchar*)sorted->data, FALSE);
+            while (gsf_input_remaining(child) > 0) {
+                gsf_off_t size = MIN(gsf_input_remaining(child), 4096);
+                guint8 const *data = gsf_input_read(child, size, NULL);
+                BIO_write(hash, data, size);
+                if (!gsf_output_write(outchild, size, data))
+                    DO_EXIT_1("Error writing %s", outfile);
+            }
+            g_object_unref(child);
+            gsf_output_close(outchild);
+            g_object_unref(outchild);
+        }
+
+        BIO_write(hash, classid, sizeof(classid));
+        g_slist_free(sorted);
+#else
+        DO_EXIT_1("libgsf is not available, msi support is disabled: %s\n", infile);
+#endif
     }
 
     if (type == FILE_TYPE_CAB || type == FILE_TYPE_PE) {
@@ -998,6 +1204,18 @@ int main(int argc, char **argv)
             memset(p, 0, padlen);
             BIO_write(outdata, p, padlen);
         }
+#ifdef WITH_GSF
+    } else if (type == FILE_TYPE_MSI) {
+        GsfOutput *child;
+        GError *error = NULL;
+
+        child = gsf_outfile_new_child(outole, "\05DigitalSignature", FALSE);
+        if (!gsf_output_write(child, len, p))
+            DO_EXIT_1("Failed to write MSI signature to %s", infile);
+        gsf_output_close(child);
+        gsf_output_close(GSF_OUTPUT(outole));
+        g_object_unref(sink);
+#endif
     }
 
     if (type == FILE_TYPE_PE) {
