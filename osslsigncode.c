@@ -1,7 +1,7 @@
 /*
    OpenSSL based Authenticode signing for PE files and Java CAB's.
 
-     Copyright (C) 2005-2011 mfive <mfive@users.sourceforge.net>
+     Copyright (C) 2005-2013 Per Allansson <pallansson@gmail.com>
 
 
    This program is free software; you can redistribute it and/or modify
