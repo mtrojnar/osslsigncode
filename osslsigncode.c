@@ -472,8 +472,13 @@ ASN1_TYPE *PKCS7_get_signed_attribute(PKCS7_SIGNER_INFO *si, int nid)
 }
 #endif
 
+enum {
+    FILE_TYPE_CAB,
+    FILE_TYPE_PE,
+    FILE_TYPE_MSI,
+};
 
-static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, int isjava)
+static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, int type)
 {
     static const unsigned char obsolete[] = {
         0x00, 0x3c, 0x00, 0x3c, 0x00, 0x3c, 0x00, 0x4f, 0x00, 0x62,
@@ -487,7 +492,6 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, in
     SpcLink *link;
     SpcIndirectDataContent *idc = SpcIndirectDataContent_new();
     idc->data = SpcAttributeTypeAndOptionalValue_new();
-    idc->data->type = OBJ_txt2obj(isjava ? SPC_CAB_DATA_OBJID : SPC_PE_IMAGE_DATA_OBJID, 1);
 
     link = SpcLink_new();
     link->type = 2;
@@ -499,12 +503,12 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, in
     idc->data->value = ASN1_TYPE_new();
     idc->data->value->type = V_ASN1_SEQUENCE;
     idc->data->value->value.sequence = ASN1_STRING_new();
-    if (isjava) {
+    if (type == FILE_TYPE_CAB) {
 		l = i2d_SpcLink(link, NULL);
         p = OPENSSL_malloc(l);
         i2d_SpcLink(link, &p);
         p -= l;
-    } else {
+    } else if (type == FILE_TYPE_PE) {
         SpcPeImageData *pid = SpcPeImageData_new();
         pid->flags = ASN1_BIT_STRING_new();
         ASN1_BIT_STRING_set(pid->flags, (unsigned char*)"0", 0);
@@ -513,7 +517,11 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, in
         p = OPENSSL_malloc(l);
         i2d_SpcPeImageData(pid, &p);
         p -= l;
+        idc->data->type = OBJ_txt2obj(SPC_PE_IMAGE_DATA_OBJID, 1);
+    } else {
+        exit(1);
     }
+
     idc->data->value->value.sequence->data = p;
     idc->data->value->value.sequence->length = l;
     idc->messageDigest = DigestInfo_new();
@@ -555,7 +563,7 @@ int main(int argc, char **argv)
     char *turl = NULL, *proxy = NULL;
 #endif
     u_char *p;
-    int i, len = 0, is_cabinet = 0, jp = -1, fd = -1, pe32plus = 0, comm = 0;
+    int i, len = 0, type = 0, jp = -1, fd = -1, pe32plus = 0, comm = 0;
     unsigned int tmp, peheader = 0, padlen;
     struct stat st;
 
@@ -731,16 +739,21 @@ int main(int argc, char **argv)
         DO_EXIT_1("Failed to open file: %s\n", infile);
 
     if (!memcmp(indata, "MSCF", 4))
-        is_cabinet = 1;
-    else if (memcmp(indata, "MZ", 2))
+        type = FILE_TYPE_CAB;
+    else if (!memcmp(indata, "MZ", 2))
+        type = FILE_TYPE_PE;
+    else
         DO_EXIT_1("Unrecognized file type: %s\n", infile);
 
-    if (is_cabinet) {
+    hash = BIO_new(BIO_f_md());
+    BIO_set_md(hash, md);
+
+    if (type == FILE_TYPE_CAB) {
         if (st.st_size < 44)
             DO_EXIT_1("Corrupt cab file - too short: %s\n", infile);
         if (indata[0x1e] != 0x00 || indata[0x1f] != 0x00)
             DO_EXIT_0("Cannot sign cab files with flag bits set!\n"); /* XXX */
-    } else {
+    } else if (type == FILE_TYPE_PE) {
         if (st.st_size < 64)
             DO_EXIT_1("Corrupt DOS file - too short: %s\n", infile);
         peheader = GET_UINT32_LE(indata+60);
@@ -750,16 +763,16 @@ int main(int argc, char **argv)
             DO_EXIT_1("Unrecognized DOS file type: %s\n", infile);
     }
 
-    /* Create outdata file */
-    outdata = BIO_new_file(outfile, "wb");
-    if (outdata == NULL)
-        DO_EXIT_1("Failed to create file: %s\n", outfile);
+    if (type == FILE_TYPE_CAB || type == FILE_TYPE_PE) {
+        /* Create outdata file */
+        outdata = BIO_new_file(outfile, "wb");
+        if (outdata == NULL)
+            DO_EXIT_1("Failed to create file: %s\n", outfile);
 
-    hash = BIO_new(BIO_f_md());
-    BIO_set_md(hash, md);
-    BIO_push(hash, outdata);
+        BIO_push(hash, outdata);
+    }
 
-    if (is_cabinet) {
+    if (type == FILE_TYPE_CAB) {
         unsigned short nfolders;
 
         u_char cabsigned[] = {
@@ -803,7 +816,7 @@ int main(int argc, char **argv)
 
         /* Write what's left */
         BIO_write(hash, indata+i, st.st_size-i);
-    } else {
+    } else if (type == FILE_TYPE_PE) {
 		if (jp >= 0)
 			fprintf(stderr, "Warning: -jp option is only valid "
 					"for CAB files.\n");
@@ -865,7 +878,7 @@ int main(int argc, char **argv)
 		(si, NID_pkcs9_contentType,
 		 V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1));
 
-    if (is_cabinet && jp >= 0) {
+    if (type == FILE_TYPE_CAB && jp >= 0) {
         const u_char *attrs = NULL;
         static const u_char java_attrs_low[] = {
             0x30, 0x06, 0x03, 0x02, 0x00, 0x01, 0x30, 0x00
@@ -931,7 +944,7 @@ int main(int argc, char **argv)
     if ((sigdata = PKCS7_dataInit(sig, NULL)) == NULL)
         DO_EXIT_0("Signing failed(PKCS7_dataInit)\n");
 
-    get_indirect_data_blob(&p, &len, md, is_cabinet);
+    get_indirect_data_blob(&p, &len, md, type);
     len -= EVP_MD_size(md);
     memcpy(buf, p, len);
     i = BIO_gets(hash, buf + len, EVP_MAX_MD_SIZE);
@@ -968,7 +981,7 @@ int main(int argc, char **argv)
     p -= len;
     padlen = (8 - len%8) % 8;
 
-    if (!is_cabinet) {
+    if (type == FILE_TYPE_PE) {
         static const char magic[] = {
             0x00, 0x02, 0x02, 0x00
         };
@@ -977,21 +990,23 @@ int main(int argc, char **argv)
         BIO_write(outdata, magic, sizeof(magic));
     }
 
-    BIO_write(outdata, p, len);
+    if (type == FILE_TYPE_PE || type == FILE_TYPE_CAB) {
+        BIO_write(outdata, p, len);
 
-    /* pad (with 0's) asn1 blob to 8 byte boundary */
-    if (padlen > 0) {
-        memset(p, 0, padlen);
-        BIO_write(outdata, p, padlen);
+        /* pad (with 0's) asn1 blob to 8 byte boundary */
+        if (padlen > 0) {
+            memset(p, 0, padlen);
+            BIO_write(outdata, p, padlen);
+        }
     }
 
-    if (!is_cabinet) {
+    if (type == FILE_TYPE_PE) {
         (void)BIO_seek(outdata, peheader+152+pe32plus*16);
         PUT_UINT32_LE(st.st_size, buf);
         BIO_write(outdata, buf, 4);
         PUT_UINT32_LE(len+8+padlen, buf);
         BIO_write(outdata, buf, 4);
-    } else {
+    } else if (type == FILE_TYPE_CAB) {
         (void)BIO_seek(outdata, 0x30);
         PUT_UINT32_LE(len+padlen, buf);
         BIO_write(outdata, buf, 4);
