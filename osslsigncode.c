@@ -534,6 +534,32 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, in
     i2d_SpcIndirectDataContent(idc, &p);
 }
 
+static void recalc_pe_checksum(BIO *outdata, unsigned int peheader)
+{
+	unsigned int checkSum = 0;
+	unsigned short  val;
+	unsigned int size = 0;
+
+	/* First set current checksum to 0. */
+	(void)BIO_seek(outdata, peheader + 88);
+	BIO_write(outdata, &checkSum, 4);
+
+	/* recalc checksum. */
+	(void)BIO_seek(outdata, 0);
+	while (BIO_read(outdata, &val, 2) == 2) {
+		checkSum += val;
+		checkSum = 0xffff & (checkSum + (checkSum >> 0x10));
+		size += 2;
+	}
+
+	checkSum = 0xffff & (checkSum + (checkSum >> 0x10));
+	checkSum += size;
+
+	/* write back checksum. */
+	(void)BIO_seek(outdata, peheader + 88);
+	BIO_write(outdata, &checkSum, 4);
+}
+
 int main(int argc, char **argv)
 {
     BIO *btmp, *sigdata, *hash, *outdata;
@@ -751,7 +777,7 @@ int main(int argc, char **argv)
     }
 
     /* Create outdata file */
-    outdata = BIO_new_file(outfile, "wb");
+    outdata = BIO_new_file(outfile, "w+b");
     if (outdata == NULL)
         DO_EXIT_1("Failed to create file: %s\n", outfile);
 
@@ -991,6 +1017,7 @@ int main(int argc, char **argv)
         BIO_write(outdata, buf, 4);
         PUT_UINT32_LE(len+8+padlen, buf);
         BIO_write(outdata, buf, 4);
+        recalc_pe_checksum(outdata, peheader);
     } else {
         (void)BIO_seek(outdata, 0x30);
         PUT_UINT32_LE(len+padlen, buf);
