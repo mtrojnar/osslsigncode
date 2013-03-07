@@ -1,5 +1,5 @@
 /*
-   OpenSSL based Authenticode signing for PE files and Java CAB's.
+   OpenSSL based Authenticode signing for PE/MSI/Java CAB files.
 
 	 Copyright (C) 2005-2013 Per Allansson <pallansson@gmail.com>
 
