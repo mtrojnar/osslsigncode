@@ -103,6 +103,10 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.4 2011/08/12 11:08:12 mfive 
 /* 1.3.6.1.4.1.311.4... MS Crypto 2.0 stuff... */
 
 
+#define WIN_CERT_REVISION_2             0x0200
+#define WIN_CERT_TYPE_PKCS_SIGNED_DATA  0x0002
+
+
 /*
   ASN.1 definitions (more or less from official MS Authenticode docs)
 */
@@ -472,16 +476,20 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy)
 static void usage(const char *argv0)
 {
 	fprintf(stderr,
-			"Usage: %s [ --version | -v ]\n"
-			"\t( -spc <spcfile> -key <keyfile> |\n"
-			"\t	 -pkcs12 <pkcs12file> )\n"
-			"\t[ -pass <keypass> ]\n"
-			"\t[ -h {md5,sha1,sha2} ]\n"
-			"\t[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n"
+			"Usage: %s\n\n\t[ --version | -v ]\n\n"
+			"\t[ sign ]\n"
+			"\t\t( -spc <spcfile> -key <keyfile> | -pkcs12 <pkcs12file> )\n"
+			"\t\t[ -pass <keypass> ]\n"
+			"\t\t[ -h {md5,sha1,sha2} ]\n"
+			"\t\t[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n"
 #ifdef ENABLE_CURL
-			"\t[ -t <timestampurl> [ -p <proxy> ]]\n"
+			"\t\t[ -t <timestampurl> [ -p <proxy> ]]\n"
 #endif
-			"\t-in <infile> -out <outfile>\n",
+			"\t\t[ -in ] <infile> [-out ] <outfile>\n\n"
+			"\textract-signature [ -in ] <infile> [ -out ] <outfile>\n\n"
+			"\tremove-signature [ -in ] <infile> [ -out ] <outfile>\n\n"
+			"\tverify [ -in ] <infile>\n\n"
+			"",
 			argv0);
 	exit(-1);
 }
@@ -494,6 +502,10 @@ static void usage(const char *argv0)
 
 #define GET_UINT32_LE(p) (((u_char*)(p))[0] | (((u_char*)(p))[1]<<8) |	\
 						  (((u_char*)(p))[2]<<16) | (((u_char*)(p))[3]<<24))
+
+#define PUT_UINT16_LE(i,p)						\
+	((u_char*)(p))[0] = (i) & 0xff;				\
+	((u_char*)(p))[1] = ((i)>>8) & 0xff
 
 #define PUT_UINT32_LE(i,p)						\
 	((u_char*)(p))[0] = (i) & 0xff;				\
@@ -513,13 +525,20 @@ ASN1_TYPE *PKCS7_get_signed_attribute(PKCS7_SIGNER_INFO *si, int nid)
 }
 #endif
 
-enum {
+typedef enum {
 	FILE_TYPE_CAB,
 	FILE_TYPE_PE,
 	FILE_TYPE_MSI,
-};
+} file_type_t;
 
-static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, int type)
+typedef enum {
+	CMD_SIGN,
+	CMD_EXTRACT,
+	CMD_REMOVE,
+	CMD_VERIFY,
+} cmd_type_t;
+
+static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, file_type_t type)
 {
 	static const unsigned char obsolete[] = {
 		0x00, 0x3c, 0x00, 0x3c, 0x00, 0x3c, 0x00, 0x4f, 0x00, 0x62,
@@ -606,19 +625,17 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, in
 	i2d_SpcIndirectDataContent(idc, &p);
 }
 
-static void recalc_pe_checksum(BIO *outdata, unsigned int peheader)
+static unsigned int calc_pe_checksum(BIO *bio, unsigned int peheader)
 {
 	unsigned int checkSum = 0;
 	unsigned short	val;
 	unsigned int size = 0;
 
-	/* First set current checksum to 0. */
-	(void)BIO_seek(outdata, peheader + 88);
-	BIO_write(outdata, &checkSum, 4);
-
 	/* recalc checksum. */
-	(void)BIO_seek(outdata, 0);
-	while (BIO_read(outdata, &val, 2) == 2) {
+	(void)BIO_seek(bio, 0);
+	while (BIO_read(bio, &val, 2) == 2) {
+		if (size == peheader + 88 || size == peheader + 90)
+			val = 0;
 		checkSum += val;
 		checkSum = 0xffff & (checkSum + (checkSum >> 0x10));
 		size += 2;
@@ -627,9 +644,18 @@ static void recalc_pe_checksum(BIO *outdata, unsigned int peheader)
 	checkSum = 0xffff & (checkSum + (checkSum >> 0x10));
 	checkSum += size;
 
+	return checkSum;
+}
+
+static void recalc_pe_checksum(BIO *bio, unsigned int peheader)
+{
+	unsigned int checkSum = calc_pe_checksum(bio, peheader);
+	char buf[4];
+
 	/* write back checksum. */
-	(void)BIO_seek(outdata, peheader + 88);
-	BIO_write(outdata, &checkSum, 4);
+	(void)BIO_seek(bio, peheader + 88);
+	PUT_UINT32_LE(checkSum, buf);
+	BIO_write(bio, buf, 4);
 }
 
 #ifdef WITH_GSF
@@ -703,6 +729,174 @@ static gint msi_cmp(gpointer a, gpointer b)
 }
 #endif
 
+static void tohex(const unsigned char *v, unsigned char *b, int len)
+{
+	int i;
+	for(i=0; i<len; i++)
+		sprintf(b+i*2, "%02X", v[i]);
+	b[i*2] = 0x00;
+}
+
+
+static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
+						   unsigned int peheader, int pe32plus, unsigned int fileend)
+{
+	EVP_MD_CTX mdctx;
+	EVP_MD_CTX_init(&mdctx);
+	EVP_DigestInit(&mdctx, md);
+	static unsigned char bfb[16*1024*1024];
+
+	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
+
+	BIO_seek(bio, 0);
+	BIO_read(bio, bfb, peheader + 88);
+	EVP_DigestUpdate(&mdctx, bfb, peheader + 88);
+	BIO_read(bio, bfb, 4);
+	BIO_read(bio, bfb, 60+pe32plus*16);
+	EVP_DigestUpdate(&mdctx, bfb, 60+pe32plus*16);
+	BIO_read(bio, bfb, 8);
+
+	unsigned int n = BIO_tell(bio);
+	while (n < fileend) {
+		int l = fileend - n;
+		if (l > sizeof(bfb))
+			l = sizeof(bfb);
+		l = BIO_read(bio, bfb, l);
+		if (l <= 0)
+			break;
+		EVP_DigestUpdate(&mdctx, bfb, l);
+		n += l;
+	}
+
+	EVP_DigestFinal(&mdctx, mdbuf, NULL);
+}
+
+
+static unsigned int der_seq_hdr_len(unsigned char *p, unsigned int len) {
+	if (len <= 2 || p[0] != 0x30)
+		return 0;
+	return (p[1]&0x80) ? (2 + p[1]&0x7f) : 2;
+}
+
+static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
+						  unsigned int sigpos, unsigned int siglen)
+{
+	int ret = 0;
+	unsigned int pe_checksum = GET_UINT32_LE(indata + peheader + 88);
+	printf("Current PE checksum   : %08X\n", pe_checksum);
+
+	BIO *bio = BIO_new_mem_buf(indata, sigpos + siglen);
+	unsigned int real_pe_checksum = calc_pe_checksum(bio, peheader);
+	if (pe_checksum && pe_checksum != real_pe_checksum)
+		ret = 1;
+	printf("Calculated PE checksum: %08X%s\n\n", real_pe_checksum,
+		   ret ? "     MISMATCH!!!!" : "");
+	if (siglen == 0) {
+		BIO_free(bio);
+		printf("No signature found.\n\n");
+		return ret;
+	}
+
+	int mdtype = -1;
+	unsigned char mdbuf[EVP_MAX_MD_SIZE];
+	unsigned int pos = 0;
+	unsigned char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	PKCS7 *p7 = NULL;
+
+	while (pos < siglen && mdtype == -1) {
+		unsigned int l = GET_UINT32_LE(indata + sigpos + pos);
+		unsigned short certrev  = GET_UINT16_LE(indata + sigpos + pos + 4);
+		unsigned short certtype = GET_UINT16_LE(indata + sigpos + pos + 6);
+		if (certrev == WIN_CERT_REVISION_2 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
+			const unsigned char *blob = indata + sigpos + pos + 8;
+			p7 = d2i_PKCS7(NULL, &blob, l - 8);
+			if (p7 && PKCS7_type_is_signed(p7) &&
+				!OBJ_cmp(p7->d.sign->contents->type, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1)) &&
+				p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
+
+				ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
+				const unsigned char *p = astr->data;
+				SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
+				if (idc) {
+					if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
+						mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
+						memcpy(mdbuf, idc->messageDigest->digest->data, idc->messageDigest->digest->length);
+					}
+					SpcIndirectDataContent_free(idc);
+				}
+			}
+			if (p7 && mdtype == -1) {
+				PKCS7_free(p7);
+				p7 = NULL;
+			}
+		}
+		if (l%8)
+			l += (8 - l%8);
+		pos += l;
+	}
+
+	if (mdtype == -1) {
+		BIO_free(bio);
+		printf("Failed to extract current message digest\n\n");
+		return;
+	}
+
+	printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
+
+	const EVP_MD *md = EVP_get_digestbynid(mdtype);
+	tohex(mdbuf, hexbuf, EVP_MD_size(md));
+	printf("Current message digest    : %s\n", hexbuf);
+
+	calc_pe_digest(bio, md, mdbuf, peheader, pe32plus, sigpos);
+	printf("Calculated message digest : %s\n\n", hexbuf);
+	BIO_free(bio);
+
+	int seqhdrlen = der_seq_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
+									p7->d.sign->contents->d.other->value.sequence->length);
+	bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
+						  p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
+	X509_STORE *store = X509_STORE_new();
+	int verok = PKCS7_verify(p7, p7->d.sign->cert, store, bio, NULL, PKCS7_NOVERIFY);
+	/* XXX: add more checks here (attributes, pagehash, timestamp, etc) */
+	printf("Signature verification: %s\n\n", verok ? "ok" : "failed");
+	if (!verok) {
+		ERR_print_errors_fp(stdout);
+		ret = 1;
+	}
+
+	int i;
+	STACK_OF(X509) *signers = PKCS7_get0_signers(p7, NULL, 0);
+	printf("Number of signers: %d\n", sk_X509_num(signers));
+	for (i=0; i<sk_X509_num(signers); i++) {
+		X509 *cert = sk_X509_value(signers, i);
+		char *subject = X509_NAME_oneline(X509_get_subject_name(cert), NULL, 0);
+		char *issuer = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
+		printf("\tSigner #%d:\n\t\tSubject: %s\n\t\tIssuer : %s\n", i, subject, issuer);
+		OPENSSL_free(subject);
+		OPENSSL_free(issuer);
+	}
+	sk_X509_free(signers);
+
+	printf("\nNumber of certificates: %d\n", sk_X509_num(p7->d.sign->cert));
+	for (i=0; i<sk_X509_num(p7->d.sign->cert); i++) {
+		X509 *cert = sk_X509_value(p7->d.sign->cert, i);
+		char *subject = X509_NAME_oneline(X509_get_subject_name(cert), NULL, 0);
+		char *issuer = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
+		printf("\tCert #%d:\n\t\tSubject: %s\n\t\tIssuer : %s\n", i, subject, issuer);
+		OPENSSL_free(subject);
+		OPENSSL_free(issuer);
+    }
+
+	X509_STORE_free(store);
+	BIO_free(bio);
+	PKCS7_free(p7);
+
+	printf("\n");
+
+	return ret;
+}
+
+
 int main(int argc, char **argv)
 {
 	BIO *btmp, *sigdata, *hash, *outdata;
@@ -724,46 +918,13 @@ int main(int argc, char **argv)
 	char *turl = NULL, *proxy = NULL;
 #endif
 	u_char *p;
-	int i, len = 0, type = 0, jp = -1, fd = -1, pe32plus = 0, comm = 0;
+	int ret = 0, i, len = 0, jp = -1, fd = -1, pe32plus = 0, comm = 0;
 	unsigned int tmp, peheader = 0, padlen;
 	off_t fileend;
+	file_type_t type;
+	cmd_type_t cmd = CMD_SIGN;
 	struct stat st;
-
-#if 0
-	static u_char spcIndirectDataContext_blob_cab[] = {
-		0x30, 0x50,
-
-		0x30, 0x2c,
-		0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x19,
-		0xa2, 0x1e, 0x80, 0x1c,
-		0x00, 0x3c, 0x00, 0x3c, 0x00, 0x3c, 0x00, 0x4f, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6f, 0x00, 0x6c, 0x00, 0x65,
-		0x00, 0x74, 0x00, 0x65, 0x00, 0x3e, 0x00, 0x3e, 0x00, 0x3e,
-
-		0x30, 0x20,
-		0x30, 0x0c,
-		0x06, 0x08, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x05,
-		0x05, 0x00,
-		0x04, 0x10 /* + hash */
-	};
-
-	static u_char spcIndirectDataContext_blob_pe[] = {
-		0x30, 0x57,
-
-		0x30, 0x33,
-		0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x0f,
-		0x30, 0x25, 0x03, 0x01, 0x00,
-		0xa0, 0x20, 0xa2, 0x1e, 0x80, 0x1c,
-		0x00, 0x3c, 0x00, 0x3c, 0x00, 0x3c, 0x00, 0x4f, 0x00, 0x62,
-		0x00, 0x73, 0x00, 0x6f, 0x00, 0x6c, 0x00, 0x65, 0x00, 0x74,
-		0x00, 0x65, 0x00, 0x3e, 0x00, 0x3e, 0x00, 0x3e,
-
-		0x30, 0x20,
-		0x30, 0x0c,
-		0x06, 0x08, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x05,
-		0x05, 0x00,
-		0x04, 0x10 /* + hash */
-	};
-#endif
+	char *failarg = NULL;
 
 	static u_char purpose_ind[] = {
 		0x30, 0x0c,
@@ -774,6 +935,7 @@ int main(int argc, char **argv)
 		0x30, 0x0c,
 		0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x16
 	};
+
 	static u_char msi_signature[] = {
 		0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1
 	};
@@ -792,25 +954,51 @@ int main(int argc, char **argv)
 	spcfile = keyfile = pkcs12file = infile = outfile = desc = url = NULL;
 	hash = outdata = NULL;
 
+	if (argc > 1) {
+		if (!strcmp(argv[1], "sign")) {
+			cmd = CMD_SIGN;
+			argv++;
+			argc--;
+		} else if (!strcmp(argv[1], "extract-signature")) {
+			cmd = CMD_EXTRACT;
+			argv++;
+			argc--;
+		} else if (!strcmp(argv[1], "remove-signature")) {
+			cmd = CMD_REMOVE;
+			argv++;
+			argc--;
+		} else if (!strcmp(argv[1], "verify")) {
+			cmd = CMD_VERIFY;
+			argv++;
+			argc--;
+		}
+	}
+
 	for (argc--,argv++; argc >= 1; argc--,argv++) {
-		if (!strcmp(*argv, "-spc")) {
+		if (!strcmp(*argv, "-in")) {
+			if (--argc < 1) usage(argv0);
+			infile = *(++argv);
+		} else if (!strcmp(*argv, "-out")) {
+			if (--argc < 1) usage(argv0);
+			outfile = *(++argv);
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-spc")) {
 			if (--argc < 1) usage(argv0);
 			spcfile = *(++argv);
-		} else if (!strcmp(*argv, "-key")) {
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-key")) {
 			if (--argc < 1) usage(argv0);
 			keyfile = *(++argv);
-		} else if (!strcmp(*argv, "-pkcs12")) {
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs12")) {
 			if (--argc < 1) usage(argv0);
 			pkcs12file = *(++argv);
-		} else if (!strcmp(*argv, "-pass")) {
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pass")) {
 			if (--argc < 1) usage(argv0);
 			pass = *(++argv);
-		} else if (!strcmp(*argv, "-comm")) {
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-comm")) {
 			comm = 1;
-		} else if (!strcmp(*argv, "-n")) {
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-n")) {
 			if (--argc < 1) usage(argv0);
 			desc = *(++argv);
-		} else if (!strcmp(*argv, "-h")) {
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-h")) {
 			if (--argc < 1) usage(argv0);
 			++argv;
 			if (!strcmp(*argv, "md5")) {
@@ -822,20 +1010,14 @@ int main(int argc, char **argv)
 			} else {
 				usage(argv0);
 			}
-		} else if (!strcmp(*argv, "-i")) {
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-i")) {
 			if (--argc < 1) usage(argv0);
 			url = *(++argv);
-		} else if (!strcmp(*argv, "-in")) {
-			if (--argc < 1) usage(argv0);
-			infile = *(++argv);
-		} else if (!strcmp(*argv, "-out")) {
-			if (--argc < 1) usage(argv0);
-			outfile = *(++argv);
 #ifdef ENABLE_CURL
-		} else if (!strcmp(*argv, "-t")) {
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-t")) {
 			if (--argc < 1) usage(argv0);
 			turl = *(++argv);
-		} else if (!strcmp(*argv, "-p")) {
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-p")) {
 			if (--argc < 1) usage(argv0);
 			proxy = *(++argv);
 #endif
@@ -876,36 +1058,57 @@ int main(int argc, char **argv)
 			}
 			if (jp != 0) usage(argv0); /* XXX */
 		} else {
-			fprintf(stderr, "Unknown option: %s\n", *argv);
-			usage(argv0);
+			failarg = *argv;
+			break;
 		}
 	}
 
-	if (!infile || !outfile || !((spcfile && keyfile) || pkcs12file))
+	if (!infile && argc > 0) {
+		infile = *(argv++);
+		argc--;
+	}
+
+	if (cmd != CMD_VERIFY && (!outfile && argc > 0)) {
+		if (!strcmp(*argv, "-out")) {
+			argv++;
+			argc--;
+		}
+		if (argc > 0) {
+			outfile = *(argv++);
+			argc--;
+		}
+	}
+
+	if (argc > 0 || !infile || (cmd != CMD_VERIFY && !outfile) || (cmd == CMD_SIGN && !((spcfile && keyfile) || pkcs12file))) {
+		if (failarg)
+			fprintf(stderr, "Unknown option: %s\n", failarg);
 		usage(argv0);
+	}
 
-	/* Read certificate and key */
-	if (pkcs12file != NULL) {
-		if ((btmp = BIO_new_file(pkcs12file, "rb")) == NULL ||
-			(p12 = d2i_PKCS12_bio(btmp, NULL)) == NULL)
-			DO_EXIT_1("Failed to read PKCS#12 file: %s\n", pkcs12file);
-		BIO_free(btmp);
-		if (!PKCS12_parse(p12, pass, &pkey, &cert, &certs))
-			DO_EXIT_1("Failed to parse PKCS#12 file: %s (Wrong password?)\n", pkcs12file);
-		PKCS12_free(p12);
-	} else {
-		if ((btmp = BIO_new_file(spcfile, "rb")) == NULL ||
-			(p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL)
-			DO_EXIT_1("Failed to read DER-encoded spc file: %s\n", spcfile);
-		BIO_free(btmp);
+	if (cmd == CMD_SIGN) {
+		/* Read certificate and key */
+		if (pkcs12file != NULL) {
+			if ((btmp = BIO_new_file(pkcs12file, "rb")) == NULL ||
+				(p12 = d2i_PKCS12_bio(btmp, NULL)) == NULL)
+				DO_EXIT_1("Failed to read PKCS#12 file: %s\n", pkcs12file);
+			BIO_free(btmp);
+			if (!PKCS12_parse(p12, pass, &pkey, &cert, &certs))
+				DO_EXIT_1("Failed to parse PKCS#12 file: %s (Wrong password?)\n", pkcs12file);
+			PKCS12_free(p12);
+		} else {
+			if ((btmp = BIO_new_file(spcfile, "rb")) == NULL ||
+				(p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL)
+				DO_EXIT_1("Failed to read DER-encoded spc file: %s\n", spcfile);
+			BIO_free(btmp);
 
-		if ((btmp = BIO_new_file(keyfile, "rb")) == NULL ||
-			( (pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
-			  (pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, pass)) == NULL &&
-			  (pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL))
+			if ((btmp = BIO_new_file(keyfile, "rb")) == NULL ||
+				( (pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
+				  (pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, pass)) == NULL &&
+				  (pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL))
 			DO_EXIT_1("Failed to read private key file: %s (Wrong password?)\n", keyfile);
-		BIO_free(btmp);
-		certs = p7->d.sign->cert;
+			BIO_free(btmp);
+			certs = p7->d.sign->cert;
+		}
 	}
 
 	/* Check if indata is cab or pe */
@@ -920,7 +1123,7 @@ int main(int argc, char **argv)
 	if ((fd = open(infile, O_RDONLY)) < 0)
 		DO_EXIT_1("Failed to open file: %s\n", infile);
 
-	indata = mmap(0, st.st_size, PROT_READ, MAP_SHARED, fd, 0);
+	indata = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
 	if (indata == NULL)
 		DO_EXIT_1("Failed to open file: %s\n", infile);
 
@@ -932,6 +1135,9 @@ int main(int argc, char **argv)
 		type = FILE_TYPE_MSI;
 	else
 		DO_EXIT_1("Unrecognized file type: %s\n", infile);
+
+	if (cmd != CMD_SIGN && type != FILE_TYPE_PE)
+		DO_EXIT_1("Command is not supported for non-PE files: %s\n", infile);
 
 	hash = BIO_new(BIO_f_md());
 	BIO_set_md(hash, md);
@@ -1010,12 +1216,13 @@ int main(int argc, char **argv)
 	}
 
 	if (type == FILE_TYPE_CAB || type == FILE_TYPE_PE) {
-		/* Create outdata file */
-		outdata = BIO_new_file(outfile, "w+b");
-		if (outdata == NULL)
-			DO_EXIT_1("Failed to create file: %s\n", outfile);
-
-		BIO_push(hash, outdata);
+		if (cmd != CMD_VERIFY) {
+			/* Create outdata file */
+			outdata = BIO_new_file(outfile, "w+b");
+			if (outdata == NULL)
+				DO_EXIT_1("Failed to create file: %s\n", outfile);
+			BIO_push(hash, outdata);
+		}
 	}
 
 	if (type == FILE_TYPE_CAB) {
@@ -1081,7 +1288,7 @@ int main(int argc, char **argv)
 
 		nrvas = GET_UINT32_LE(indata + peheader + 116 + pe32plus*16);
 		if (nrvas < 5)
-			DO_EXIT_1("Can not sign PE files without certificate table resource: %s\n", infile);
+			DO_EXIT_1("Can not handle PE files without certificate table resource: %s\n", infile);
 
 		sigpos = GET_UINT32_LE(indata + peheader + 152 + pe32plus*16);
 		siglen = GET_UINT32_LE(indata + peheader + 152 + pe32plus*16 + 4);
@@ -1090,6 +1297,21 @@ int main(int argc, char **argv)
 		   that signature should be last part of file */
 		if (sigpos > 0 && sigpos + siglen != st.st_size)
 			DO_EXIT_1("Corrupt PE file - current signature not at end of file: %s\n", infile);
+
+		if ((cmd == CMD_REMOVE || cmd == CMD_EXTRACT) && sigpos == 0)
+			DO_EXIT_1("PE file does not have any signature: %s\n", infile);
+
+		if (cmd == CMD_EXTRACT) {
+			/* A lil' bit of ugliness. Reset stream, write signature and skip forward */
+			BIO_reset(outdata);
+			BIO_write(outdata, indata + sigpos, siglen);
+			goto skip_signing;
+		}
+
+		if (cmd == CMD_VERIFY) {
+			ret = verify_pe_file(indata, peheader, pe32plus, sigpos ? sigpos : fileend, siglen);
+			goto skip_signing;
+		}
 
 		if (sigpos > 0) {
 			/* Strip current signature */
@@ -1103,7 +1325,8 @@ int main(int argc, char **argv)
 		i += 4;
 		BIO_write(hash, indata + i, 60+pe32plus*16);
 		i += 60+pe32plus*16;
-		BIO_write(outdata, indata + i, 8);
+		memset(buf, 0, 8);
+		BIO_write(outdata, buf, 8); /* zero out sigtable offset + pos */
 		i += 8;
 
 		BIO_write(hash, indata + i, fileend - i);
@@ -1116,6 +1339,10 @@ int main(int argc, char **argv)
 			fileend += len;
 		}
 	}
+
+	if (cmd != CMD_SIGN)
+		goto skip_signing;
+
 	sig = PKCS7_new();
 	PKCS7_set_type(sig, NID_pkcs7_signed);
 
@@ -1214,7 +1441,8 @@ int main(int argc, char **argv)
 	len -= EVP_MD_size(md);
 	memcpy(buf, p, len);
 	i = BIO_gets(hash, buf + len, EVP_MAX_MD_SIZE);
-	BIO_write(sigdata, buf+2, len-2+i);
+	int seqhdrlen = der_seq_hdr_len(buf, len);
+	BIO_write(sigdata, buf+seqhdrlen, len-seqhdrlen+i);
 
 	if (!PKCS7_dataFinal(sig, sigdata))
 		DO_EXIT_0("Signing failed(PKCS7_dataFinal)\n");
@@ -1248,12 +1476,10 @@ int main(int argc, char **argv)
 	padlen = (8 - len%8) % 8;
 
 	if (type == FILE_TYPE_PE) {
-		static const char cert_rev_and_type[] = {
-			0x00, 0x02, 0x02, 0x00
-		};
 		PUT_UINT32_LE(len+8+padlen, buf);
-		BIO_write(outdata, buf, 4);
-		BIO_write(outdata, cert_rev_and_type, sizeof(cert_rev_and_type));
+		PUT_UINT16_LE(WIN_CERT_REVISION_2, buf + 4);
+		PUT_UINT16_LE(WIN_CERT_TYPE_PKCS_SIGNED_DATA, buf + 6);
+		BIO_write(outdata, buf, 8);
 	}
 
 	if (type == FILE_TYPE_PE || type == FILE_TYPE_CAB) {
@@ -1275,13 +1501,19 @@ int main(int argc, char **argv)
 #endif
 	}
 
+skip_signing:
+
 	if (type == FILE_TYPE_PE) {
-		(void)BIO_seek(outdata, peheader+152+pe32plus*16);
-		PUT_UINT32_LE(fileend, buf);
-		BIO_write(outdata, buf, 4);
-		PUT_UINT32_LE(len+8+padlen, buf);
-		BIO_write(outdata, buf, 4);
-		recalc_pe_checksum(outdata, peheader);
+		if (cmd == CMD_SIGN) {
+			/* Update signature position and size */
+			(void)BIO_seek(outdata, peheader+152+pe32plus*16);
+			PUT_UINT32_LE(fileend, buf); /* Previous file end = signature table start */
+			BIO_write(outdata, buf, 4);
+			PUT_UINT32_LE(len+8+padlen, buf);
+			BIO_write(outdata, buf, 4);
+		}
+		if (cmd == CMD_SIGN || cmd == CMD_REMOVE)
+			recalc_pe_checksum(outdata, peheader);
 	} else if (type == FILE_TYPE_CAB) {
 		(void)BIO_seek(outdata, 0x30);
 		PUT_UINT32_LE(len+padlen, buf);
@@ -1291,9 +1523,9 @@ int main(int argc, char **argv)
 	BIO_free_all(hash);
 	hash = outdata = NULL;
 
-	printf("Succeeded\n");
+	printf(ret ? "Failed\n" : "Succeeded\n");
 
-	return 0;
+	return ret;
 
 err_cleanup:
 	ERR_print_errors_fp(stderr);
