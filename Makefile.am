@@ -8,9 +8,9 @@ MAINTAINERCLEANFILES = \
 	$(srcdir)/config.guess $(srcdir)/config.sub
 EXTRA_DIST = .gitignore
 
-AM_CFLAGS = $(OPENSSL_CFLAGS) $(OPTIONAL_LIBCURL_CFLAGS)
+AM_CFLAGS = $(GSF_CFLAGS) $(OPENSSL_CFLAGS) $(OPTIONAL_LIBCURL_CFLAGS)
 
 bin_PROGRAMS = osslsigncode
 
 osslsigncode_SOURCES = osslsigncode.c
-osslsigncode_LDADD = $(OPENSSL_LIBS) $(OPTIONAL_LIBCURL_LIBS)
+osslsigncode_LDADD = $(GSF_LIBS) $(OPENSSL_LIBS) $(OPTIONAL_LIBCURL_LIBS)
