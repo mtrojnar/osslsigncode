@@ -994,18 +994,11 @@ int main(int argc, char **argv)
 #endif
     }
 
-<<<<<<< HEAD
-    /* Create outdata file */
-    outdata = BIO_new_file(outfile, "w+b");
-    if (outdata == NULL)
-        DO_EXIT_1("Failed to create file: %s\n", outfile);
-=======
     if (type == FILE_TYPE_CAB || type == FILE_TYPE_PE) {
         /* Create outdata file */
-        outdata = BIO_new_file(outfile, "wb");
+        outdata = BIO_new_file(outfile, "w+b");
         if (outdata == NULL)
             DO_EXIT_1("Failed to create file: %s\n", outfile);
->>>>>>> elmarco/master
 
         BIO_push(hash, outdata);
     }
@@ -1256,12 +1249,8 @@ int main(int argc, char **argv)
         BIO_write(outdata, buf, 4);
         PUT_UINT32_LE(len+8+padlen, buf);
         BIO_write(outdata, buf, 4);
-<<<<<<< HEAD
         recalc_pe_checksum(outdata, peheader);
-    } else {
-=======
     } else if (type == FILE_TYPE_CAB) {
->>>>>>> elmarco/master
         (void)BIO_seek(outdata, 0x30);
         PUT_UINT32_LE(len+padlen, buf);
         BIO_write(outdata, buf, 4);
