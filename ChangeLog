@@ -1,3 +1,14 @@
+=== 1.5 (2013-03-XX)
+
+- added support for signing MSI files (patch from Marc-André Lureau)
+- calculate correct PE checksum instead of setting it to 0
+	 (patch from Roland Schwingel)
+- added support for extracting/removing/verifying signature on PE files
+- fixed problem with not being able to decode timestamps with no newlines
+- added stricter checks for PE file validity
+- added support for reading keys from PVK files (requires OpenSSL 1.0.0 or later)
+
+
 === 1.4 (2011-08-12)
 
 - improved build system (patch from Alon Bar-Lev)
@@ -5,7 +16,6 @@
 - support reading key from PEM file
 - added support for sha1/sha256 - default hash is now sha1
 - added flag for commercial signing (default is individual)
-
 
 === 1.3.1 (2009-08-07)
 

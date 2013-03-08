@@ -47,11 +47,12 @@ to do the signing with the Microsoft signcode.exe:
 
   http://www.matthew-jones.com/articles/codesigning.html
 
-To sign with osslsigncode you need the spc file mentioned
-in the article above, and you will also need the private
-key, but not as a pvk file - it must be a simple key file
-on DER format or in PEM format. You can create a DER file
-from the PEM file by doing:
+To sign with osslsigncode you need the spc file mentioned in the
+article above, and you will also need the private key, it must
+be a key file in DER or PEM format, or if osslsigncode was
+compiled against OpenSSL 1.0.0 or later, in PVK format.
+
+. You can create a DER file from the PEM file by doing:
 
   openssl rsa -passin pass:XXXXX -outform der \
         -in <pem-key-file> -out <der-key-file>
@@ -62,7 +63,13 @@ To sign an EXE or MSI file you can now do:
         -n "Your Application" -i http://www.yourwebsite.com/ \
         -in yourapp.exe -out yourapp-signed.exe
 
-or if you are using the PEM key file:
+or if you are using a PVK key file:
+
+  osslsigncode -spc <spc-file> -pvk <der-key-file> \
+        -n "Your Application" -i http://www.yourwebsite.com/ \
+        -in yourapp.exe -out yourapp-signed.exe
+
+or if you are using a PEM key file:
 
   osslsigncode -spc <spc-file> -key <der-key-file> -pass <pem-password> \
         -n "Your Application" -i http://www.yourwebsite.com/ \

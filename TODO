@@ -1,9 +1,11 @@
-- tool for extracting/removing the signature
+- page hashing support
+- RFC3161 timestamping
+- signature extraction/removal/verificaton on MSI/CAB files
+- improved signature verification on PE files
+- clean up / untangle code
 - separate timestamping
 - man page
-- verify signatures
 - remove mmap usage to increase portability
 - tests
 - fix other stuff marked 'XXX'
 - free memory properly :)
-
