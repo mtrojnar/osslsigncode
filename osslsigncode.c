@@ -99,6 +99,10 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.4 2011/08/12 11:08:12 mfive 
 #define SPC_CAB_DATA_OBJID		 "1.3.6.1.4.1.311.2.1.25"
 #define SPC_TIME_STAMP_REQUEST_OBJID "1.3.6.1.4.1.311.3.2.1"
 #define SPC_SIPINFO_OBJID		 "1.3.6.1.4.1.311.2.1.30"
+
+#define SPC_PE_IMAGE_PAGE_HASHES_V1 "1.3.6.1.4.1.311.2.3.1" /* Page hash using SHA1 */
+#define SPC_PE_IMAGE_PAGE_HASHES_V2 "1.3.6.1.4.1.311.2.3.2" /* Page hash using SHA256 */
+
 /* 1.3.6.1.4.1.311.4... MS Crypto 2.0 stuff... */
 
 
@@ -775,10 +779,68 @@ static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
 }
 
 
-static unsigned int der_seq_hdr_len(unsigned char *p, unsigned int len) {
-	if (len <= 2 || p[0] != 0x30)
+static unsigned int asn1_simple_hdr_len(const unsigned char *p, unsigned int len) {
+	if (len <= 2 || p[0] > 0x31)
 		return 0;
 	return (p[1]&0x80) ? (2 + p[1]&0x7f) : 2;
+}
+
+static const unsigned char classid_page_hash[] = {
+	0xA6, 0xB5, 0x86, 0xD5, 0xB4, 0xA1, 0x24, 0x66,
+	0xAE, 0x05, 0xA2, 0x17, 0xDA, 0x8E, 0x60, 0xD6
+};
+
+static void	extract_page_hash (SpcAttributeTypeAndOptionalValue *obj, unsigned char **ph, unsigned int *phlen, int *phtype)
+{
+	*phlen = 0;
+
+	const unsigned char *blob = obj->value->value.sequence->data;
+	SpcPeImageData *id = d2i_SpcPeImageData(NULL, &blob, obj->value->value.sequence->length);
+	if (id == NULL)
+		return;
+
+	if (id->file->type != 1) {
+		SpcPeImageData_free(id);
+		return;
+	}
+
+	SpcSerializedObject *so = id->file->value.moniker;
+	if (so->classId->length != sizeof(classid_page_hash) ||
+		memcmp(so->classId->data, classid_page_hash, sizeof (classid_page_hash))) {
+		SpcPeImageData_free(id);
+		return;
+	}
+
+	/* skip ASN.1 SET hdr */
+	unsigned int l = asn1_simple_hdr_len(so->serializedData->data, so->serializedData->length);
+	blob = so->serializedData->data + l;
+	obj = d2i_SpcAttributeTypeAndOptionalValue(NULL, &blob, so->serializedData->length - l);
+	SpcPeImageData_free(id);
+	if (!obj)
+		return;
+
+	char buf[128];
+	*phtype = 0;
+	buf[0] = 0x00;
+	OBJ_obj2txt(buf, sizeof(buf), obj->type, 1);
+	if (!strcmp(buf, SPC_PE_IMAGE_PAGE_HASHES_V1)) {
+		*phtype = NID_sha1;
+	} else if (!strcmp(buf, SPC_PE_IMAGE_PAGE_HASHES_V2)) {
+		*phtype = NID_sha256;
+	} else {
+		SpcAttributeTypeAndOptionalValue_free(obj);
+		return;
+	}
+
+	/* Skip ASN.1 SET hdr */
+	unsigned int l2 = asn1_simple_hdr_len(obj->value->value.sequence->data, obj->value->value.sequence->length);
+	/* Skip ASN.1 OCTET STRING hdr */
+	l =  asn1_simple_hdr_len(obj->value->value.sequence->data + l2, obj->value->value.sequence->length - l2);
+	l += l2;
+	*phlen = obj->value->value.sequence->length - l;
+	*ph = malloc(*phlen);
+	memcpy(*ph, obj->value->value.sequence->data + l, *phlen);
+	SpcAttributeTypeAndOptionalValue_free(obj);
 }
 
 static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
@@ -800,10 +862,12 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 		return ret;
 	}
 
-	int mdtype = -1;
+	int mdtype = -1, phtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned int pos = 0;
 	unsigned char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	unsigned char *ph = NULL;
+	unsigned int phlen = 0;
 	PKCS7 *p7 = NULL;
 
 	while (pos < siglen && mdtype == -1) {
@@ -821,6 +885,7 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 				const unsigned char *p = astr->data;
 				SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
 				if (idc) {
+					extract_page_hash (idc->data, &ph, &phlen, &phtype);
 					if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
 						mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
 						memcpy(mdbuf, idc->messageDigest->digest->data, idc->messageDigest->digest->length);
@@ -854,8 +919,14 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 	printf("Calculated message digest : %s\n\n", hexbuf);
 	BIO_free(bio);
 
-	int seqhdrlen = der_seq_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
-									p7->d.sign->contents->d.other->value.sequence->length);
+	if (phlen > 0) {
+		printf("Page hash algorithm: %s\n", OBJ_nid2sn(phtype));
+		tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
+		printf("Page hash          : %s ...\n\n", hexbuf);
+	}
+
+	int seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
+										p7->d.sign->contents->d.other->value.sequence->length);
 	bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
 						  p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
 	X509_STORE *store = X509_STORE_new();
@@ -1470,7 +1541,7 @@ int main(int argc, char **argv)
 	len -= EVP_MD_size(md);
 	memcpy(buf, p, len);
 	i = BIO_gets(hash, buf + len, EVP_MAX_MD_SIZE);
-	int seqhdrlen = der_seq_hdr_len(buf, len);
+	int seqhdrlen = asn1_simple_hdr_len(buf, len);
 	BIO_write(sigdata, buf+seqhdrlen, len-seqhdrlen+i);
 
 	if (!PKCS7_dataFinal(sig, sigdata))
