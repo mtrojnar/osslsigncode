@@ -478,7 +478,11 @@ static void usage(const char *argv0)
 	fprintf(stderr,
 			"Usage: %s\n\n\t[ --version | -v ]\n\n"
 			"\t[ sign ]\n"
-			"\t\t( -spc <spcfile> -key <keyfile> | -pkcs12 <pkcs12file> )\n"
+			"\t\t( -spc <spcfile> -key <keyfile> | -pkcs12 <pkcs12file> "
+#if OPENSSL_VERSION_NUMBER > 0x10000000
+			"| -spc <spcfile> -pvk <pvkfile> "
+#endif
+			")\n"
 			"\t\t[ -pass <keypass> ]\n"
 			"\t\t[ -h {md5,sha1,sha2} ]\n"
 			"\t\t[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n"
@@ -913,6 +917,9 @@ int main(int argc, char **argv)
 	const char *argv0 = argv[0];
 	static char buf[64*1024];
 	char *spcfile, *keyfile, *pkcs12file, *infile, *outfile, *desc, *url, *indata;
+#if OPENSSL_VERSION_NUMBER > 0x10000000
+	char *pvkfile = NULL;
+#endif
 	char *pass = "";
 #ifdef ENABLE_CURL
 	char *turl = NULL, *proxy = NULL;
@@ -990,6 +997,11 @@ int main(int argc, char **argv)
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs12")) {
 			if (--argc < 1) usage(argv0);
 			pkcs12file = *(++argv);
+#if OPENSSL_VERSION_NUMBER > 0x10000000
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pvk")) {
+			if (--argc < 1) usage(argv0);
+			pvkfile = *(++argv);
+#endif
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pass")) {
 			if (--argc < 1) usage(argv0);
 			pass = *(++argv);
@@ -1079,7 +1091,13 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (argc > 0 || !infile || (cmd != CMD_VERIFY && !outfile) || (cmd == CMD_SIGN && !((spcfile && keyfile) || pkcs12file))) {
+	if (argc > 0 || !infile ||
+		(cmd != CMD_VERIFY && !outfile) ||
+		(cmd == CMD_SIGN && !((spcfile && keyfile) || pkcs12file
+#if OPENSSL_VERSION_NUMBER > 0x10000000
+							  || (spcfile && pvkfile)
+#endif
+			))) {
 		if (failarg)
 			fprintf(stderr, "Unknown option: %s\n", failarg);
 		usage(argv0);
@@ -1095,6 +1113,18 @@ int main(int argc, char **argv)
 			if (!PKCS12_parse(p12, pass, &pkey, &cert, &certs))
 				DO_EXIT_1("Failed to parse PKCS#12 file: %s (Wrong password?)\n", pkcs12file);
 			PKCS12_free(p12);
+#if OPENSSL_VERSION_NUMBER > 0x10000000
+		} else if (pvkfile != NULL) {
+			if ((btmp = BIO_new_file(spcfile, "rb")) == NULL ||
+				(p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL)
+				DO_EXIT_1("Failed to read DER-encoded spc file: %s\n", spcfile);
+			BIO_free(btmp);
+			if ((btmp = BIO_new_file(pvkfile, "rb")) == NULL ||
+				( (pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL &&
+				  (pkey = b2i_PVK_bio(btmp, NULL, pass)) == NULL))
+				DO_EXIT_1("Failed to read PVK file: %s\n", pvkfile);
+			BIO_free(btmp);
+#endif
 		} else {
 			if ((btmp = BIO_new_file(spcfile, "rb")) == NULL ||
 				(p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL)
