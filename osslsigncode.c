@@ -748,10 +748,11 @@ static void tohex(const unsigned char *v, unsigned char *b, int len)
 static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
 						   unsigned int peheader, int pe32plus, unsigned int fileend)
 {
+	static unsigned char bfb[16*1024*1024];
 	EVP_MD_CTX mdctx;
+
 	EVP_MD_CTX_init(&mdctx);
 	EVP_DigestInit(&mdctx, md);
-	static unsigned char bfb[16*1024*1024];
 
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 
@@ -763,12 +764,12 @@ static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
 	EVP_DigestUpdate(&mdctx, bfb, 60+pe32plus*16);
 	BIO_read(bio, bfb, 8);
 
-	unsigned int n = BIO_tell(bio);
+	unsigned int n = peheader + 88 + 4 + 60+pe32plus*16 + 8;
 	while (n < fileend) {
-		int l = fileend - n;
-		if (l > sizeof(bfb))
-			l = sizeof(bfb);
-		l = BIO_read(bio, bfb, l);
+		int want = fileend - n;
+		if (want > sizeof(bfb))
+			want = sizeof(bfb);
+		int l = BIO_read(bio, bfb, want);
 		if (l <= 0)
 			break;
 		EVP_DigestUpdate(&mdctx, bfb, l);
@@ -852,12 +853,12 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 
 	BIO *bio = BIO_new_mem_buf(indata, sigpos + siglen);
 	unsigned int real_pe_checksum = calc_pe_checksum(bio, peheader);
+	BIO_free(bio);
 	if (pe_checksum && pe_checksum != real_pe_checksum)
 		ret = 1;
 	printf("Calculated PE checksum: %08X%s\n\n", real_pe_checksum,
 		   ret ? "     MISMATCH!!!!" : "");
 	if (siglen == 0) {
-		BIO_free(bio);
 		printf("No signature found.\n\n");
 		return ret;
 	}
@@ -904,7 +905,6 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 	}
 
 	if (mdtype == -1) {
-		BIO_free(bio);
 		printf("Failed to extract current message digest\n\n");
 		return;
 	}
@@ -915,14 +915,17 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 	tohex(mdbuf, hexbuf, EVP_MD_size(md));
 	printf("Current message digest    : %s\n", hexbuf);
 
+	bio = BIO_new_mem_buf(indata, sigpos + siglen);
 	calc_pe_digest(bio, md, mdbuf, peheader, pe32plus, sigpos);
-	printf("Calculated message digest : %s\n\n", hexbuf);
 	BIO_free(bio);
+	tohex(mdbuf, hexbuf, EVP_MD_size(md));
+	printf("Calculated message digest : %s\n\n", hexbuf);
 
 	if (phlen > 0) {
 		printf("Page hash algorithm: %s\n", OBJ_nid2sn(phtype));
 		tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
 		printf("Page hash          : %s ...\n\n", hexbuf);
+		free(ph);
 	}
 
 	int seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
@@ -931,6 +934,7 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 						  p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
 	X509_STORE *store = X509_STORE_new();
 	int verok = PKCS7_verify(p7, p7->d.sign->cert, store, bio, NULL, PKCS7_NOVERIFY);
+	BIO_free(bio);
 	/* XXX: add more checks here (attributes, pagehash, timestamp, etc) */
 	printf("Signature verification: %s\n\n", verok ? "ok" : "failed");
 	if (!verok) {
@@ -962,7 +966,6 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
     }
 
 	X509_STORE_free(store);
-	BIO_free(bio);
 	PKCS7_free(p7);
 
 	printf("\n");
