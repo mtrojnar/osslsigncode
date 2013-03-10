@@ -865,6 +865,7 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 
 	int mdtype = -1, phtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
+	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
 	unsigned int pos = 0;
 	unsigned char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	unsigned char *ph = NULL;
@@ -916,10 +917,12 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 	printf("Current message digest    : %s\n", hexbuf);
 
 	bio = BIO_new_mem_buf(indata, sigpos + siglen);
-	calc_pe_digest(bio, md, mdbuf, peheader, pe32plus, sigpos);
+	calc_pe_digest(bio, md, cmdbuf, peheader, pe32plus, sigpos);
 	BIO_free(bio);
-	tohex(mdbuf, hexbuf, EVP_MD_size(md));
-	printf("Calculated message digest : %s\n\n", hexbuf);
+	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
+	int mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
+	if (!mdok) ret = 1;
+	printf("Calculated message digest : %s%s\n\n", hexbuf, mdok?"":"    MISMATCH!!!");
 
 	if (phlen > 0) {
 		printf("Page hash algorithm: %s\n", OBJ_nid2sn(phtype));
