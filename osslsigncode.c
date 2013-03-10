@@ -291,6 +291,68 @@ ASN1_SEQUENCE(TimeStampRequest) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampRequest)
 
+
+/* RFC3161 Time stamping */
+
+typedef struct {
+	ASN1_INTEGER *status;
+	STACK_OF(ASN1_UTF8STRING) *statusString;
+	ASN1_BIT_STRING *failInfo;
+} PKIStatusInfo;
+
+ASN1_SEQUENCE(PKIStatusInfo) = {
+	ASN1_SIMPLE(PKIStatusInfo, status, ASN1_INTEGER),
+	ASN1_SEQUENCE_OF_OPT(PKIStatusInfo, statusString, ASN1_UTF8STRING),
+	ASN1_OPT(PKIStatusInfo, failInfo, ASN1_BIT_STRING)
+} ASN1_SEQUENCE_END(PKIStatusInfo)
+
+IMPLEMENT_ASN1_FUNCTIONS(PKIStatusInfo)
+
+
+typedef struct {
+	PKIStatusInfo *status;
+	PKCS7 *token;
+} TimeStampResp;
+
+ASN1_SEQUENCE(TimeStampResp) = {
+	ASN1_SIMPLE(TimeStampResp, status, PKIStatusInfo),
+	ASN1_OPT(TimeStampResp, token, PKCS7)
+} ASN1_SEQUENCE_END(TimeStampResp)
+
+IMPLEMENT_ASN1_FUNCTIONS(TimeStampResp)
+
+typedef struct {
+	AlgorithmIdentifier *digestAlgorithm;
+	ASN1_OCTET_STRING *digest;
+} MessageImprint;
+
+ASN1_SEQUENCE(MessageImprint) = {
+	ASN1_SIMPLE(MessageImprint, digestAlgorithm, AlgorithmIdentifier),
+	ASN1_SIMPLE(MessageImprint, digest, ASN1_OCTET_STRING)
+} ASN1_SEQUENCE_END(MessageImprint)
+
+IMPLEMENT_ASN1_FUNCTIONS(MessageImprint)
+
+typedef struct {
+	ASN1_INTEGER *version;
+	MessageImprint *messageImprint;
+	ASN1_OBJECT *reqPolicy;
+	ASN1_INTEGER *nonce;
+	ASN1_BOOLEAN *certReq;
+	STACK_OF(X509_EXTENSION) *extensions;
+} TimeStampReq;
+
+ASN1_SEQUENCE(TimeStampReq) = {
+	ASN1_SIMPLE(TimeStampReq, version, ASN1_INTEGER),
+	ASN1_SIMPLE(TimeStampReq, messageImprint, MessageImprint),
+	ASN1_OPT   (TimeStampReq, reqPolicy, ASN1_OBJECT),
+	ASN1_OPT   (TimeStampReq, nonce, ASN1_INTEGER),
+	ASN1_SIMPLE(TimeStampReq, certReq, ASN1_BOOLEAN),
+	ASN1_IMP_SEQUENCE_OF_OPT(TimeStampReq, extensions, X509_EXTENSION, 0)
+} ASN1_SEQUENCE_END(TimeStampReq)
+
+IMPLEMENT_ASN1_FUNCTIONS(TimeStampReq)
+
 #endif /* ENABLE_CURL */
 
 
@@ -359,7 +421,7 @@ static size_t curl_write( void *ptr, size_t sz, size_t nmemb, void *stream)
 
 */
 
-static int add_timestamp(PKCS7 *sig, char *url, char *proxy)
+static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const EVP_MD *md, unsigned char *mdbuf)
 {
 	CURL *curl;
 	struct curl_slist *slist = NULL;
@@ -367,7 +429,6 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy)
 	BIO *bout, *bin, *b64;
 	u_char *p;
 	int len;
-	TimeStampRequest *req;
 	PKCS7_SIGNER_INFO *si =
 		sk_PKCS7_SIGNER_INFO_value
 		(sig->d.sign->signer_info, 0);
@@ -387,26 +448,57 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy)
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 /*	  curl_easy_setopt(curl, CURLOPT_VERBOSE, 42);	*/
 
-	slist = curl_slist_append(slist, "Content-Type: application/octet-stream");
-	slist = curl_slist_append(slist, "Accept: application/octet-stream");
+	if (rfc3161) {
+		slist = curl_slist_append(slist, "Content-Type: application/timestamp-query");
+		slist = curl_slist_append(slist, "Accept: application/timestamp-reply");
+	} else {
+		slist = curl_slist_append(slist, "Content-Type: application/octet-stream");
+		slist = curl_slist_append(slist, "Accept: application/octet-stream");
+	}
 	slist = curl_slist_append(slist, "User-Agent: Transport");
 	slist = curl_slist_append(slist, "Cache-Control: no-cache");
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
 
-	req = TimeStampRequest_new();
-	req->type = OBJ_txt2obj(SPC_TIME_STAMP_REQUEST_OBJID, 1);
-	req->blob = TimeStampRequestBlob_new();
-	req->blob->type = OBJ_nid2obj(NID_pkcs7_data);
-	req->blob->signature = si->enc_digest;
+	if (rfc3161) {
+		TimeStampReq *req = TimeStampReq_new();
+		req->version = ASN1_INTEGER_new();
+		ASN1_INTEGER_set(req->version, 1);
+		req->messageImprint = MessageImprint_new();
+		req->messageImprint->digestAlgorithm = AlgorithmIdentifier_new();
+		req->messageImprint->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(md));
+		req->messageImprint->digestAlgorithm->parameters = ASN1_TYPE_new();
+		req->messageImprint->digestAlgorithm->parameters->type = V_ASN1_NULL;
+		req->messageImprint->digest = M_ASN1_OCTET_STRING_new();
+		M_ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(md));
+		int yes = 1;
+		req->certReq = &yes;
+		len = i2d_TimeStampReq(req, NULL);
+		p = OPENSSL_malloc(len);
+		len = i2d_TimeStampReq(req, &p);
+		p -= len;
 
-	len = i2d_TimeStampRequest(req, NULL);
-	p = OPENSSL_malloc(len);
-	len = i2d_TimeStampRequest(req, &p);
-	p -= len;
+		req->certReq = NULL;
+		TimeStampReq_free(req);
+	} else {
+		TimeStampRequest *req = TimeStampRequest_new();
+		req->type = OBJ_txt2obj(SPC_TIME_STAMP_REQUEST_OBJID, 1);
+		req->blob = TimeStampRequestBlob_new();
+		req->blob->type = OBJ_nid2obj(NID_pkcs7_data);
+		req->blob->signature = si->enc_digest;
+
+		len = i2d_TimeStampRequest(req, NULL);
+		p = OPENSSL_malloc(len);
+		len = i2d_TimeStampRequest(req, &p);
+		p -= len;
+
+		TimeStampRequest_free(req);
+	}
 
 	bout = BIO_new(BIO_s_mem());
-	b64 = BIO_new(BIO_f_base64());
-	bout = BIO_push(b64, bout);
+	if (!rfc3161) {
+		b64 = BIO_new(BIO_f_base64());
+		bout = BIO_push(b64, bout);
+	}
 	BIO_write(bout, p, len);
 	(void)BIO_flush(bout);
 	OPENSSL_free(p);
@@ -428,26 +520,48 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy)
 	BIO_free_all(bout);
 
 	if (c) {
+		BIO_free_all(bin);
 		fprintf(stderr, "CURL failure: %s\n", curl_easy_strerror(c));
 	} else {
 		PKCS7 *p7;
 		int i;
 		PKCS7_SIGNER_INFO *info;
 		ASN1_STRING *astr;
-		BIO* b64_bin;
+
 		(void)BIO_flush(bin);
-		b64 = BIO_new(BIO_f_base64());
-		if (!blob_has_nl)
-			BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
-		b64_bin = BIO_push(b64, bin);
-		p7 = d2i_PKCS7_bio(b64_bin, NULL);
-		if (p7 == NULL) {
+
+		if (rfc3161) {
+			TimeStampResp *reply;
+			(void)BIO_flush(bin);
+			reply = ASN1_item_d2i_bio(ASN1_ITEM_rptr(TimeStampResp), bin, NULL);
+			BIO_free_all(bin);
+			if (!reply) {
+				fprintf(stderr, "Failed to convert timestamp reply\n");
+				ERR_print_errors_fp(stderr);
+				return -1;
+			}
+			if (ASN1_INTEGER_get(reply->status->status) != 0) {
+				fprintf(stderr, "Timestamping failed: %ld\n", ASN1_INTEGER_get(reply->status->status));
+				TimeStampResp_free(reply);
+				return -1;
+			}
+			p7 = PKCS7_dup(reply->token);
+			TimeStampResp_free(reply);
+		} else {
+			BIO* b64_bin;
+			b64 = BIO_new(BIO_f_base64());
+			if (!blob_has_nl)
+				BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+			b64_bin = BIO_push(b64, bin);
+			p7 = d2i_PKCS7_bio(b64_bin, NULL);
+			if (p7 == NULL) {
+				BIO_free_all(b64_bin);
+				fprintf(stderr, "Failed to convert timestamp reply\n");
+				ERR_print_errors_fp(stderr);
+				return -1;
+			}
 			BIO_free_all(b64_bin);
-			fprintf(stderr, "Failed to convert timestamp reply\n");
-			ERR_print_errors_fp(stderr);
-			return -1;
 		}
-		BIO_free_all(b64_bin);
 
 		for(i = sk_X509_num(p7->d.sign->cert)-1; i>=0; i--)
 			PKCS7_add_certificate(sig, sk_X509_value(p7->d.sign->cert, i));
@@ -457,6 +571,7 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy)
 			(p = OPENSSL_malloc(len)) == NULL) {
 			fprintf(stderr, "Failed to convert signer info: %d\n", len);
 			ERR_print_errors_fp(stderr);
+			PKCS7_free(p7);
 			return -1;
 		}
 		len = i2d_PKCS7_SIGNER_INFO(info, &p);
@@ -466,13 +581,25 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy)
 		PKCS7_add_attribute
 			(si, NID_pkcs9_countersignature,
 			 V_ASN1_SEQUENCE, astr);
+
+		PKCS7_free(p7);
 	}
 
-	BIO_free_all(bin);
 	curl_easy_cleanup(curl);
 
 	return (int)c;
 }
+
+static int add_timestamp_authenticode(PKCS7 *sig, char *url, char *proxy)
+{
+	return add_timestamp(sig, url, proxy, 0, NULL, NULL);
+}
+
+static int add_timestamp_rfc3161(PKCS7 *sig, char *url, char *proxy, const EVP_MD *md, unsigned char *mdbuf)
+{
+	return add_timestamp(sig, url, proxy, 1, md, mdbuf);
+}
+
 #endif /* ENABLE_CURL */
 
 
@@ -491,6 +618,7 @@ static void usage(const char *argv0)
 			"\t\t[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n"
 #ifdef ENABLE_CURL
 			"\t\t[ -t <timestampurl> [ -p <proxy> ]]\n"
+			"\t\t[ -ts <timestampurl> [ -p <proxy> ]]\n"
 #endif
 			"\t\t[ -in ] <infile> [-out ] <outfile>\n\n"
 			"\textract-signature [ -in ] <infile> [ -out ] <outfile>\n\n"
@@ -998,7 +1126,7 @@ int main(int argc, char **argv)
 #endif
 	char *pass = "";
 #ifdef ENABLE_CURL
-	char *turl = NULL, *proxy = NULL;
+	char *turl = NULL, *proxy = NULL, *tsurl = NULL;
 #endif
 	u_char *p;
 	int ret = 0, i, len = 0, jp = -1, fd = -1, pe32plus = 0, comm = 0;
@@ -1105,6 +1233,9 @@ int main(int argc, char **argv)
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-t")) {
 			if (--argc < 1) usage(argv0);
 			turl = *(++argv);
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-ts")) {
+			if (--argc < 1) usage(argv0);
+			tsurl = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-p")) {
 			if (--argc < 1) usage(argv0);
 			proxy = *(++argv);
@@ -1167,7 +1298,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (argc > 0 || !infile ||
+	if (argc > 0 || (turl && tsurl) || !infile ||
 		(cmd != CMD_VERIFY && !outfile) ||
 		(cmd == CMD_SIGN && !((spcfile && keyfile) || pkcs12file
 #if OPENSSL_VERSION_NUMBER > 0x10000000
@@ -1546,9 +1677,11 @@ int main(int argc, char **argv)
 	get_indirect_data_blob(&p, &len, md, type);
 	len -= EVP_MD_size(md);
 	memcpy(buf, p, len);
-	i = BIO_gets(hash, buf + len, EVP_MAX_MD_SIZE);
+	unsigned char mdbuf[EVP_MAX_MD_SIZE];
+	int mdlen = BIO_gets(hash, mdbuf, EVP_MAX_MD_SIZE);
+	memcpy(buf+len, mdbuf, mdlen);
 	int seqhdrlen = asn1_simple_hdr_len(buf, len);
-	BIO_write(sigdata, buf+seqhdrlen, len-seqhdrlen+i);
+	BIO_write(sigdata, buf+seqhdrlen, len-seqhdrlen+mdlen);
 
 	if (!PKCS7_dataFinal(sig, sigdata))
 		DO_EXIT_0("Signing failed(PKCS7_dataFinal)\n");
@@ -1556,7 +1689,7 @@ int main(int argc, char **argv)
 	/* replace the data part with the MS Authenticode
 	   spcIndirectDataContext blob */
 	astr = ASN1_STRING_new();
-	ASN1_STRING_set(astr, buf, len+i);
+	ASN1_STRING_set(astr, buf, len+mdlen);
 	dummy.type = V_ASN1_SEQUENCE;
 	dummy.value.sequence = astr;
 	sig->d.sign->contents->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
@@ -1564,8 +1697,10 @@ int main(int argc, char **argv)
 
 #ifdef ENABLE_CURL
 	/* add counter-signature/timestamp */
-	if (turl && add_timestamp(sig, turl, proxy))
-		DO_EXIT_0("timestamping failed\n");
+	if (turl && add_timestamp_authenticode(sig, turl, proxy))
+		DO_EXIT_0("authenticode timestamping failed\n");
+	if (tsurl && add_timestamp_rfc3161(sig, tsurl, proxy, md, mdbuf))
+		DO_EXIT_0("RFC 3161 timestamping failed\n");
 #endif
 
 #if 0
