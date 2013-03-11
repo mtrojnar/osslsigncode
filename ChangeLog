@@ -7,6 +7,8 @@
 - fixed problem with not being able to decode timestamps with no newlines
 - added stricter checks for PE file validity
 - added support for reading keys from PVK files (requires OpenSSL 1.0.0 or later)
+- added support for reading certificates from PEM files
+- renamed program option: -spc to -certs (old option name still valid)
 
 
 === 1.4 (2011-08-12)

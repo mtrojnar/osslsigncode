@@ -103,6 +103,8 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.4 2011/08/12 11:08:12 mfive 
 #define SPC_PE_IMAGE_PAGE_HASHES_V1 "1.3.6.1.4.1.311.2.3.1" /* Page hash using SHA1 */
 #define SPC_PE_IMAGE_PAGE_HASHES_V2 "1.3.6.1.4.1.311.2.3.2" /* Page hash using SHA256 */
 
+#define SPC_RFC3161_OBJID "1.3.6.1.4.1.311.3.3.1"
+
 /* 1.3.6.1.4.1.311.4... MS Crypto 2.0 stuff... */
 
 
@@ -427,8 +429,8 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 	struct curl_slist *slist = NULL;
 	CURLcode c;
 	BIO *bout, *bin, *b64;
-	u_char *p;
-	int len;
+	u_char *p = NULL;
+	int len = 0;
 	PKCS7_SIGNER_INFO *si =
 		sk_PKCS7_SIGNER_INFO_value
 		(sig->d.sign->signer_info, 0);
@@ -472,13 +474,14 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 		M_ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(md));
 		int yes = 1;
 		req->certReq = &yes;
+
 		len = i2d_TimeStampReq(req, NULL);
 		p = OPENSSL_malloc(len);
 		len = i2d_TimeStampReq(req, &p);
 		p -= len;
 
-		req->certReq = NULL;
-		TimeStampReq_free(req);
+		/* req->certReq = NULL; */
+		/* TimeStampReq_free(req); */
 	} else {
 		TimeStampRequest *req = TimeStampRequest_new();
 		req->type = OBJ_txt2obj(SPC_TIME_STAMP_REQUEST_OBJID, 1);
@@ -491,6 +494,7 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 		len = i2d_TimeStampRequest(req, &p);
 		p -= len;
 
+		req->blob->signature = NULL;
 		TimeStampRequest_free(req);
 	}
 
@@ -502,6 +506,7 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 	BIO_write(bout, p, len);
 	(void)BIO_flush(bout);
 	OPENSSL_free(p);
+	p = NULL;
 
 	len = BIO_get_mem_data(bout, &p);
 
@@ -523,11 +528,6 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 		BIO_free_all(bin);
 		fprintf(stderr, "CURL failure: %s\n", curl_easy_strerror(c));
 	} else {
-		PKCS7 *p7;
-		int i;
-		PKCS7_SIGNER_INFO *info;
-		ASN1_STRING *astr;
-
 		(void)BIO_flush(bin);
 
 		if (rfc3161) {
@@ -545,9 +545,28 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 				TimeStampResp_free(reply);
 				return -1;
 			}
-			p7 = PKCS7_dup(reply->token);
+
+			if (((len = i2d_PKCS7(reply->token, NULL)) <= 0) ||
+				(p = OPENSSL_malloc(len)) == NULL) {
+				fprintf(stderr, "Failed to convert pkcs7: %d\n", len);
+				ERR_print_errors_fp(stderr);
+				TimeStampResp_free(reply);
+				return -1;
+			}
+			len = i2d_PKCS7(reply->token, &p);
+			p -= len;
+
+			STACK_OF(X509_ATTRIBUTE) *attrs = sk_X509_ATTRIBUTE_new_null();
+			attrs = X509at_add1_attr_by_txt
+				(&attrs, SPC_RFC3161_OBJID, V_ASN1_SET, p, len);
+			PKCS7_set_attributes(si, attrs);
+
 			TimeStampResp_free(reply);
 		} else {
+			int i;
+			PKCS7 *p7;
+			PKCS7_SIGNER_INFO *info;
+			ASN1_STRING *astr;
 			BIO* b64_bin;
 			b64 = BIO_new(BIO_f_base64());
 			if (!blob_has_nl)
@@ -561,28 +580,28 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 				return -1;
 			}
 			BIO_free_all(b64_bin);
-		}
 
-		for(i = sk_X509_num(p7->d.sign->cert)-1; i>=0; i--)
-			PKCS7_add_certificate(sig, sk_X509_value(p7->d.sign->cert, i));
+			for(i = sk_X509_num(p7->d.sign->cert)-1; i>=0; i--)
+				PKCS7_add_certificate(sig, sk_X509_value(p7->d.sign->cert, i));
 
-		info = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-		if (((len = i2d_PKCS7_SIGNER_INFO(info, NULL)) <= 0) ||
-			(p = OPENSSL_malloc(len)) == NULL) {
-			fprintf(stderr, "Failed to convert signer info: %d\n", len);
-			ERR_print_errors_fp(stderr);
+			info = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+			if (((len = i2d_PKCS7_SIGNER_INFO(info, NULL)) <= 0) ||
+				(p = OPENSSL_malloc(len)) == NULL) {
+				fprintf(stderr, "Failed to convert signer info: %d\n", len);
+				ERR_print_errors_fp(stderr);
+				PKCS7_free(p7);
+				return -1;
+			}
+			len = i2d_PKCS7_SIGNER_INFO(info, &p);
+			p -= len;
+			astr = ASN1_STRING_new();
+			ASN1_STRING_set(astr, p, len);
+			PKCS7_add_attribute
+				(si, NID_pkcs9_countersignature,
+				 V_ASN1_SEQUENCE, astr);
+
 			PKCS7_free(p7);
-			return -1;
 		}
-		len = i2d_PKCS7_SIGNER_INFO(info, &p);
-		p -= len;
-		astr = ASN1_STRING_new();
-		ASN1_STRING_set(astr, p, len);
-		PKCS7_add_attribute
-			(si, NID_pkcs9_countersignature,
-			 V_ASN1_SEQUENCE, astr);
-
-		PKCS7_free(p7);
 	}
 
 	curl_easy_cleanup(curl);
@@ -608,12 +627,8 @@ static void usage(const char *argv0)
 	fprintf(stderr,
 			"Usage: %s\n\n\t[ --version | -v ]\n\n"
 			"\t[ sign ]\n"
-			"\t\t( -spc <spcfile> -key <keyfile> | -pkcs12 <pkcs12file> "
-#if OPENSSL_VERSION_NUMBER > 0x10000000
-			"| -spc <spcfile> -pvk <pvkfile> "
-#endif
-			")\n"
-			"\t\t[ -pass <keypass> ]\n"
+			"\t\t( -certs <certfile> -key <keyfile> | -pkcs12 <pkcs12file> )\n"
+			"\t\t[ -pass <password> ]\n"
 			"\t\t[ -h {md5,sha1,sha2} ]\n"
 			"\t\t[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n"
 #ifdef ENABLE_CURL
@@ -868,7 +883,7 @@ static void tohex(const unsigned char *v, unsigned char *b, int len)
 {
 	int i;
 	for(i=0; i<len; i++)
-		sprintf(b+i*2, "%02X", v[i]);
+		sprintf((char*)b+i*2, "%02X", v[i]);
 	b[i*2] = 0x00;
 }
 
@@ -884,7 +899,7 @@ static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
 
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 
-	BIO_seek(bio, 0);
+	(void)BIO_seek(bio, 0);
 	BIO_read(bio, bfb, peheader + 88);
 	EVP_DigestUpdate(&mdctx, bfb, peheader + 88);
 	BIO_read(bio, bfb, 4);
@@ -911,7 +926,7 @@ static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
 static unsigned int asn1_simple_hdr_len(const unsigned char *p, unsigned int len) {
 	if (len <= 2 || p[0] > 0x31)
 		return 0;
-	return (p[1]&0x80) ? (2 + p[1]&0x7f) : 2;
+	return (p[1]&0x80) ? (2 + (p[1]&0x7f)) : 2;
 }
 
 static const unsigned char classid_page_hash[] = {
@@ -1005,7 +1020,7 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 		unsigned short certrev  = GET_UINT16_LE(indata + sigpos + pos + 4);
 		unsigned short certtype = GET_UINT16_LE(indata + sigpos + pos + 6);
 		if (certrev == WIN_CERT_REVISION_2 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
-			const unsigned char *blob = indata + sigpos + pos + 8;
+			const unsigned char *blob = (unsigned char*)indata + sigpos + pos + 8;
 			p7 = d2i_PKCS7(NULL, &blob, l - 8);
 			if (p7 && PKCS7_type_is_signed(p7) &&
 				!OBJ_cmp(p7->d.sign->contents->type, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1)) &&
@@ -1035,7 +1050,7 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 
 	if (mdtype == -1) {
 		printf("Failed to extract current message digest\n\n");
-		return;
+		return -1;
 	}
 
 	printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
@@ -1104,6 +1119,28 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 	return ret;
 }
 
+static STACK_OF(X509) *PEM_read_certs_with_pass(BIO *bin, char *certpass)
+{
+	STACK_OF(X509) *certs = sk_X509_new_null();
+	X509 *x509;
+	(void)BIO_seek(bin, 0);
+	while((x509 = PEM_read_bio_X509(bin, NULL, NULL, certpass)))
+		sk_X509_push(certs, x509);
+	if (!sk_X509_num(certs)) {
+		sk_X509_free(certs);
+		return NULL;
+	}
+	return certs;
+}
+
+static STACK_OF(X509) *PEM_read_certs(BIO *bin, char *certpass)
+{
+	STACK_OF(X509) *certs = PEM_read_certs_with_pass(bin, certpass);
+	if (!certs)
+		certs = PEM_read_certs_with_pass(bin, NULL);
+	return certs;
+}
+
 
 int main(int argc, char **argv)
 {
@@ -1120,17 +1157,14 @@ int main(int argc, char **argv)
 
 	const char *argv0 = argv[0];
 	static char buf[64*1024];
-	char *spcfile, *keyfile, *pkcs12file, *infile, *outfile, *desc, *url, *indata;
-#if OPENSSL_VERSION_NUMBER > 0x10000000
-	char *pvkfile = NULL;
-#endif
+	char *certfile, *keyfile, *pvkfile, *pkcs12file, *infile, *outfile, *desc, *url, *indata;
 	char *pass = "";
 #ifdef ENABLE_CURL
 	char *turl = NULL, *proxy = NULL, *tsurl = NULL;
 #endif
 	u_char *p;
 	int ret = 0, i, len = 0, jp = -1, fd = -1, pe32plus = 0, comm = 0;
-	unsigned int tmp, peheader = 0, padlen;
+	unsigned int tmp, peheader = 0, padlen = 0;
 	off_t fileend;
 	file_type_t type;
 	cmd_type_t cmd = CMD_SIGN;
@@ -1162,7 +1196,7 @@ int main(int argc, char **argv)
 	OPENSSL_add_all_algorithms_conf();
 
 	md = EVP_sha1();
-	spcfile = keyfile = pkcs12file = infile = outfile = desc = url = NULL;
+	certfile = keyfile = pvkfile = pkcs12file = infile = outfile = desc = url = NULL;
 	hash = outdata = NULL;
 
 	if (argc > 1) {
@@ -1192,20 +1226,15 @@ int main(int argc, char **argv)
 		} else if (!strcmp(*argv, "-out")) {
 			if (--argc < 1) usage(argv0);
 			outfile = *(++argv);
-		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-spc")) {
+		} else if ((cmd == CMD_SIGN) && (!strcmp(*argv, "-spc") || !strcmp(*argv, "-certs"))) {
 			if (--argc < 1) usage(argv0);
-			spcfile = *(++argv);
+			certfile = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-key")) {
 			if (--argc < 1) usage(argv0);
 			keyfile = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs12")) {
 			if (--argc < 1) usage(argv0);
 			pkcs12file = *(++argv);
-#if OPENSSL_VERSION_NUMBER > 0x10000000
-		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pvk")) {
-			if (--argc < 1) usage(argv0);
-			pvkfile = *(++argv);
-#endif
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pass")) {
 			if (--argc < 1) usage(argv0);
 			pass = *(++argv);
@@ -1300,11 +1329,7 @@ int main(int argc, char **argv)
 
 	if (argc > 0 || (turl && tsurl) || !infile ||
 		(cmd != CMD_VERIFY && !outfile) ||
-		(cmd == CMD_SIGN && !((spcfile && keyfile) || pkcs12file
-#if OPENSSL_VERSION_NUMBER > 0x10000000
-							  || (spcfile && pvkfile)
-#endif
-			))) {
+		(cmd == CMD_SIGN && !((certfile && keyfile) || pkcs12file))) {
 		if (failarg)
 			fprintf(stderr, "Unknown option: %s\n", failarg);
 		usage(argv0);
@@ -1312,6 +1337,18 @@ int main(int argc, char **argv)
 
 	if (cmd == CMD_SIGN) {
 		/* Read certificate and key */
+		if (keyfile && (btmp = BIO_new_file(keyfile, "rb")) != NULL) {
+			unsigned char magic[4];
+			unsigned char pvkhdr[4] = { 0x1e, 0xf1, 0xb5, 0xb0 };
+			magic[0] = 0x00;
+			BIO_read(btmp, magic, 4);
+			if (!memcmp(magic, pvkhdr, 4)) {
+				pvkfile = keyfile;
+				keyfile = NULL;
+			}
+			BIO_free(btmp);
+		}
+
 		if (pkcs12file != NULL) {
 			if ((btmp = BIO_new_file(pkcs12file, "rb")) == NULL ||
 				(p12 = d2i_PKCS12_bio(btmp, NULL)) == NULL)
@@ -1320,31 +1357,40 @@ int main(int argc, char **argv)
 			if (!PKCS12_parse(p12, pass, &pkey, &cert, &certs))
 				DO_EXIT_1("Failed to parse PKCS#12 file: %s (Wrong password?)\n", pkcs12file);
 			PKCS12_free(p12);
-#if OPENSSL_VERSION_NUMBER > 0x10000000
 		} else if (pvkfile != NULL) {
-			if ((btmp = BIO_new_file(spcfile, "rb")) == NULL ||
-				(p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL)
-				DO_EXIT_1("Failed to read DER-encoded spc file: %s\n", spcfile);
+#if OPENSSL_VERSION_NUMBER > 0x10000000
+			if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
+				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
+				 (certs = PEM_read_certs(btmp, "")) == NULL))
+				DO_EXIT_1("Failed to read certificate file: %s\n", certfile);
 			BIO_free(btmp);
 			if ((btmp = BIO_new_file(pvkfile, "rb")) == NULL ||
-				( (pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL &&
-				  (pkey = b2i_PVK_bio(btmp, NULL, pass)) == NULL))
+				( (pkey = b2i_PVK_bio(btmp, NULL, pass)) == NULL &&
+				  (BIO_seek(btmp, 0) == 0) &&
+				  (pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL))
 				DO_EXIT_1("Failed to read PVK file: %s\n", pvkfile);
 			BIO_free(btmp);
+			if (p7)
+				certs = p7->d.sign->cert;
+#else
+			DO_EXIT_1("Can not read keys from PVK files, must compile against a newer version of OpenSSL: %s\n", pvkfile);
 #endif
 		} else {
-			if ((btmp = BIO_new_file(spcfile, "rb")) == NULL ||
-				(p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL)
-				DO_EXIT_1("Failed to read DER-encoded spc file: %s\n", spcfile);
+			if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
+				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
+				 (certs = PEM_read_certs(btmp, "")) == NULL))
+				DO_EXIT_1("Failed to read certiticate file: %s\n", certfile);
 			BIO_free(btmp);
-
 			if ((btmp = BIO_new_file(keyfile, "rb")) == NULL ||
 				( (pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
+				  (BIO_seek(btmp, 0) == 0) &&
 				  (pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, pass)) == NULL &&
+				  (BIO_seek(btmp, 0) == 0) &&
 				  (pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL))
-			DO_EXIT_1("Failed to read private key file: %s (Wrong password?)\n", keyfile);
+				DO_EXIT_2("Failed to read private key file: %s (Wrong password? %s)\n", keyfile, pass);
 			BIO_free(btmp);
-			certs = p7->d.sign->cert;
+			if (p7)
+				certs = p7->d.sign->cert;
 		}
 	}
 
@@ -1540,7 +1586,7 @@ int main(int argc, char **argv)
 
 		if (cmd == CMD_EXTRACT) {
 			/* A lil' bit of ugliness. Reset stream, write signature and skip forward */
-			BIO_reset(outdata);
+			(void)BIO_reset(outdata);
 			BIO_write(outdata, indata + sigpos, siglen);
 			goto skip_signing;
 		}
@@ -1657,6 +1703,8 @@ int main(int argc, char **argv)
 
 		PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_SP_OPUS_INFO_OBJID),
 								   V_ASN1_SEQUENCE, astr);
+
+		SpcSpOpusInfo_free(opus);
 	}
 
 	PKCS7_content_new(sig, NID_pkcs7_data);
@@ -1678,9 +1726,9 @@ int main(int argc, char **argv)
 	len -= EVP_MD_size(md);
 	memcpy(buf, p, len);
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
-	int mdlen = BIO_gets(hash, mdbuf, EVP_MAX_MD_SIZE);
+	int mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
 	memcpy(buf+len, mdbuf, mdlen);
-	int seqhdrlen = asn1_simple_hdr_len(buf, len);
+	int seqhdrlen = asn1_simple_hdr_len((unsigned char*)buf, len);
 	BIO_write(sigdata, buf+seqhdrlen, len-seqhdrlen+mdlen);
 
 	if (!PKCS7_dataFinal(sig, sigdata))

@@ -5,25 +5,25 @@ osslsigncode
 == WHAT IS IT?
 
 osslsigncode is a small tool that implements part of the functionality
-of the Microsoft tool signcode.exe - more exactly the Authenticode
+of the Microsoft tool signtool.exe - more exactly the Authenticode
 signing and timestamping. But osslsigncode is based on OpenSSL and cURL,
 and thus should be able to compile on most platforms where these exist.
 
 
 == WHY?
 
-Why not use signcode.exe? Because I don't want to go to a Windows
+Why not use signtool.exe? Because I don't want to go to a Windows
 machine every time I need to sign a binary - I can compile and build
 the binaries using Wine on my Linux machine, but I can't sign them
-since the signcode.exe makes good use of the CryptoAPI in Windows, and
-these APIs aren't (yet?) fully implemented in Wine, so the signcode.exe
+since the signtool.exe makes good use of the CryptoAPI in Windows, and
+these APIs aren't (yet?) fully implemented in Wine, so the signtool.exe
 tool  would fail. And, so, osslsigncode was born.
 
 
 == WHAT CAN IT DO?
 
 It can sign and timestamp EXE, CAB and MSI files. It supports the equivalent
-of signcode.exe's "-j javasign.dll -jp low", i.e. add a valid signature
+of signtool.exe's "-j javasign.dll -jp low", i.e. add a valid signature
 for a CAB file containing Java files. It supports getting the timestamp
 through a proxy as well.
 
@@ -43,54 +43,45 @@ Before you can sign a file you need a Software Publishing
 Certificate (spc) and a corresponding private key.
 
 This article provides a good starting point as to how
-to do the signing with the Microsoft signcode.exe:
+to do the signing with the Microsoft signtool.exe:
 
   http://www.matthew-jones.com/articles/codesigning.html
 
-To sign with osslsigncode you need the spc file mentioned in the
-article above, and you will also need the private key, it must
-be a key file in DER or PEM format, or if osslsigncode was
+To sign with osslsigncode you need the certificate file mentioned in the
+article above, in SPC or PEM format, and you will also need the private
+key which must be a key file in DER or PEM format, or if osslsigncode was
 compiled against OpenSSL 1.0.0 or later, in PVK format.
-
-. You can create a DER file from the PEM file by doing:
-
-  openssl rsa -passin pass:XXXXX -outform der \
-        -in <pem-key-file> -out <der-key-file>
 
 To sign an EXE or MSI file you can now do:
 
-  osslsigncode -spc <spc-file> -key <der-key-file> \
+  osslsigncode sign -certs <cert-file> -key <der-key-file> \
         -n "Your Application" -i http://www.yourwebsite.com/ \
         -in yourapp.exe -out yourapp-signed.exe
 
-or if you are using a PVK key file:
+or if you are using a PEM or PVK key file with a password together
+with a PEM certificate:
 
-  osslsigncode -spc <spc-file> -pvk <der-key-file> \
-        -n "Your Application" -i http://www.yourwebsite.com/ \
-        -in yourapp.exe -out yourapp-signed.exe
-
-or if you are using a PEM key file:
-
-  osslsigncode -spc <spc-file> -key <der-key-file> -pass <pem-password> \
+  osslsigncode sign -certs <cert-file> \
+        -key <key-file> -pass <key-password> \
         -n "Your Application" -i http://www.yourwebsite.com/ \
         -in yourapp.exe -out yourapp-signed.exe
 
 or if you want to add a timestamp as well:
 
-  osslsigncode -spc <spc-file> -key <der-key-file> \
+  osslsigncode sign -certs <cert-file> -key <key-file> \
         -n "Your Application" -i http://www.yourwebsite.com/ \
         -t http://timestamp.verisign.com/scripts/timstamp.dll \
         -in yourapp.exe -out yourapp-signed.exe
 
-You can use an spc and key stored in a PKCS#12 container:
+You can use a certificate and key stored in a PKCS#12 container:
 
-  osslsigncode -pkcs12 <pkcs12-file> -pass <pkcs12-password> \
+  osslsigncode sign -pkcs12 <pkcs12-file> -pass <pkcs12-password> \
         -n "Your Application" -i http://www.yourwebsite.com/ \
         -in yourapp.exe -out yourapp-signed.exe
 
 To sign a CAB file containing java class files:
 
-  osslsigncode -spc <spc-file> -key <der-key-file> \
+  osslsigncode sign -certs <cert-file> -key <key-file> \
         -n "Your Application" -i http://www.yourwebsite.com/ \
         -jp low \
         -in yourapp.cab -out yourapp-signed.cab
