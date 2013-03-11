@@ -1,5 +1,4 @@
 - page hashing support
-- RFC3161 timestamping
 - signature extraction/removal/verificaton on MSI/CAB files
 - improved signature verification on PE files
 - clean up / untangle code

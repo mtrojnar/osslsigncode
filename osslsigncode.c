@@ -423,7 +423,7 @@ static size_t curl_write( void *ptr, size_t sz, size_t nmemb, void *stream)
 
 */
 
-static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const EVP_MD *md, unsigned char *mdbuf)
+static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const EVP_MD *md)
 {
 	CURL *curl;
 	struct curl_slist *slist = NULL;
@@ -462,6 +462,14 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
 
 	if (rfc3161) {
+		unsigned char mdbuf[EVP_MAX_MD_SIZE];
+		EVP_MD_CTX mdctx;
+
+		EVP_MD_CTX_init(&mdctx);
+		EVP_DigestInit(&mdctx, md);
+		EVP_DigestUpdate(&mdctx, si->enc_digest->data, si->enc_digest->length);
+		EVP_DigestFinal(&mdctx, mdbuf, NULL);
+
 		TimeStampReq *req = TimeStampReq_new();
 		req->version = ASN1_INTEGER_new();
 		ASN1_INTEGER_set(req->version, 1);
@@ -611,12 +619,12 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 
 static int add_timestamp_authenticode(PKCS7 *sig, char *url, char *proxy)
 {
-	return add_timestamp(sig, url, proxy, 0, NULL, NULL);
+	return add_timestamp(sig, url, proxy, 0, NULL);
 }
 
-static int add_timestamp_rfc3161(PKCS7 *sig, char *url, char *proxy, const EVP_MD *md, unsigned char *mdbuf)
+static int add_timestamp_rfc3161(PKCS7 *sig, char *url, char *proxy, const EVP_MD *md)
 {
-	return add_timestamp(sig, url, proxy, 1, md, mdbuf);
+	return add_timestamp(sig, url, proxy, 1, md);
 }
 
 #endif /* ENABLE_CURL */
@@ -1747,7 +1755,7 @@ int main(int argc, char **argv)
 	/* add counter-signature/timestamp */
 	if (turl && add_timestamp_authenticode(sig, turl, proxy))
 		DO_EXIT_0("authenticode timestamping failed\n");
-	if (tsurl && add_timestamp_rfc3161(sig, tsurl, proxy, md, mdbuf))
+	if (tsurl && add_timestamp_rfc3161(sig, tsurl, proxy, md))
 		DO_EXIT_0("RFC 3161 timestamping failed\n");
 #endif
 

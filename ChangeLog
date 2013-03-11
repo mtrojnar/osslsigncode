@@ -3,6 +3,7 @@
 - added support for signing MSI files (patch from Marc-André Lureau)
 - calculate correct PE checksum instead of setting it to 0
 	 (patch from Roland Schwingel)
+- added support for RFC3161 timestamping (-ts option)
 - added support for extracting/removing/verifying signature on PE files
 - fixed problem with not being able to decode timestamps with no newlines
 - added stricter checks for PE file validity
