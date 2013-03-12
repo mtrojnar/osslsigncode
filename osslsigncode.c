@@ -995,6 +995,55 @@ static void	extract_page_hash (SpcAttributeTypeAndOptionalValue *obj, unsigned c
 	SpcAttributeTypeAndOptionalValue_free(obj);
 }
 
+static unsigned char *calc_page_hash(char *indata, unsigned int peheader, int pe32plus, unsigned int sigpos, int phtype)
+{
+	unsigned short nsections = GET_UINT16_LE(indata + peheader + 6);
+	unsigned int pagesize = GET_UINT32_LE(indata + peheader + 56);
+	unsigned int hdrsize = GET_UINT32_LE(indata + peheader + 84);
+	const EVP_MD *md = EVP_get_digestbynid(phtype);
+	int pphlen = 4 + EVP_MD_size(md);
+	int phlen = pphlen * (2 + nsections + sigpos / pagesize);
+	unsigned char *res = malloc(phlen);
+	unsigned char *zeroes = calloc(pagesize, 1);
+	EVP_MD_CTX mdctx;
+
+	EVP_MD_CTX_init(&mdctx);
+	EVP_DigestInit(&mdctx, md);
+	EVP_DigestUpdate(&mdctx, indata, peheader + 88);
+	EVP_DigestUpdate(&mdctx, indata + peheader + 92, 60 + pe32plus*16);
+	EVP_DigestUpdate(&mdctx, indata + peheader + 160 + pe32plus*16, hdrsize - (peheader + 160 + pe32plus*16));
+	EVP_DigestUpdate(&mdctx, zeroes, pagesize - hdrsize);
+	memset(res, 0, 4);
+	EVP_DigestFinal(&mdctx, res + 4, NULL);
+
+	unsigned short sizeofopthdr = GET_UINT16_LE(indata + peheader + 20);
+	char *sections = indata + peheader + 24 + sizeofopthdr;
+	int i, pi = 1;
+	unsigned int lastpos = 0;
+	for (i=0; i<nsections; i++) {
+		unsigned int rs = GET_UINT32_LE(sections + 16);
+		unsigned int ro = GET_UINT32_LE(sections + 20);
+		unsigned int l;
+		for (l=0; l < rs; l+=pagesize, pi++) {
+			PUT_UINT32_LE(ro + l, res + pi*pphlen);
+			EVP_DigestInit(&mdctx, md);
+			if (rs - l < pagesize) {
+				EVP_DigestUpdate(&mdctx, indata + ro + l, rs - l);
+				EVP_DigestUpdate(&mdctx, zeroes, pagesize - (rs - l));
+			} else {
+				EVP_DigestUpdate(&mdctx, indata + ro + l, pagesize);
+			}
+			EVP_DigestFinal(&mdctx, res + pi*pphlen + 4, NULL);
+		}
+		lastpos = ro + rs;
+		sections += 40;
+	}
+	PUT_UINT32_LE(lastpos, res + pi*pphlen);
+	memset(res + pi*pphlen + 4, 0, EVP_MD_size(md));
+	free(zeroes);
+	return res;
+}
+
 static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 						  unsigned int sigpos, unsigned int siglen)
 {
@@ -1076,10 +1125,14 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 	printf("Calculated message digest : %s%s\n\n", hexbuf, mdok?"":"    MISMATCH!!!");
 
 	if (phlen > 0) {
-		printf("Page hash algorithm: %s\n", OBJ_nid2sn(phtype));
+		printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
 		tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
-		printf("Page hash          : %s ...\n\n", hexbuf);
+		printf("Page hash            : %s ...\n", hexbuf);
+		unsigned char *cph = calc_page_hash(indata, peheader, pe32plus, sigpos, phtype);
+		tohex(cph, hexbuf, (phlen < 32) ? phlen : 32);
+		printf("Calculated page hash : %s ...%s\n\n", hexbuf, memcmp(ph, cph, phlen) ? "    MISMATCH!!!":"");
 		free(ph);
+		free(cph);
 	}
 
 	int seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,

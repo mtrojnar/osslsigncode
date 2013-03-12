@@ -7,20 +7,20 @@ from pyasn1.type import univ
 from pyasn1.codec.ber import encoder, decoder
 
 f = open(sys.argv[1], 'rb')
-b = f.read(1024)
-if b[0:2] != 'MZ':
+filehdr = f.read(1024)
+if filehdr[0:2] != 'MZ':
     print "Not a DOS file."
     sys.exit(0)
-pepos = struct.unpack('<I', b[60:64])[0]
-if b[pepos:pepos+4] != 'PE\0\0':
+pepos = struct.unpack('<I', filehdr[60:64])[0]
+if filehdr[pepos:pepos+4] != 'PE\0\0':
     print "Not a PE file."
     sys.exit(0)
 pepos += 4
 
-nsections = struct.unpack('<H', b[pepos+2:pepos+4])[0]
+nsections = struct.unpack('<H', filehdr[pepos+2:pepos+4])[0]
 print "#sections", nsections
 
-magic = struct.unpack('<H', b[pepos+20:pepos+22])[0]
+magic = struct.unpack('<H', filehdr[pepos+20:pepos+22])[0]
 pe32plus = 0
 if magic == 0x20b:
     pe32plus = 1
@@ -30,24 +30,24 @@ else:
     print "Unknown magic", magic
     sys.exit(0)
 
-sectoralign = struct.unpack('<I', b[pepos+52:pepos+56])[0]
+sectoralign = struct.unpack('<I', filehdr[pepos+52:pepos+56])[0]
 print "Sector alignment", sectoralign
 
 pos = pepos + 112 + pe32plus*16
-nrvas = struct.unpack('<I', b[pos:pos+4])[0]
+nrvas = struct.unpack('<I', filehdr[pos:pos+4])[0]
 print "#rvas", nrvas
 
 pos += 4
 tpos = pos
 rvas = []
 for i in range(0, nrvas):
-    (p1,p2) = struct.unpack('<II', b[pos:pos+8])
+    (p1,p2) = struct.unpack('<II', filehdr[pos:pos+8])
     rvas.append((p1,p2))
     pos += 8
 
 sections = []
 for i in range(0, nsections):
-    (vsize,vaddr,rsize,raddr) = struct.unpack('<IIII', b[pos+8:pos+24])
+    (vsize,vaddr,rsize,raddr) = struct.unpack('<IIII', filehdr[pos+8:pos+24])
     pos += 40
     sections.append((vsize,vaddr,rsize,raddr))
 
@@ -95,15 +95,15 @@ while i < len(blob):
     ph.append((offset,data.encode("hex")))
     i += hashlen
 
-# Calculating first page hash is not working, the normal authenticode
-# hash is calculated like below, but that's not how it should be done...
 if sha1:
     md = hashlib.sha1()
 else:
     md = hashlib.sha256()
-md.update(blob[0:pepos+84])
-md.update(blob[pepos:88:tpos+3*8])
-md.update(blob[tpos+4*8:1024])
+b = filehdr[0:pepos+84]
+b += filehdr[pepos+88:tpos+4*8]
+b += filehdr[tpos+5*8:1024]
+b += '\0'*(4096-1024)
+md.update(b)
 digest = md.hexdigest()
 
 print ""
