@@ -1,3 +1,7 @@
+=== 1.5.1 (2013-03-12)
+
+- forgot to bump version number...
+
 === 1.5 (2013-03-12)
 
 - added support for signing MSI files (patch from Marc-André Lureau)
