@@ -19,7 +19,7 @@
 
 */
 
-static const char *rcsid = "$Id: osslsigncode.c,v 1.4 2011/08/12 11:08:12 mfive Exp $";
+static const char *rcsid = "$Id: osslsigncode.c,v 1.5 2013/03/12 06:05:12 mfive Exp $";
 
 /*
    Implemented with good help from:

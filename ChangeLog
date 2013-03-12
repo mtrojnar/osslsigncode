@@ -1,4 +1,4 @@
-=== 1.5 (2013-03-XX)
+=== 1.5 (2013-03-12)
 
 - added support for signing MSI files (patch from Marc-André Lureau)
 - calculate correct PE checksum instead of setting it to 0
