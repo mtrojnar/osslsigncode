@@ -6,4 +6,3 @@
 - remove mmap usage to increase portability
 - tests
 - fix other stuff marked 'XXX'
-- free memory properly :)

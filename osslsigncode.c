@@ -19,7 +19,7 @@
 
 */
 
-static const char *rcsid = "$Id: osslsigncode.c,v 1.5.1 2013/03/12 06:05:12 mfive Exp $";
+static const char *rcsid = "$Id: osslsigncode.c,v 1.5.1 2013/03/13 13:13:13 mfive Exp $";
 
 /*
    Implemented with good help from:
@@ -83,6 +83,10 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.5.1 2013/03/12 06:05:12 mfiv
 #include <openssl/pkcs12.h>
 #include <openssl/pem.h>
 #include <openssl/asn1t.h>
+#include <openssl/conf.h>
+#ifndef OPENSSL_NO_ENGINE
+#include <openssl/engine.h>
+#endif
 
 #ifdef ENABLE_CURL
 #include <curl/curl.h>
@@ -124,6 +128,8 @@ typedef struct {
 	} value;
 } SpcString;
 
+DECLARE_ASN1_FUNCTIONS(SpcString)
+
 ASN1_CHOICE(SpcString) = {
 	ASN1_IMP_OPT(SpcString, value.unicode, ASN1_BMPSTRING , 0),
 	ASN1_IMP_OPT(SpcString, value.ascii,   ASN1_IA5STRING,	1)
@@ -136,6 +142,8 @@ typedef struct {
 	ASN1_OCTET_STRING *classId;
 	ASN1_OCTET_STRING *serializedData;
 } SpcSerializedObject;
+
+DECLARE_ASN1_FUNCTIONS(SpcSerializedObject)
 
 ASN1_SEQUENCE(SpcSerializedObject) = {
 	ASN1_SIMPLE(SpcSerializedObject, classId, ASN1_OCTET_STRING),
@@ -153,6 +161,8 @@ typedef struct {
 		SpcString *file;
 	} value;
 } SpcLink;
+
+DECLARE_ASN1_FUNCTIONS(SpcLink)
 
 ASN1_CHOICE(SpcLink) = {
 	ASN1_IMP_OPT(SpcLink, value.url,	 ASN1_IA5STRING,	  0),
@@ -183,6 +193,8 @@ typedef struct {
 	ASN1_TYPE *value;
 } SpcAttributeTypeAndOptionalValue;
 
+DECLARE_ASN1_FUNCTIONS(SpcAttributeTypeAndOptionalValue)
+
 ASN1_SEQUENCE(SpcAttributeTypeAndOptionalValue) = {
 	ASN1_SIMPLE(SpcAttributeTypeAndOptionalValue, type, ASN1_OBJECT),
 	ASN1_OPT(SpcAttributeTypeAndOptionalValue, value, ASN1_ANY)
@@ -196,6 +208,8 @@ typedef struct {
 	ASN1_TYPE *parameters;
 } AlgorithmIdentifier;
 
+DECLARE_ASN1_FUNCTIONS(AlgorithmIdentifier)
+
 ASN1_SEQUENCE(AlgorithmIdentifier) = {
 	ASN1_SIMPLE(AlgorithmIdentifier, algorithm, ASN1_OBJECT),
 	ASN1_OPT(AlgorithmIdentifier, parameters, ASN1_ANY)
@@ -203,10 +217,13 @@ ASN1_SEQUENCE(AlgorithmIdentifier) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(AlgorithmIdentifier)
 
+
 typedef struct {
 	AlgorithmIdentifier *digestAlgorithm;
 	ASN1_OCTET_STRING *digest;
 } DigestInfo;
+
+DECLARE_ASN1_FUNCTIONS(DigestInfo)
 
 ASN1_SEQUENCE(DigestInfo) = {
 	ASN1_SIMPLE(DigestInfo, digestAlgorithm, AlgorithmIdentifier),
@@ -215,10 +232,13 @@ ASN1_SEQUENCE(DigestInfo) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(DigestInfo)
 
+
 typedef struct {
 	SpcAttributeTypeAndOptionalValue *data;
 	DigestInfo *messageDigest;
 } SpcIndirectDataContent;
+
+DECLARE_ASN1_FUNCTIONS(SpcIndirectDataContent)
 
 ASN1_SEQUENCE(SpcIndirectDataContent) = {
 	ASN1_SIMPLE(SpcIndirectDataContent, data, SpcAttributeTypeAndOptionalValue),
@@ -227,10 +247,13 @@ ASN1_SEQUENCE(SpcIndirectDataContent) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(SpcIndirectDataContent)
 
+
 typedef struct {
 	ASN1_BIT_STRING* flags;
 	SpcLink *file;
 } SpcPeImageData;
+
+DECLARE_ASN1_FUNCTIONS(SpcPeImageData)
 
 ASN1_SEQUENCE(SpcPeImageData) = {
 	ASN1_SIMPLE(SpcPeImageData, flags, ASN1_BIT_STRING),
@@ -238,6 +261,7 @@ ASN1_SEQUENCE(SpcPeImageData) = {
 } ASN1_SEQUENCE_END(SpcPeImageData)
 
 IMPLEMENT_ASN1_FUNCTIONS(SpcPeImageData)
+
 
 typedef struct {
 	ASN1_INTEGER *a;
@@ -247,19 +271,22 @@ typedef struct {
 	ASN1_INTEGER *d;
 	ASN1_INTEGER *e;
 	ASN1_INTEGER *f;
-} SpcSipinfo;
+} SpcSipInfo;
 
-ASN1_SEQUENCE(SpcSipinfo) = {
-	ASN1_SIMPLE(SpcSipinfo, a, ASN1_INTEGER),
-	ASN1_SIMPLE(SpcSipinfo, string, ASN1_OCTET_STRING),
-	ASN1_SIMPLE(SpcSipinfo, b, ASN1_INTEGER),
-	ASN1_SIMPLE(SpcSipinfo, c, ASN1_INTEGER),
-	ASN1_SIMPLE(SpcSipinfo, d, ASN1_INTEGER),
-	ASN1_SIMPLE(SpcSipinfo, e, ASN1_INTEGER),
-	ASN1_SIMPLE(SpcSipinfo, f, ASN1_INTEGER),
-} ASN1_SEQUENCE_END(SpcSipinfo)
+DECLARE_ASN1_FUNCTIONS(SpcSipInfo)
 
-IMPLEMENT_ASN1_FUNCTIONS(SpcSipinfo)
+ASN1_SEQUENCE(SpcSipInfo) = {
+	ASN1_SIMPLE(SpcSipInfo, a, ASN1_INTEGER),
+	ASN1_SIMPLE(SpcSipInfo, string, ASN1_OCTET_STRING),
+	ASN1_SIMPLE(SpcSipInfo, b, ASN1_INTEGER),
+	ASN1_SIMPLE(SpcSipInfo, c, ASN1_INTEGER),
+	ASN1_SIMPLE(SpcSipInfo, d, ASN1_INTEGER),
+	ASN1_SIMPLE(SpcSipInfo, e, ASN1_INTEGER),
+	ASN1_SIMPLE(SpcSipInfo, f, ASN1_INTEGER),
+} ASN1_SEQUENCE_END(SpcSipInfo)
+
+IMPLEMENT_ASN1_FUNCTIONS(SpcSipInfo)
+
 
 #ifdef ENABLE_CURL
 
@@ -302,6 +329,8 @@ typedef struct {
 	ASN1_BIT_STRING *failInfo;
 } PKIStatusInfo;
 
+DECLARE_ASN1_FUNCTIONS(PKIStatusInfo)
+
 ASN1_SEQUENCE(PKIStatusInfo) = {
 	ASN1_SIMPLE(PKIStatusInfo, status, ASN1_INTEGER),
 	ASN1_SEQUENCE_OF_OPT(PKIStatusInfo, statusString, ASN1_UTF8STRING),
@@ -316,6 +345,8 @@ typedef struct {
 	PKCS7 *token;
 } TimeStampResp;
 
+DECLARE_ASN1_FUNCTIONS(TimeStampResp)
+
 ASN1_SEQUENCE(TimeStampResp) = {
 	ASN1_SIMPLE(TimeStampResp, status, PKIStatusInfo),
 	ASN1_OPT(TimeStampResp, token, PKCS7)
@@ -327,6 +358,8 @@ typedef struct {
 	AlgorithmIdentifier *digestAlgorithm;
 	ASN1_OCTET_STRING *digest;
 } MessageImprint;
+
+DECLARE_ASN1_FUNCTIONS(MessageImprint)
 
 ASN1_SEQUENCE(MessageImprint) = {
 	ASN1_SIMPLE(MessageImprint, digestAlgorithm, AlgorithmIdentifier),
@@ -343,6 +376,8 @@ typedef struct {
 	ASN1_BOOLEAN *certReq;
 	STACK_OF(X509_EXTENSION) *extensions;
 } TimeStampReq;
+
+DECLARE_ASN1_FUNCTIONS(TimeStampReq)
 
 ASN1_SEQUENCE(TimeStampReq) = {
 	ASN1_SIMPLE(TimeStampReq, version, ASN1_INTEGER),
@@ -471,29 +506,22 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 		EVP_DigestFinal(&mdctx, mdbuf, NULL);
 
 		TimeStampReq *req = TimeStampReq_new();
-		req->version = ASN1_INTEGER_new();
 		ASN1_INTEGER_set(req->version, 1);
-		req->messageImprint = MessageImprint_new();
-		req->messageImprint->digestAlgorithm = AlgorithmIdentifier_new();
 		req->messageImprint->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(md));
 		req->messageImprint->digestAlgorithm->parameters = ASN1_TYPE_new();
 		req->messageImprint->digestAlgorithm->parameters->type = V_ASN1_NULL;
-		req->messageImprint->digest = M_ASN1_OCTET_STRING_new();
 		M_ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(md));
-		int yes = 1;
-		req->certReq = &yes;
+		req->certReq = (void*)0x1;
 
 		len = i2d_TimeStampReq(req, NULL);
 		p = OPENSSL_malloc(len);
 		len = i2d_TimeStampReq(req, &p);
 		p -= len;
 
-		/* req->certReq = NULL; */
-		/* TimeStampReq_free(req); */
+		TimeStampReq_free(req);
 	} else {
 		TimeStampRequest *req = TimeStampRequest_new();
 		req->type = OBJ_txt2obj(SPC_TIME_STAMP_REQUEST_OBJID, 1);
-		req->blob = TimeStampRequestBlob_new();
 		req->blob->type = OBJ_nid2obj(NID_pkcs7_data);
 		req->blob->signature = si->enc_digest;
 
@@ -563,13 +591,14 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 			}
 			len = i2d_PKCS7(reply->token, &p);
 			p -= len;
+			TimeStampResp_free(reply);
 
 			STACK_OF(X509_ATTRIBUTE) *attrs = sk_X509_ATTRIBUTE_new_null();
 			attrs = X509at_add1_attr_by_txt
 				(&attrs, SPC_RFC3161_OBJID, V_ASN1_SET, p, len);
+			OPENSSL_free(p);
 			PKCS7_set_attributes(si, attrs);
-
-			TimeStampResp_free(reply);
+			sk_X509_ATTRIBUTE_pop_free(attrs, X509_ATTRIBUTE_free);
 		} else {
 			int i;
 			PKCS7 *p7;
@@ -604,6 +633,7 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 			p -= len;
 			astr = ASN1_STRING_new();
 			ASN1_STRING_set(astr, p, len);
+			OPENSSL_free(p);
 			PKCS7_add_attribute
 				(si, NID_pkcs9_countersignature,
 				 V_ASN1_SEQUENCE, astr);
@@ -613,6 +643,7 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 	}
 
 	curl_easy_cleanup(curl);
+	curl_global_cleanup();
 
 	return (int)c;
 }
@@ -629,6 +660,26 @@ static int add_timestamp_rfc3161(PKCS7 *sig, char *url, char *proxy, const EVP_M
 
 #endif /* ENABLE_CURL */
 
+#ifdef WITH_GSF
+static int gsf_initialized = 0;
+#endif
+
+static void cleanup_lib_state(void)
+{
+#ifdef WITH_GSF
+	if (gsf_initialized)
+		gsf_shutdown();
+#endif
+	OBJ_cleanup();
+#ifndef OPENSSL_NO_ENGINE
+    ENGINE_cleanup();
+#endif
+    EVP_cleanup();
+	CONF_modules_free();
+    CRYPTO_cleanup_all_ex_data();
+	ERR_remove_thread_state(NULL);
+    ERR_free_strings();
+}
 
 static void usage(const char *argv0)
 {
@@ -650,6 +701,7 @@ static void usage(const char *argv0)
 			"\tverify [ -in ] <infile>\n\n"
 			"",
 			argv0);
+	cleanup_lib_state();
 	exit(-1);
 }
 
@@ -685,6 +737,7 @@ typedef enum {
 	CMD_REMOVE,
 	CMD_VERIFY,
 } cmd_type_t;
+
 
 static SpcLink *get_obsolete_link(void)
 {
@@ -739,6 +792,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, unsigned int pehead
 
 	ASN1_OCTET_STRING *ostr = M_ASN1_OCTET_STRING_new();
 	M_ASN1_OCTET_STRING_set(ostr, ph, phlen);
+	free(ph);
 
 	STACK_OF(ASN1_OCTET_STRING) *oset = sk_ASN1_OCTET_STRING_new_null();
 	sk_ASN1_OCTET_STRING_push(oset, ostr);
@@ -749,6 +803,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, unsigned int pehead
 	tmp = p = OPENSSL_malloc(l);
 	i2d_ASN1_SET_OF_ASN1_OCTET_STRING(oset, &tmp, i2d_ASN1_OCTET_STRING,
 									  V_ASN1_SET, V_ASN1_UNIVERSAL, IS_SET);
+	ASN1_OCTET_STRING_free(ostr);
 	sk_ASN1_OCTET_STRING_free(oset);
 
 	SpcAttributeTypeAndOptionalValue *aval = SpcAttributeTypeAndOptionalValue_new();
@@ -756,8 +811,8 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, unsigned int pehead
 	aval->value = ASN1_TYPE_new();
 	aval->value->type = V_ASN1_SET;
 	aval->value->value.set = ASN1_STRING_new();
-	aval->value->value.set->data = p;
-	aval->value->value.set->length = l;
+	ASN1_STRING_set(aval->value->value.set, p, l);
+	OPENSSL_free(p);
 
 	STACK_OF(SpcAttributeTypeAndOptionalValue) *aset = sk_SpcAttributeTypeAndOptionalValue_new_null();
 	sk_SpcAttributeTypeAndOptionalValue_push(aset, aval);
@@ -767,12 +822,12 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, unsigned int pehead
 	l = i2d_SpcAttributeTypeAndOptionalValue(aset, &tmp, i2d_SpcAttributeTypeAndOptionalValue,
 											 V_ASN1_SET, V_ASN1_UNIVERSAL, IS_SET);
 	sk_SpcAttributeTypeAndOptionalValue_free(aset);
+	SpcAttributeTypeAndOptionalValue_free(aval);
 
 	SpcSerializedObject *so = SpcSerializedObject_new();
-	so->classId = M_ASN1_OCTET_STRING_new();
 	M_ASN1_OCTET_STRING_set(so->classId, classid_page_hash, sizeof(classid_page_hash));
-	so->serializedData = M_ASN1_OCTET_STRING_new();
 	M_ASN1_OCTET_STRING_set(so->serializedData, p, l);
+	OPENSSL_free(p);
 
 	SpcLink *link = SpcLink_new();
 	link->type = 1;
@@ -792,8 +847,8 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, fi
 	u_char *p;
 	int hashlen, l;
 	void *hash;
+	ASN1_OBJECT *dtype;
 	SpcIndirectDataContent *idc = SpcIndirectDataContent_new();
-	idc->data = SpcAttributeTypeAndOptionalValue_new();
 	idc->data->value = ASN1_TYPE_new();
 	idc->data->value->type = V_ASN1_SEQUENCE;
 	idc->data->value->value.sequence = ASN1_STRING_new();
@@ -803,10 +858,10 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, fi
 		p = OPENSSL_malloc(l);
 		i2d_SpcLink(link, &p);
 		p -= l;
-		idc->data->type = OBJ_txt2obj(SPC_CAB_DATA_OBJID, 1);
+		dtype = OBJ_txt2obj(SPC_CAB_DATA_OBJID, 1);
+		SpcLink_free(link);
 	} else if (type == FILE_TYPE_PE) {
 		SpcPeImageData *pid = SpcPeImageData_new();
-		pid->flags = ASN1_BIT_STRING_new();
 		ASN1_BIT_STRING_set(pid->flags, (unsigned char*)"0", 0);
 		if (pagehash) {
 			int phtype = NID_sha1;
@@ -820,46 +875,46 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, fi
 		p = OPENSSL_malloc(l);
 		i2d_SpcPeImageData(pid, &p);
 		p -= l;
-		idc->data->type = OBJ_txt2obj(SPC_PE_IMAGE_DATA_OBJID, 1);
+		dtype = OBJ_txt2obj(SPC_PE_IMAGE_DATA_OBJID, 1);
+		SpcPeImageData_free(pid);
 	} else if (type == FILE_TYPE_MSI) {
-		SpcSipinfo *si = SpcSipinfo_new();
-		si->a = ASN1_INTEGER_new();
+		SpcSipInfo *si = SpcSipInfo_new();
 		ASN1_INTEGER_set(si->a, 1);
-		si->string = M_ASN1_OCTET_STRING_new();
+		ASN1_INTEGER_set(si->b, 0);
+		ASN1_INTEGER_set(si->c, 0);
+		ASN1_INTEGER_set(si->d, 0);
+		ASN1_INTEGER_set(si->e, 0);
+		ASN1_INTEGER_set(si->f, 0);
 		M_ASN1_OCTET_STRING_set(si->string, msistr, sizeof(msistr));
-		si->b = ASN1_INTEGER_new();
-		si->c = ASN1_INTEGER_new();
-		si->d = ASN1_INTEGER_new();
-		si->e = ASN1_INTEGER_new();
-		si->f = ASN1_INTEGER_new();
-		l = i2d_SpcSipinfo(si, NULL);
+		l = i2d_SpcSipInfo(si, NULL);
 		p = OPENSSL_malloc(l);
-		i2d_SpcSipinfo(si, &p);
+		i2d_SpcSipInfo(si, &p);
 		p -= l;
-		idc->data->type = OBJ_txt2obj(SPC_SIPINFO_OBJID, 1);
+		dtype = OBJ_txt2obj(SPC_SIPINFO_OBJID, 1);
+		SpcSipInfo_free(si);
 	} else {
 		fprintf(stderr, "Unexpected file type: %d\n", type);
 		exit(1);
 	}
 
+	idc->data->type = dtype;
 	idc->data->value->value.sequence->data = p;
 	idc->data->value->value.sequence->length = l;
-	idc->messageDigest = DigestInfo_new();
-	idc->messageDigest->digestAlgorithm = AlgorithmIdentifier_new();
 	idc->messageDigest->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(md));
 	idc->messageDigest->digestAlgorithm->parameters = ASN1_TYPE_new();
 	idc->messageDigest->digestAlgorithm->parameters->type = V_ASN1_NULL;
-	idc->messageDigest->digest = M_ASN1_OCTET_STRING_new();
 
 	hashlen = EVP_MD_size(md);
 	hash = OPENSSL_malloc(hashlen);
 	memset(hash, 0, hashlen);
 	M_ASN1_OCTET_STRING_set(idc->messageDigest->digest, hash, hashlen);
+	OPENSSL_free(hash);
 
 	*len  = i2d_SpcIndirectDataContent(idc, NULL);
 	*blob = OPENSSL_malloc(*len);
 	p = *blob;
 	i2d_SpcIndirectDataContent(idc, &p);
+	SpcIndirectDataContent_free(idc);
 }
 
 static unsigned int calc_pe_checksum(BIO *bio, unsigned int peheader)
@@ -1156,9 +1211,10 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 		unsigned short certtype = GET_UINT16_LE(indata + sigpos + pos + 6);
 		if (certrev == WIN_CERT_REVISION_2 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
 			const unsigned char *blob = (unsigned char*)indata + sigpos + pos + 8;
+			ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
 			p7 = d2i_PKCS7(NULL, &blob, l - 8);
 			if (p7 && PKCS7_type_is_signed(p7) &&
-				!OBJ_cmp(p7->d.sign->contents->type, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1)) &&
+				!OBJ_cmp(p7->d.sign->contents->type, indir_objid) &&
 				p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
 
 				ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
@@ -1173,6 +1229,7 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 					SpcIndirectDataContent_free(idc);
 				}
 			}
+			ASN1_OBJECT_free(indir_objid);
 			if (p7 && mdtype == -1) {
 				PKCS7_free(p7);
 				p7 = NULL;
@@ -1206,7 +1263,7 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 		printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
 		tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
 		printf("Page hash            : %s ...\n", hexbuf);
-		unsigned int cphlen;
+		unsigned int cphlen = 0;
 		unsigned char *cph = calc_page_hash(indata, peheader, pe32plus, sigpos, phtype, &cphlen);
 		tohex(cph, hexbuf, (cphlen < 32) ? cphlen : 32);
 		printf("Calculated page hash : %s ...%s\n\n", hexbuf,
@@ -1285,14 +1342,13 @@ static STACK_OF(X509) *PEM_read_certs(BIO *bin, char *certpass)
 
 int main(int argc, char **argv)
 {
-	BIO *btmp, *sigdata, *hash, *outdata;
+	BIO *btmp, *sigbio, *hash, *outdata;
 	PKCS12 *p12;
-	PKCS7 *p7, *sig;
+	PKCS7 *p7 = NULL, *sig;
 	X509 *cert = NULL;
 	STACK_OF(X509) *certs = NULL;
-	EVP_PKEY *pkey;
+	EVP_PKEY *pkey = NULL;
 	PKCS7_SIGNER_INFO *si;
-	ASN1_TYPE dummy;
 	ASN1_STRING *astr;
 	const EVP_MD *md;
 
@@ -1329,7 +1385,6 @@ int main(int argc, char **argv)
 #ifdef WITH_GSF
 	GsfOutfile *outole = NULL;
 	GsfOutput *sink = NULL;
-	gsf_init();
 #endif
 
 	/* Set up OpenSSL */
@@ -1517,8 +1572,6 @@ int main(int argc, char **argv)
 				  (pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL))
 				DO_EXIT_1("Failed to read PVK file: %s\n", pvkfile);
 			BIO_free(btmp);
-			if (p7)
-				certs = p7->d.sign->cert;
 #else
 			DO_EXIT_1("Can not read keys from PVK files, must compile against a newer version of OpenSSL: %s\n", pvkfile);
 #endif
@@ -1536,10 +1589,11 @@ int main(int argc, char **argv)
 				  (pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL))
 				DO_EXIT_2("Failed to read private key file: %s (Wrong password? %s)\n", keyfile, pass);
 			BIO_free(btmp);
-			if (p7)
-				certs = p7->d.sign->cert;
 		}
 	}
+
+	if (certs == NULL && p7 != NULL)
+		certs = p7->d.sign->cert;
 
 	/* Check if indata is cab or pe */
 	if (stat(infile, &st))
@@ -1557,14 +1611,19 @@ int main(int argc, char **argv)
 	if (indata == NULL)
 		DO_EXIT_1("Failed to open file: %s\n", infile);
 
-	if (!memcmp(indata, "MSCF", 4))
+	if (!memcmp(indata, "MSCF", 4)) {
 		type = FILE_TYPE_CAB;
-	else if (!memcmp(indata, "MZ", 2))
+	} else if (!memcmp(indata, "MZ", 2)) {
 		type = FILE_TYPE_PE;
-	else if (!memcmp(indata, msi_signature, sizeof(msi_signature)))
+	} else if (!memcmp(indata, msi_signature, sizeof(msi_signature))) {
 		type = FILE_TYPE_MSI;
-	else
+#ifdef WITH_GSF
+		gsf_init();
+		gsf_initialized = 1;
+#endif
+	} else {
 		DO_EXIT_1("Unrecognized file type: %s\n", infile);
+	}
 
 	if (cmd != CMD_SIGN && type != FILE_TYPE_PE)
 		DO_EXIT_1("Command is not supported for non-PE files: %s\n", infile);
@@ -1787,6 +1846,8 @@ int main(int argc, char **argv)
 			if (si != NULL) break;
 		}
 	}
+	EVP_PKEY_free(pkey);
+	pkey = NULL;
 
 	if (si == NULL)
 		DO_EXIT_0("Signing failed(PKCS7_add_signature)\n");
@@ -1847,6 +1908,7 @@ int main(int argc, char **argv)
 		p -= len;
 		astr = ASN1_STRING_new();
 		ASN1_STRING_set(astr, p, len);
+		OPENSSL_free(p);
 
 		PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_SP_OPUS_INFO_OBJID),
 								   V_ASN1_SEQUENCE, astr);
@@ -1860,35 +1922,49 @@ int main(int argc, char **argv)
 	for(i = 0; i < sk_X509_num(p7->d.sign->cert); i++)
 		PKCS7_add_certificate(sig, sk_X509_value(p7->d.sign->cert, i));
 #else
-	if (cert != NULL)
+	if (cert != NULL) {
 		PKCS7_add_certificate(sig, cert);
+		X509_free(cert);
+		cert = NULL;
+	}
 	for(i = sk_X509_num(certs)-1; i>=0; i--)
 		PKCS7_add_certificate(sig, sk_X509_value(certs, i));
 #endif
-
-	if ((sigdata = PKCS7_dataInit(sig, NULL)) == NULL)
-		DO_EXIT_0("Signing failed(PKCS7_dataInit)\n");
+	if (p7 == NULL) {
+		sk_X509_free(certs);
+	} else {
+		PKCS7_free(p7);
+		p7 = NULL;
+	}
+	certs = NULL;
 
 	get_indirect_data_blob(&p, &len, md, type, pagehash, indata, peheader, pe32plus, fileend);
 	len -= EVP_MD_size(md);
 	memcpy(buf, p, len);
+	OPENSSL_free(p);
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	int mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
 	memcpy(buf+len, mdbuf, mdlen);
 	int seqhdrlen = asn1_simple_hdr_len((unsigned char*)buf, len);
-	BIO_write(sigdata, buf+seqhdrlen, len-seqhdrlen+mdlen);
 
-	if (!PKCS7_dataFinal(sig, sigdata))
+	if ((sigbio = PKCS7_dataInit(sig, NULL)) == NULL)
+		DO_EXIT_0("Signing failed(PKCS7_dataInit)\n");
+	BIO_write(sigbio, buf+seqhdrlen, len-seqhdrlen+mdlen);
+	(void)BIO_flush(sigbio);
+
+	if (!PKCS7_dataFinal(sig, sigbio))
 		DO_EXIT_0("Signing failed(PKCS7_dataFinal)\n");
+	BIO_free_all(sigbio);
 
 	/* replace the data part with the MS Authenticode
 	   spcIndirectDataContext blob */
-	astr = ASN1_STRING_new();
-	ASN1_STRING_set(astr, buf, len+mdlen);
-	dummy.type = V_ASN1_SEQUENCE;
-	dummy.value.sequence = astr;
-	sig->d.sign->contents->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
-	sig->d.sign->contents->d.other = &dummy;
+	PKCS7 *td7 = PKCS7_new();
+	td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+	td7->d.other = ASN1_TYPE_new();
+	td7->d.other->type = V_ASN1_SEQUENCE;
+	td7->d.other->value.sequence = ASN1_STRING_new();
+	ASN1_STRING_set(td7->d.other->value.sequence, buf, len+mdlen);
+	PKCS7_set_content(sig, td7);
 
 #ifdef ENABLE_CURL
 	/* add counter-signature/timestamp */
@@ -1937,6 +2013,9 @@ int main(int argc, char **argv)
 #endif
 	}
 
+	PKCS7_free(sig);
+	OPENSSL_free(p);
+
 skip_signing:
 
 	if (type == FILE_TYPE_PE) {
@@ -1961,14 +2040,27 @@ skip_signing:
 
 	printf(ret ? "Failed\n" : "Succeeded\n");
 
+	cleanup_lib_state();
+
 	return ret;
 
 err_cleanup:
 	ERR_print_errors_fp(stderr);
-	if (hash != NULL)
+	if (p7)
+		PKCS7_free(p7);
+	else if (certs)
+		sk_X509_free(certs);
+	if (cert)
+		X509_free(cert);
+	if (certs)
+		sk_X509_free(certs);
+	if (pkey)
+		EVP_PKEY_free(pkey);
+	if (hash)
 		BIO_free_all(hash);
 	unlink(outfile);
 	fprintf(stderr, "\nFailed\n");
+	cleanup_lib_state();
 	return -1;
 }
 
