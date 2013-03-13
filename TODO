@@ -1,4 +1,3 @@
-- page hashing support - need to figure out how the first hash is calculated
 - signature extraction/removal/verificaton on MSI/CAB files
 - improved signature verification on PE files
 - clean up / untangle code

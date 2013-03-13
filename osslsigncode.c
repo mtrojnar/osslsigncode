@@ -639,6 +639,7 @@ static void usage(const char *argv0)
 			"\t\t[ -pass <password> ]\n"
 			"\t\t[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n"
 			"\t\t[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n"
+			"\t\t[ -ph ]\n"
 #ifdef ENABLE_CURL
 			"\t\t[ -t <timestampurl> [ -p <proxy> ]]\n"
 			"\t\t[ -ts <timestampurl> [ -p <proxy> ]]\n"
@@ -685,13 +686,104 @@ typedef enum {
 	CMD_VERIFY,
 } cmd_type_t;
 
-static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, file_type_t type)
+static SpcLink *get_obsolete_link(void)
 {
 	static const unsigned char obsolete[] = {
 		0x00, 0x3c, 0x00, 0x3c, 0x00, 0x3c, 0x00, 0x4f, 0x00, 0x62,
 		0x00, 0x73, 0x00, 0x6f, 0x00, 0x6c, 0x00, 0x65, 0x00, 0x74,
 		0x00, 0x65, 0x00, 0x3e, 0x00, 0x3e, 0x00, 0x3e
 	};
+	SpcLink *link = SpcLink_new();
+	link->type = 2;
+	link->value.file = SpcString_new();
+	link->value.file->type = 0;
+	link->value.file->value.unicode = ASN1_BMPSTRING_new();
+	ASN1_STRING_set(link->value.file->value.unicode, obsolete, sizeof(obsolete));
+	return link;
+}
+
+static const unsigned char classid_page_hash[] = {
+	0xA6, 0xB5, 0x86, 0xD5, 0xB4, 0xA1, 0x24, 0x66,
+	0xAE, 0x05, 0xA2, 0x17, 0xDA, 0x8E, 0x60, 0xD6
+};
+
+static unsigned char *calc_page_hash(char *indata, unsigned int peheader, int pe32plus,
+									 unsigned int sigpos, int phtype, unsigned int *phlen);
+
+DECLARE_STACK_OF(ASN1_OCTET_STRING)
+#ifndef sk_ASN1_OCTET_STRING_new_null
+#define sk_ASN1_OCTET_STRING_new_null() SKM_sk_new_null(ASN1_OCTET_STRING)
+#define sk_ASN1_OCTET_STRING_free(st) SKM_sk_free(ASN1_OCTET_STRING, (st))
+#define sk_ASN1_OCTET_STRING_push(st, val) SKM_sk_push(ASN1_OCTET_STRING, (st), (val))
+#define i2d_ASN1_SET_OF_ASN1_OCTET_STRING(st, pp, i2d_func, ex_tag, ex_class, is_set) \
+	SKM_ASN1_SET_OF_i2d(ASN1_OCTET_STRING, (st), (pp), (i2d_func), (ex_tag), (ex_class), (is_set))
+#endif
+
+DECLARE_STACK_OF(SpcAttributeTypeAndOptionalValue)
+#ifndef sk_SpcAttributeTypeAndOptionalValue_new_null
+#define sk_SpcAttributeTypeAndOptionalValue_new_null() SKM_sk_new_null(SpcAttributeTypeAndOptionalValue)
+#define sk_SpcAttributeTypeAndOptionalValue_free(st) SKM_sk_free(SpcAttributeTypeAndOptionalValue, (st))
+#define sk_SpcAttributeTypeAndOptionalValue_push(st, val) SKM_sk_push(SpcAttributeTypeAndOptionalValue, (st), (val))
+#define i2d_SpcAttributeTypeAndOptionalValue(st, pp, i2d_func, ex_tag, ex_class, is_set) \
+	SKM_ASN1_SET_OF_i2d(SpcAttributeTypeAndOptionalValue, (st), (pp), (i2d_func), (ex_tag), (ex_class), (is_set))
+#endif
+
+static SpcLink *get_page_hash_link(int phtype, char *indata, unsigned int peheader, int pe32plus, unsigned int sigpos)
+{
+	unsigned int phlen;
+	unsigned char *ph = calc_page_hash(indata, peheader, pe32plus, sigpos, phtype, &phlen);
+	if (!ph) {
+		fprintf(stderr, "Failed to calculate page hash\n");
+		exit(-1);
+	}
+
+	ASN1_OCTET_STRING *ostr = M_ASN1_OCTET_STRING_new();
+	M_ASN1_OCTET_STRING_set(ostr, ph, phlen);
+
+	STACK_OF(ASN1_OCTET_STRING) *oset = sk_ASN1_OCTET_STRING_new_null();
+	sk_ASN1_OCTET_STRING_push(oset, ostr);
+	unsigned char *p, *tmp;
+	unsigned int l;
+	l = i2d_ASN1_SET_OF_ASN1_OCTET_STRING(oset, NULL, i2d_ASN1_OCTET_STRING,
+										  V_ASN1_SET, V_ASN1_UNIVERSAL, IS_SET);
+	tmp = p = OPENSSL_malloc(l);
+	i2d_ASN1_SET_OF_ASN1_OCTET_STRING(oset, &tmp, i2d_ASN1_OCTET_STRING,
+									  V_ASN1_SET, V_ASN1_UNIVERSAL, IS_SET);
+	sk_ASN1_OCTET_STRING_free(oset);
+
+	SpcAttributeTypeAndOptionalValue *aval = SpcAttributeTypeAndOptionalValue_new();
+	aval->type = OBJ_txt2obj((phtype == NID_sha1) ? SPC_PE_IMAGE_PAGE_HASHES_V1 : SPC_PE_IMAGE_PAGE_HASHES_V2, 1);
+	aval->value = ASN1_TYPE_new();
+	aval->value->type = V_ASN1_SET;
+	aval->value->value.set = ASN1_STRING_new();
+	aval->value->value.set->data = p;
+	aval->value->value.set->length = l;
+
+	STACK_OF(SpcAttributeTypeAndOptionalValue) *aset = sk_SpcAttributeTypeAndOptionalValue_new_null();
+	sk_SpcAttributeTypeAndOptionalValue_push(aset, aval);
+	l = i2d_SpcAttributeTypeAndOptionalValue(aset, NULL, i2d_SpcAttributeTypeAndOptionalValue,
+											 V_ASN1_SET, V_ASN1_UNIVERSAL, IS_SET);
+	tmp = p = OPENSSL_malloc(l);
+	l = i2d_SpcAttributeTypeAndOptionalValue(aset, &tmp, i2d_SpcAttributeTypeAndOptionalValue,
+											 V_ASN1_SET, V_ASN1_UNIVERSAL, IS_SET);
+	sk_SpcAttributeTypeAndOptionalValue_free(aset);
+
+	SpcSerializedObject *so = SpcSerializedObject_new();
+	so->classId = M_ASN1_OCTET_STRING_new();
+	M_ASN1_OCTET_STRING_set(so->classId, classid_page_hash, sizeof(classid_page_hash));
+	so->serializedData = M_ASN1_OCTET_STRING_new();
+	M_ASN1_OCTET_STRING_set(so->serializedData, p, l);
+
+	SpcLink *link = SpcLink_new();
+	link->type = 1;
+	link->value.moniker = so;
+	return link;
+}
+
+static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, file_type_t type,
+								   int pagehash, char *indata, unsigned int peheader, int pe32plus,
+								   unsigned int sigpos)
+{
 	static const unsigned char msistr[] = {
 		0xf1, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46
@@ -700,21 +792,13 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, fi
 	u_char *p;
 	int hashlen, l;
 	void *hash;
-	SpcLink *link;
 	SpcIndirectDataContent *idc = SpcIndirectDataContent_new();
 	idc->data = SpcAttributeTypeAndOptionalValue_new();
-
-	link = SpcLink_new();
-	link->type = 2;
-	link->value.file = SpcString_new();
-	link->value.file->type = 0;
-	link->value.file->value.unicode = ASN1_BMPSTRING_new();
-	ASN1_STRING_set(link->value.file->value.unicode, obsolete, sizeof(obsolete));
-
 	idc->data->value = ASN1_TYPE_new();
 	idc->data->value->type = V_ASN1_SEQUENCE;
 	idc->data->value->value.sequence = ASN1_STRING_new();
 	if (type == FILE_TYPE_CAB) {
+		SpcLink *link = get_obsolete_link();
 		l = i2d_SpcLink(link, NULL);
 		p = OPENSSL_malloc(l);
 		i2d_SpcLink(link, &p);
@@ -724,7 +808,14 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, fi
 		SpcPeImageData *pid = SpcPeImageData_new();
 		pid->flags = ASN1_BIT_STRING_new();
 		ASN1_BIT_STRING_set(pid->flags, (unsigned char*)"0", 0);
-		pid->file = link;
+		if (pagehash) {
+			int phtype = NID_sha1;
+			if (EVP_MD_size(md) > EVP_MD_size(EVP_sha1()))
+				phtype = NID_sha256;
+			pid->file = get_page_hash_link(phtype, indata, peheader, pe32plus, sigpos);
+		} else {
+			pid->file = get_obsolete_link();
+		}
 		l = i2d_SpcPeImageData(pid, NULL);
 		p = OPENSSL_malloc(l);
 		i2d_SpcPeImageData(pid, &p);
@@ -732,7 +823,6 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, fi
 		idc->data->type = OBJ_txt2obj(SPC_PE_IMAGE_DATA_OBJID, 1);
 	} else if (type == FILE_TYPE_MSI) {
 		SpcSipinfo *si = SpcSipinfo_new();
-
 		si->a = ASN1_INTEGER_new();
 		ASN1_INTEGER_set(si->a, 1);
 		si->string = M_ASN1_OCTET_STRING_new();
@@ -926,12 +1016,8 @@ static unsigned int asn1_simple_hdr_len(const unsigned char *p, unsigned int len
 	return (p[1]&0x80) ? (2 + (p[1]&0x7f)) : 2;
 }
 
-static const unsigned char classid_page_hash[] = {
-	0xA6, 0xB5, 0x86, 0xD5, 0xB4, 0xA1, 0x24, 0x66,
-	0xAE, 0x05, 0xA2, 0x17, 0xDA, 0x8E, 0x60, 0xD6
-};
-
-static void	extract_page_hash (SpcAttributeTypeAndOptionalValue *obj, unsigned char **ph, unsigned int *phlen, int *phtype)
+static void	extract_page_hash (SpcAttributeTypeAndOptionalValue *obj,
+							   unsigned char **ph, unsigned int *phlen, int *phtype)
 {
 	*phlen = 0;
 
@@ -1218,7 +1304,7 @@ int main(int argc, char **argv)
 	char *turl = NULL, *proxy = NULL, *tsurl = NULL;
 #endif
 	u_char *p;
-	int ret = 0, i, len = 0, jp = -1, fd = -1, pe32plus = 0, comm = 0;
+	int ret = 0, i, len = 0, jp = -1, fd = -1, pe32plus = 0, comm = 0, pagehash = 0;
 	unsigned int tmp, peheader = 0, padlen = 0;
 	off_t fileend;
 	file_type_t type;
@@ -1295,6 +1381,8 @@ int main(int argc, char **argv)
 			pass = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-comm")) {
 			comm = 1;
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-ph")) {
+			pagehash = 1;
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-n")) {
 			if (--argc < 1) usage(argv0);
 			desc = *(++argv);
@@ -1781,7 +1869,7 @@ int main(int argc, char **argv)
 	if ((sigdata = PKCS7_dataInit(sig, NULL)) == NULL)
 		DO_EXIT_0("Signing failed(PKCS7_dataInit)\n");
 
-	get_indirect_data_blob(&p, &len, md, type);
+	get_indirect_data_blob(&p, &len, md, type, pagehash, indata, peheader, pe32plus, fileend);
 	len -= EVP_MD_size(md);
 	memcpy(buf, p, len);
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];

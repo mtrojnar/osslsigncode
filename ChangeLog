@@ -1,3 +1,9 @@
+
+=== 1.5.2 (2013-03-13)
+
+- added support for signing with SHA-384 and SHA-512
+- added support for page hashing (-ph option)
+
 === 1.5.1 (2013-03-12)
 
 - forgot to bump version number...
