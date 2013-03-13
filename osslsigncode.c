@@ -672,17 +672,6 @@ static void usage(const char *argv0)
 	((u_char*)(p))[3] = ((i)>>24) & 0xff
 
 
-#ifdef HACK_OPENSSL
-ASN1_TYPE *PKCS7_get_signed_attribute(PKCS7_SIGNER_INFO *si, int nid)
-/* ARGSUSED */
-{
-	/* Ehhhm. Hack. The PKCS7 sign method adds NID_pkcs9_signingTime if
-	   it isn't there. But we don't want it since M$ barfs on it.
-	   Sooooo... let's pretend it's here. */
-	return (ASN1_TYPE*)0xdeadbeef;
-}
-#endif
-
 typedef enum {
 	FILE_TYPE_CAB,
 	FILE_TYPE_PE,
