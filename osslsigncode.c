@@ -637,7 +637,7 @@ static void usage(const char *argv0)
 			"\t[ sign ]\n"
 			"\t\t( -certs <certfile> -key <keyfile> | -pkcs12 <pkcs12file> )\n"
 			"\t\t[ -pass <password> ]\n"
-			"\t\t[ -h {md5,sha1,sha2} ]\n"
+			"\t\t[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n"
 			"\t\t[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n"
 #ifdef ENABLE_CURL
 			"\t\t[ -t <timestampurl> [ -p <proxy> ]]\n"
@@ -1311,8 +1311,12 @@ int main(int argc, char **argv)
 				md = EVP_md5();
 			} else if (!strcmp(*argv, "sha1")) {
 				md = EVP_sha1();
-			} else if (!strcmp(*argv, "sha2")) {
+			} else if (!strcmp(*argv, "sha2") || !strcmp(*argv, "sha256")) {
 				md = EVP_sha256();
+			} else if (!strcmp(*argv, "sha384")) {
+				md = EVP_sha384();
+			} else if (!strcmp(*argv, "sha512")) {
+				md = EVP_sha512();
 			} else {
 				usage(argv0);
 			}
