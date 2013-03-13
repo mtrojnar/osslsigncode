@@ -984,14 +984,15 @@ static void	extract_page_hash (SpcAttributeTypeAndOptionalValue *obj, unsigned c
 	SpcAttributeTypeAndOptionalValue_free(obj);
 }
 
-static unsigned char *calc_page_hash(char *indata, unsigned int peheader, int pe32plus, unsigned int sigpos, int phtype)
+static unsigned char *calc_page_hash(char *indata, unsigned int peheader, int pe32plus,
+									 unsigned int sigpos, int phtype, unsigned int *rphlen)
 {
 	unsigned short nsections = GET_UINT16_LE(indata + peheader + 6);
 	unsigned int pagesize = GET_UINT32_LE(indata + peheader + 56);
 	unsigned int hdrsize = GET_UINT32_LE(indata + peheader + 84);
 	const EVP_MD *md = EVP_get_digestbynid(phtype);
 	int pphlen = 4 + EVP_MD_size(md);
-	int phlen = pphlen * (2 + nsections + sigpos / pagesize);
+	int phlen = pphlen * (3 + nsections + sigpos / pagesize);
 	unsigned char *res = malloc(phlen);
 	unsigned char *zeroes = calloc(pagesize, 1);
 	EVP_MD_CTX mdctx;
@@ -1029,7 +1030,9 @@ static unsigned char *calc_page_hash(char *indata, unsigned int peheader, int pe
 	}
 	PUT_UINT32_LE(lastpos, res + pi*pphlen);
 	memset(res + pi*pphlen + 4, 0, EVP_MD_size(md));
+	pi++;
 	free(zeroes);
+	*rphlen = pi*pphlen;
 	return res;
 }
 
@@ -1117,9 +1120,11 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 		printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
 		tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
 		printf("Page hash            : %s ...\n", hexbuf);
-		unsigned char *cph = calc_page_hash(indata, peheader, pe32plus, sigpos, phtype);
-		tohex(cph, hexbuf, (phlen < 32) ? phlen : 32);
-		printf("Calculated page hash : %s ...%s\n\n", hexbuf, memcmp(ph, cph, phlen) ? "    MISMATCH!!!":"");
+		unsigned int cphlen;
+		unsigned char *cph = calc_page_hash(indata, peheader, pe32plus, sigpos, phtype, &cphlen);
+		tohex(cph, hexbuf, (cphlen < 32) ? cphlen : 32);
+		printf("Calculated page hash : %s ...%s\n\n", hexbuf,
+			   ((phlen != cphlen) || memcmp(ph, cph, phlen)) ? "    MISMATCH!!!":"");
 		free(ph);
 		free(cph);
 	}
@@ -1131,7 +1136,7 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 	X509_STORE *store = X509_STORE_new();
 	int verok = PKCS7_verify(p7, p7->d.sign->cert, store, bio, NULL, PKCS7_NOVERIFY);
 	BIO_free(bio);
-	/* XXX: add more checks here (attributes, pagehash, timestamp, etc) */
+	/* XXX: add more checks here (attributes, timestamp, etc) */
 	printf("Signature verification: %s\n\n", verok ? "ok" : "failed");
 	if (!verok) {
 		ERR_print_errors_fp(stdout);
