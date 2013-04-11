@@ -675,7 +675,7 @@ static int add_timestamp_rfc3161(PKCS7 *sig, char **url, int nurls, char *proxy,
 {
 	int i;
 	for (i=0; i<nurls; i++) {
-		int res = add_timestamp(sig, url[0], proxy, 1, md, nurls == 1);
+		int res = add_timestamp(sig, url[i], proxy, 1, md, nurls == 1);
 		if (!res) return 0;
 	}
 	return -1;
