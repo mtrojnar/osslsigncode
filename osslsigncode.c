@@ -90,6 +90,9 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.5.1 2013/03/13 13:13:13 mfiv
 
 #ifdef ENABLE_CURL
 #include <curl/curl.h>
+
+#define MAX_TS_SERVERS 256
+
 #endif
 
 /* MS Authenticode object ids */
@@ -458,7 +461,7 @@ static size_t curl_write( void *ptr, size_t sz, size_t nmemb, void *stream)
 
 */
 
-static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const EVP_MD *md)
+static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const EVP_MD *md, int verbose)
 {
 	CURL *curl;
 	struct curl_slist *slist = NULL;
@@ -562,7 +565,8 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 
 	if (c) {
 		BIO_free_all(bin);
-		fprintf(stderr, "CURL failure: %s\n", curl_easy_strerror(c));
+		if (verbose)
+			fprintf(stderr, "CURL failure: %s\n", curl_easy_strerror(c));
 	} else {
 		(void)BIO_flush(bin);
 
@@ -572,20 +576,25 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 			reply = ASN1_item_d2i_bio(ASN1_ITEM_rptr(TimeStampResp), bin, NULL);
 			BIO_free_all(bin);
 			if (!reply) {
-				fprintf(stderr, "Failed to convert timestamp reply\n");
-				ERR_print_errors_fp(stderr);
+				if (verbose) {
+					fprintf(stderr, "Failed to convert timestamp reply\n");
+					ERR_print_errors_fp(stderr);
+				}
 				return -1;
 			}
 			if (ASN1_INTEGER_get(reply->status->status) != 0) {
-				fprintf(stderr, "Timestamping failed: %ld\n", ASN1_INTEGER_get(reply->status->status));
+				if (verbose)
+					fprintf(stderr, "Timestamping failed: %ld\n", ASN1_INTEGER_get(reply->status->status));
 				TimeStampResp_free(reply);
 				return -1;
 			}
 
 			if (((len = i2d_PKCS7(reply->token, NULL)) <= 0) ||
 				(p = OPENSSL_malloc(len)) == NULL) {
-				fprintf(stderr, "Failed to convert pkcs7: %d\n", len);
-				ERR_print_errors_fp(stderr);
+				if (verbose) {
+					fprintf(stderr, "Failed to convert pkcs7: %d\n", len);
+					ERR_print_errors_fp(stderr);
+				}
 				TimeStampResp_free(reply);
 				return -1;
 			}
@@ -612,8 +621,10 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 			p7 = d2i_PKCS7_bio(b64_bin, NULL);
 			if (p7 == NULL) {
 				BIO_free_all(b64_bin);
-				fprintf(stderr, "Failed to convert timestamp reply\n");
-				ERR_print_errors_fp(stderr);
+				if (verbose) {
+					fprintf(stderr, "Failed to convert timestamp reply\n");
+					ERR_print_errors_fp(stderr);
+				}
 				return -1;
 			}
 			BIO_free_all(b64_bin);
@@ -624,8 +635,10 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 			info = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
 			if (((len = i2d_PKCS7_SIGNER_INFO(info, NULL)) <= 0) ||
 				(p = OPENSSL_malloc(len)) == NULL) {
-				fprintf(stderr, "Failed to convert signer info: %d\n", len);
-				ERR_print_errors_fp(stderr);
+				if (verbose) {
+					fprintf(stderr, "Failed to convert signer info: %d\n", len);
+					ERR_print_errors_fp(stderr);
+				}
 				PKCS7_free(p7);
 				return -1;
 			}
@@ -648,14 +661,24 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 	return (int)c;
 }
 
-static int add_timestamp_authenticode(PKCS7 *sig, char *url, char *proxy)
+static int add_timestamp_authenticode(PKCS7 *sig, char **url, int nurls, char *proxy)
 {
-	return add_timestamp(sig, url, proxy, 0, NULL);
+	int i;
+	for (i=0; i<nurls; i++) {
+		int res = add_timestamp(sig, url[i], proxy, 0, NULL, nurls == 1);
+		if (!res) return 0;
+	}
+	return -1;
 }
 
-static int add_timestamp_rfc3161(PKCS7 *sig, char *url, char *proxy, const EVP_MD *md)
+static int add_timestamp_rfc3161(PKCS7 *sig, char **url, int nurls, char *proxy, const EVP_MD *md)
 {
-	return add_timestamp(sig, url, proxy, 1, md);
+	int i;
+	for (i=0; i<nurls; i++) {
+		int res = add_timestamp(sig, url[0], proxy, 1, md, nurls == 1);
+		if (!res) return 0;
+	}
+	return -1;
 }
 
 #endif /* ENABLE_CURL */
@@ -692,8 +715,8 @@ static void usage(const char *argv0)
 			"\t\t[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n"
 			"\t\t[ -ph ]\n"
 #ifdef ENABLE_CURL
-			"\t\t[ -t <timestampurl> [ -p <proxy> ]]\n"
-			"\t\t[ -ts <timestampurl> [ -p <proxy> ]]\n"
+			"\t\t[ -t <timestampurl> [ -t ... ] [ -p <proxy> ]]\n"
+			"\t\t[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ]]\n"
 #endif
 			"\t\t[ -in ] <infile> [-out ] <outfile>\n\n"
 			"\textract-signature [ -in ] <infile> [ -out ] <outfile>\n\n"
@@ -1357,7 +1380,8 @@ int main(int argc, char **argv)
 	char *certfile, *keyfile, *pvkfile, *pkcs12file, *infile, *outfile, *desc, *url, *indata;
 	char *pass = "";
 #ifdef ENABLE_CURL
-	char *turl = NULL, *proxy = NULL, *tsurl = NULL;
+	char *turl[MAX_TS_SERVERS], *proxy = NULL, *tsurl[MAX_TS_SERVERS];
+	int nturl = 0, ntsurl = 0;
 #endif
 	u_char *p;
 	int ret = 0, i, len = 0, jp = -1, fd = -1, pe32plus = 0, comm = 0, pagehash = 0;
@@ -1463,10 +1487,10 @@ int main(int argc, char **argv)
 #ifdef ENABLE_CURL
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-t")) {
 			if (--argc < 1) usage(argv0);
-			turl = *(++argv);
+			turl[nturl++] = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-ts")) {
 			if (--argc < 1) usage(argv0);
-			tsurl = *(++argv);
+			tsurl[ntsurl++] = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-p")) {
 			if (--argc < 1) usage(argv0);
 			proxy = *(++argv);
@@ -1529,7 +1553,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (argc > 0 || (turl && tsurl) || !infile ||
+	if (argc > 0 || (nturl && ntsurl) || !infile ||
 		(cmd != CMD_VERIFY && !outfile) ||
 		(cmd == CMD_SIGN && !((certfile && keyfile) || pkcs12file))) {
 		if (failarg)
@@ -1968,9 +1992,9 @@ int main(int argc, char **argv)
 
 #ifdef ENABLE_CURL
 	/* add counter-signature/timestamp */
-	if (turl && add_timestamp_authenticode(sig, turl, proxy))
+	if (nturl && add_timestamp_authenticode(sig, turl, nturl, proxy))
 		DO_EXIT_0("authenticode timestamping failed\n");
-	if (tsurl && add_timestamp_rfc3161(sig, tsurl, proxy, md))
+	if (ntsurl && add_timestamp_rfc3161(sig, tsurl, ntsurl, proxy, md))
 		DO_EXIT_0("RFC 3161 timestamping failed\n");
 #endif
 

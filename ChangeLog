@@ -1,4 +1,7 @@
 
+- added support for giving multiple timestamp servers
+  as arguments (first one that succeeds will be used)
+
 === 1.5.2 (2013-03-13)
 
 - added support for signing with SHA-384 and SHA-512
