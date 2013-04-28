@@ -3,7 +3,10 @@
   as arguments (first one that succeeds will be used)
 - signatures on hierarchical MSI files were broken
 	 (Fix from Mikkel Krautz)
-	
+- MSI: Add support for MsiDigitalSignatureEx signature
+	 (Patch from Mikkel Krautz)
+
+
 === 1.5.2 (2013-03-13)
 
 - added support for signing with SHA-384 and SHA-512

@@ -1044,15 +1044,18 @@ static gint msi_cmp(gpointer a, gpointer b)
 	return diff;
 }
 
-static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
+/*
+ * msi_sorted_infile_children returns a sorted list of all
+ * of the children of the given infile. The children are
+ * sorted according to the msi_cmp.
+ *
+ * The returned list must be freed with g_slist_free.
+ */
+static GSList *msi_sorted_infile_children(GsfInfile *infile)
 {
-	guint8 classid[16];
-	gchar decoded[0x40];
 	GSList *sorted = NULL;
-	gint i;
-
-	gsf_infile_msole_get_class_id(GSF_INFILE_MSOLE(infile), classid);
-	gsf_outfile_msole_set_class_id(GSF_OUTFILE_MSOLE(outole), classid);
+	gchar decoded[0x40];
+	int i;
 
 	for (i = 0; i < gsf_infile_num_children(infile); i++) {
 		GsfInput *child = gsf_infile_child_by_index(infile, i);
@@ -1066,6 +1069,134 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
  
 		sorted = g_slist_insert_sorted(sorted, (gpointer)name, (GCompareFunc)msi_cmp);
 	}
+
+	return sorted;
+}
+
+#ifndef NO_MSI_DIGITALSIGNATUREEX
+/*
+ * msi_prehash_utf16_name converts an UTF-8 representation of
+ * an MSI filename to its on-disk UTF-16 representation and
+ * writes it to the hash BIO.  It is used when calculating the
+ * pre-hash used for MsiDigitalSignatureEx signatures in MSI files.
+ */
+static gboolean msi_prehash_utf16_name(gchar *name, BIO *hash)
+{
+	glong chars_written = 0;
+
+	gchar *u16name = (gchar*)g_utf8_to_utf16(name, -1, NULL, &chars_written, NULL);
+	if (u16name == NULL) {
+		return FALSE;
+	}
+
+	BIO_write(hash, u16name, 2*chars_written);
+
+	g_free(u16name);
+
+	return TRUE;
+}
+
+/*
+ * msi_prehash calculates the pre-hash used for 'MsiDigitalSignatureEx'
+ * signatures in MSI files.  The pre-hash hashes only metadata (file names,
+ * file sizes, creation times and modification times), whereas the basic
+ * 'DigitalSignature' MSI signature only hashes file content.
+ *
+ * The hash is written to the hash BIO.
+ */
+static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
+{
+	GSList *sorted = NULL;
+	guint8 classid[16];
+	guint8 zeroes[8];
+
+	memset(&zeroes, 0, sizeof(zeroes));
+
+	gsf_infile_msole_get_class_id(GSF_INFILE_MSOLE(infile), classid);
+
+	if (dirname != NULL) {
+		if (!msi_prehash_utf16_name(dirname, hash))
+			return FALSE;
+	}
+
+	BIO_write(hash, classid, sizeof(classid));
+	BIO_write(hash, zeroes, 4);
+
+	if (dirname != NULL) {
+		/*
+		 * Creation time and modification time for the root directory.
+		 * These are always zero. The ctime and mtime of the actual
+		 * file itself takes precedence.
+		 */ 
+		BIO_write(hash, zeroes, 8); // ctime as Windows FILETIME.
+		BIO_write(hash, zeroes, 8); // mtime as Windows FILETIME.
+	}
+
+	sorted = msi_sorted_infile_children(infile);
+
+	for (; sorted; sorted = sorted->next) {
+		gchar *name = (gchar*)sorted->data;
+		GsfInput *child =  gsf_infile_child_by_name(infile, name);
+		if (child == NULL)
+			continue;
+
+		gboolean is_dir = GSF_IS_INFILE(child) && gsf_infile_num_children(GSF_INFILE(child)) > 0;
+		if (is_dir) {
+			if (!msi_prehash(GSF_INFILE(child), name, hash))
+				return FALSE;
+		} else {
+			if (!msi_prehash_utf16_name(name, hash))
+				return FALSE;
+
+			/*
+			 * File size.
+			 */
+			gsf_off_t size = gsf_input_remaining(child);
+			guint32 sizebuf = GUINT32_TO_LE((guint32)size);
+			BIO_write(hash, &sizebuf, sizeof(sizebuf));
+
+			/*
+			 * Reserved - must be 0. Corresponds to
+			 * offset 0x7c..0x7f in the CDFv2 file.
+			 */
+			BIO_write(hash, zeroes, 4);
+
+			/*
+			 * Creation time and modification time
+			 * as Windows FILETIMEs. We keep them
+			 * zeroed, because libgsf doesn't seem
+			 * to support outputting them.
+			 */
+			BIO_write(hash, zeroes, 8); // ctime as a Windows FILETIME
+			BIO_write(hash, zeroes, 8); // mtime as a Windows FILETIME
+		}
+	}
+
+	g_slist_free(sorted);
+
+	return TRUE;
+}
+#endif
+
+
+/**
+ * msi_handle_dir performs a direct copy of the input MSI file in infile to a new
+ * output file in outfile.  While copying, it also writes all file content to the
+ * hash BIO in order to calculate a 'basic' hash that can be used for an MSI
+ * 'DigitalSignature' hash.
+ *
+ * msi_handle_dir is hierarchy aware: if any subdirectories are found, they will be
+ * visited, copied and hashed as well.
+ */
+static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
+{
+	guint8 classid[16];
+	GSList *sorted = NULL;
+
+	gsf_infile_msole_get_class_id(GSF_INFILE_MSOLE(infile), classid);
+	gsf_outfile_msole_set_class_id(GSF_OUTFILE_MSOLE(outole), classid);
+
+	sorted = msi_sorted_infile_children(infile);
 
 	for (; sorted; sorted = sorted->next) {
 		gchar *name = (gchar*)sorted->data;
@@ -1441,7 +1572,7 @@ int main(int argc, char **argv)
 	char *turl[MAX_TS_SERVERS], *proxy = NULL, *tsurl[MAX_TS_SERVERS];
 	int nturl = 0, ntsurl = 0;
 #endif
-	u_char *p;
+	u_char *p = NULL;
 	int ret = 0, i, len = 0, jp = -1, fd = -1, pe32plus = 0, comm = 0, pagehash = 0;
 	unsigned int tmp, peheader = 0, padlen = 0;
 	off_t fileend;
@@ -1467,6 +1598,8 @@ int main(int argc, char **argv)
 #ifdef WITH_GSF
 	GsfOutfile *outole = NULL;
 	GsfOutput *sink = NULL;
+	u_char *p_msiex = NULL;
+	int len_msiex = 0;
 #endif
 
 	/* Set up OpenSSL */
@@ -1743,6 +1876,63 @@ int main(int argc, char **argv)
 
 		ole = gsf_infile_msole_new(src, NULL);
 		outole = gsf_outfile_msole_new(sink);
+
+#ifndef NO_MSI_DIGITALSIGNATUREEX
+		/*
+		 * MsiDigitalSignatureEx is an enhanced signature type that
+		 * can be used when signing MSI files.  In addition to
+		 * file content, it also hashes some file metadata, specifically
+		 * file names, file sizes, creation times and modification times.
+		 *
+		 * The file content hashing part stays the same, so the
+		 * msi_handle_dir() function can be used across both variants.
+		 *
+		 * When an MsiDigitalSigntaureEx section is present in an MSI file,
+		 * the meaning of the DigitalSignature section changes:  Instead
+		 * of being merely a file content hash (as what is output by the
+		 * msi_handle_dir() function), it is now hashes both content
+		 * and metadata.
+		 *
+		 * Here is how it works:
+		 *
+		 * First, a "pre-hash" is calculated. This is the "metadata" hash.
+		 * It iterates over the files in the MSI in the same order as the
+		 * file content hashing method would - but it only processes the
+		 * metadata.
+		 * 
+		 * Once the pre-hash is calculated, a new hash is created for
+		 * calculating the hash of the file content.  The output of the
+		 * pre-hash is added as the first element of the file content hash.  
+		 *
+		 * After the pre-hash is written, what follows is the "regular"
+		 * stream of data that would normally be written when performing
+		 * file content hashing.
+		 *
+		 * The output of this hash, which combines both metadata and file
+		 * content, is what will be output in signed form to the
+		 * DigitalSignature section when in 'MsiDigitalSignatureEx' mode.
+		 *
+		 * As mentioned previously, this new mode of operation is signalled
+		 * by the presence of a 'MsiDigitalSignatureEx' section in the MSI
+		 * file.  This section must come after the 'DigitalSignature'
+		 * section, and its content must be the output of the pre-hash
+		 * ("metadata") hash.
+		 */
+		{
+			BIO *prehash = BIO_new(BIO_f_md());
+			BIO_set_md(prehash, md);
+			BIO_push(prehash, BIO_new(BIO_s_null()));
+
+			if (!msi_prehash(ole, NULL, prehash))
+				DO_EXIT_0("unable to calculate MSI pre-hash ('metadata') hash.\n");
+
+			p_msiex = malloc(EVP_MAX_MD_SIZE);
+			len_msiex = BIO_gets(prehash, (char*)p_msiex, EVP_MAX_MD_SIZE);
+
+			BIO_write(hash, p_msiex, len_msiex);
+		}
+#endif
+
 		if (!msi_handle_dir(ole, outole, hash)) {
 			DO_EXIT_0("unable to msi_handle_dir()\n");
 		}
@@ -2053,8 +2243,17 @@ int main(int argc, char **argv)
 	} else if (type == FILE_TYPE_MSI) {
 		GsfOutput *child = gsf_outfile_new_child(outole, "\05DigitalSignature", FALSE);
 		if (!gsf_output_write(child, len, p))
-			DO_EXIT_1("Failed to write MSI signature to %s", infile);
+			DO_EXIT_1("Failed to write MSI 'DigitalSignature' signature to %s", infile);
 		gsf_output_close(child);
+
+		if (p_msiex != NULL) {
+			child = gsf_outfile_new_child(outole, "\05MsiDigitalSignatureEx", FALSE);
+			if (!gsf_output_write(child, len_msiex, p_msiex)) {
+				DO_EXIT_1("Failed to write MSI 'MsiDigitalSignatureEx' signature to %s", infile);
+			}
+			gsf_output_close(child);
+		}
+
 		gsf_output_close(GSF_OUTPUT(outole));
 		g_object_unref(sink);
 #endif
