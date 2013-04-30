@@ -1455,6 +1455,77 @@ out:
 	return ret;
 }
 
+/*
+ * msi_extract_signature extracts the MSI DigitalSignaure from infile
+ * to a file at the path given by outfile.
+ */
+static int msi_extract_signature(GsfInfile *infile, char *outfile) {
+	unsigned char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	GsfInput *sig = NULL;
+	GsfInput *exsig = NULL;
+	unsigned char *exdata = NULL;
+	unsigned long exlen = 0;
+	BIO *outdata = NULL;
+	gchar decoded[0x40];
+	int i, ret = 0;
+
+	for (i = 0; i < gsf_infile_num_children(infile); i++) {
+		GsfInput *child = gsf_infile_child_by_index(infile, i);
+		const guint8 *name = (const guint8*)gsf_input_name(child);
+		msi_decode(name, decoded);
+		if (!g_strcmp0(decoded, "\05DigitalSignature"))
+			sig = child;
+		if (!g_strcmp0(decoded, "\05MsiDigitalSignatureEx"))
+			exsig = child;
+	}
+	if (sig == NULL) {
+		printf("MSI file has no signature\n\n");
+		ret = 1;
+		goto out;
+	}
+
+	/* Create outdata file */
+	outdata = BIO_new_file(outfile, "w+b");
+	if (outdata == NULL) {
+		printf("Unable to open %s\n\n", outfile);
+		ret = 1;
+		goto out;
+	}
+
+	while (gsf_input_remaining(sig) > 0) {
+		gsf_off_t size = MIN(gsf_input_remaining(sig), 4096);
+		guint8 const *data = gsf_input_read(sig, size, NULL);
+		BIO_write(outdata, data, size);
+	}
+
+	if (exsig != NULL) {
+		exlen = (unsigned long) gsf_input_remaining(exsig);
+		if (exlen > EVP_MAX_MD_SIZE) {
+			printf("MsiDigitalSignatureEx is larger than EVP_MAX_MD_SIZE. Aborting...\n\n");
+			ret = 1;
+			goto out;
+		}
+
+		exdata = malloc(exlen);
+		if (gsf_input_read(exsig, exlen, exdata) == NULL) {
+			printf("Unable to read MsiDigitalSignatureEx\n\n");
+			ret = 1;
+			goto out;
+		}
+
+		tohex(exdata, hexbuf, exlen);
+		printf("Note: MSI includes a MsiDigitalSignatureEx section.\n");
+		printf("MsiDigitalSignatureEx pre-hash: %s\n\n", hexbuf);
+	}
+
+out:
+	free(exdata);
+	if (outdata)
+		BIO_free_all(outdata);
+
+	return ret;
+}
+
 #endif
 
 static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
@@ -2091,7 +2162,10 @@ int main(int argc, char **argv)
 			DO_EXIT_1("Error opening file %s", infile);
 		ole = gsf_infile_msole_new(src, NULL);
 
-		if (cmd == CMD_VERIFY) {
+		if (cmd == CMD_EXTRACT) {
+			ret = msi_extract_signature(ole, outfile);
+			goto skip_signing;
+		} else if (cmd == CMD_VERIFY) {
 			ret = msi_verify_file(ole);
 			goto skip_signing;
 		}
