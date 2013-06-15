@@ -711,6 +711,7 @@ static void usage(const char *argv0)
 			"\t[ sign ]\n"
 			"\t\t( -certs <certfile> -key <keyfile> | -pkcs12 <pkcs12file> )\n"
 			"\t\t[ -pass <password> ]\n"
+			"\t\t[ -ac <crosscertfile> ]\n"
 			"\t\t[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n"
 			"\t\t[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n"
 			"\t\t[ -ph ]\n"
@@ -1556,9 +1557,9 @@ int main(int argc, char **argv)
 {
 	BIO *btmp, *sigbio, *hash, *outdata;
 	PKCS12 *p12;
-	PKCS7 *p7 = NULL, *sig;
+	PKCS7 *p7 = NULL, *sig, *p7x = NULL;
 	X509 *cert = NULL;
-	STACK_OF(X509) *certs = NULL;
+	STACK_OF(X509) *certs = NULL, *xcerts = NULL;
 	EVP_PKEY *pkey = NULL;
 	PKCS7_SIGNER_INFO *si;
 	ASN1_STRING *astr;
@@ -1566,7 +1567,7 @@ int main(int argc, char **argv)
 
 	const char *argv0 = argv[0];
 	static char buf[64*1024];
-	char *certfile, *keyfile, *pvkfile, *pkcs12file, *infile, *outfile, *desc, *url, *indata;
+	char *xcertfile, *certfile, *keyfile, *pvkfile, *pkcs12file, *infile, *outfile, *desc, *url, *indata;
 	char *pass = "";
 #ifdef ENABLE_CURL
 	char *turl[MAX_TS_SERVERS], *proxy = NULL, *tsurl[MAX_TS_SERVERS];
@@ -1607,7 +1608,7 @@ int main(int argc, char **argv)
 	OPENSSL_add_all_algorithms_conf();
 
 	md = EVP_sha1();
-	certfile = keyfile = pvkfile = pkcs12file = infile = outfile = desc = url = NULL;
+	xcertfile = certfile = keyfile = pvkfile = pkcs12file = infile = outfile = desc = url = NULL;
 	hash = outdata = NULL;
 
 	if (argc > 1) {
@@ -1640,6 +1641,9 @@ int main(int argc, char **argv)
 		} else if ((cmd == CMD_SIGN) && (!strcmp(*argv, "-spc") || !strcmp(*argv, "-certs"))) {
 			if (--argc < 1) usage(argv0);
 			certfile = *(++argv);
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-ac")) {
+			if (--argc < 1) usage(argv0);
+			xcertfile = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-key")) {
 			if (--argc < 1) usage(argv0);
 			keyfile = *(++argv);
@@ -1794,7 +1798,7 @@ int main(int argc, char **argv)
 			if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
 				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
 				 (certs = PEM_read_certs(btmp, "")) == NULL))
-				DO_EXIT_1("Failed to read certiticate file: %s\n", certfile);
+				DO_EXIT_1("Failed to read certificate file: %s\n", certfile);
 			BIO_free(btmp);
 			if ((btmp = BIO_new_file(keyfile, "rb")) == NULL ||
 				( (pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
@@ -1803,6 +1807,14 @@ int main(int argc, char **argv)
 				  (BIO_seek(btmp, 0) == 0) &&
 				  (pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL))
 				DO_EXIT_2("Failed to read private key file: %s (Wrong password? %s)\n", keyfile, pass);
+			BIO_free(btmp);
+		}
+
+		if (xcertfile) {
+			if ((btmp = BIO_new_file(xcertfile, "rb")) == NULL ||
+				((p7x = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
+				 (xcerts = PEM_read_certs(btmp, "")) == NULL))
+				DO_EXIT_1("Failed to read cross certificate file: %s\n", xcertfile);
 			BIO_free(btmp);
 		}
 	}
@@ -2155,18 +2167,18 @@ int main(int argc, char **argv)
 
 	PKCS7_content_new(sig, NID_pkcs7_data);
 
-#if 0
-	for(i = 0; i < sk_X509_num(p7->d.sign->cert); i++)
-		PKCS7_add_certificate(sig, sk_X509_value(p7->d.sign->cert, i));
-#else
 	if (cert != NULL) {
 		PKCS7_add_certificate(sig, cert);
 		X509_free(cert);
 		cert = NULL;
 	}
+	if (xcerts) {
+		for(i = sk_X509_num(xcerts)-1; i>=0; i--)
+			PKCS7_add_certificate(sig, sk_X509_value(xcerts, i));
+	}
 	for(i = sk_X509_num(certs)-1; i>=0; i--)
 		PKCS7_add_certificate(sig, sk_X509_value(certs, i));
-#endif
+
 	if (p7 == NULL) {
 		sk_X509_free(certs);
 	} else {
@@ -2174,6 +2186,13 @@ int main(int argc, char **argv)
 		p7 = NULL;
 	}
 	certs = NULL;
+	if (p7x == NULL) {
+		sk_X509_free(xcerts);
+	} else {
+		PKCS7_free(p7x);
+		p7x = NULL;
+	}
+	xcerts = NULL;
 
 	get_indirect_data_blob(&p, &len, md, type, pagehash, indata, peheader, pe32plus, fileend);
 	len -= EVP_MD_size(md);
@@ -2296,6 +2315,10 @@ err_cleanup:
 		PKCS7_free(p7);
 	else if (certs)
 		sk_X509_free(certs);
+	if (p7x)
+		PKCS7_free(p7x);
+	else if (xcerts)
+		sk_X509_free(xcerts);
 	if (cert)
 		X509_free(cert);
 	if (certs)
