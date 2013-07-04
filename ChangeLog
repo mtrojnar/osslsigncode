@@ -8,8 +8,11 @@
 - add support for adding additional/cross certificates
   through -ac option
 	 (Thanks to Lars Munch for idea + testing)
+- MSI: Add support for signature extract/remove/verify
+	 (Patches from Mikkel Krautz)
+- PE/MSI: Implement -require-leaf-hash for verify.
+	 (Patch from Mikkel Krautz)
 
-	
 === 1.5.2 (2013-03-13)
 
 - added support for signing with SHA-384 and SHA-512
