@@ -998,6 +998,9 @@ static unsigned char nib2val(unsigned char c) {
 	} else if (c >= 'A' && c <= 'F') {
 		return c - 'A' + 10;
 	}
+
+	printf("Illegal hex value: '%x'\n", c);
+	return 0;
 }
 
 static int verify_leaf_hash(X509 *leaf, char *leafhash) {
@@ -1337,8 +1340,12 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 static int msi_verify_file(GsfInfile *infile, char *leafhash) {
 	GsfInput *sig = NULL;
 	GsfInput *exsig = NULL;
+	unsigned char *exdata = NULL;
+	unsigned char *indata = NULL;
 	gchar decoded[0x40];
 	int i, ret = 0;
+	X509_STORE *store = NULL;
+	PKCS7 *p7 = NULL;
 
 	for (i = 0; i < gsf_infile_num_children(infile); i++) {
 		GsfInput *child = gsf_infile_child_by_index(infile, i);
@@ -1356,13 +1363,12 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash) {
 	}
 
 	unsigned long inlen = (unsigned long) gsf_input_remaining(sig);
-	unsigned char *indata = malloc(inlen);
+	indata = malloc(inlen);
 	if (gsf_input_read(sig, inlen, indata) == NULL) {
 		ret = 1;
 		goto out;
 	}
 
-	unsigned char *exdata = NULL;
 	unsigned long exlen = 0;
 	if (exsig != NULL) {
 		exlen = (unsigned long) gsf_input_remaining(exsig);
@@ -1376,9 +1382,10 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash) {
 	int mdtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
+#ifdef GSF_CAN_READ_MSI_METADATA
 	unsigned char cexmdbuf[EVP_MAX_MD_SIZE];
+#endif
 	unsigned char hexbuf[EVP_MAX_MD_SIZE*2+1];
-	PKCS7 *p7 = NULL;
 	BIO *bio = NULL;
 
 	ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
@@ -1472,9 +1479,9 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash) {
 	if (exsig && exdata) {
 		tohex(cexmdbuf, hexbuf, EVP_MD_size(md));
 		int exok = !memcmp(exdata, cexmdbuf, MIN(EVP_MD_size(md), exlen));
-		if (!mdok) ret = 1;
+		if (!exok) ret = 1;
 		printf("Calculated MsiDigitalSignatureEx : %s", hexbuf);
-		if (mdok) {
+		if (exok) {
 			printf("\n");
 		} else {
 			tohex(exdata, hexbuf, EVP_MD_size(md));
@@ -1489,9 +1496,9 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash) {
 										p7->d.sign->contents->d.other->value.sequence->length);
 	bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
 						  p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
-	X509_STORE *store = X509_STORE_new();
+	store = X509_STORE_new();
 	int verok = PKCS7_verify(p7, p7->d.sign->cert, store, bio, NULL, PKCS7_NOVERIFY);
-	BIO_free(bio);	
+	BIO_free(bio);
 	/* XXX: add more checks here (attributes, timestamp, etc) */
 	printf("Signature verification: %s\n\n", verok ? "ok" : "failed");
 	if (!verok) {
