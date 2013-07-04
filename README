@@ -22,10 +22,11 @@ tool  would fail. And, so, osslsigncode was born.
 
 == WHAT CAN IT DO?
 
-It can sign and timestamp EXE, CAB and MSI files. It supports the equivalent
-of signtool.exe's "-j javasign.dll -jp low", i.e. add a valid signature
-for a CAB file containing Java files. It supports getting the timestamp
-through a proxy as well.
+It can sign and timestamp PE (EXE/SYS/DLL/etc), CAB and MSI files. It supports
+the equivalent of signtool.exe's "-j javasign.dll -jp low", i.e. add a
+valid signature for a CAB file containing Java files. It supports getting
+the timestamp through a proxy as well. It also supports signature verification,
+removal and extraction.
 
 
 == INSTALLATION
@@ -52,7 +53,7 @@ article above, in SPC or PEM format, and you will also need the private
 key which must be a key file in DER or PEM format, or if osslsigncode was
 compiled against OpenSSL 1.0.0 or later, in PVK format.
 
-To sign an EXE or MSI file you can now do:
+To sign a PE or MSI file you can now do:
 
   osslsigncode sign -certs <cert-file> -key <der-key-file> \
         -n "Your Application" -i http://www.yourwebsite.com/ \
