@@ -1,4 +1,8 @@
 
+- add support for compiling and running on Windows
+	 (Patch from Heiko Hund)
+- fix compilation without curl
+	 (Fix from Heiko Hund)
 - added support for giving multiple timestamp servers
   as arguments (first one that succeeds will be used)
 - signatures on hierarchical MSI files were broken
