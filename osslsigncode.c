@@ -52,6 +52,10 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.5.1 2013/03/13 13:13:13 mfiv
 #include <config.h>
 #endif
 
+#ifdef HAVE_WINDOWS_H
+#include <windows.h>
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -1941,6 +1945,51 @@ static STACK_OF(X509) *PEM_read_certs(BIO *bin, char *certpass)
 }
 
 
+static off_t get_file_size(const char *infile)
+{
+#ifdef WIN32
+	struct _stat st;
+	if (_stat(infile, &st))
+#else
+	struct stat st;
+	if (stat(infile, &st))
+#endif
+	{
+		fprintf(stderr, "Failed to open file: %s\n", infile);
+		return 0;
+	}
+
+	if (st.st_size < 4) {
+		fprintf(stderr, "Unrecognized file type - file is too short: %s\n", infile);
+		return 0;
+	}
+	return st.st_size;
+}
+
+static char* map_file(const char *infile, const off_t size)
+{
+	char *indata = NULL;
+#ifdef WIN32
+	HANDLE fh, fm;
+	fh = CreateFile(infile, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+	if (fh == INVALID_HANDLE_VALUE)
+		return NULL;
+	fm = CreateFileMapping(fh, NULL, PAGE_READONLY, 0, 0, NULL);
+	if (fm == NULL)
+		return NULL;
+	indata = MapViewOfFile(fm, FILE_MAP_READ, 0, 0, 0);
+#else
+	int fd = open(infile, O_RDONLY);
+	if (fd < 0)
+		return NULL;
+	indata = mmap(0, size, PROT_READ, MAP_PRIVATE, fd, 0);
+	if (indata == MAP_FAILED)
+		return NULL;
+#endif
+	return indata;
+}
+
+
 int main(int argc, char **argv)
 {
 	BIO *btmp, *sigbio, *hash, *outdata;
@@ -1963,12 +2012,11 @@ int main(int argc, char **argv)
 #endif
 	int nturl = 0, ntsurl = 0;
 	u_char *p = NULL;
-	int ret = 0, i, len = 0, jp = -1, fd = -1, pe32plus = 0, comm = 0, pagehash = 0;
+	int ret = 0, i, len = 0, jp = -1, pe32plus = 0, comm = 0, pagehash = 0;
 	unsigned int tmp, peheader = 0, padlen = 0;
-	off_t fileend;
+	off_t filesize, fileend;
 	file_type_t type;
 	cmd_type_t cmd = CMD_SIGN;
-	struct stat st;
 	char *failarg = NULL;
 
 	static u_char purpose_ind[] = {
@@ -2215,20 +2263,15 @@ int main(int argc, char **argv)
 		certs = p7->d.sign->cert;
 
 	/* Check if indata is cab or pe */
-	if (stat(infile, &st))
-		DO_EXIT_1("Failed to open file: %s\n", infile);
+	filesize = get_file_size(infile);
+	if (filesize == 0)
+		goto err_cleanup;
 
-	fileend = st.st_size;
-
-	if (st.st_size < 4)
-		DO_EXIT_1("Unrecognized file type - file is too short: %s\n", infile);
-
-	if ((fd = open(infile, O_RDONLY)) < 0)
-		DO_EXIT_1("Failed to open file: %s\n", infile);
-
-	indata = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	indata = map_file(infile, filesize);
 	if (indata == NULL)
 		DO_EXIT_1("Failed to open file: %s\n", infile);
+
+	fileend = filesize;
 
 	if (!memcmp(indata, "MSCF", 4)) {
 		type = FILE_TYPE_CAB;
@@ -2251,15 +2294,15 @@ int main(int argc, char **argv)
 	BIO_set_md(hash, md);
 
 	if (type == FILE_TYPE_CAB) {
-		if (st.st_size < 44)
+		if (filesize < 44)
 			DO_EXIT_1("Corrupt cab file - too short: %s\n", infile);
 		if (indata[0x1e] != 0x00 || indata[0x1f] != 0x00)
 			DO_EXIT_0("Cannot sign cab files with flag bits set!\n"); /* XXX */
 	} else if (type == FILE_TYPE_PE) {
-		if (st.st_size < 64)
+		if (filesize < 64)
 			DO_EXIT_1("Corrupt DOS file - too short: %s\n", infile);
 		peheader = GET_UINT32_LE(indata+60);
-		if (st.st_size < peheader + 160)
+		if (filesize < peheader + 160)
 			DO_EXIT_1("Corrupt PE file - too short: %s\n", infile);
 		if (memcmp(indata+peheader, "PE\0\0", 4))
 			DO_EXIT_1("Unrecognized DOS file type: %s\n", infile);
@@ -2410,7 +2453,7 @@ int main(int argc, char **argv)
 		}
 
 		/* Write what's left */
-		BIO_write(hash, indata+i, st.st_size-i);
+		BIO_write(hash, indata+i, filesize-i);
 	} else if (type == FILE_TYPE_PE) {
 		unsigned int sigpos, siglen, nrvas;
 		unsigned short magic;
@@ -2437,7 +2480,7 @@ int main(int argc, char **argv)
 
 		/* Since fix for MS Bulletin MS12-024 we can really assume
 		   that signature should be last part of file */
-		if (sigpos > 0 && sigpos + siglen != st.st_size)
+		if (sigpos > 0 && sigpos + siglen != filesize)
 			DO_EXIT_1("Corrupt PE file - current signature not at end of file: %s\n", infile);
 
 		if ((cmd == CMD_REMOVE || cmd == CMD_EXTRACT) && sigpos == 0)

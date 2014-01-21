@@ -53,14 +53,20 @@ AC_HEADER_STDC
 AC_HEADER_TIME
 AC_CHECK_HEADERS(
 	[sys/mman.h],
-	,
-	[AC_MSG_ERROR([Need mmap to build.])]
+	[AC_CHECK_FUNC(
+		[mmap],
+		[AC_DEFINE(HAVE_MMAP, [1], [Define to 1 if you have mmap])],
+		[AC_MSG_ERROR([Need mmap to build.])]
+	)],
+	[have_mmap=no]
 )
-AC_CHECK_FUNC(
-	[mmap],
-	[AC_DEFINE(HAVE_MMAP, [1], [Define to 1 if you have mmap])],
-	[AC_MSG_ERROR([Need mmap to build.])]
+AC_CHECK_HEADERS(
+	[windows.h],
+	[],
+	[have_MapViewOfFile=no]
 )
+AS_IF([test "x$have_mmap$have_MapViewOfFile" = "xnono"],
+	[AC_MSG_ERROR([Need file mapping function to buid.])])
 
 AC_CHECK_LIB(
 	[dl],
