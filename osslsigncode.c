@@ -1,7 +1,7 @@
 /*
    OpenSSL based Authenticode signing for PE/MSI/Java CAB files.
 
-	 Copyright (C) 2005-2013 Per Allansson <pallansson@gmail.com>
+	 Copyright (C) 2005-2014 Per Allansson <pallansson@gmail.com>
 
 
    This program is free software: you can redistribute it and/or modify
@@ -19,7 +19,7 @@
 
 */
 
-static const char *rcsid = "$Id: osslsigncode.c,v 1.5.1 2013/03/13 13:13:13 mfive Exp $";
+static const char *rcsid = "$Id: osslsigncode.c,v 1.5.3 2014/01/21 14:14:14 mfive Exp $";
 
 /*
    Implemented with good help from:
@@ -69,6 +69,10 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.5.1 2013/03/13 13:13:13 mfiv
 #include <sys/mman.h>
 #endif
 
+#ifdef HAVE_TERMIOS_H
+#include <termios.h>
+#endif
+
 #ifdef WITH_GSF
 #include <gsf/gsf-infile-msole.h>
 #include <gsf/gsf-infile.h>
@@ -97,6 +101,10 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.5.1 2013/03/13 13:13:13 mfiv
 
 #define MAX_TS_SERVERS 256
 
+#endif
+
+#if defined (HAVE_TERMIOS_H) || defined (HAVE_GETPASS)
+#define PROVIDE_ASKPASS 1
 #endif
 
 /* MS Authenticode object ids */
@@ -728,7 +736,11 @@ static void usage(const char *argv0)
 			"Usage: %s\n\n\t[ --version | -v ]\n\n"
 			"\t[ sign ]\n"
 			"\t\t( -certs <certfile> -key <keyfile> | -pkcs12 <pkcs12file> )\n"
-			"\t\t[ -pass <password> ]\n"
+			"\t\t[ -pass <password> ] "
+#ifdef PROVIDE_ASKPASS
+			"[ -askpass ]"
+#endif
+			"[ -readpass <file> ]\n"
 			"\t\t[ -ac <crosscertfile> ]\n"
 			"\t\t[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n"
 			"\t\t[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n"
@@ -1989,6 +2001,44 @@ static char* map_file(const char *infile, const off_t size)
 	return indata;
 }
 
+#ifdef PROVIDE_ASKPASS
+char *getpassword(const char *prompt)
+{
+#ifdef HAVE_TERMIOS_H
+	struct termios ofl, nfl;
+    char *p, passbuf[1024];
+
+    fputs(prompt, stdout);
+
+    tcgetattr(fileno(stdin), &ofl);
+    nfl = ofl;
+    nfl.c_lflag &= ~ECHO;
+    nfl.c_lflag |= ECHONL;
+
+    if (tcsetattr(fileno(stdin), TCSANOW, &nfl) != 0) {
+	    fprintf(stderr, "Failed to set terminal attributes\n");
+		return NULL;
+    }
+
+    p = fgets(passbuf, sizeof(passbuf), stdin);
+
+    if (tcsetattr(fileno(stdin), TCSANOW, &ofl) != 0)
+	    fprintf(stderr, "Failed to restore terminal attributes\n");
+
+	if (!p) {
+	    fprintf(stderr, "Failed to read password\n");
+		return NULL;
+    }
+
+	passbuf[strlen(passbuf)-1] = 0x00;
+	char *pass = strdup(passbuf);
+	memset(passbuf, 0, sizeof(passbuf));
+	return pass;
+#else
+	return getpass(prompt);
+#endif
+}
+#endif
 
 int main(int argc, char **argv)
 {
@@ -2005,7 +2055,8 @@ int main(int argc, char **argv)
 	const char *argv0 = argv[0];
 	static char buf[64*1024];
 	char *xcertfile, *certfile, *keyfile, *pvkfile, *pkcs12file, *infile, *outfile, *desc, *url, *indata;
-	char *pass = "";
+	char *pass = NULL, *readpass = NULL;
+	int askpass = 0;
 	char *leafhash = NULL;
 #ifdef ENABLE_CURL
 	char *turl[MAX_TS_SERVERS], *proxy = NULL, *tsurl[MAX_TS_SERVERS];
@@ -2088,8 +2139,19 @@ int main(int argc, char **argv)
 			if (--argc < 1) usage(argv0);
 			pkcs12file = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pass")) {
+			if (askpass || readpass) usage(argv0);
 			if (--argc < 1) usage(argv0);
-			pass = *(++argv);
+			pass = strdup(*(++argv));
+			memset(*argv, 0, strlen(*argv));
+#ifdef PROVIDE_ASKPASS
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-askpass")) {
+			if (pass || readpass) usage(argv0);
+			askpass = 1;
+#endif
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-readpass")) {
+			if (askpass || pass) usage(argv0);
+			if (--argc < 1) usage(argv0);
+			readpass = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-comm")) {
 			comm = 1;
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-ph")) {
@@ -2196,6 +2258,24 @@ int main(int argc, char **argv)
 		usage(argv0);
 	}
 
+	if (readpass) {
+		char passbuf[4096];
+		int passfd = open(readpass, O_RDONLY);
+		if (passfd < 0)
+			DO_EXIT_1("Failed to open password file: %s\n", readpass);
+		ssize_t passlen = read(passfd, passbuf, sizeof(passbuf)-1);
+		close(passfd);
+		if (passlen <= 0)
+			DO_EXIT_1("Failed to read password from file: %s\n", readpass);
+		passbuf[passlen] = 0x00;
+		pass = strdup(passbuf);
+		memset(passbuf, 0, sizeof(passbuf));
+#ifdef PROVIDE_ASKPASS
+	} else if (askpass) {
+		pass = getpassword("Password: ");
+#endif
+	}
+
 	if (cmd == CMD_SIGN) {
 		/* Read certificate and key */
 		if (keyfile && (btmp = BIO_new_file(keyfile, "rb")) != NULL) {
@@ -2215,7 +2295,7 @@ int main(int argc, char **argv)
 				(p12 = d2i_PKCS12_bio(btmp, NULL)) == NULL)
 				DO_EXIT_1("Failed to read PKCS#12 file: %s\n", pkcs12file);
 			BIO_free(btmp);
-			if (!PKCS12_parse(p12, pass, &pkey, &cert, &certs))
+			if (!PKCS12_parse(p12, pass ? pass : "", &pkey, &cert, &certs))
 				DO_EXIT_1("Failed to parse PKCS#12 file: %s (Wrong password?)\n", pkcs12file);
 			PKCS12_free(p12);
 		} else if (pvkfile != NULL) {
@@ -2226,7 +2306,7 @@ int main(int argc, char **argv)
 				DO_EXIT_1("Failed to read certificate file: %s\n", certfile);
 			BIO_free(btmp);
 			if ((btmp = BIO_new_file(pvkfile, "rb")) == NULL ||
-				( (pkey = b2i_PVK_bio(btmp, NULL, pass)) == NULL &&
+				( (pkey = b2i_PVK_bio(btmp, NULL, pass ? pass : "")) == NULL &&
 				  (BIO_seek(btmp, 0) == 0) &&
 				  (pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL))
 				DO_EXIT_1("Failed to read PVK file: %s\n", pvkfile);
@@ -2243,10 +2323,10 @@ int main(int argc, char **argv)
 			if ((btmp = BIO_new_file(keyfile, "rb")) == NULL ||
 				( (pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
 				  (BIO_seek(btmp, 0) == 0) &&
-				  (pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, pass)) == NULL &&
+				  (pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, pass ? pass : "")) == NULL &&
 				  (BIO_seek(btmp, 0) == 0) &&
 				  (pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL))
-				DO_EXIT_2("Failed to read private key file: %s (Wrong password? %s)\n", keyfile, pass);
+				DO_EXIT_1("Failed to read private key file: %s (Wrong password?)\n", keyfile);
 			BIO_free(btmp);
 		}
 
@@ -2257,6 +2337,11 @@ int main(int argc, char **argv)
 				DO_EXIT_1("Failed to read cross certificate file: %s\n", xcertfile);
 			BIO_free(btmp);
 		}
+
+		if (pass) {
+			memset (pass, 0, strlen(pass));
+			pass = NULL;
+	    }
 	}
 
 	if (certs == NULL && p7 != NULL)
@@ -2760,6 +2845,10 @@ skip_signing:
 	return ret;
 
 err_cleanup:
+	if (pass) {
+		memset (pass, 0, strlen(pass));
+		pass = NULL;
+	}
 	ERR_print_errors_fp(stderr);
 	if (p7)
 		PKCS7_free(p7);

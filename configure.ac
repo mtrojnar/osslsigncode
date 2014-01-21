@@ -1,6 +1,6 @@
 AC_PREREQ(2.60)
 
-AC_INIT([osslsigncode], [1.5.2], [pallansson@gmail.com])
+AC_INIT([osslsigncode], [1.5.3], [pallansson@gmail.com])
 AC_CONFIG_AUX_DIR([.])
 AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE
@@ -73,6 +73,9 @@ AC_CHECK_LIB(
 	[dlopen],
 	[DL_LIBS="-ldl"]
 )
+
+AC_CHECK_HEADERS([termios.h])
+AC_CHECK_FUNCS(getpass)
 
 AC_ARG_WITH([gsf],
         AS_HELP_STRING([--without-gsf], [Ignore presence of libgsf and disable it])

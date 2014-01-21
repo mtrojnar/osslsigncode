@@ -1,4 +1,10 @@
 
+=== 1.5.3 (2014-01-21)
+
+
+- add support for reading password from file
+- add support for asking for password (on systems that
+  provide support for it)
 - add support for compiling and running on Windows
 	 (Patch from Heiko Hund)
 - fix compilation without curl
