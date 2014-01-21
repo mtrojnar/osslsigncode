@@ -1960,8 +1960,8 @@ int main(int argc, char **argv)
 	char *leafhash = NULL;
 #ifdef ENABLE_CURL
 	char *turl[MAX_TS_SERVERS], *proxy = NULL, *tsurl[MAX_TS_SERVERS];
-	int nturl = 0, ntsurl = 0;
 #endif
+	int nturl = 0, ntsurl = 0;
 	u_char *p = NULL;
 	int ret = 0, i, len = 0, jp = -1, fd = -1, pe32plus = 0, comm = 0, pagehash = 0;
 	unsigned int tmp, peheader = 0, padlen = 0;
