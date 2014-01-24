@@ -726,7 +726,9 @@ static void cleanup_lib_state(void)
     EVP_cleanup();
 	CONF_modules_free();
     CRYPTO_cleanup_all_ex_data();
+#if OPENSSL_VERSION_NUMBER > 0x10000000
 	ERR_remove_thread_state(NULL);
+#endif
     ERR_free_strings();
 }
 

@@ -1,6 +1,6 @@
+- fix compilation problem with OpenSSL < 1.0.0
 
 === 1.6 (2014-01-21)
-
 
 - add support for reading password from file
 - add support for asking for password (on systems that
