@@ -122,6 +122,8 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.6 2014/01/21 14:14:14 mfive 
 #define SPC_PE_IMAGE_PAGE_HASHES_V1 "1.3.6.1.4.1.311.2.3.1" /* Page hash using SHA1 */
 #define SPC_PE_IMAGE_PAGE_HASHES_V2 "1.3.6.1.4.1.311.2.3.2" /* Page hash using SHA256 */
 
+#define SPC_NESTED_SIGNATURE_OBJID  "1.3.6.1.4.1.311.2.4.1"
+
 #define SPC_RFC3161_OBJID "1.3.6.1.4.1.311.3.3.1"
 
 /* 1.3.6.1.4.1.311.4... MS Crypto 2.0 stuff... */
@@ -1785,25 +1787,11 @@ static unsigned char *calc_page_hash(char *indata, unsigned int peheader, int pe
 	return res;
 }
 
-static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
-						  unsigned int sigpos, unsigned int siglen, char *leafhash)
+static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader, int pe32plus,
+						   unsigned int sigpos, unsigned int siglen, char *leafhash,
+						   int allownest)
 {
 	int ret = 0;
-	unsigned int pe_checksum = GET_UINT32_LE(indata + peheader + 88);
-	printf("Current PE checksum   : %08X\n", pe_checksum);
-
-	BIO *bio = BIO_new_mem_buf(indata, sigpos + siglen);
-	unsigned int real_pe_checksum = calc_pe_checksum(bio, peheader);
-	BIO_free(bio);
-	if (pe_checksum && pe_checksum != real_pe_checksum)
-		ret = 1;
-	printf("Calculated PE checksum: %08X%s\n\n", real_pe_checksum,
-		   ret ? "     MISMATCH!!!!" : "");
-	if (siglen == 0) {
-		printf("No signature found.\n\n");
-		return ret;
-	}
-
 	int mdtype = -1, phtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
@@ -1811,42 +1799,25 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 	unsigned char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	unsigned char *ph = NULL;
 	unsigned int phlen = 0;
-	PKCS7 *p7 = NULL;
+	BIO *bio = NULL;
 
-	while (pos < siglen && mdtype == -1) {
-		unsigned int l = GET_UINT32_LE(indata + sigpos + pos);
-		unsigned short certrev  = GET_UINT16_LE(indata + sigpos + pos + 4);
-		unsigned short certtype = GET_UINT16_LE(indata + sigpos + pos + 6);
-		if (certrev == WIN_CERT_REVISION_2 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
-			const unsigned char *blob = (unsigned char*)indata + sigpos + pos + 8;
-			ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
-			p7 = d2i_PKCS7(NULL, &blob, l - 8);
-			if (p7 && PKCS7_type_is_signed(p7) &&
-				!OBJ_cmp(p7->d.sign->contents->type, indir_objid) &&
-				p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
-
-				ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
-				const unsigned char *p = astr->data;
-				SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
-				if (idc) {
-					extract_page_hash (idc->data, &ph, &phlen, &phtype);
-					if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
-						mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
-						memcpy(mdbuf, idc->messageDigest->digest->data, idc->messageDigest->digest->length);
-					}
-					SpcIndirectDataContent_free(idc);
-				}
+	ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+	if (PKCS7_type_is_signed(p7) &&
+		!OBJ_cmp(p7->d.sign->contents->type, indir_objid) &&
+		p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
+		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
+		const unsigned char *p = astr->data;
+		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
+		if (idc) {
+			extract_page_hash (idc->data, &ph, &phlen, &phtype);
+			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
+				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
+				memcpy(mdbuf, idc->messageDigest->digest->data, idc->messageDigest->digest->length);
 			}
-			ASN1_OBJECT_free(indir_objid);
-			if (p7 && mdtype == -1) {
-				PKCS7_free(p7);
-				p7 = NULL;
-			}
+			SpcIndirectDataContent_free(idc);
 		}
-		if (l%8)
-			l += (8 - l%8);
-		pos += l;
 	}
+	ASN1_OBJECT_free(indir_objid);
 
 	if (mdtype == -1) {
 		printf("Failed to extract current message digest\n\n");
@@ -1920,19 +1891,80 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 		printf("\tCert #%d:\n\t\tSubject: %s\n\t\tIssuer : %s\n", i, subject, issuer);
 		OPENSSL_free(subject);
 		OPENSSL_free(issuer);
-    }
-
-	X509_STORE_free(store);
-	PKCS7_free(p7);
-
-	printf("\n");
+	}
 
 	if (leafhash != NULL) {
-		printf("Leaf hash match: %s\n\n", leafok ? "ok" : "failed");
+		printf("\nLeaf hash match: %s\n", leafok ? "ok" : "failed");
 		if (!leafok)
 			ret = 1;
 	}
 
+	if (allownest) {
+		PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+		ASN1_TYPE *nestedSignature = PKCS7_get_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID));
+		if (nestedSignature) {
+			ASN1_STRING *astr = nestedSignature->value.sequence;
+			const unsigned char *p = astr->data;
+			PKCS7 *p7nest = d2i_PKCS7(NULL, &p, astr->length);
+			if (p7nest) {
+				printf("\n");
+				int nest_ret = verify_pe_pkcs7(p7nest, indata, peheader, pe32plus, sigpos, siglen, leafhash, 0);
+				if (ret == 0)
+					ret = nest_ret;
+				PKCS7_free(p7nest);
+			}
+		} else
+			printf("\n");
+	} else
+		printf("\n");
+
+	X509_STORE_free(store);
+
+	return ret;
+}
+
+static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
+						  unsigned int sigpos, unsigned int siglen, char *leafhash)
+{
+	int ret = 0;
+	unsigned int pe_checksum = GET_UINT32_LE(indata + peheader + 88);
+	printf("Current PE checksum   : %08X\n", pe_checksum);
+
+	BIO *bio = BIO_new_mem_buf(indata, sigpos + siglen);
+	unsigned int real_pe_checksum = calc_pe_checksum(bio, peheader);
+	BIO_free(bio);
+	if (pe_checksum && pe_checksum != real_pe_checksum)
+		ret = 1;
+	printf("Calculated PE checksum: %08X%s\n\n", real_pe_checksum,
+		   ret ? "     MISMATCH!!!!" : "");
+	if (siglen == 0) {
+		printf("No signature found.\n\n");
+		return ret;
+	}
+
+	unsigned int pos = 0;
+	PKCS7 *p7 = NULL;
+
+	while (pos < siglen) {
+		unsigned int l = GET_UINT32_LE(indata + sigpos + pos);
+		unsigned short certrev  = GET_UINT16_LE(indata + sigpos + pos + 4);
+		unsigned short certtype = GET_UINT16_LE(indata + sigpos + pos + 6);
+		if (certrev == WIN_CERT_REVISION_2 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
+			const unsigned char *blob = (unsigned char*)indata + sigpos + pos + 8;
+			p7 = d2i_PKCS7(NULL, &blob, l - 8);
+		}
+		if (l%8)
+			l += (8 - l%8);
+		pos += l;
+	}
+
+	if (p7 == NULL) {
+		printf("Failed to extract PKCS7 data\n\n");
+		return -1;
+	}
+
+	ret = verify_pe_pkcs7(p7, indata, peheader, pe32plus, sigpos, siglen, leafhash, 1);
+	PKCS7_free(p7);
 	return ret;
 }
 
@@ -2096,6 +2128,13 @@ int main(int argc, char **argv)
 	/* Set up OpenSSL */
 	ERR_load_crypto_strings();
 	OPENSSL_add_all_algorithms_conf();
+
+	/* create some MS Authenticode OIDS we need later on */
+	if (!OBJ_create(SPC_STATEMENT_TYPE_OBJID, NULL, NULL) ||
+		!OBJ_create(SPC_MS_JAVA_SOMETHING, NULL, NULL) ||
+		!OBJ_create(SPC_SP_OPUS_INFO_OBJID, NULL, NULL) ||
+		!OBJ_create(SPC_NESTED_SIGNATURE_OBJID, NULL, NULL))
+		DO_EXIT_0("Failed to add objects\n");
 
 	md = EVP_sha1();
 	xcertfile = certfile = keyfile = pvkfile = pkcs12file = infile = outfile = desc = url = NULL;
@@ -2634,12 +2673,6 @@ int main(int argc, char **argv)
 
 	if (si == NULL)
 		DO_EXIT_0("Signing failed(PKCS7_add_signature)\n");
-
-	/* create some MS Authenticode OIDS we need later on */
-	if (!OBJ_create(SPC_STATEMENT_TYPE_OBJID, NULL, NULL) ||
-		!OBJ_create(SPC_MS_JAVA_SOMETHING, NULL, NULL) ||
-		!OBJ_create(SPC_SP_OPUS_INFO_OBJID, NULL, NULL))
-		DO_EXIT_0("Failed to add objects\n");
 
 	PKCS7_add_signed_attribute
 		(si, NID_pkcs9_contentType,
