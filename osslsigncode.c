@@ -1807,7 +1807,6 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader, int p
 	int mdtype = -1, phtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
-	unsigned int pos = 0;
 	unsigned char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	unsigned char *ph = NULL;
 	unsigned int phlen = 0;
