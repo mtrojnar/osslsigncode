@@ -765,6 +765,7 @@ static void usage(const char *argv0)
 			"\t\t[ -t <timestampurl> [ -t ... ] [ -p <proxy> ]]\n"
 			"\t\t[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ]]\n"
 #endif
+			"\t\t[ -nest ]\n"
 			"\t\t[ -in ] <infile> [-out ] <outfile>\n\n"
 			"\textract-signature [ -in ] <infile> [ -out ] <outfile>\n\n"
 			"\tremove-signature [ -in ] <infile> [ -out ] <outfile>\n\n"
@@ -1799,6 +1800,52 @@ static unsigned char *calc_page_hash(char *indata, unsigned int peheader, int pe
 	return res;
 }
 
+// pkcs7_get_nested_signature exctracts a nested signature from p7.
+// The caller is responsible for freeing the returned object.
+//
+// If has_sig is provided, it will be set to either 1 if there is a
+// SPC_NESTED_SIGNATURE attribute in p7 at all or 0 if not.
+// This allows has_sig to be used to distinguish two possible scenarios
+// when the functon returns NULL: if has_sig is 1, it means d2i_PKCS7
+// failed to decode the nested signature. However, if has_sig is 0, it
+// simply means the given p7 does not have a nested signature.
+static PKCS7 *pkcs7_get_nested_signature(PKCS7 *p7, int *has_sig) {
+	PKCS7 *ret = NULL;
+	PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+	ASN1_TYPE *nestedSignature = PKCS7_get_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID));
+	if (nestedSignature) {
+		ASN1_STRING *astr = nestedSignature->value.sequence;
+		const unsigned char *p = astr->data;
+		ret = d2i_PKCS7(NULL, &p, astr->length);
+	}
+	if (has_sig)
+		*has_sig = (nestedSignature != NULL);
+	return ret;
+}
+
+// pkcs7_set_nested_signature adds the p7nest signature to p7
+// as a nested signature (SPC_NESTED_SIGNATURE).
+static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest) {
+	u_char *p = NULL;
+	int len = 0;
+
+	if (((len = i2d_PKCS7(p7nest, NULL)) <= 0) ||
+		(p = OPENSSL_malloc(len)) == NULL)
+		return 0;
+
+	i2d_PKCS7(p7nest, &p);
+	p -= len;
+	ASN1_STRING *astr = ASN1_STRING_new();
+	ASN1_STRING_set(astr, p, len);
+	OPENSSL_free(p);
+
+	PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+	if (PKCS7_add_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID), V_ASN1_SEQUENCE, astr) == 0)
+		return 0;
+
+	return 1;
+}
+
 static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader, int pe32plus,
 						   unsigned int sigpos, unsigned int siglen, char *leafhash,
 						   int allownest)
@@ -1911,19 +1958,17 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader, int p
 	}
 
 	if (allownest) {
-		PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-		ASN1_TYPE *nestedSignature = PKCS7_get_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID));
-		if (nestedSignature) {
-			ASN1_STRING *astr = nestedSignature->value.sequence;
-			const unsigned char *p = astr->data;
-			PKCS7 *p7nest = d2i_PKCS7(NULL, &p, astr->length);
-			if (p7nest) {
-				printf("\n");
-				int nest_ret = verify_pe_pkcs7(p7nest, indata, peheader, pe32plus, sigpos, siglen, leafhash, 0);
-				if (ret == 0)
-					ret = nest_ret;
-				PKCS7_free(p7nest);
-			}
+		int has_sig = 0;
+		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
+		if (p7nest) {
+			printf("\n");
+			int nest_ret = verify_pe_pkcs7(p7nest, indata, peheader, pe32plus, sigpos, siglen, leafhash, 0);
+			if (ret == 0)
+				ret = nest_ret;
+			PKCS7_free(p7nest);
+		} else if (!p7nest && has_sig) {
+			printf("\nFailed to decode nested signature!\n");
+			ret = 1;
 		} else
 			printf("\n");
 	} else
@@ -1977,6 +2022,30 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 	ret = verify_pe_pkcs7(p7, indata, peheader, pe32plus, sigpos, siglen, leafhash, 1);
 	PKCS7_free(p7);
 	return ret;
+}
+
+// extract_existing_pe_pkcs7 retreives a decoded PKCS7 struct corresponding to the
+// existing signature of the PE file.
+static PKCS7 *extract_existing_pe_pkcs7(char *indata, unsigned int peheader, int pe32plus,
+									   unsigned int sigpos, unsigned int siglen)
+{
+	unsigned int pos = 0;
+	PKCS7 *p7 = NULL;
+
+	while (pos < siglen) {
+		unsigned int l = GET_UINT32_LE(indata + sigpos + pos);
+		unsigned short certrev  = GET_UINT16_LE(indata + sigpos + pos + 4);
+		unsigned short certtype = GET_UINT16_LE(indata + sigpos + pos + 6);
+		if (certrev == WIN_CERT_REVISION_2 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
+			const unsigned char *blob = (unsigned char*)indata + sigpos + pos + 8;
+			p7 = d2i_PKCS7(NULL, &blob, l - 8);
+		}
+		if (l%8)
+			l += (8 - l%8);
+		pos += l;
+	}
+
+	return p7;
 }
 
 static STACK_OF(X509) *PEM_read_certs_with_pass(BIO *bin, char *certpass)
@@ -2089,7 +2158,7 @@ int main(int argc, char **argv)
 {
 	BIO *btmp, *sigbio, *hash, *outdata;
 	PKCS12 *p12;
-	PKCS7 *p7 = NULL, *sig, *p7x = NULL;
+	PKCS7 *p7 = NULL, *cursig = NULL, *outsig = NULL, *sig, *p7x = NULL;
 	X509 *cert = NULL;
 	STACK_OF(X509) *certs = NULL, *xcerts = NULL;
 	EVP_PKEY *pkey = NULL;
@@ -2106,6 +2175,7 @@ int main(int argc, char **argv)
 #ifdef ENABLE_CURL
 	char *turl[MAX_TS_SERVERS], *proxy = NULL, *tsurl[MAX_TS_SERVERS];
 #endif
+	int nest = 0;
 	int nturl = 0, ntsurl = 0;
 	u_char *p = NULL;
 	int ret = 0, i, len = 0, jp = -1, pe32plus = 0, comm = 0, pagehash = 0;
@@ -2241,6 +2311,8 @@ int main(int argc, char **argv)
 			if (--argc < 1) usage(argv0);
 			proxy = *(++argv);
 #endif
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-nest")) {
+			nest = 1;
 		} else if ((cmd == CMD_VERIFY) && !strcmp(*argv, "-require-leaf-hash")) {
 			if (--argc < 1) usage(argv0);
 			leafhash = (*++argv); 
@@ -2630,6 +2702,13 @@ int main(int argc, char **argv)
 			goto skip_signing;
 		}
 
+		if (cmd == CMD_SIGN && nest) {
+			cursig = extract_existing_pe_pkcs7(indata, peheader, pe32plus, sigpos ? sigpos : fileend, siglen);
+			if (cursig == NULL) {
+				DO_EXIT_0("Unable to extract existing signature in -nest mode");
+			}
+		}
+
 		if (cmd == CMD_VERIFY) {
 			ret = verify_pe_file(indata, peheader, pe32plus, sigpos ? sigpos : fileend, siglen, leafhash);
 			goto skip_signing;
@@ -2813,11 +2892,19 @@ int main(int argc, char **argv)
 		DO_EXIT_0("PKCS7 output failed\n");
 #endif
 
+	if (nest) {
+		if (pkcs7_set_nested_signature(cursig, sig) == 0)
+			DO_EXIT_0("unable to append the nested signature to the current signature");
+		outsig = cursig;
+	} else {
+		outsig = sig;
+	}
+
 	/* Append signature to outfile */
-	if (((len = i2d_PKCS7(sig, NULL)) <= 0) ||
+	if (((len = i2d_PKCS7(outsig, NULL)) <= 0) ||
 		(p = OPENSSL_malloc(len)) == NULL)
 		DO_EXIT_1("i2d_PKCS - memory allocation failed: %d\n", len);
-	i2d_PKCS7(sig, &p);
+	i2d_PKCS7(outsig, &p);
 	p -= len;
 	padlen = (8 - len%8) % 8;
 
