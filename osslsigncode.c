@@ -1104,6 +1104,52 @@ static int verify_leaf_hash(X509 *leaf, char *leafhash) {
 	return 0;
 }
 
+// pkcs7_get_nested_signature exctracts a nested signature from p7.
+// The caller is responsible for freeing the returned object.
+//
+// If has_sig is provided, it will be set to either 1 if there is a
+// SPC_NESTED_SIGNATURE attribute in p7 at all or 0 if not.
+// This allows has_sig to be used to distinguish two possible scenarios
+// when the functon returns NULL: if has_sig is 1, it means d2i_PKCS7
+// failed to decode the nested signature. However, if has_sig is 0, it
+// simply means the given p7 does not have a nested signature.
+static PKCS7 *pkcs7_get_nested_signature(PKCS7 *p7, int *has_sig) {
+	PKCS7 *ret = NULL;
+	PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+	ASN1_TYPE *nestedSignature = PKCS7_get_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID));
+	if (nestedSignature) {
+		ASN1_STRING *astr = nestedSignature->value.sequence;
+		const unsigned char *p = astr->data;
+		ret = d2i_PKCS7(NULL, &p, astr->length);
+	}
+	if (has_sig)
+		*has_sig = (nestedSignature != NULL);
+	return ret;
+}
+
+// pkcs7_set_nested_signature adds the p7nest signature to p7
+// as a nested signature (SPC_NESTED_SIGNATURE).
+static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest) {
+	u_char *p = NULL;
+	int len = 0;
+
+	if (((len = i2d_PKCS7(p7nest, NULL)) <= 0) ||
+		(p = OPENSSL_malloc(len)) == NULL)
+		return 0;
+
+	i2d_PKCS7(p7nest, &p);
+	p -= len;
+	ASN1_STRING *astr = ASN1_STRING_new();
+	ASN1_STRING_set(astr, p, len);
+	OPENSSL_free(p);
+
+	PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+	if (PKCS7_add_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID), V_ASN1_SEQUENCE, astr) == 0)
+		return 0;
+
+	return 1;
+}
+
 #ifdef WITH_GSF
 static gint msi_base64_decode(gint x)
 {
@@ -1368,50 +1414,13 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 }
 
 /*
- * msi_verify_file checks whether or not the signature of infile is valid.
+ * msi_verify_pkcs7 is a helper function for msi_verify_file.
+ * It exists to make it easier to implement verification of nested signatures.
  */
-static int msi_verify_file(GsfInfile *infile, char *leafhash) {
-	GsfInput *sig = NULL;
-	GsfInput *exsig = NULL;
-	unsigned char *exdata = NULL;
-	unsigned char *indata = NULL;
-	gchar decoded[0x40];
-	int i, ret = 0;
+static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata, unsigned int exlen, char *leafhash, int allownest) {
+	int i = 0;
+	int ret = 0;
 	X509_STORE *store = NULL;
-	PKCS7 *p7 = NULL;
-
-	for (i = 0; i < gsf_infile_num_children(infile); i++) {
-		GsfInput *child = gsf_infile_child_by_index(infile, i);
-		const guint8 *name = (const guint8*)gsf_input_name(child);
-		msi_decode(name, decoded);
-		if (!g_strcmp0(decoded, "\05DigitalSignature"))
-			sig = child;
-		if (!g_strcmp0(decoded, "\05MsiDigitalSignatureEx"))
-			exsig = child;
-	}
-	if (sig == NULL) {
-		printf("MSI file has no signature\n\n");
-		ret = 1;
-		goto out;
-	}
-
-	unsigned long inlen = (unsigned long) gsf_input_remaining(sig);
-	indata = malloc(inlen);
-	if (gsf_input_read(sig, inlen, indata) == NULL) {
-		ret = 1;
-		goto out;
-	}
-
-	unsigned long exlen = 0;
-	if (exsig != NULL) {
-		exlen = (unsigned long) gsf_input_remaining(exsig);
-		exdata = malloc(exlen);
-		if (gsf_input_read(exsig, exlen, exdata) == NULL) {
-			ret = 1;
-			goto out;
-		}
-	}
-
 	int mdtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
@@ -1422,8 +1431,6 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash) {
 	BIO *bio = NULL;
 
 	ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
-	const unsigned char *blob = (unsigned char *)indata;
-	p7 = d2i_PKCS7(NULL, &blob, inlen);
 	if (p7 && PKCS7_type_is_signed(p7) && !OBJ_cmp(p7->d.sign->contents->type, indir_objid) && p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
 		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
 		const unsigned char *p = astr->data;
@@ -1436,10 +1443,6 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash) {
 			SpcIndirectDataContent_free(idc);
 		}
 		ASN1_OBJECT_free(indir_objid);
-		if (p7 && mdtype == -1) {
-			PKCS7_free(p7);
-			p7 = NULL;
-		}
 	}
 
 	if (mdtype == -1) {
@@ -1461,7 +1464,7 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash) {
 	BIO_set_md(hash, md);
 	BIO_push(hash, BIO_new(BIO_s_null()));
 
-	if (exsig) {
+	if (exdata) {
 		/*
 		 * Until libgsf can read more MSI metadata, we can't
 		 * really verify them by plowing through the file.
@@ -1574,12 +1577,84 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash) {
 			ret = 1;
 	}
 
+	if (allownest) {
+		int has_sig = 0;
+		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
+		if (p7nest) {
+			printf("\n");
+			int nest_ret = msi_verify_pkcs7(p7nest, infile, exdata, exlen, leafhash, 0);
+			if (ret == 0)
+				ret = nest_ret;
+			PKCS7_free(p7nest);
+		} else if (!p7nest && has_sig) {
+			printf("\nFailed to decode nested signature!\n");
+			ret = 1;
+		} else
+			printf("\n");
+	} else
+		printf("\n");
+
+out:
+	if (store)
+		X509_STORE_free(store);
+
+	return ret;
+}
+
+/*
+ * msi_verify_file checks whether or not the signature of infile is valid.
+ */
+static int msi_verify_file(GsfInfile *infile, char *leafhash) {
+	GsfInput *sig = NULL;
+	GsfInput *exsig = NULL;
+	unsigned char *exdata = NULL;
+	unsigned char *indata = NULL;
+	gchar decoded[0x40];
+	int i, ret = 0;
+	X509_STORE *store = NULL;
+	PKCS7 *p7 = NULL;
+
+	for (i = 0; i < gsf_infile_num_children(infile); i++) {
+		GsfInput *child = gsf_infile_child_by_index(infile, i);
+		const guint8 *name = (const guint8*)gsf_input_name(child);
+		msi_decode(name, decoded);
+		if (!g_strcmp0(decoded, "\05DigitalSignature"))
+			sig = child;
+		if (!g_strcmp0(decoded, "\05MsiDigitalSignatureEx"))
+			exsig = child;
+	}
+	if (sig == NULL) {
+		printf("MSI file has no signature\n\n");
+		ret = 1;
+		goto out;
+	}
+
+	unsigned long inlen = (unsigned long) gsf_input_remaining(sig);
+	indata = malloc(inlen);
+	if (gsf_input_read(sig, inlen, indata) == NULL) {
+		ret = 1;
+		goto out;
+	}
+
+	unsigned long exlen = 0;
+	if (exsig != NULL) {
+		exlen = (unsigned long) gsf_input_remaining(exsig);
+		exdata = malloc(exlen);
+		if (gsf_input_read(exsig, exlen, exdata) == NULL) {
+			ret = 1;
+			goto out;
+		}
+	}
+
+	const unsigned char *blob = (unsigned char *)indata;
+	p7 = d2i_PKCS7(NULL, &blob, inlen);
+
+	ret = msi_verify_pkcs7(p7, infile, exdata, exlen, leafhash, 1);
+
 out:
 	free(indata);
 	free(exdata);
 
-	if (store)
-		X509_STORE_free(store);
 	if (p7)
 		PKCS7_free(p7);
 
@@ -1587,10 +1662,10 @@ out:
 }
 
 /*
- * msi_extract_signature extracts the MSI DigitalSignaure from infile
+ * msi_extract_signature_to_file extracts the MSI DigitalSignaure from infile
  * to a file at the path given by outfile.
  */
-static int msi_extract_signature(GsfInfile *infile, char *outfile) {
+static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile) {
 	unsigned char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	GsfInput *sig = NULL;
 	GsfInput *exsig = NULL;
@@ -1655,6 +1730,41 @@ out:
 		BIO_free_all(outdata);
 
 	return ret;
+}
+
+static PKCS7 *msi_extract_signature_to_pkcs7(GsfInfile *infile) {
+	unsigned char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	GsfInput *sig = NULL;
+	BIO *outdata = NULL;
+	gchar decoded[0x40];
+	PKCS7 *p7 = NULL;
+	u_char *buf = NULL;
+	gsf_off_t size = 0;
+	int i = 0;
+
+	for (i = 0; i < gsf_infile_num_children(infile); i++) {
+		GsfInput *child = gsf_infile_child_by_index(infile, i);
+		const guint8 *name = (const guint8*)gsf_input_name(child);
+		msi_decode(name, decoded);
+		if (!g_strcmp0(decoded, "\05DigitalSignature"))
+			sig = child;
+	}
+	if (sig == NULL) {
+		goto out;
+	}
+
+	size = gsf_input_remaining(sig);
+	buf = malloc(size);
+	if (gsf_input_read(sig, size, buf) == NULL) {
+		goto out;
+	}
+
+	const unsigned char *p7buf = buf;
+	p7 = d2i_PKCS7(NULL, &p7buf, size);
+
+out:
+	free(buf);
+	return p7;
 }
 
 #endif
@@ -1798,52 +1908,6 @@ static unsigned char *calc_page_hash(char *indata, unsigned int peheader, int pe
 	free(zeroes);
 	*rphlen = pi*pphlen;
 	return res;
-}
-
-// pkcs7_get_nested_signature exctracts a nested signature from p7.
-// The caller is responsible for freeing the returned object.
-//
-// If has_sig is provided, it will be set to either 1 if there is a
-// SPC_NESTED_SIGNATURE attribute in p7 at all or 0 if not.
-// This allows has_sig to be used to distinguish two possible scenarios
-// when the functon returns NULL: if has_sig is 1, it means d2i_PKCS7
-// failed to decode the nested signature. However, if has_sig is 0, it
-// simply means the given p7 does not have a nested signature.
-static PKCS7 *pkcs7_get_nested_signature(PKCS7 *p7, int *has_sig) {
-	PKCS7 *ret = NULL;
-	PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-	ASN1_TYPE *nestedSignature = PKCS7_get_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID));
-	if (nestedSignature) {
-		ASN1_STRING *astr = nestedSignature->value.sequence;
-		const unsigned char *p = astr->data;
-		ret = d2i_PKCS7(NULL, &p, astr->length);
-	}
-	if (has_sig)
-		*has_sig = (nestedSignature != NULL);
-	return ret;
-}
-
-// pkcs7_set_nested_signature adds the p7nest signature to p7
-// as a nested signature (SPC_NESTED_SIGNATURE).
-static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest) {
-	u_char *p = NULL;
-	int len = 0;
-
-	if (((len = i2d_PKCS7(p7nest, NULL)) <= 0) ||
-		(p = OPENSSL_malloc(len)) == NULL)
-		return 0;
-
-	i2d_PKCS7(p7nest, &p);
-	p -= len;
-	ASN1_STRING *astr = ASN1_STRING_new();
-	ASN1_STRING_set(astr, p, len);
-	OPENSSL_free(p);
-
-	PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-	if (PKCS7_add_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID), V_ASN1_SEQUENCE, astr) == 0)
-		return 0;
-
-	return 1;
 }
 
 static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader, int pe32plus,
@@ -2528,11 +2592,18 @@ int main(int argc, char **argv)
 		ole = gsf_infile_msole_new(src, NULL);
 
 		if (cmd == CMD_EXTRACT) {
-			ret = msi_extract_signature(ole, outfile);
+			ret = msi_extract_signature_to_file(ole, outfile);
 			goto skip_signing;
 		} else if (cmd == CMD_VERIFY) {
 			ret = msi_verify_file(ole, leafhash);
 			goto skip_signing;
+		} else if (cmd == CMD_SIGN) {
+			if (nest) {
+				cursig = msi_extract_signature_to_pkcs7(ole);
+				if (cursig == NULL) {
+					DO_EXIT_0("Unable to extract existing signature in -nest mode");
+				}
+			}
 		}
 
 		sink = gsf_output_stdio_new(outfile, NULL);
@@ -2893,8 +2964,11 @@ int main(int argc, char **argv)
 #endif
 
 	if (nest) {
+		if (cursig == NULL) {
+			DO_EXIT_0("no 'cursig' was extracted. this points to a bug in the code. aborting...\n")
+		}
 		if (pkcs7_set_nested_signature(cursig, sig) == 0)
-			DO_EXIT_0("unable to append the nested signature to the current signature");
+			DO_EXIT_0("unable to append the nested signature to the current signature\n");
 		outsig = cursig;
 	} else {
 		outsig = sig;
