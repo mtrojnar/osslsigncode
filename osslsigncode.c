@@ -1036,40 +1036,52 @@ static unsigned char nib2val(unsigned char c) {
 	return 0;
 }
 
-static int verify_leaf_hash(X509 *leaf, char *leafhash) {
-	char *orig = leafhash;
-	char *mdid = orig;
+static int verify_leaf_hash(X509 *leaf, const char *leafhash) {
+	char *lhdup = NULL;
+	char *orig = NULL;
+	char *mdid = NULL;
 	char *hash = NULL;
-	while (leafhash != NULL && *leafhash != '\0') {
-		if (*leafhash == ':') {
-			*leafhash = '\0';
-			++leafhash;
-			hash = leafhash;
+	int ret = 0;
+
+	lhdup = strdup(leafhash);
+	orig = lhdup;
+	mdid = lhdup;
+	while (lhdup != NULL && *lhdup != '\0') {
+		if (*lhdup == ':') {
+			*lhdup = '\0';
+			++lhdup;
+			hash = lhdup;
 			break;
 		}
-		++leafhash;
+		++lhdup;
 	}
+	lhdup = orig;
+
 	if (hash == NULL) {
 		printf("Unable to parse -require-leaf-hash parameter: %s\n\n", orig);
-		return 1;
+		ret = 1;
+		goto out;
 	}
 
 	const EVP_MD *md = EVP_get_digestbyname(mdid);
 	if (md == NULL) {
 		printf("Unable to lookup digest by name '%s'\n", mdid);
-		return 1;
+		ret = 1;
+		goto out;
 	}
 
 	unsigned long sz = EVP_MD_size(md);
 	unsigned long actual = strlen(hash);
 	if (actual%2 != 0) {
 		printf("Hash length mismatch: length is uneven.\n");
-		return 1;
+		ret = 1;
+		goto out;
 	}
 	actual /= 2;
 	if (actual != sz) {
 		printf("Hash length mismatch: '%s' digest must be %lu bytes long (got %lu bytes)\n", mdid, sz, actual);
-		return 1;
+		ret = 1;
+		goto out;
 	}
 
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
@@ -1098,10 +1110,13 @@ static int verify_leaf_hash(X509 *leaf, char *leafhash) {
 	free(certbuf);
 
 	if (memcmp(mdbuf, cmdbuf, EVP_MD_size(md))) {
-		return 1;
+		ret = 1;
+		goto out;
 	}
 
-	return 0;
+out:
+	free(lhdup);
+	return ret;
 }
 
 // pkcs7_get_nested_signature exctracts a nested signature from p7.
