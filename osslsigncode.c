@@ -2667,7 +2667,10 @@ int main(int argc, char **argv)
 		 * section, and its content must be the output of the pre-hash
 		 * ("metadata") hash.
 		 */
-		{
+		/*
+		 * Disabled for now. Does not work well with nested sigantures.
+		 */
+		if (0) {
 			BIO *prehash = BIO_new(BIO_f_md());
 			BIO_set_md(prehash, md);
 			BIO_push(prehash, BIO_new(BIO_s_null()));
