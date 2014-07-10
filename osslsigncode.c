@@ -1675,6 +1675,48 @@ out:
 	return ret;
 }
 
+static int msi_extract_dse(GsfInfile *infile, unsigned char **dsebuf, unsigned long *dselen, int *has_dse) {
+	GsfInput *exsig = NULL;
+	gchar decoded[0x40];
+	u_char *buf = NULL;
+	gsf_off_t size = 0;
+	int i, ret = 0;
+
+	for (i = 0; i < gsf_infile_num_children(infile); i++) {
+		GsfInput *child = gsf_infile_child_by_index(infile, i);
+		const guint8 *name = (const guint8*)gsf_input_name(child);
+		msi_decode(name, decoded);
+		if (!g_strcmp0(decoded, "\05MsiDigitalSignatureEx"))
+			exsig = child;
+	}
+	if (exsig == NULL) {
+		ret = 1;
+		goto out;
+	}
+
+	if (has_dse != NULL) {
+		*has_dse = 1;
+	}
+
+	size = gsf_input_remaining(exsig);
+
+	if (dselen != NULL) {
+		*dselen = (unsigned long) size;
+	}
+
+	if (dsebuf != NULL) {
+		buf = malloc(size);
+		if (gsf_input_read(exsig, size, buf) == NULL) {
+			ret = 1;
+			goto out;
+		}
+		*dsebuf = (unsigned char *) buf;
+	}
+
+out:
+	return ret;
+}
+
 /*
  * msi_extract_signature_to_file extracts the MSI DigitalSignaure from infile
  * to a file at the path given by outfile.
@@ -2615,6 +2657,26 @@ int main(int argc, char **argv)
 			goto skip_signing;
 		} else if (cmd == CMD_SIGN) {
 			if (nest) {
+				// Perform a sanity check for the MsiDigitalSignatureEx section.
+				// If the file we're attempting to sign has an MsiDigitalSignatureEx
+				// section, we can't add a nested signature of a different MD type
+				// without breaking the initial signature.
+				{
+					unsigned long dselen = 0;
+					int has_dse = 0;
+					if (msi_extract_dse(ole, NULL, &dselen, &has_dse) != 0 && has_dse) {
+						DO_EXIT_0("Unable to extract MsiDigitalSigantureEx section.\n");
+					}
+					if (has_dse) {
+						int mdlen = EVP_MD_size(md);
+						if (dselen != (unsigned long)mdlen) {
+							DO_EXIT_0("Unable to add nested signature with a different MD type (-h parameter) "
+							          "than what exists in the MSI file already. This is due to the presence of "
+							          "MsiDigitalSigantureEx (-add-msi-dse parameter).\n");
+						}
+					}
+				}
+
 				cursig = msi_extract_signature_to_pkcs7(ole);
 				if (cursig == NULL) {
 					DO_EXIT_0("Unable to extract existing signature in -nest mode");
