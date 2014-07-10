@@ -31,7 +31,7 @@
    files in the program, then also delete it here.
 */
 
-static const char *rcsid = "$Id: osslsigncode.c,v 1.6 2014/01/21 14:14:14 mfive Exp $";
+static const char *rcsid = "$Id: osslsigncode.c,v 1.7 2014/07/10 14:14:14 mfive Exp $";
 
 /*
    Implemented with good help from:
