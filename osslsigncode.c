@@ -1626,7 +1626,6 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash) {
 	unsigned char *indata = NULL;
 	gchar decoded[0x40];
 	int i, ret = 0;
-	X509_STORE *store = NULL;
 	PKCS7 *p7 = NULL;
 
 	for (i = 0; i < gsf_infile_num_children(infile); i++) {
@@ -1748,9 +1747,7 @@ out:
 }
 
 static PKCS7 *msi_extract_signature_to_pkcs7(GsfInfile *infile) {
-	unsigned char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	GsfInput *sig = NULL;
-	BIO *outdata = NULL;
 	gchar decoded[0x40];
 	PKCS7 *p7 = NULL;
 	u_char *buf = NULL;
@@ -2285,6 +2282,9 @@ int main(int argc, char **argv)
 	int len_msiex = 0;
 #endif
 
+	xcertfile = certfile = keyfile = pvkfile = pkcs12file = infile = outfile = desc = url = NULL;
+	hash = outdata = NULL;
+
 	/* Set up OpenSSL */
 	ERR_load_crypto_strings();
 	OPENSSL_add_all_algorithms_conf();
@@ -2297,8 +2297,6 @@ int main(int argc, char **argv)
 		DO_EXIT_0("Failed to add objects\n");
 
 	md = EVP_sha1();
-	xcertfile = certfile = keyfile = pvkfile = pkcs12file = infile = outfile = desc = url = NULL;
-	hash = outdata = NULL;
 
 	if (argc > 1) {
 		if (!strcmp(argv[1], "sign")) {
@@ -3091,7 +3089,8 @@ err_cleanup:
 		EVP_PKEY_free(pkey);
 	if (hash)
 		BIO_free_all(hash);
-	unlink(outfile);
+	if (outfile)
+		unlink(outfile);
 	fprintf(stderr, "\nFailed\n");
 	cleanup_lib_state();
 	return -1;
