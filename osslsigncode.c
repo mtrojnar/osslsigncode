@@ -765,7 +765,9 @@ static void usage(const char *argv0)
 			"\t\t[ -t <timestampurl> [ -t ... ] [ -p <proxy> ]]\n"
 			"\t\t[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ]]\n"
 #endif
-			"\t\t[ -nest ]\n"
+			"\t\t[ -nest ]\n\n"
+			"\t\tMSI specific:\n"
+			"\t\t[ -add-msi-dse ]\n\n"
 			"\t\t[ -in ] <infile> [-out ] <outfile>\n\n"
 			"\textract-signature [ -in ] <infile> [ -out ] <outfile>\n\n"
 			"\tremove-signature [ -in ] <infile> [ -out ] <outfile>\n\n"
@@ -2252,6 +2254,7 @@ int main(int argc, char **argv)
 	char *turl[MAX_TS_SERVERS], *proxy = NULL, *tsurl[MAX_TS_SERVERS];
 #endif
 	int nest = 0;
+	int add_msi_dse = 0;
 	int nturl = 0, ntsurl = 0;
 	u_char *p = NULL;
 	int ret = 0, i, len = 0, jp = -1, pe32plus = 0, comm = 0, pagehash = 0;
@@ -2390,6 +2393,8 @@ int main(int argc, char **argv)
 #endif
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-nest")) {
 			nest = 1;
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-add-msi-dse")) {
+			add_msi_dse = 1;
 		} else if ((cmd == CMD_VERIFY) && !strcmp(*argv, "-require-leaf-hash")) {
 			if (--argc < 1) usage(argv0);
 			leafhash = (*++argv); 
@@ -2665,10 +2670,7 @@ int main(int argc, char **argv)
 		 * section, and its content must be the output of the pre-hash
 		 * ("metadata") hash.
 		 */
-		/*
-		 * Disabled for now. Does not work well with nested sigantures.
-		 */
-		if (0) {
+		if (add_msi_dse) {
 			BIO *prehash = BIO_new(BIO_f_md());
 			BIO_set_md(prehash, md);
 			BIO_push(prehash, BIO_new(BIO_s_null()));
