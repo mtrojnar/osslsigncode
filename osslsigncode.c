@@ -1527,7 +1527,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 	}
 
 #ifdef GSF_CAN_READ_MSI_METADATA
-	if (exsig && exdata) {
+	if (exdata) {
 		tohex(cexmdbuf, hexbuf, EVP_MD_size(md));
 		int exok = !memcmp(exdata, cexmdbuf, MIN(EVP_MD_size(md), exlen));
 		if (!exok) ret = 1;
