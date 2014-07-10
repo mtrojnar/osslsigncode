@@ -1267,7 +1267,6 @@ static GSList *msi_sorted_infile_children(GsfInfile *infile)
 	return sorted;
 }
 
-#ifndef NO_MSI_DIGITALSIGNATUREEX
 /*
  * msi_prehash_utf16_name converts an UTF-8 representation of
  * an MSI filename to its on-disk UTF-16 representation and
@@ -1370,7 +1369,6 @@ static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
 
 	return TRUE;
 }
-#endif
 
 /**
  * msi_handle_dir performs a direct copy of the input MSI file in infile to a new
@@ -2629,7 +2627,6 @@ int main(int argc, char **argv)
 			DO_EXIT_1("Error opening output file %s", outfile);
 		outole = gsf_outfile_msole_new(sink);
 
-#ifndef NO_MSI_DIGITALSIGNATUREEX
 		/*
 		 * MsiDigitalSignatureEx is an enhanced signature type that
 		 * can be used when signing MSI files.  In addition to
@@ -2683,7 +2680,6 @@ int main(int argc, char **argv)
 
 			BIO_write(hash, p_msiex, len_msiex);
 		}
-#endif
 
 		if (!msi_handle_dir(ole, outole, hash)) {
 			DO_EXIT_0("unable to msi_handle_dir()\n");
