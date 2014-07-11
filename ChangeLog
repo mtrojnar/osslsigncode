@@ -1,8 +1,16 @@
+=== 1.7.1 (2014-07-11)
+
+- MSI: added -add-msi-dse option
+	(Patch from Mikkel Krautz)
+- MSI: fix build when GSF_CAN_READ_MSI_METADATA defined
+	(Patch from Mikkel Krautz)
+
 === 1.7 (2014-07-10)
 
 - add support for nested signatures
 	(Patch from Mikkel Krautz)
 - fix compilation problem with OpenSSL < 1.0.0
+- added OpenSSL linkage exception to license
 
 === 1.6 (2014-01-21)
 
