@@ -995,18 +995,28 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, fi
 static unsigned int calc_pe_checksum(BIO *bio, unsigned int peheader)
 {
 	unsigned int checkSum = 0;
-	unsigned short	val;
+	unsigned short val;
 	unsigned int size = 0;
+	unsigned short *buf;
+	int nread;
 
 	/* recalc checksum. */
+	buf = (unsigned short*)malloc(sizeof(unsigned short)*32768);
+
 	(void)BIO_seek(bio, 0);
-	while (BIO_read(bio, &val, 2) == 2) {
-		if (size == peheader + 88 || size == peheader + 90)
-			val = 0;
-		checkSum += val;
-		checkSum = 0xffff & (checkSum + (checkSum >> 0x10));
-		size += 2;
+	while ((nread = BIO_read(bio, buf, sizeof(unsigned short)*32768)) > 0) {
+		int i;
+		for (i = 0; i < nread / 2; i++) {
+			val = buf[i];
+			if (size == peheader + 88 || size == peheader + 90)
+				val = 0;
+			checkSum += val;
+			checkSum = 0xffff & (checkSum + (checkSum >> 0x10));
+			size += 2;
+		}
 	}
+
+	free(buf);
 
 	checkSum = 0xffff & (checkSum + (checkSum >> 0x10));
 	checkSum += size;
