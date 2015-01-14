@@ -2059,9 +2059,16 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader, int p
 		X509 *cert = sk_X509_value(signers, i);
 		char *subject = X509_NAME_oneline(X509_get_subject_name(cert), NULL, 0);
 		char *issuer = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
-		printf("\tSigner #%d:\n\t\tSubject: %s\n\t\tIssuer : %s\n", i, subject, issuer);
+		BIGNUM *serialbn = ASN1_INTEGER_to_BN(X509_get_serialNumber(cert), NULL);
+		char *serial = BN_bn2hex(serialbn);
+		if (i > 0)
+			printf("\t------------------\n");
+		printf("\tSigner #%d:\n\t\tSubject: %s\n\t\tIssuer : %s\n\t\tSerial : %s\n",
+			   i, subject, issuer, serial);
 		OPENSSL_free(subject);
 		OPENSSL_free(issuer);
+		OPENSSL_free(serial);
+		BN_free(serialbn);
 
 		if (leafhash != NULL && leafok == 0) {
 			leafok = verify_leaf_hash(cert, leafhash) == 0;
@@ -2074,9 +2081,16 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader, int p
 		X509 *cert = sk_X509_value(p7->d.sign->cert, i);
 		char *subject = X509_NAME_oneline(X509_get_subject_name(cert), NULL, 0);
 		char *issuer = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
-		printf("\tCert #%d:\n\t\tSubject: %s\n\t\tIssuer : %s\n", i, subject, issuer);
+		BIGNUM *serialbn = ASN1_INTEGER_to_BN(X509_get_serialNumber(cert), NULL);
+		char *serial = BN_bn2hex(serialbn);
+		if (i > 0)
+			printf("\t------------------\n");
+		printf("\tCert #%d:\n\t\tSubject: %s\n\t\tIssuer : %s\n\t\tSerial : %s\n",
+			   i, subject, issuer, serial);
 		OPENSSL_free(subject);
 		OPENSSL_free(issuer);
+		OPENSSL_free(serial);
+		BN_free(serialbn);
 	}
 
 	if (leafhash != NULL) {
