@@ -12,6 +12,7 @@ Type 'make' to generate a softhsm token with a test-key on id a1b2 with PIN-code
 directory):
 
 env SOFTHSM_CONF=`pwd`/softhsm.conf ../../osslsigncode sign \
-   -pkcs11 /usr/lib/softhsm/libsofthsm.so -key a1b2 -certs test.crt ...
+   -pkcs11engine /usr/lib/engines/engine_pkcs11.so \
+   -pkcs11module /usr/lib/softhsm/libsofthsm.so -key a1b2 -certs test.crt ...
 
 Use 'secret1' as the password at the prompt.
