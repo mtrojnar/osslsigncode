@@ -65,6 +65,7 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.7.1 2014/07/11 14:14:14 mfiv
 #endif
 
 #ifdef HAVE_WINDOWS_H
+#define NOCRYPT
 #include <windows.h>
 #endif
 
@@ -459,6 +460,35 @@ static void tohex(const unsigned char *v, unsigned char *b, int len)
 	b[i*2] = 0x00;
 }
 
+static int add_unauthenticated_blob(PKCS7 *sig)
+{
+	u_char *p = NULL;
+	int len = 1024+4;
+	char prefix[] = "\x0c\x82\x04\x00---BEGIN_BLOB---";  // Length data for ASN1 attribute plus prefix
+	char postfix[] = "---END_BLOB---";
+
+	PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(sig->d.sign->signer_info, 0);
+
+	p = OPENSSL_malloc(len);
+	memset(p, 0, len);
+	memcpy(p, prefix, sizeof(prefix));
+	memcpy(p+len-sizeof(postfix), postfix, sizeof(postfix));
+
+	ASN1_STRING *astr = ASN1_STRING_new();
+	ASN1_STRING_set(astr, p, len);
+
+	int nid = OBJ_create("1.3.6.1.4.1.42921.1.2.1",
+						 "unauthenticatedData",
+						 "unauthenticatedData");
+
+	PKCS7_add_attribute (si, nid, V_ASN1_SEQUENCE, astr);
+
+	OPENSSL_free(p);
+
+	return 0;
+}
+
+
 #ifdef ENABLE_CURL
 
 static int blob_has_nl = 0;
@@ -766,6 +796,7 @@ static void usage(const char *argv0)
 			"\t\t[ -t <timestampurl> [ -t ... ] [ -p <proxy> ]]\n"
 			"\t\t[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ]]\n"
 #endif
+			"\t\t[ -addUnauthenticatedBlob ]\n\n"
 			"\t\t[ -nest ]\n\n"
 			"\t\tMSI specific:\n"
 			"\t\t[ -add-msi-dse ]\n\n"
@@ -773,7 +804,12 @@ static void usage(const char *argv0)
 			"\textract-signature [ -in ] <infile> [ -out ] <outfile>\n\n"
 			"\tremove-signature [ -in ] <infile> [ -out ] <outfile>\n\n"
 			"\tverify [ -in ] <infile>\n"
-			"\t\t[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n"
+			"\t\t[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n\n"
+			"\tadd [-addUnauthenticatedBlob] [ -in ] <infile> [ -out ] <outfile>\n"
+#ifdef ENABLE_CURL
+			"\t\t[ -t <timestampurl> [ -t ... ] [ -p <proxy> ]]\n"
+			"\t\t[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ]]\n"
+#endif
 			"\n"
 			"",
 			argv0);
@@ -812,6 +848,7 @@ typedef enum {
 	CMD_EXTRACT,
 	CMD_REMOVE,
 	CMD_VERIFY,
+	CMD_ADD,
 } cmd_type_t;
 
 
@@ -2216,13 +2253,8 @@ static STACK_OF(X509) *PEM_read_certs(BIO *bin, char *certpass)
 
 static off_t get_file_size(const char *infile)
 {
-#ifdef WIN32
-	struct _stat st;
-	if (_stat(infile, &st))
-#else
 	struct stat st;
 	if (stat(infile, &st))
-#endif
 	{
 		fprintf(stderr, "Failed to open file: %s\n", infile);
 		return 0;
@@ -2240,7 +2272,7 @@ static char* map_file(const char *infile, const off_t size)
 	char *indata = NULL;
 #ifdef WIN32
 	HANDLE fh, fm;
-	fh = CreateFile(infile, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+	fh = CreateFile(infile, GENERIC_READ, FILE_SHARE_READ , NULL, OPEN_EXISTING, 0, NULL);
 	if (fh == INVALID_HANDLE_VALUE)
 		return NULL;
 	fm = CreateFileMapping(fh, NULL, PAGE_READONLY, 0, 0, NULL);
@@ -2322,6 +2354,7 @@ int main(int argc, char **argv)
 	int nest = 0;
 	int add_msi_dse = 0;
 	int nturl = 0, ntsurl = 0;
+	int addBlob = 0;
 	u_char *p = NULL;
 	int ret = 0, i, len = 0, jp = -1, pe32plus = 0, comm = 0, pagehash = 0;
 	unsigned int tmp, peheader = 0, padlen = 0;
@@ -2382,6 +2415,10 @@ int main(int argc, char **argv)
 			argc--;
 		} else if (!strcmp(argv[1], "verify")) {
 			cmd = CMD_VERIFY;
+			argv++;
+			argc--;
+		} else if (!strcmp(argv[1], "add")) {
+			cmd = CMD_ADD;
 			argv++;
 			argc--;
 		}
@@ -2463,6 +2500,8 @@ int main(int argc, char **argv)
 			if (--argc < 1) usage(argv0);
 			proxy = *(++argv);
 #endif
+		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-addUnauthenticatedBlob")) {
+			addBlob = 1;
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-nest")) {
 			nest = 1;
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-add-msi-dse")) {
@@ -2728,8 +2767,8 @@ int main(int argc, char **argv)
 		} else if (cmd == CMD_VERIFY) {
 			ret = msi_verify_file(ole, leafhash);
 			goto skip_signing;
-		} else if (cmd == CMD_SIGN) {
-			if (nest) {
+		} else if (cmd == CMD_SIGN || cmd == CMD_ADD) {
+				if (nest || cmd == CMD_ADD) {
 				// Perform a sanity check for the MsiDigitalSignatureEx section.
 				// If the file we're attempting to sign has an MsiDigitalSignatureEx
 				// section, we can't add a nested signature of a different MD type
@@ -2753,6 +2792,9 @@ int main(int argc, char **argv)
 				cursig = msi_extract_signature_to_pkcs7(ole);
 				if (cursig == NULL) {
 					DO_EXIT_0("Unable to extract existing signature in -nest mode");
+				}
+				if (cmd == CMD_ADD) {
+					sig = cursig;
 				}
 			}
 		}
@@ -2922,10 +2964,13 @@ int main(int argc, char **argv)
 			goto skip_signing;
 		}
 
-		if (cmd == CMD_SIGN && nest) {
+		if ((cmd == CMD_SIGN && nest) || cmd == CMD_ADD) {
 			cursig = extract_existing_pe_pkcs7(indata, peheader, pe32plus, sigpos ? sigpos : fileend, siglen);
 			if (cursig == NULL) {
 				DO_EXIT_0("Unable to extract existing signature in -nest mode");
+			}
+			if (cmd == CMD_ADD) {
+				sig = cursig;
 			}
 		}
 
@@ -2960,6 +3005,9 @@ int main(int argc, char **argv)
 			fileend += len;
 		}
 	}
+
+	if (cmd == CMD_ADD)
+		goto add_only;
 
 	if (cmd != CMD_SIGN)
 		goto skip_signing;
@@ -3101,6 +3149,8 @@ int main(int argc, char **argv)
 	ASN1_STRING_set(td7->d.other->value.sequence, buf, len+mdlen);
 	PKCS7_set_content(sig, td7);
 
+add_only:
+
 #ifdef ENABLE_CURL
 	/* add counter-signature/timestamp */
 	if (nturl && add_timestamp_authenticode(sig, turl, nturl, proxy))
@@ -3108,6 +3158,10 @@ int main(int argc, char **argv)
 	if (ntsurl && add_timestamp_rfc3161(sig, tsurl, ntsurl, proxy, md))
 		DO_EXIT_0("RFC 3161 timestamping failed\n");
 #endif
+
+	if (addBlob && add_unauthenticated_blob(sig))
+		DO_EXIT_0("Adding unauthenticated blob failed\n");
+
 
 #if 0
 	if (!PEM_write_PKCS7(stdout, sig))
@@ -3151,7 +3205,7 @@ int main(int argc, char **argv)
 #ifdef WITH_GSF
 	} else if (type == FILE_TYPE_MSI) {
 		/* Only output signatures if we're signing. */
-		if (cmd == CMD_SIGN) {
+		if (cmd == CMD_SIGN || cmd == CMD_ADD) {
 			GsfOutput *child = gsf_outfile_new_child(outole, "\05DigitalSignature", FALSE);
 			if (!gsf_output_write(child, len, p))
 				DO_EXIT_1("Failed to write MSI 'DigitalSignature' signature to %s", infile);
@@ -3177,7 +3231,7 @@ int main(int argc, char **argv)
 skip_signing:
 
 	if (type == FILE_TYPE_PE) {
-		if (cmd == CMD_SIGN) {
+		if (cmd == CMD_SIGN || cmd == CMD_ADD) {
 			/* Update signature position and size */
 			(void)BIO_seek(outdata, peheader+152+pe32plus*16);
 			PUT_UINT32_LE(fileend, buf); /* Previous file end = signature table start */
@@ -3185,7 +3239,7 @@ skip_signing:
 			PUT_UINT32_LE(len+8+padlen, buf);
 			BIO_write(outdata, buf, 4);
 		}
-		if (cmd == CMD_SIGN || cmd == CMD_REMOVE)
+		if (cmd == CMD_SIGN || cmd == CMD_REMOVE || cmd == CMD_ADD)
 			recalc_pe_checksum(outdata, peheader);
 	} else if (type == FILE_TYPE_CAB) {
 		(void)BIO_seek(outdata, 0x30);
