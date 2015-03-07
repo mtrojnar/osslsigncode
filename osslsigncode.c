@@ -3056,20 +3056,22 @@ int main(int argc, char **argv)
 	for(i = sk_X509_num(certs)-1; i>=0; i--)
 		PKCS7_add_certificate(sig, sk_X509_value(certs, i));
 
-	if (p7 == NULL) {
+	if (p7 == NULL || certs != p7->d.sign->cert) {
 		sk_X509_free(certs);
-	} else {
+		certs = NULL;
+	}
+	if (p7) {
 		PKCS7_free(p7);
 		p7 = NULL;
 	}
-	certs = NULL;
-	if (p7x == NULL) {
+	if (xcerts) {
 		sk_X509_free(xcerts);
-	} else {
+		xcerts = NULL;
+	}
+	if (p7x) {
 		PKCS7_free(p7x);
 		p7x = NULL;
 	}
-	xcerts = NULL;
 
 	get_indirect_data_blob(&p, &len, md, type, pagehash, indata, peheader, pe32plus, fileend);
 	len -= EVP_MD_size(md);
@@ -3206,18 +3208,16 @@ err_cleanup:
 		pass = NULL;
 	}
 	ERR_print_errors_fp(stderr);
+	if (certs && (p7 == NULL || certs != p7->d.sign->cert))
+		sk_X509_free(certs);
 	if (p7)
 		PKCS7_free(p7);
-	else if (certs)
-		sk_X509_free(certs);
 	if (p7x)
 		PKCS7_free(p7x);
-	else if (xcerts)
+	if (xcerts)
 		sk_X509_free(xcerts);
 	if (cert)
 		X509_free(cert);
-	if (certs)
-		sk_X509_free(certs);
 	if (pkey)
 		EVP_PKEY_free(pkey);
 	if (hash)
