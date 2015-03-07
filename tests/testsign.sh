@@ -1,5 +1,16 @@
 #!/bin/sh
 
+rm -f putty*.exe
+
+PUTTY_URL="http://the.earth.li/~sgtatham/putty/0.64/x86/putty.exe"
+[ -f putty.exe ] || wget -q -O putty.exe $PUTTY_URL
+[ -f putty.exe ] || curl -o putty.exe $PUTTY_URL
+
+if [ ! -f putty.exe ]; then
+    echo "FAIL: Couldn't download putty.exe"
+    exit 1
+fi
+
 rm -f key.* cert.*
 
 keytool -genkey \
@@ -12,6 +23,7 @@ LaLaLand
 SE
 yes
 EOF
+
 
 echo "Converting key/cert to PKCS12 container"
 keytool -importkeystore \
@@ -35,7 +47,6 @@ echo "Converting cert to SPC format"
 openssl crl2pkcs7 -nocrl -certfile cert.pem -outform DER -out cert.spc
 
 
-wget -q -O putty.exe http://the.earth.li/~sgtatham/putty/latest/x86/putty.exe
 ../osslsigncode sign -spc cert.spc -key key.pem putty.exe putty1.exe
 ../osslsigncode sign -certs cert.spc -key keyp.pem -pass passme putty.exe putty2.exe
 ../osslsigncode sign -certs cert.pem -key keyp.pem -pass passme putty.exe putty3.exe

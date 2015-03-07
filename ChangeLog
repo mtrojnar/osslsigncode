@@ -1,3 +1,8 @@
+=== 1.8 (2015-xx-xx)
+
+- add support for pkcs11-based hardware tokens
+	(Patch from Leif Johansson)
+
 === 1.7.1 (2014-07-11)
 
 - MSI: added -add-msi-dse option
