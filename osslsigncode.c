@@ -489,6 +489,8 @@ static int add_unauthenticated_blob(PKCS7 *sig)
 }
 
 
+static int g_verbose = 0;
+
 #ifdef ENABLE_CURL
 
 static int blob_has_nl = 0;
@@ -499,6 +501,19 @@ static size_t curl_write( void *ptr, size_t sz, size_t nmemb, void *stream)
 			blob_has_nl = 1;
 	}
 	return BIO_write((BIO*)stream, ptr, sz*nmemb);
+}
+
+static void print_timestamp_error(const char *url, long http_code)
+{
+    if (http_code != -1) {
+        fprintf(stderr, "Failed to convert timestamp reply from %s; "
+                "HTTP status %ld\n", url, http_code);
+    } else {
+        fprintf(stderr, "Failed to convert timestamp reply from %s; "
+                "no HTTP status available", url);
+    }
+
+    ERR_print_errors_fp(stderr);
 }
 
 /*
@@ -640,16 +655,25 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 	} else {
 		(void)BIO_flush(bin);
 
+		long http_code = -1;
+		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+		/*
+		 * At this point we could also look at the response body (and perhaps
+		 * log it if we fail to decode the response):
+		 *
+		 *     char *resp_body = NULL;
+		 *     long resp_body_len = BIO_get_mem_data(bin, &resp_body);
+		 */
+
 		if (rfc3161) {
 			TimeStampResp *reply;
 			(void)BIO_flush(bin);
 			reply = ASN1_item_d2i_bio(ASN1_ITEM_rptr(TimeStampResp), bin, NULL);
 			BIO_free_all(bin);
 			if (!reply) {
-				if (verbose) {
-					fprintf(stderr, "Failed to convert timestamp reply\n");
-					ERR_print_errors_fp(stderr);
-				}
+				if (verbose)
+					print_timestamp_error(url, http_code);
 				return -1;
 			}
 			if (ASN1_INTEGER_get(reply->status->status) != 0) {
@@ -691,10 +715,8 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 			p7 = d2i_PKCS7_bio(b64_bin, NULL);
 			if (p7 == NULL) {
 				BIO_free_all(b64_bin);
-				if (verbose) {
-					fprintf(stderr, "Failed to convert timestamp reply\n");
-					ERR_print_errors_fp(stderr);
-				}
+				if (verbose)
+					print_timestamp_error(url, http_code);
 				return -1;
 			}
 			BIO_free_all(b64_bin);
@@ -735,7 +757,7 @@ static int add_timestamp_authenticode(PKCS7 *sig, char **url, int nurls, char *p
 {
 	int i;
 	for (i=0; i<nurls; i++) {
-		int res = add_timestamp(sig, url[i], proxy, 0, NULL, nurls == 1);
+		int res = add_timestamp(sig, url[i], proxy, 0, NULL, g_verbose || nurls == 1);
 		if (!res) return 0;
 	}
 	return -1;
@@ -745,7 +767,7 @@ static int add_timestamp_rfc3161(PKCS7 *sig, char **url, int nurls, char *proxy,
 {
 	int i;
 	for (i=0; i<nurls; i++) {
-		int res = add_timestamp(sig, url[i], proxy, 1, md, nurls == 1);
+		int res = add_timestamp(sig, url[i], proxy, 1, md, g_verbose || nurls == 1);
 		if (!res) return 0;
 	}
 	return -1;
@@ -798,6 +820,7 @@ static void usage(const char *argv0)
 #endif
 			"\t\t[ -addUnauthenticatedBlob ]\n\n"
 			"\t\t[ -nest ]\n\n"
+			"\t\t[ -verbose ]\n\n"
 			"\t\tMSI specific:\n"
 			"\t\t[ -add-msi-dse ]\n\n"
 			"\t\t[ -in ] <infile> [-out ] <outfile>\n\n"
@@ -2504,6 +2527,8 @@ int main(int argc, char **argv)
 			addBlob = 1;
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-nest")) {
 			nest = 1;
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-verbose")) {
+			g_verbose = 1;
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-add-msi-dse")) {
 			add_msi_dse = 1;
 		} else if ((cmd == CMD_VERIFY) && !strcmp(*argv, "-require-leaf-hash")) {
@@ -3289,4 +3314,6 @@ Local Variables:
    tab-width: 4
    indent-tabs-mode: t
 End:
+
+  vim: set ts=4 :
 */

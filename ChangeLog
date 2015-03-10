@@ -2,6 +2,8 @@
 
 - add support for pkcs11-based hardware tokens
 	(Patch from Leif Johansson)
+- improved error reporting of timestamping errors
+        (Patch from Carlo Teubner)
 
 === 1.7.1 (2014-07-11)
 
