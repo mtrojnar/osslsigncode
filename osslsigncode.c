@@ -824,7 +824,7 @@ static void usage(const char *argv0)
 			"\t\tMSI specific:\n"
 			"\t\t[ -add-msi-dse ]\n\n"
 			"\t\t[ -in ] <infile> [-out ] <outfile>\n\n"
-			"\textract-signature [ -in ] <infile> [ -out ] <outfile>\n\n"
+			"\textract-signature [ -pem ] [ -in ] <infile> [ -out ] <outfile>\n\n"
 			"\tremove-signature [ -in ] <infile> [ -out ] <outfile>\n\n"
 			"\tverify [ -in ] <infile>\n"
 			"\t\t[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n\n"
@@ -2369,6 +2369,7 @@ int main(int argc, char **argv)
 	char *xcertfile, *certfile, *keyfile, *pvkfile, *pkcs12file, *infile, *outfile, *desc, *url, *indata;
 	char *p11engine, *p11module;
 	char *pass = NULL, *readpass = NULL;
+	int output_pkcs7 = 0;
 	int askpass = 0;
 	char *leafhash = NULL;
 #ifdef ENABLE_CURL
@@ -2466,6 +2467,8 @@ int main(int argc, char **argv)
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs12")) {
 			if (--argc < 1) usage(argv0);
 			pkcs12file = *(++argv);
+		} else if ((cmd == CMD_EXTRACT) && !strcmp(*argv, "-pem")) {
+			output_pkcs7 = 1;
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11engine")) {
 			if (--argc < 1) usage(argv0);
 			p11engine = *(++argv);
@@ -2787,7 +2790,18 @@ int main(int argc, char **argv)
 		ole = gsf_infile_msole_new(src, NULL);
 
 		if (cmd == CMD_EXTRACT) {
-			ret = msi_extract_signature_to_file(ole, outfile);
+			if(output_pkcs7) {
+				sig = msi_extract_signature_to_pkcs7(ole);
+				if (!sig)
+					DO_EXIT_0("Unable to extract existing signature.");
+				outdata = BIO_new_file(outfile, "w+b");
+				if (outdata == NULL)
+					DO_EXIT_1("Unable to open %s\n\n", outfile);
+				ret = !PEM_write_bio_PKCS7(outdata, sig);
+				BIO_free_all(outdata);
+			}
+			else
+				ret = msi_extract_signature_to_file(ole, outfile);
 			goto skip_signing;
 		} else if (cmd == CMD_VERIFY) {
 			ret = msi_verify_file(ole, leafhash);
