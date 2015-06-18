@@ -826,6 +826,7 @@ static void usage(const char *argv0)
 			"\t\t[ -in ] <infile> [-out ] <outfile>\n\n"
 			"\textract-signature [ -pem ] [ -in ] <infile> [ -out ] <outfile>\n\n"
 			"\tremove-signature [ -in ] <infile> [ -out ] <outfile>\n\n"
+			"\tattach-signature [ -sigin ] <sigfile> [ -in ] <infile> [ -out ] <outfile>\n\n"
 			"\tverify [ -in ] <infile>\n"
 			"\t\t[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n\n"
 			"\tadd [-addUnauthenticatedBlob] [ -in ] <infile> [ -out ] <outfile>\n"
@@ -872,6 +873,7 @@ typedef enum {
 	CMD_REMOVE,
 	CMD_VERIFY,
 	CMD_ADD,
+	CMD_ATTACH,
 } cmd_type_t;
 
 
@@ -2366,7 +2368,7 @@ int main(int argc, char **argv)
 
 	const char *argv0 = argv[0];
 	static char buf[64*1024];
-	char *xcertfile, *certfile, *keyfile, *pvkfile, *pkcs12file, *infile, *outfile, *desc, *url, *indata;
+	char *xcertfile, *certfile, *keyfile, *pvkfile, *pkcs12file, *infile, *outfile, *sigfile, *desc, *url, *indata, *insigdata, *outdataverify;
 	char *p11engine, *p11module;
 	char *pass = NULL, *readpass = NULL;
 	int output_pkcs7 = 0;
@@ -2382,7 +2384,7 @@ int main(int argc, char **argv)
 	u_char *p = NULL;
 	int ret = 0, i, len = 0, jp = -1, pe32plus = 0, comm = 0, pagehash = 0;
 	unsigned int tmp, peheader = 0, padlen = 0;
-	off_t filesize, fileend;
+	off_t filesize, fileend, sigfilesize, sigfileend, outdatasize;
 	file_type_t type;
 	cmd_type_t cmd = CMD_SIGN;
 	char *failarg = NULL;
@@ -2408,7 +2410,7 @@ int main(int argc, char **argv)
 	int len_msiex = 0;
 #endif
 
-	xcertfile = certfile = keyfile = pvkfile = pkcs12file = p11module = p11engine = infile = outfile = desc = url = NULL;
+	xcertfile = certfile = keyfile = pvkfile = pkcs12file = p11module = p11engine = infile = outfile = sigfile = desc = url = NULL;
 	hash = outdata = NULL;
 
 	/* Set up OpenSSL */
@@ -2433,6 +2435,10 @@ int main(int argc, char **argv)
 			cmd = CMD_EXTRACT;
 			argv++;
 			argc--;
+		} else if (!strcmp(argv[1], "attach-signature")) {
+			cmd = CMD_ATTACH;
+			argv++;
+                        argc--;
 		} else if (!strcmp(argv[1], "remove-signature")) {
 			cmd = CMD_REMOVE;
 			argv++;
@@ -2455,6 +2461,9 @@ int main(int argc, char **argv)
 		} else if (!strcmp(*argv, "-out")) {
 			if (--argc < 1) usage(argv0);
 			outfile = *(++argv);
+		} else if (!strcmp(*argv, "-sigin")) {
+			if (--argc < 1) usage(argv0);
+			sigfile = *(++argv);
 		} else if ((cmd == CMD_SIGN) && (!strcmp(*argv, "-spc") || !strcmp(*argv, "-certs"))) {
 			if (--argc < 1) usage(argv0);
 			certfile = *(++argv);
@@ -2528,7 +2537,7 @@ int main(int argc, char **argv)
 #endif
 		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-addUnauthenticatedBlob")) {
 			addBlob = 1;
-		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-nest")) {
+		} else if ((cmd == CMD_SIGN || cmd == CMD_ATTACH) && !strcmp(*argv, "-nest")) {
 			nest = 1;
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-verbose")) {
 			g_verbose = 1;
@@ -2806,7 +2815,7 @@ int main(int argc, char **argv)
 		} else if (cmd == CMD_VERIFY) {
 			ret = msi_verify_file(ole, leafhash);
 			goto skip_signing;
-		} else if (cmd == CMD_SIGN || cmd == CMD_ADD) {
+		} else if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
 				if (nest || cmd == CMD_ADD) {
 				// Perform a sanity check for the MsiDigitalSignatureEx section.
 				// If the file we're attempting to sign has an MsiDigitalSignatureEx
@@ -2999,11 +3008,18 @@ int main(int argc, char **argv)
 		if (cmd == CMD_EXTRACT) {
 			/* A lil' bit of ugliness. Reset stream, write signature and skip forward */
 			(void)BIO_reset(outdata);
-			BIO_write(outdata, indata + sigpos, siglen);
+			if(output_pkcs7) {
+				sig = extract_existing_pe_pkcs7(indata, peheader, pe32plus, sigpos ? sigpos : fileend, siglen);
+				if (!sig)
+					DO_EXIT_0("Unable to extract existing signature.");
+				PEM_write_bio_PKCS7(outdata, sig);
+			}
+			else
+				BIO_write(outdata, indata + sigpos, siglen);
 			goto skip_signing;
 		}
 
-		if ((cmd == CMD_SIGN && nest) || cmd == CMD_ADD) {
+		if ((cmd == CMD_SIGN && nest) || (cmd == CMD_ATTACH && nest) || cmd == CMD_ADD) {
 			cursig = extract_existing_pe_pkcs7(indata, peheader, pe32plus, sigpos ? sigpos : fileend, siglen);
 			if (cursig == NULL) {
 				DO_EXIT_0("Unable to extract existing signature in -nest mode");
@@ -3047,6 +3063,40 @@ int main(int argc, char **argv)
 
 	if (cmd == CMD_ADD)
 		goto add_only;
+
+	if(cmd == CMD_ATTACH)
+	{
+		const char pemhdr[] = "-----BEGIN PKCS7-----";
+		sigfilesize = get_file_size(sigfile);
+		if(!sigfilesize)
+			goto err_cleanup;
+		insigdata = map_file(sigfile, sigfilesize);
+		if (insigdata == NULL)
+			DO_EXIT_1("Failed to open file: %s\n", infile);
+
+		if (sigfilesize >= sizeof(pemhdr) && !memcmp(insigdata, pemhdr, sizeof(pemhdr)-1))
+		{
+			sigbio = BIO_new_mem_buf(insigdata, sigfilesize);
+			sig = PEM_read_bio_PKCS7(sigbio, NULL, NULL, NULL);
+			BIO_free_all(sigbio);
+		}
+		else {
+			if (type == FILE_TYPE_PE) {
+				sig = extract_existing_pe_pkcs7(insigdata, peheader, pe32plus, 0, sigfilesize);
+			}
+			else if (type == FILE_TYPE_MSI) {
+#ifdef WITH_GSF
+				const unsigned char *p = insigdata;
+				sig = d2i_PKCS7(NULL, &p, sigfilesize);
+#else
+	                        DO_EXIT_1("libgsf is not available, msi support is disabled: %s\n", infile);
+#endif
+			}
+		}
+		if (!sig)
+			DO_EXIT_0("No valid signature found.");
+		goto add_only;
+	}
 
 	if (cmd != CMD_SIGN)
 		goto skip_signing;
@@ -3244,7 +3294,7 @@ add_only:
 #ifdef WITH_GSF
 	} else if (type == FILE_TYPE_MSI) {
 		/* Only output signatures if we're signing. */
-		if (cmd == CMD_SIGN || cmd == CMD_ADD) {
+		if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
 			GsfOutput *child = gsf_outfile_new_child(outole, "\05DigitalSignature", FALSE);
 			if (!gsf_output_write(child, len, p))
 				DO_EXIT_1("Failed to write MSI 'DigitalSignature' signature to %s", infile);
@@ -3270,7 +3320,7 @@ add_only:
 skip_signing:
 
 	if (type == FILE_TYPE_PE) {
-		if (cmd == CMD_SIGN || cmd == CMD_ADD) {
+		if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
 			/* Update signature position and size */
 			(void)BIO_seek(outdata, peheader+152+pe32plus*16);
 			PUT_UINT32_LE(fileend, buf); /* Previous file end = signature table start */
@@ -3278,7 +3328,7 @@ skip_signing:
 			PUT_UINT32_LE(len+8+padlen, buf);
 			BIO_write(outdata, buf, 4);
 		}
-		if (cmd == CMD_SIGN || cmd == CMD_REMOVE || cmd == CMD_ADD)
+		if (cmd == CMD_SIGN || cmd == CMD_REMOVE || cmd == CMD_ADD || cmd == CMD_ATTACH)
 			recalc_pe_checksum(outdata, peheader);
 	} else if (type == FILE_TYPE_CAB) {
 		(void)BIO_seek(outdata, 0x30);
@@ -3289,8 +3339,49 @@ skip_signing:
 	BIO_free_all(hash);
 	hash = outdata = NULL;
 
-	printf(ret ? "Failed\n" : "Succeeded\n");
+	if (cmd == CMD_ATTACH) {
+		if (type == FILE_TYPE_PE) {
+			outdatasize = get_file_size(outfile);
+			if (!outdatasize)
+				DO_EXIT_0("Error verifying result.\n");
+			outdataverify = map_file(outfile, outdatasize);
+			if (!outdataverify)
+				DO_EXIT_0("Error verifying result.\n");
+			int sigpos = GET_UINT32_LE(outdataverify + peheader + 152 + pe32plus*16);
+			int siglen = GET_UINT32_LE(outdataverify + peheader + 152 + pe32plus*16 + 4);
+			ret = verify_pe_file(outdataverify, peheader, pe32plus, sigpos, siglen, leafhash);
+			if (ret) {
+				DO_EXIT_0("Signature mismatch.\n");
+			}
+		}
+		else if (type == FILE_TYPE_MSI)
+		{
+#ifdef WITH_GSF
+			GsfInput *src;
+			GsfInfile *ole;
 
+			src = gsf_input_stdio_new(outfile, NULL);
+			if (!src)
+				DO_EXIT_1("Error opening file %s", outfile);
+			ole = gsf_infile_msole_new(src, NULL);
+			g_object_unref(src);
+			ret = msi_verify_file(ole, leafhash);
+			g_object_unref(ole);
+			if (ret) {
+				DO_EXIT_0("Signature mismatch.\n");
+			}
+#else
+			DO_EXIT_1("libgsf is not available, msi support is disabled: %s\n", infile);
+#endif
+		}
+		else
+		{
+			DO_EXIT_1("Unknown input type for file: %s\n", infile);
+		}
+		printf("Signature successfully attached.\n");
+	}
+        else
+		printf(ret ? "Failed\n" : "Succeeded\n");
 	cleanup_lib_state();
 
 	return ret;
