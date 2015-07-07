@@ -546,7 +546,7 @@ static void print_timestamp_error(const char *url, long http_code)
 
 */
 
-static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const EVP_MD *md, int verbose)
+static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const EVP_MD *md, int verbose, int noverifypeer)
 {
 	CURL *curl;
 	struct curl_slist *slist = NULL;
@@ -572,6 +572,9 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 /*	  curl_easy_setopt(curl, CURLOPT_VERBOSE, 42);	*/
+
+	if (noverifypeer)
+		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, FALSE);
 
 	if (rfc3161) {
 		slist = curl_slist_append(slist, "Content-Type: application/timestamp-query");
@@ -753,21 +756,21 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 	return (int)c;
 }
 
-static int add_timestamp_authenticode(PKCS7 *sig, char **url, int nurls, char *proxy)
+static int add_timestamp_authenticode(PKCS7 *sig, char **url, int nurls, char *proxy, int noverifypeer)
 {
 	int i;
 	for (i=0; i<nurls; i++) {
-		int res = add_timestamp(sig, url[i], proxy, 0, NULL, g_verbose || nurls == 1);
+		int res = add_timestamp(sig, url[i], proxy, 0, NULL, g_verbose || nurls == 1, noverifypeer);
 		if (!res) return 0;
 	}
 	return -1;
 }
 
-static int add_timestamp_rfc3161(PKCS7 *sig, char **url, int nurls, char *proxy, const EVP_MD *md)
+static int add_timestamp_rfc3161(PKCS7 *sig, char **url, int nurls, char *proxy, const EVP_MD *md, int noverifypeer)
 {
 	int i;
 	for (i=0; i<nurls; i++) {
-		int res = add_timestamp(sig, url[i], proxy, 1, md, g_verbose || nurls == 1);
+		int res = add_timestamp(sig, url[i], proxy, 1, md, g_verbose || nurls == 1, noverifypeer);
 		if (!res) return 0;
 	}
 	return -1;
@@ -815,8 +818,8 @@ static void usage(const char *argv0)
 			"\t\t[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n"
 			"\t\t[ -ph ]\n"
 #ifdef ENABLE_CURL
-			"\t\t[ -t <timestampurl> [ -t ... ] [ -p <proxy> ]]\n"
-			"\t\t[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ]]\n"
+			"\t\t[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n"
+			"\t\t[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n"
 #endif
 			"\t\t[ -addUnauthenticatedBlob ]\n\n"
 			"\t\t[ -nest ]\n\n"
@@ -831,8 +834,8 @@ static void usage(const char *argv0)
 			"\t\t[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n\n"
 			"\tadd [-addUnauthenticatedBlob] [ -in ] <infile> [ -out ] <outfile>\n"
 #ifdef ENABLE_CURL
-			"\t\t[ -t <timestampurl> [ -t ... ] [ -p <proxy> ]]\n"
-			"\t\t[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ]]\n"
+			"\t\t[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n"
+			"\t\t[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n"
 #endif
 			"\n"
 			"",
@@ -2376,6 +2379,7 @@ int main(int argc, char **argv)
 	char *leafhash = NULL;
 #ifdef ENABLE_CURL
 	char *turl[MAX_TS_SERVERS], *proxy = NULL, *tsurl[MAX_TS_SERVERS];
+	int noverifypeer = 0;
 #endif
 	int nest = 0;
 	int add_msi_dse = 0;
@@ -2534,6 +2538,8 @@ int main(int argc, char **argv)
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-p")) {
 			if (--argc < 1) usage(argv0);
 			proxy = *(++argv);
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-noverifypeer")) {
+			noverifypeer = 1;
 #endif
 		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-addUnauthenticatedBlob")) {
 			addBlob = 1;
@@ -2545,7 +2551,7 @@ int main(int argc, char **argv)
 			add_msi_dse = 1;
 		} else if ((cmd == CMD_VERIFY) && !strcmp(*argv, "-require-leaf-hash")) {
 			if (--argc < 1) usage(argv0);
-			leafhash = (*++argv); 
+			leafhash = (*++argv);
 		} else if (!strcmp(*argv, "-v") || !strcmp(*argv, "--version")) {
 			printf(PACKAGE_STRING ", using:\n\t%s\n\t%s\n",
 				   SSLeay_version(SSLEAY_VERSION),
@@ -3242,9 +3248,9 @@ add_only:
 
 #ifdef ENABLE_CURL
 	/* add counter-signature/timestamp */
-	if (nturl && add_timestamp_authenticode(sig, turl, nturl, proxy))
+	if (nturl && add_timestamp_authenticode(sig, turl, nturl, proxy, noverifypeer))
 		DO_EXIT_0("authenticode timestamping failed\n");
-	if (ntsurl && add_timestamp_rfc3161(sig, tsurl, ntsurl, proxy, md))
+	if (ntsurl && add_timestamp_rfc3161(sig, tsurl, ntsurl, proxy, md, noverifypeer))
 		DO_EXIT_0("RFC 3161 timestamping failed\n");
 #endif
 
