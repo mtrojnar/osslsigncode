@@ -1,7 +1,7 @@
 /*
    OpenSSL based Authenticode signing for PE/MSI/Java CAB files.
 
-	 Copyright (C) 2005-2014 Per Allansson <pallansson@gmail.com>
+	 Copyright (C) 2005-2015 Per Allansson <pallansson@gmail.com>
 
 
    This program is free software: you can redistribute it and/or modify
@@ -61,29 +61,36 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.7.1 2014/07/11 14:14:14 mfiv
 */
 
 #ifdef HAVE_CONFIG_H
-#include <config.h>
+#include "config.h"
 #endif
 
 #ifdef HAVE_WINDOWS_H
 #define NOCRYPT
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+typedef unsigned char u_char;
 #endif
 
 #include <stdio.h>
 #include <stdlib.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <string.h>
 #include <time.h>
 #include <ctype.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+
+#ifndef _WIN32
 #ifdef HAVE_SYS_MMAN_H
 #include <sys/mman.h>
 #endif
 
 #ifdef HAVE_TERMIOS_H
 #include <termios.h>
+#endif
 #endif
 
 #ifdef WITH_GSF
@@ -110,6 +117,11 @@ static const char *rcsid = "$Id: osslsigncode.c,v 1.7.1 2014/07/11 14:14:14 mfiv
 #endif
 
 #ifdef ENABLE_CURL
+#ifdef __CYGWIN__
+#ifndef SOCKET
+#define SOCKET UINT_PTR
+#endif
+#endif
 #include <curl/curl.h>
 
 #define MAX_TS_SERVERS 256
@@ -2289,8 +2301,15 @@ static STACK_OF(X509) *PEM_read_certs(BIO *bin, char *certpass)
 
 static off_t get_file_size(const char *infile)
 {
+	int ret;
+#ifdef _WIN32
+	struct _stat st;
+	ret = _stat(infile, &st);
+#else
 	struct stat st;
-	if (stat(infile, &st))
+	ret = stat(infile, &st);
+#endif
+	if (ret)
 	{
 		fprintf(stderr, "Failed to open file: %s\n", infile);
 		return 0;
@@ -2631,7 +2650,7 @@ int main(int argc, char **argv)
 		int passfd = open(readpass, O_RDONLY);
 		if (passfd < 0)
 			DO_EXIT_1("Failed to open password file: %s\n", readpass);
-		ssize_t passlen = read(passfd, passbuf, sizeof(passbuf)-1);
+		int passlen = read(passfd, passbuf, sizeof(passbuf)-1);
 		close(passfd);
 		if (passlen <= 0)
 			DO_EXIT_1("Failed to read password from file: %s\n", readpass);
@@ -3100,7 +3119,7 @@ int main(int argc, char **argv)
 			}
 			else if (type == FILE_TYPE_MSI) {
 #ifdef WITH_GSF
-				const unsigned char *p = insigdata;
+				const unsigned char *p = (unsigned char*)insigdata;
 				sig = d2i_PKCS7(NULL, &p, sigfilesize);
 #else
 	                        DO_EXIT_1("libgsf is not available, msi support is disabled: %s\n", infile);
