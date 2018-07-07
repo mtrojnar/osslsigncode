@@ -2679,7 +2679,7 @@ int main(int argc, char **argv) {
 
 			pkey = ENGINE_load_private_key(pkcs11, keyfile, NULL, NULL);
 			if (pkey == NULL)
-				DO_EXIT_1("Failed to load private key %s", keyfile);
+				DO_EXIT_1("Failed to load private key %s\n", keyfile);
 			if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
 				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
 				 (certs = PEM_read_certs(btmp, "")) == NULL))
