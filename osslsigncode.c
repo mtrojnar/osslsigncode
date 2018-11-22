@@ -1,8 +1,8 @@
 /*
    OpenSSL based Authenticode signing for PE/MSI/Java CAB files.
 
-	 Copyright (C) 2005-2015 Per Allansson <pallansson@gmail.com>
-
+   Copyright (C) 2005-2015 Per Allansson <pallansson@gmail.com>
+   Copyright (C) 2018 Michał Trojnara <Michal.Trojnara@stunnel.org>
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -30,8 +30,6 @@
    version.  If you delete this exception statement from all source
    files in the program, then also delete it here.
 */
-
-static const char *rcsid = "$Id: osslsigncode.c,v 1.7.1 2014/07/11 14:14:14 mfive Exp $";
 
 /*
    Implemented with good help from:
@@ -450,7 +448,7 @@ static SpcSpOpusInfo* createOpus(const char *desc, const char *url)
 	if (desc) {
 		info->programName = SpcString_new();
 		info->programName->type = 1;
-		info->programName->value.ascii = M_ASN1_IA5STRING_new();
+		info->programName->value.ascii = ASN1_IA5STRING_new();
 		ASN1_STRING_set((ASN1_STRING *)info->programName->value.ascii,
 						(const unsigned char*)desc, strlen(desc));
 	}
@@ -458,7 +456,7 @@ static SpcSpOpusInfo* createOpus(const char *desc, const char *url)
 	if (url) {
 		info->moreInfo = SpcLink_new();
 		info->moreInfo->type = 0;
-		info->moreInfo->value.url = M_ASN1_IA5STRING_new();
+		info->moreInfo->value.url = ASN1_IA5STRING_new();
 		ASN1_STRING_set((ASN1_STRING *)info->moreInfo->value.url,
 						(const unsigned char*)url, strlen(url));
 	}
@@ -609,19 +607,20 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161, const 
 
 	if (rfc3161) {
 		unsigned char mdbuf[EVP_MAX_MD_SIZE];
-		EVP_MD_CTX mdctx;
+		EVP_MD_CTX *mdctx;
 
-		EVP_MD_CTX_init(&mdctx);
-		EVP_DigestInit(&mdctx, md);
-		EVP_DigestUpdate(&mdctx, si->enc_digest->data, si->enc_digest->length);
-		EVP_DigestFinal(&mdctx, mdbuf, NULL);
+		mdctx = EVP_MD_CTX_new();
+		EVP_DigestInit(mdctx, md);
+		EVP_DigestUpdate(mdctx, si->enc_digest->data, si->enc_digest->length);
+		EVP_DigestFinal(mdctx, mdbuf, NULL);
+		EVP_MD_CTX_free(mdctx);
 
 		TimeStampReq *req = TimeStampReq_new();
 		ASN1_INTEGER_set(req->version, 1);
 		req->messageImprint->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(md));
 		req->messageImprint->digestAlgorithm->parameters = ASN1_TYPE_new();
 		req->messageImprint->digestAlgorithm->parameters->type = V_ASN1_NULL;
-		M_ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(md));
+		ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(md));
 		req->certReq = (void*)0x1;
 
 		len = i2d_TimeStampReq(req, NULL);
@@ -815,9 +814,6 @@ static void cleanup_lib_state(void)
     EVP_cleanup();
 	CONF_modules_free();
     CRYPTO_cleanup_all_ex_data();
-#if OPENSSL_VERSION_NUMBER > 0x10000000
-	ERR_remove_thread_state(NULL);
-#endif
     ERR_free_strings();
 }
 
@@ -924,23 +920,9 @@ static const unsigned char classid_page_hash[] = {
 static unsigned char *calc_page_hash(char *indata, unsigned int peheader, int pe32plus,
 									 unsigned int sigpos, int phtype, unsigned int *phlen);
 
-DECLARE_STACK_OF(ASN1_OCTET_STRING)
-#ifndef sk_ASN1_OCTET_STRING_new_null
-#define sk_ASN1_OCTET_STRING_new_null() SKM_sk_new_null(ASN1_OCTET_STRING)
-#define sk_ASN1_OCTET_STRING_free(st) SKM_sk_free(ASN1_OCTET_STRING, (st))
-#define sk_ASN1_OCTET_STRING_push(st, val) SKM_sk_push(ASN1_OCTET_STRING, (st), (val))
-#define i2d_ASN1_SET_OF_ASN1_OCTET_STRING(st, pp, i2d_func, ex_tag, ex_class, is_set) \
-	SKM_ASN1_SET_OF_i2d(ASN1_OCTET_STRING, (st), (pp), (i2d_func), (ex_tag), (ex_class), (is_set))
-#endif
+DEFINE_STACK_OF(ASN1_OCTET_STRING)
 
-DECLARE_STACK_OF(SpcAttributeTypeAndOptionalValue)
-#ifndef sk_SpcAttributeTypeAndOptionalValue_new_null
-#define sk_SpcAttributeTypeAndOptionalValue_new_null() SKM_sk_new_null(SpcAttributeTypeAndOptionalValue)
-#define sk_SpcAttributeTypeAndOptionalValue_free(st) SKM_sk_free(SpcAttributeTypeAndOptionalValue, (st))
-#define sk_SpcAttributeTypeAndOptionalValue_push(st, val) SKM_sk_push(SpcAttributeTypeAndOptionalValue, (st), (val))
-#define i2d_SpcAttributeTypeAndOptionalValue(st, pp, i2d_func, ex_tag, ex_class, is_set) \
-	SKM_ASN1_SET_OF_i2d(SpcAttributeTypeAndOptionalValue, (st), (pp), (i2d_func), (ex_tag), (ex_class), (is_set))
-#endif
+DEFINE_STACK_OF(SpcAttributeTypeAndOptionalValue)
 
 static SpcLink *get_page_hash_link(int phtype, char *indata, unsigned int peheader, int pe32plus, unsigned int sigpos)
 {
@@ -951,19 +933,17 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, unsigned int pehead
 		exit(-1);
 	}
 
-	ASN1_OCTET_STRING *ostr = M_ASN1_OCTET_STRING_new();
-	M_ASN1_OCTET_STRING_set(ostr, ph, phlen);
+	ASN1_OCTET_STRING *ostr = ASN1_OCTET_STRING_new();
+	ASN1_OCTET_STRING_set(ostr, ph, phlen);
 	free(ph);
 
 	STACK_OF(ASN1_OCTET_STRING) *oset = sk_ASN1_OCTET_STRING_new_null();
 	sk_ASN1_OCTET_STRING_push(oset, ostr);
 	unsigned char *p, *tmp;
 	unsigned int l;
-	l = i2d_ASN1_SET_OF_ASN1_OCTET_STRING(oset, NULL, i2d_ASN1_OCTET_STRING,
-										  V_ASN1_SET, V_ASN1_UNIVERSAL, IS_SET);
+	l = i2d_ASN1_SET_ANY((ASN1_SEQUENCE_ANY *)oset, NULL);
 	tmp = p = OPENSSL_malloc(l);
-	i2d_ASN1_SET_OF_ASN1_OCTET_STRING(oset, &tmp, i2d_ASN1_OCTET_STRING,
-									  V_ASN1_SET, V_ASN1_UNIVERSAL, IS_SET);
+	i2d_ASN1_SET_ANY((ASN1_SEQUENCE_ANY *)oset, &tmp);
 	ASN1_OCTET_STRING_free(ostr);
 	sk_ASN1_OCTET_STRING_free(oset);
 
@@ -977,17 +957,15 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, unsigned int pehead
 
 	STACK_OF(SpcAttributeTypeAndOptionalValue) *aset = sk_SpcAttributeTypeAndOptionalValue_new_null();
 	sk_SpcAttributeTypeAndOptionalValue_push(aset, aval);
-	l = i2d_SpcAttributeTypeAndOptionalValue(aset, NULL, i2d_SpcAttributeTypeAndOptionalValue,
-											 V_ASN1_SET, V_ASN1_UNIVERSAL, IS_SET);
+	l = i2d_ASN1_SET_ANY((ASN1_SEQUENCE_ANY *)aset, NULL);
 	tmp = p = OPENSSL_malloc(l);
-	l = i2d_SpcAttributeTypeAndOptionalValue(aset, &tmp, i2d_SpcAttributeTypeAndOptionalValue,
-											 V_ASN1_SET, V_ASN1_UNIVERSAL, IS_SET);
+	l = i2d_ASN1_SET_ANY((ASN1_SEQUENCE_ANY *)aset, &tmp);
 	sk_SpcAttributeTypeAndOptionalValue_free(aset);
 	SpcAttributeTypeAndOptionalValue_free(aval);
 
 	SpcSerializedObject *so = SpcSerializedObject_new();
-	M_ASN1_OCTET_STRING_set(so->classId, classid_page_hash, sizeof(classid_page_hash));
-	M_ASN1_OCTET_STRING_set(so->serializedData, p, l);
+	ASN1_OCTET_STRING_set(so->classId, classid_page_hash, sizeof(classid_page_hash));
+	ASN1_OCTET_STRING_set(so->serializedData, p, l);
 	OPENSSL_free(p);
 
 	SpcLink *link = SpcLink_new();
@@ -1046,7 +1024,7 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, fi
 		ASN1_INTEGER_set(si->d, 0);
 		ASN1_INTEGER_set(si->e, 0);
 		ASN1_INTEGER_set(si->f, 0);
-		M_ASN1_OCTET_STRING_set(si->string, msistr, sizeof(msistr));
+		ASN1_OCTET_STRING_set(si->string, msistr, sizeof(msistr));
 		l = i2d_SpcSipInfo(si, NULL);
 		p = OPENSSL_malloc(l);
 		i2d_SpcSipInfo(si, &p);
@@ -1068,7 +1046,7 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md, fi
 	hashlen = EVP_MD_size(md);
 	hash = OPENSSL_malloc(hashlen);
 	memset(hash, 0, hashlen);
-	M_ASN1_OCTET_STRING_set(idc->messageDigest->digest, hash, hashlen);
+	ASN1_OCTET_STRING_set(idc->messageDigest->digest, hash, hashlen);
 	OPENSSL_free(hash);
 
 	*len  = i2d_SpcIndirectDataContent(idc, NULL);
@@ -1923,19 +1901,19 @@ static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
 						   unsigned int peheader, int pe32plus, unsigned int fileend)
 {
 	static unsigned char bfb[16*1024*1024];
-	EVP_MD_CTX mdctx;
+	EVP_MD_CTX *mdctx;
 
-	EVP_MD_CTX_init(&mdctx);
-	EVP_DigestInit(&mdctx, md);
+	mdctx = EVP_MD_CTX_new();
+	EVP_DigestInit(mdctx, md);
 
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 
 	(void)BIO_seek(bio, 0);
 	BIO_read(bio, bfb, peheader + 88);
-	EVP_DigestUpdate(&mdctx, bfb, peheader + 88);
+	EVP_DigestUpdate(mdctx, bfb, peheader + 88);
 	BIO_read(bio, bfb, 4);
 	BIO_read(bio, bfb, 60+pe32plus*16);
-	EVP_DigestUpdate(&mdctx, bfb, 60+pe32plus*16);
+	EVP_DigestUpdate(mdctx, bfb, 60+pe32plus*16);
 	BIO_read(bio, bfb, 8);
 
 	unsigned int n = peheader + 88 + 4 + 60+pe32plus*16 + 8;
@@ -1946,11 +1924,12 @@ static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
 		int l = BIO_read(bio, bfb, want);
 		if (l <= 0)
 			break;
-		EVP_DigestUpdate(&mdctx, bfb, l);
+		EVP_DigestUpdate(mdctx, bfb, l);
 		n += l;
 	}
 
-	EVP_DigestFinal(&mdctx, mdbuf, NULL);
+	EVP_DigestFinal(mdctx, mdbuf, NULL);
+	EVP_MD_CTX_free(mdctx);
 }
 
 
@@ -2019,16 +1998,16 @@ static unsigned char *calc_page_hash(char *indata, unsigned int peheader, int pe
 	int phlen = pphlen * (3 + nsections + sigpos / pagesize);
 	unsigned char *res = malloc(phlen);
 	unsigned char *zeroes = calloc(pagesize, 1);
-	EVP_MD_CTX mdctx;
+	EVP_MD_CTX *mdctx;
 
-	EVP_MD_CTX_init(&mdctx);
-	EVP_DigestInit(&mdctx, md);
-	EVP_DigestUpdate(&mdctx, indata, peheader + 88);
-	EVP_DigestUpdate(&mdctx, indata + peheader + 92, 60 + pe32plus*16);
-	EVP_DigestUpdate(&mdctx, indata + peheader + 160 + pe32plus*16, hdrsize - (peheader + 160 + pe32plus*16));
-	EVP_DigestUpdate(&mdctx, zeroes, pagesize - hdrsize);
+	mdctx = EVP_MD_CTX_new();
+	EVP_DigestInit(mdctx, md);
+	EVP_DigestUpdate(mdctx, indata, peheader + 88);
+	EVP_DigestUpdate(mdctx, indata + peheader + 92, 60 + pe32plus*16);
+	EVP_DigestUpdate(mdctx, indata + peheader + 160 + pe32plus*16, hdrsize - (peheader + 160 + pe32plus*16));
+	EVP_DigestUpdate(mdctx, zeroes, pagesize - hdrsize);
 	memset(res, 0, 4);
-	EVP_DigestFinal(&mdctx, res + 4, NULL);
+	EVP_DigestFinal(mdctx, res + 4, NULL);
 
 	unsigned short sizeofopthdr = GET_UINT16_LE(indata + peheader + 20);
 	char *sections = indata + peheader + 24 + sizeofopthdr;
@@ -2040,18 +2019,19 @@ static unsigned char *calc_page_hash(char *indata, unsigned int peheader, int pe
 		unsigned int l;
 		for (l=0; l < rs; l+=pagesize, pi++) {
 			PUT_UINT32_LE(ro + l, res + pi*pphlen);
-			EVP_DigestInit(&mdctx, md);
+			EVP_DigestInit(mdctx, md);
 			if (rs - l < pagesize) {
-				EVP_DigestUpdate(&mdctx, indata + ro + l, rs - l);
-				EVP_DigestUpdate(&mdctx, zeroes, pagesize - (rs - l));
+				EVP_DigestUpdate(mdctx, indata + ro + l, rs - l);
+				EVP_DigestUpdate(mdctx, zeroes, pagesize - (rs - l));
 			} else {
-				EVP_DigestUpdate(&mdctx, indata + ro + l, pagesize);
+				EVP_DigestUpdate(mdctx, indata + ro + l, pagesize);
 			}
-			EVP_DigestFinal(&mdctx, res + pi*pphlen + 4, NULL);
+			EVP_DigestFinal(mdctx, res + pi*pphlen + 4, NULL);
 		}
 		lastpos = ro + rs;
 		sections += 40;
 	}
+	EVP_MD_CTX_free(mdctx);
 	PUT_UINT32_LE(lastpos, res + pi*pphlen);
 	memset(res + pi*pphlen + 4, 0, EVP_MD_size(md));
 	pi++;
