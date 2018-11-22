@@ -1,6 +1,7 @@
 === 2.0 (2018-xx-xx)
 
 - ported to OpenSSL 1.1.x
+- ported to SoftHSM2
 - add support for pkcs11-based hardware tokens
 	(Patch from Leif Johansson)
 - improved error reporting of timestamping errors
