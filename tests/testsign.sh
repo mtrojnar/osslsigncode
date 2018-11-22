@@ -11,7 +11,7 @@ if [ ! -f putty.exe ]; then
     exit 1
 fi
 
-rm -f key.* cert.*
+rm -f cert.pem cert.spc key.der key.p12 key.pem key.pvk keyp.pem
 
 keytool -genkey \
 	-alias selfsigned -keysize 2048 -keyalg RSA -keypass passme -storepass passme -keystore key.ks << EOF
@@ -53,6 +53,8 @@ openssl crl2pkcs7 -nocrl -certfile cert.pem -outform DER -out cert.spc
 ../osslsigncode sign -certs cert.spc -key key.der putty.exe putty4.exe
 ../osslsigncode sign -pkcs12 key.p12 -pass passme putty.exe putty5.exe
 ../osslsigncode sign -certs cert.spc -key key.pvk -pass passme putty.exe putty6.exe
+
+rm -f cert.pem cert.spc key.der key.p12 key.pem key.pvk keyp.pem
 
 echo ""
 echo ""
