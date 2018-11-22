@@ -2666,7 +2666,6 @@ int main(int argc, char **argv)
 				DO_EXIT_1("Failed to parse PKCS#12 file: %s (Wrong password?)\n", pkcs12file);
 			PKCS12_free(p12);
 		} else if (pvkfile != NULL) {
-#if OPENSSL_VERSION_NUMBER > 0x10000000
 			if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
 				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
 				 (certs = PEM_read_certs(btmp, "")) == NULL))
@@ -2678,9 +2677,6 @@ int main(int argc, char **argv)
 				  (pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL))
 				DO_EXIT_1("Failed to read PVK file: %s\n", pvkfile);
 			BIO_free(btmp);
-#else
-			DO_EXIT_1("Can not read keys from PVK files, must compile against a newer version of OpenSSL: %s\n", pvkfile);
-#endif
 		} else if (p11engine != NULL && p11module != NULL) {
 			const int CMD_MANDATORY = 0;
 			ENGINE_load_dynamic();
