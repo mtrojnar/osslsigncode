@@ -1,5 +1,6 @@
-### 2.0 (2018-xx-xx)
+### 2.0 (2018-12-04)
 
+- orphaned project adopted by Michał Trojnara
 - ported to OpenSSL 1.1.x
 - ported to SoftHSM2
 - add support for pkcs11-based hardware tokens
