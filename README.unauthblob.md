@@ -1,7 +1,9 @@
-# This is NOT the official repo for osslsigncode  
+# This is NOT the official repo for osslsigncode
+
 This project was copied from osslsigncode 1.7.1 to apply some patches for compiling with cygwin and being able to add unauthenticated blobs.  The official source for the project is at: http://sourceforge.net/projects/osslsigncode/
 
 ## Features added
+
 Adds the argument "-addUnauthenticatedBlob" to add a 1024 byte unauthenticated blob of data to the signature in the same area as the timestamp.  This can be used while signing, while timestamping (new `add` command added to allow just time-stamping, after a file has been code signed, or by itself.
 
 Examples:
@@ -34,10 +36,9 @@ This technique (but not this project) is used by Dropbox, GoToMeeting, and Summi
 - https://tech.dropbox.com/2014/08/tech-behind-dropboxs-new-user-experience-for-mobile/
 - http://blogs.msdn.com/b/ieinternals/archive/2014/09/04/personalizing-installers-using-unauthenticated-data-inside-authenticode-signed-binaries.aspx
 
-
 ## WARNING
-The capability this adds can allow you to do dumb things.  Be very careful with what you put in the unauthenticated blob, as an attacker could modify this.  Do NOT under any circumstances put a URL here that you will use to download an additional file.  If you do do that, you would need to check the newly downloaded file is code signed AND that it has been signed with your cert AND that it is the version you expect.  You should consider using asymmetrical encryption for the data you put in the blob, such that the executable contains the public key to decrypt the data.  Basically, be VERY careful.  
 
+The capability this adds can allow you to do dumb things.  Be very careful with what you put in the unauthenticated blob, as an attacker could modify this.  Do NOT under any circumstances put a URL here that you will use to download an additional file.  If you do do that, you would need to check the newly downloaded file is code signed AND that it has been signed with your cert AND that it is the version you expect.  You should consider using asymmetrical encryption for the data you put in the blob, such that the executable contains the public key to decrypt the data.  Basically, be VERY careful.
 
 ## Compiling under cygwin
 

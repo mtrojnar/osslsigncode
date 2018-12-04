@@ -1,63 +1,63 @@
-=== 2.0 (2018-xx-xx)
+### 2.0 (2018-xx-xx)
 
 - ported to OpenSSL 1.1.x
 - ported to SoftHSM2
 - add support for pkcs11-based hardware tokens
-	(Patch from Leif Johansson)
+  (Patch from Leif Johansson)
 - improved error reporting of timestamping errors
-        (Patch from Carlo Teubner)
+  (Patch from Carlo Teubner)
 
-=== 1.7.1 (2014-07-11)
+### 1.7.1 (2014-07-11)
 
 - MSI: added -add-msi-dse option
-	(Patch from Mikkel Krautz)
+  (Patch from Mikkel Krautz)
 - MSI: fix build when GSF_CAN_READ_MSI_METADATA defined
-	(Patch from Mikkel Krautz)
+  (Patch from Mikkel Krautz)
 
-=== 1.7 (2014-07-10)
+### 1.7 (2014-07-10)
 
 - add support for nested signatures
-	(Patch from Mikkel Krautz)
+  (Patch from Mikkel Krautz)
 - fix compilation problem with OpenSSL < 1.0.0
 - added OpenSSL linkage exception to license
 
-=== 1.6 (2014-01-21)
+### 1.6 (2014-01-21)
 
 - add support for reading password from file
 - add support for asking for password (on systems that
   provide support for it)
 - add support for compiling and running on Windows
-	 (Patch from Heiko Hund)
+  (Patch from Heiko Hund)
 - fix compilation without curl
-	 (Fix from Heiko Hund)
+  (Fix from Heiko Hund)
 - added support for giving multiple timestamp servers
   as arguments (first one that succeeds will be used)
 - signatures on hierarchical MSI files were broken
-	 (Fix from Mikkel Krautz)
+  (Fix from Mikkel Krautz)
 - MSI: Add support for MsiDigitalSignatureEx signature
-	 (Patch from Mikkel Krautz)
+  (Patch from Mikkel Krautz)
 - add support for adding additional/cross certificates
   through -ac option
-	 (Thanks to Lars Munch for idea + testing)
+  (Thanks to Lars Munch for idea + testing)
 - MSI: Add support for signature extract/remove/verify
-	 (Patches from Mikkel Krautz)
+  (Patches from Mikkel Krautz)
 - PE/MSI: Implement -require-leaf-hash for verify.
-	 (Patch from Mikkel Krautz)
+  (Patch from Mikkel Krautz)
 
-=== 1.5.2 (2013-03-13)
+### 1.5.2 (2013-03-13)
 
 - added support for signing with SHA-384 and SHA-512
 - added support for page hashing (-ph option)
 
-=== 1.5.1 (2013-03-12)
+### 1.5.1 (2013-03-12)
 
 - forgot to bump version number...
 
-=== 1.5 (2013-03-12)
+### 1.5 (2013-03-12)
 
 - added support for signing MSI files (patch from Marc-André Lureau)
 - calculate correct PE checksum instead of setting it to 0
-	 (patch from Roland Schwingel)
+  (patch from Roland Schwingel)
 - added support for RFC3161 timestamping (-ts option)
 - added support for extracting/removing/verifying signature on PE files
 - fixed problem with not being able to decode timestamps with no newlines
@@ -66,8 +66,7 @@
 - added support for reading certificates from PEM files
 - renamed program option: -spc to -certs (old option name still valid)
 
-
-=== 1.4 (2011-08-12)
+### 1.4 (2011-08-12)
 
 - improved build system (patch from Alon Bar-Lev)
 - support reading cert+key from PKCS12 file (patch from Alon Bar-Lev)
@@ -75,17 +74,17 @@
 - added support for sha1/sha256 - default hash is now sha1
 - added flag for commercial signing (default is individual)
 
-=== 1.3.1 (2009-08-07)
+### 1.3.1 (2009-08-07)
 
 - support signing of 64-bit executables (fix  from Paul Kendall)
 
-=== 1.3 (2008-01-31)
+### 1.3 (2008-01-31)
 
 - fixed padding problem (fix from Ryan Rubley)
 - allow signing of already signed files (fix from Ryan Rubley)
 - added Ryan Rubley's PVK-to-DER guide into the README
 
-=== 1.2 (2005-01-21)
+### 1.2 (2005-01-21)
 
 - autoconf:ed (Thanks to Roy Keene)
 - added documentation
@@ -94,6 +93,6 @@
 - compiles without curl, which means no timestamping
 - version number output
 
-=== 1.1 (2005-01-19)
+### 1.1 (2005-01-19)
 
 - Initial release
