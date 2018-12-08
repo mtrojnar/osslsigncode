@@ -920,12 +920,62 @@ static const unsigned char classid_page_hash[] = {
 	0xAE, 0x05, 0xA2, 0x17, 0xDA, 0x8E, 0x60, 0xD6
 };
 
-static unsigned char *calc_page_hash(char *indata, unsigned int peheader,
-	int pe32plus, unsigned int sigpos, int phtype, unsigned int *phlen);
-
 DEFINE_STACK_OF(ASN1_OCTET_STRING)
 
 DEFINE_STACK_OF(SpcAttributeTypeAndOptionalValue)
+
+static unsigned char *calc_page_hash(char *indata, unsigned int peheader,
+	int pe32plus, unsigned int sigpos, int phtype, unsigned int *rphlen)
+{
+	unsigned short nsections = GET_UINT16_LE(indata + peheader + 6);
+	unsigned int pagesize = GET_UINT32_LE(indata + peheader + 56);
+	unsigned int hdrsize = GET_UINT32_LE(indata + peheader + 84);
+	const EVP_MD *md = EVP_get_digestbynid(phtype);
+	int pphlen = 4 + EVP_MD_size(md);
+	int phlen = pphlen * (3 + nsections + sigpos / pagesize);
+	unsigned char *res = malloc(phlen);
+	unsigned char *zeroes = calloc(pagesize, 1);
+	EVP_MD_CTX *mdctx;
+
+	mdctx = EVP_MD_CTX_new();
+	EVP_DigestInit(mdctx, md);
+	EVP_DigestUpdate(mdctx, indata, peheader + 88);
+	EVP_DigestUpdate(mdctx, indata + peheader + 92, 60 + pe32plus*16);
+	EVP_DigestUpdate(mdctx, indata + peheader + 160 + pe32plus*16, hdrsize - (peheader + 160 + pe32plus*16));
+	EVP_DigestUpdate(mdctx, zeroes, pagesize - hdrsize);
+	memset(res, 0, 4);
+	EVP_DigestFinal(mdctx, res + 4, NULL);
+
+	unsigned short sizeofopthdr = GET_UINT16_LE(indata + peheader + 20);
+	char *sections = indata + peheader + 24 + sizeofopthdr;
+	int i, pi = 1;
+	unsigned int lastpos = 0;
+	for (i=0; i<nsections; i++) {
+		unsigned int rs = GET_UINT32_LE(sections + 16);
+		unsigned int ro = GET_UINT32_LE(sections + 20);
+		unsigned int l;
+		for (l=0; l < rs; l+=pagesize, pi++) {
+			PUT_UINT32_LE(ro + l, res + pi*pphlen);
+			EVP_DigestInit(mdctx, md);
+			if (rs - l < pagesize) {
+				EVP_DigestUpdate(mdctx, indata + ro + l, rs - l);
+				EVP_DigestUpdate(mdctx, zeroes, pagesize - (rs - l));
+			} else {
+				EVP_DigestUpdate(mdctx, indata + ro + l, pagesize);
+			}
+			EVP_DigestFinal(mdctx, res + pi*pphlen + 4, NULL);
+		}
+		lastpos = ro + rs;
+		sections += 40;
+	}
+	EVP_MD_CTX_free(mdctx);
+	PUT_UINT32_LE(lastpos, res + pi*pphlen);
+	memset(res + pi*pphlen + 4, 0, EVP_MD_size(md));
+	pi++;
+	free(zeroes);
+	*rphlen = pi*pphlen;
+	return res;
+}
 
 static SpcLink *get_page_hash_link(int phtype, char *indata,
 	unsigned int peheader, int pe32plus, unsigned int sigpos)
@@ -2008,59 +2058,6 @@ static void	extract_page_hash (SpcAttributeTypeAndOptionalValue *obj,
 	SpcAttributeTypeAndOptionalValue_free(obj);
 }
 
-static unsigned char *calc_page_hash(char *indata, unsigned int peheader,
-	int pe32plus, unsigned int sigpos, int phtype, unsigned int *rphlen)
-{
-	unsigned short nsections = GET_UINT16_LE(indata + peheader + 6);
-	unsigned int pagesize = GET_UINT32_LE(indata + peheader + 56);
-	unsigned int hdrsize = GET_UINT32_LE(indata + peheader + 84);
-	const EVP_MD *md = EVP_get_digestbynid(phtype);
-	int pphlen = 4 + EVP_MD_size(md);
-	int phlen = pphlen * (3 + nsections + sigpos / pagesize);
-	unsigned char *res = malloc(phlen);
-	unsigned char *zeroes = calloc(pagesize, 1);
-	EVP_MD_CTX *mdctx;
-
-	mdctx = EVP_MD_CTX_new();
-	EVP_DigestInit(mdctx, md);
-	EVP_DigestUpdate(mdctx, indata, peheader + 88);
-	EVP_DigestUpdate(mdctx, indata + peheader + 92, 60 + pe32plus*16);
-	EVP_DigestUpdate(mdctx, indata + peheader + 160 + pe32plus*16, hdrsize - (peheader + 160 + pe32plus*16));
-	EVP_DigestUpdate(mdctx, zeroes, pagesize - hdrsize);
-	memset(res, 0, 4);
-	EVP_DigestFinal(mdctx, res + 4, NULL);
-
-	unsigned short sizeofopthdr = GET_UINT16_LE(indata + peheader + 20);
-	char *sections = indata + peheader + 24 + sizeofopthdr;
-	int i, pi = 1;
-	unsigned int lastpos = 0;
-	for (i=0; i<nsections; i++) {
-		unsigned int rs = GET_UINT32_LE(sections + 16);
-		unsigned int ro = GET_UINT32_LE(sections + 20);
-		unsigned int l;
-		for (l=0; l < rs; l+=pagesize, pi++) {
-			PUT_UINT32_LE(ro + l, res + pi*pphlen);
-			EVP_DigestInit(mdctx, md);
-			if (rs - l < pagesize) {
-				EVP_DigestUpdate(mdctx, indata + ro + l, rs - l);
-				EVP_DigestUpdate(mdctx, zeroes, pagesize - (rs - l));
-			} else {
-				EVP_DigestUpdate(mdctx, indata + ro + l, pagesize);
-			}
-			EVP_DigestFinal(mdctx, res + pi*pphlen + 4, NULL);
-		}
-		lastpos = ro + rs;
-		sections += 40;
-	}
-	EVP_MD_CTX_free(mdctx);
-	PUT_UINT32_LE(lastpos, res + pi*pphlen);
-	memset(res + pi*pphlen + 4, 0, EVP_MD_size(md));
-	pi++;
-	free(zeroes);
-	*rphlen = pi*pphlen;
-	return res;
-}
-
 static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader,
 	int pe32plus, unsigned int sigpos, unsigned int siglen,
 	char *leafhash, int allownest)
@@ -2210,6 +2207,32 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader,
 	return ret;
 }
 
+/*
+ * extract_existing_pe_pkcs7 retreives a decoded PKCS7 struct
+ * corresponding to the existing signature of the PE file.
+ */
+static PKCS7 *extract_existing_pe_pkcs7(char *indata,
+	unsigned int sigpos, unsigned int siglen)
+{
+	unsigned int pos = 0;
+	PKCS7 *p7 = NULL;
+
+	while (pos < siglen) {
+		unsigned int l = GET_UINT32_LE(indata + sigpos + pos);
+		unsigned short certrev  = GET_UINT16_LE(indata + sigpos + pos + 4);
+		unsigned short certtype = GET_UINT16_LE(indata + sigpos + pos + 6);
+		if (certrev == WIN_CERT_REVISION_2 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
+			const unsigned char *blob = (unsigned char*)indata + sigpos + pos + 8;
+			p7 = d2i_PKCS7(NULL, &blob, l - 8);
+		}
+		if (l%8)
+			l += (8 - l%8);
+		pos += l;
+	}
+
+	return p7;
+}
+
 static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 	unsigned int sigpos, unsigned int siglen, char *leafhash)
 {
@@ -2229,22 +2252,7 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 		return ret;
 	}
 
-	unsigned int pos = 0;
-	PKCS7 *p7 = NULL;
-
-	while (pos < siglen) {
-		unsigned int l = GET_UINT32_LE(indata + sigpos + pos);
-		unsigned short certrev  = GET_UINT16_LE(indata + sigpos + pos + 4);
-		unsigned short certtype = GET_UINT16_LE(indata + sigpos + pos + 6);
-		if (certrev == WIN_CERT_REVISION_2 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
-			const unsigned char *blob = (unsigned char*)indata + sigpos + pos + 8;
-			p7 = d2i_PKCS7(NULL, &blob, l - 8);
-		}
-		if (l%8)
-			l += (8 - l%8);
-		pos += l;
-	}
-
+	PKCS7 *p7 = extract_existing_pe_pkcs7(indata, sigpos, siglen);
 	if (p7 == NULL) {
 		printf("Failed to extract PKCS7 data\n\n");
 		return -1;
@@ -2253,32 +2261,6 @@ static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
 	ret = verify_pe_pkcs7(p7, indata, peheader, pe32plus, sigpos, siglen, leafhash, 1);
 	PKCS7_free(p7);
 	return ret;
-}
-
-/*
- * extract_existing_pe_pkcs7 retreives a decoded PKCS7 struct
- * corresponding to the existing signature of the PE file.
- */
-static PKCS7 *extract_existing_pe_pkcs7(char *indata, unsigned int peheader,
-	int pe32plus, unsigned int sigpos, unsigned int siglen)
-{
-	unsigned int pos = 0;
-	PKCS7 *p7 = NULL;
-
-	while (pos < siglen) {
-		unsigned int l = GET_UINT32_LE(indata + sigpos + pos);
-		unsigned short certrev  = GET_UINT16_LE(indata + sigpos + pos + 4);
-		unsigned short certtype = GET_UINT16_LE(indata + sigpos + pos + 6);
-		if (certrev == WIN_CERT_REVISION_2 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
-			const unsigned char *blob = (unsigned char*)indata + sigpos + pos + 8;
-			p7 = d2i_PKCS7(NULL, &blob, l - 8);
-		}
-		if (l%8)
-			l += (8 - l%8);
-		pos += l;
-	}
-
-	return p7;
 }
 
 static STACK_OF(X509) *PEM_read_certs_with_pass(BIO *bin, char *certpass)
@@ -2852,7 +2834,7 @@ int main(int argc, char **argv) {
 			ret = msi_verify_file(ole, leafhash);
 			goto skip_signing;
 		} else if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
-				if (nest || cmd == CMD_ADD) {
+			if (nest || cmd == CMD_ADD) {
 				/*
 				 * Perform a sanity check for the MsiDigitalSignatureEx section.
 				 * If the file we're attempting to sign has an MsiDigitalSignatureEx
@@ -3047,7 +3029,7 @@ int main(int argc, char **argv) {
 			/* A lil' bit of ugliness. Reset stream, write signature and skip forward */
 			(void)BIO_reset(outdata);
 			if (output_pkcs7) {
-				sig = extract_existing_pe_pkcs7(indata, peheader, pe32plus, sigpos ? sigpos : fileend, siglen);
+				sig = extract_existing_pe_pkcs7(indata, sigpos ? sigpos : fileend, siglen);
 				if (!sig)
 					DO_EXIT_0("Unable to extract existing signature.");
 				PEM_write_bio_PKCS7(outdata, sig);
@@ -3058,7 +3040,7 @@ int main(int argc, char **argv) {
 		}
 
 		if ((cmd == CMD_SIGN && nest) || (cmd == CMD_ATTACH && nest) || cmd == CMD_ADD) {
-			cursig = extract_existing_pe_pkcs7(indata, peheader, pe32plus, sigpos ? sigpos : fileend, siglen);
+			cursig = extract_existing_pe_pkcs7(indata, sigpos ? sigpos : fileend, siglen);
 			if (cursig == NULL) {
 				DO_EXIT_0("Unable to extract existing signature in -nest mode");
 			}
@@ -3117,7 +3099,7 @@ int main(int argc, char **argv) {
 			BIO_free_all(sigbio);
 		} else {
 			if (type == FILE_TYPE_PE) {
-				sig = extract_existing_pe_pkcs7(insigdata, peheader, pe32plus, 0, sigfilesize);
+				sig = extract_existing_pe_pkcs7(insigdata, 0, sigfilesize);
 			} else if (type == FILE_TYPE_MSI) {
 #ifdef WITH_GSF
 				const unsigned char *p = (unsigned char*)insigdata;
