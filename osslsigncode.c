@@ -1118,7 +1118,7 @@ static unsigned int calc_pe_checksum(BIO *bio, unsigned int peheader)
 	unsigned short *buf;
 	int nread;
 
-	/* recalc checksum. */
+	/* recalculate the checksum */
 	buf = (unsigned short*)malloc(sizeof(unsigned short)*32768);
 
 	(void)BIO_seek(bio, 0);
@@ -1211,13 +1211,13 @@ out:
 }
 
 /*
- * pkcs7_get_nested_signature exctracts a nested signature from p7.
+ * pkcs7_get_nested_signature extracts a nested signature from p7.
  * The caller is responsible for freeing the returned object.
  *
  * If has_sig is provided, it will be set to either 1 if there is a
  * SPC_NESTED_SIGNATURE attribute in p7 at all or 0 if not.
  * This allows has_sig to be used to distinguish two possible scenarios
- * when the functon returns NULL: if has_sig is 1, it means d2i_PKCS7
+ * when the function returns NULL: if has_sig is 1, it means d2i_PKCS7
  * failed to decode the nested signature. However, if has_sig is 0, it
  * simply means the given p7 does not have a nested signature.
  */
@@ -1587,7 +1587,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile,
 		 * For now, the compromise is to use the hash given
 		 * by the file, which is equivalent to verifying a
 		 * non-MsiDigitalSignatureEx signature from a security
-		 * pespective, because we'll only be calculating the
+		 * perspective, because we'll only be calculating the
 		 * file content hashes ourselves.
 		 */
 #ifdef GSF_CAN_READ_MSI_METADATA
@@ -2167,7 +2167,7 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader,
 }
 
 /*
- * extract_existing_pe_pkcs7 retreives a decoded PKCS7 struct
+ * extract_existing_pe_pkcs7 retrieves a decoded PKCS7 struct
  * corresponding to the existing signature of the PE file.
  */
 static PKCS7 *extract_existing_pe_pkcs7(char *indata,
