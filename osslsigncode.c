@@ -1153,101 +1153,60 @@ static void recalc_pe_checksum(BIO *bio, unsigned int peheader)
 	BIO_write(bio, buf, 4);
 }
 
-static unsigned char nib2val(unsigned char c)
-{
-	if (c >= '0' && c <= '9') {
-		return c - '0';
-	} else if (c >= 'a' && c <= 'f') {
-		return c - 'a' + 10;
-	} else if (c >= 'A' && c <= 'F') {
-		return c - 'A' + 10;
-	}
-
-	printf("Illegal hex value: '%x'\n", c);
-	return 0;
-}
-
 static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 {
-	char *lhdup = NULL;
-	char *orig = NULL;
-	char *mdid = NULL;
-	char *hash = NULL;
 	int ret = 0;
+	unsigned char *mdbuf = NULL;
 
-	lhdup = strdup(leafhash);
-	orig = lhdup;
-	mdid = lhdup;
-	while (lhdup != NULL && *lhdup != '\0') {
-		if (*lhdup == ':') {
-			*lhdup = '\0';
-			++lhdup;
-			hash = lhdup;
-			break;
-		}
-		++lhdup;
-	}
-	lhdup = orig;
-
+	/* decode the provided hash */
+	char *mdid = OPENSSL_strdup(leafhash);
+	char *hash = index(mdid, ':');
 	if (hash == NULL) {
-		printf("Unable to parse -require-leaf-hash parameter: %s\n\n", orig);
+		printf("Unable to parse -require-leaf-hash parameter: %s\n", leafhash);
 		ret = 1;
 		goto out;
 	}
-
+	*hash++ = '\0';
 	const EVP_MD *md = EVP_get_digestbyname(mdid);
 	if (md == NULL) {
 		printf("Unable to lookup digest by name '%s'\n", mdid);
 		ret = 1;
 		goto out;
 	}
-
-	unsigned long sz = EVP_MD_size(md);
-	unsigned long actual = strlen(hash);
-	if (actual%2 != 0) {
-		printf("Hash length mismatch: length is uneven.\n");
-		ret = 1;
-		goto out;
-	}
-	actual /= 2;
-	if (actual != sz) {
-		printf("Hash length mismatch: '%s' digest must be %lu bytes long (got %lu bytes)\n", mdid, sz, actual);
+	long mdlen = 0;
+	mdbuf = OPENSSL_hexstr2buf(hash, &mdlen);
+	if (mdlen != EVP_MD_size(md)) {
+		printf("Hash length mismatch: '%s' digest must be %d bytes long (got %ld bytes)\n",
+			mdid, EVP_MD_size(md), mdlen);
 		ret = 1;
 		goto out;
 	}
 
-	unsigned char mdbuf[EVP_MAX_MD_SIZE];
-	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
-	int i = 0, j = 0;
-	while (i < sz*2) {
-		unsigned char x;
-		x = nib2val(hash[i+1]);
-		x |= nib2val(hash[i]) << 4;
-		mdbuf[j] = x;
-		i += 2;
-		j += 1;
-	}
-
-	unsigned long certlen = i2d_X509(leaf, NULL);
-	unsigned char *certbuf = malloc(certlen);
-	unsigned char *tmp = certbuf;
-	i2d_X509(leaf, &tmp);
-
+	/* compute the leaf certificate hash */
 	EVP_MD_CTX *ctx = EVP_MD_CTX_create();
 	EVP_DigestInit_ex(ctx, md, NULL);
+	size_t certlen = i2d_X509(leaf, NULL);
+	unsigned char *certbuf = OPENSSL_malloc(certlen);
+	unsigned char *tmp = certbuf;
+	i2d_X509(leaf, &tmp);
 	EVP_DigestUpdate(ctx, certbuf, certlen);
+	OPENSSL_free(certbuf);
+	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
 	EVP_DigestFinal_ex(ctx, cmdbuf, NULL);
 	EVP_MD_CTX_destroy(ctx);
 
-	free(certbuf);
-
+	/* compare the provided hash against the computed hash */
 	if (memcmp(mdbuf, cmdbuf, EVP_MD_size(md))) {
+		char *hexstr = OPENSSL_buf2hexstr(cmdbuf, EVP_MD_size(md));
+		printf("Hash value mismatch: %s computed\n", hexstr);
+		OPENSSL_free(hexstr);
 		ret = 1;
 		goto out;
 	}
 
 out:
-	free(lhdup);
+	OPENSSL_free(mdid);
+	OPENSSL_free(mdbuf);
 	return ret;
 }
 
