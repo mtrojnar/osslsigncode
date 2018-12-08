@@ -78,16 +78,16 @@ AC_CHECK_HEADERS([termios.h])
 AC_CHECK_FUNCS(getpass)
 
 AC_ARG_WITH([gsf],
-        AS_HELP_STRING([--without-gsf], [Ignore presence of libgsf and disable it])
+	AS_HELP_STRING([--without-gsf], [Ignore presence of libgsf and disable it])
 )
 AS_IF([test "x$with_gsf" != "xno"],
-        [PKG_CHECK_MODULES([GSF], [libgsf-1], [have_gsf=yes], [have_gsf=no])],
-        [have_gsf=no]
+	[PKG_CHECK_MODULES([GSF], [libgsf-1], [have_gsf=yes], [have_gsf=no])],
+	[have_gsf=no]
 )
 AS_IF([test "x$have_gsf" = "xyes"],
-        [AC_DEFINE([WITH_GSF], 1, [Have libgsf?])],
-        [AS_IF([test "x$with_gsf" = "xyes"],
-                [AC_MSG_ERROR([libgsf requested but not found])])]
+	[AC_DEFINE([WITH_GSF], 1, [Have libgsf?])],
+	[AS_IF([test "x$with_gsf" = "xyes"],
+		[AC_MSG_ERROR([libgsf requested but not found])])]
 )
 
 
@@ -134,3 +134,5 @@ AC_SUBST([OPTIONAL_LIBCURL_LIBS])
 
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
+
+# vim: set ts=4 noexpandtab:
