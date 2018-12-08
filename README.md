@@ -129,7 +129,9 @@ You need the *.p7b and *.der files to use osslsigncode, instead of your
 
 ## BUGS, QUESTIONS etc.
 
-Send an email to pallansson@gmail.com
+Check whether your your question or suspected bug was already
+discussed on https://github.com/mtrojnar/osslsigncode/issues.
+Otherwise, open a new issue.
 
 BUT, if you have questions related to generating spc files,
 converting between different formats and so on, *please*
