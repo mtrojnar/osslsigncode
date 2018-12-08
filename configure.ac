@@ -101,9 +101,9 @@ PKG_CHECK_MODULES(
 		,
 		[AC_CHECK_LIB(
 			[crypto],
-			[RSA_verify],
+			[EVP_MD_CTX_new],
 			[OPENSSL_LIBS="-lcrypto ${SOCKETS_LIBS} ${DL_LIBS}"],
-			[AC_MSG_ERROR([OpenSSL 1.1.0 or later is required. http://www.openssl.org/])],
+			[AC_MSG_ERROR([OpenSSL 1.1.0 or later is required. https://www.openssl.org/])],
 			[${DL_LIBS}]
 		)]
 	)]
