@@ -463,19 +463,18 @@ static SpcSpOpusInfo* createOpus(const char *desc, const char *url)
 	return info;
 }
 
-static unsigned int asn1_simple_hdr_len(const unsigned char *p, unsigned int len)
+static size_t asn1_simple_hdr_len(const unsigned char *p, size_t len)
 {
 	if (len <= 2 || p[0] > 0x31)
 		return 0;
 	return (p[1]&0x80) ? (2 + (p[1]&0x7f)) : 2;
 }
 
-static void tohex(const unsigned char *v, unsigned char *b, int len)
+static void tohex(const unsigned char *v, char *b, int len)
 {
 	int i;
 	for(i=0; i<len; i++)
-		sprintf((char*)b+i*2, "%02X", v[i]);
-	b[i*2] = 0x00;
+		sprintf(b+i*2, "%02X", v[i]);
 }
 
 static int add_unauthenticated_blob(PKCS7 *sig)
@@ -924,12 +923,12 @@ DEFINE_STACK_OF(ASN1_OCTET_STRING)
 
 DEFINE_STACK_OF(SpcAttributeTypeAndOptionalValue)
 
-static unsigned char *calc_page_hash(char *indata, unsigned int peheader,
-	int pe32plus, unsigned int sigpos, int phtype, unsigned int *rphlen)
+static unsigned char *calc_page_hash(char *indata, size_t peheader,
+	int pe32plus, size_t sigpos, int phtype, size_t *rphlen)
 {
 	unsigned short nsections = GET_UINT16_LE(indata + peheader + 6);
-	unsigned int pagesize = GET_UINT32_LE(indata + peheader + 56);
-	unsigned int hdrsize = GET_UINT32_LE(indata + peheader + 84);
+	size_t pagesize = GET_UINT32_LE(indata + peheader + 56);
+	size_t hdrsize = GET_UINT32_LE(indata + peheader + 84);
 	const EVP_MD *md = EVP_get_digestbynid(phtype);
 	int pphlen = 4 + EVP_MD_size(md);
 	int phlen = pphlen * (3 + nsections + sigpos / pagesize);
@@ -949,11 +948,11 @@ static unsigned char *calc_page_hash(char *indata, unsigned int peheader,
 	unsigned short sizeofopthdr = GET_UINT16_LE(indata + peheader + 20);
 	char *sections = indata + peheader + 24 + sizeofopthdr;
 	int i, pi = 1;
-	unsigned int lastpos = 0;
+	size_t lastpos = 0;
 	for (i=0; i<nsections; i++) {
-		unsigned int rs = GET_UINT32_LE(sections + 16);
-		unsigned int ro = GET_UINT32_LE(sections + 20);
-		unsigned int l;
+		size_t rs = GET_UINT32_LE(sections + 16);
+		size_t ro = GET_UINT32_LE(sections + 20);
+		size_t l;
 		for (l=0; l < rs; l+=pagesize, pi++) {
 			PUT_UINT32_LE(ro + l, res + pi*pphlen);
 			EVP_DigestInit(mdctx, md);
@@ -978,9 +977,9 @@ static unsigned char *calc_page_hash(char *indata, unsigned int peheader,
 }
 
 static SpcLink *get_page_hash_link(int phtype, char *indata,
-	unsigned int peheader, int pe32plus, unsigned int sigpos)
+	size_t peheader, int pe32plus, size_t sigpos)
 {
-	unsigned int phlen;
+	size_t phlen;
 	unsigned char *ph = calc_page_hash(indata, peheader, pe32plus, sigpos, phtype, &phlen);
 	if (!ph) {
 		fprintf(stderr, "Failed to calculate page hash\n");
@@ -994,7 +993,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata,
 	STACK_OF(ASN1_OCTET_STRING) *oset = sk_ASN1_OCTET_STRING_new_null();
 	sk_ASN1_OCTET_STRING_push(oset, ostr);
 	unsigned char *p, *tmp;
-	unsigned int l;
+	size_t l;
 	l = i2d_ASN1_SET_ANY((ASN1_SEQUENCE_ANY *)oset, NULL);
 	tmp = p = OPENSSL_malloc(l);
 	i2d_ASN1_SET_ANY((ASN1_SEQUENCE_ANY *)oset, &tmp);
@@ -1029,8 +1028,8 @@ static SpcLink *get_page_hash_link(int phtype, char *indata,
 }
 
 static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md,
-	file_type_t type, int pagehash, char *indata, unsigned int peheader,
-	int pe32plus, unsigned int sigpos)
+	file_type_t type, int pagehash, char *indata, size_t peheader,
+	int pe32plus, size_t sigpos)
 {
 	static const unsigned char msistr[] = {
 		0xf1, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -1110,16 +1109,16 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md,
 	SpcIndirectDataContent_free(idc);
 }
 
-static unsigned int calc_pe_checksum(BIO *bio, unsigned int peheader)
+static unsigned int calc_pe_checksum(BIO *bio, size_t peheader)
 {
 	unsigned int checkSum = 0;
 	unsigned short val;
-	unsigned int size = 0;
+	size_t size = 0;
 	unsigned short *buf;
 	int nread;
 
 	/* recalculate the checksum */
-	buf = (unsigned short*)malloc(sizeof(unsigned short)*32768);
+	buf = malloc(sizeof(unsigned short)*32768);
 
 	(void)BIO_seek(bio, 0);
 	while ((nread = BIO_read(bio, buf, sizeof(unsigned short)*32768)) > 0) {
@@ -1142,7 +1141,7 @@ static unsigned int calc_pe_checksum(BIO *bio, unsigned int peheader)
 	return checkSum;
 }
 
-static void recalc_pe_checksum(BIO *bio, unsigned int peheader)
+static void recalc_pe_checksum(BIO *bio, size_t peheader)
 {
 	unsigned int checkSum = calc_pe_checksum(bio, peheader);
 	char buf[4];
@@ -1528,7 +1527,7 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
  * It exists to make it easier to implement verification of nested signatures.
  */
 static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile,
-	unsigned char *exdata, unsigned int exlen, char *leafhash,
+	unsigned char *exdata, size_t exlen, char *leafhash,
 	int allownest)
 {
 	int i = 0;
@@ -1540,7 +1539,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile,
 #ifdef GSF_CAN_READ_MSI_METADATA
 	unsigned char cexmdbuf[EVP_MAX_MD_SIZE];
 #endif
-	unsigned char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	BIO *bio = NULL;
 
 	ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
@@ -1641,7 +1640,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile,
 
 	printf("\n");
 
-	int seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
+	size_t seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
 		p7->d.sign->contents->d.other->value.sequence->length);
 	bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
 		p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
@@ -1826,7 +1825,7 @@ out:
  */
 static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
 {
-	unsigned char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	GsfInput *sig = NULL;
 	GsfInput *exsig = NULL;
 	unsigned char *exdata = NULL;
@@ -1929,7 +1928,7 @@ out:
 #endif
 
 static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
-	unsigned int peheader, int pe32plus, unsigned int fileend)
+	size_t peheader, int pe32plus, size_t fileend)
 {
 	static unsigned char bfb[16*1024*1024];
 	EVP_MD_CTX *mdctx;
@@ -1947,9 +1946,9 @@ static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
 	EVP_DigestUpdate(mdctx, bfb, 60+pe32plus*16);
 	BIO_read(bio, bfb, 8);
 
-	unsigned int n = peheader + 88 + 4 + 60+pe32plus*16 + 8;
+	size_t n = peheader + 88 + 4 + 60+pe32plus*16 + 8;
 	while (n < fileend) {
-		int want = fileend - n;
+		size_t want = fileend - n;
 		if (want > sizeof(bfb))
 			want = sizeof(bfb);
 		int l = BIO_read(bio, bfb, want);
@@ -1964,7 +1963,7 @@ static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
 }
 
 static void	extract_page_hash (SpcAttributeTypeAndOptionalValue *obj,
-	unsigned char **ph, unsigned int *phlen, int *phtype)
+	unsigned char **ph, size_t *phlen, int *phtype)
 {
 	*phlen = 0;
 
@@ -1986,7 +1985,7 @@ static void	extract_page_hash (SpcAttributeTypeAndOptionalValue *obj,
 	}
 
 	/* skip ASN.1 SET hdr */
-	unsigned int l = asn1_simple_hdr_len(so->serializedData->data, so->serializedData->length);
+	size_t l = asn1_simple_hdr_len(so->serializedData->data, so->serializedData->length);
 	blob = so->serializedData->data + l;
 	obj = d2i_SpcAttributeTypeAndOptionalValue(NULL, &blob, so->serializedData->length - l);
 	SpcPeImageData_free(id);
@@ -2007,9 +2006,9 @@ static void	extract_page_hash (SpcAttributeTypeAndOptionalValue *obj,
 	}
 
 	/* Skip ASN.1 SET hdr */
-	unsigned int l2 = asn1_simple_hdr_len(obj->value->value.sequence->data, obj->value->value.sequence->length);
+	size_t l2 = asn1_simple_hdr_len(obj->value->value.sequence->data, obj->value->value.sequence->length);
 	/* Skip ASN.1 OCTET STRING hdr */
-	l =  asn1_simple_hdr_len(obj->value->value.sequence->data + l2, obj->value->value.sequence->length - l2);
+	l = asn1_simple_hdr_len(obj->value->value.sequence->data + l2, obj->value->value.sequence->length - l2);
 	l += l2;
 	*phlen = obj->value->value.sequence->length - l;
 	*ph = malloc(*phlen);
@@ -2017,17 +2016,17 @@ static void	extract_page_hash (SpcAttributeTypeAndOptionalValue *obj,
 	SpcAttributeTypeAndOptionalValue_free(obj);
 }
 
-static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader,
-	int pe32plus, unsigned int sigpos, unsigned int siglen,
+static int verify_pe_pkcs7(PKCS7 *p7, char *indata, size_t peheader,
+	int pe32plus, size_t sigpos, size_t siglen,
 	char *leafhash, int allownest)
 {
 	int ret = 0;
 	int mdtype = -1, phtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
-	unsigned char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	unsigned char *ph = NULL;
-	unsigned int phlen = 0;
+	size_t phlen = 0;
 	BIO *bio = NULL;
 
 	ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
@@ -2071,7 +2070,7 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader,
 		printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
 		tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
 		printf("Page hash            : %s ...\n", hexbuf);
-		unsigned int cphlen = 0;
+		size_t cphlen = 0;
 		unsigned char *cph = calc_page_hash(indata, peheader, pe32plus, sigpos, phtype, &cphlen);
 		tohex(cph, hexbuf, (cphlen < 32) ? cphlen : 32);
 		printf("Calculated page hash : %s ...%s\n\n", hexbuf,
@@ -2080,7 +2079,7 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader,
 		free(cph);
 	}
 
-	int seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
+	size_t seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
 		p7->d.sign->contents->d.other->value.sequence->length);
 	bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
 		p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
@@ -2171,13 +2170,13 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, unsigned int peheader,
  * corresponding to the existing signature of the PE file.
  */
 static PKCS7 *extract_existing_pe_pkcs7(char *indata,
-	unsigned int sigpos, unsigned int siglen)
+	size_t sigpos, size_t siglen)
 {
-	unsigned int pos = 0;
+	size_t pos = 0;
 	PKCS7 *p7 = NULL;
 
 	while (pos < siglen) {
-		unsigned int l = GET_UINT32_LE(indata + sigpos + pos);
+		size_t l = GET_UINT32_LE(indata + sigpos + pos);
 		unsigned short certrev  = GET_UINT16_LE(indata + sigpos + pos + 4);
 		unsigned short certtype = GET_UINT16_LE(indata + sigpos + pos + 6);
 		if (certrev == WIN_CERT_REVISION_2 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
@@ -2192,8 +2191,8 @@ static PKCS7 *extract_existing_pe_pkcs7(char *indata,
 	return p7;
 }
 
-static int verify_pe_file(char *indata, unsigned int peheader, int pe32plus,
-	unsigned int sigpos, unsigned int siglen, char *leafhash)
+static int verify_pe_file(char *indata, size_t peheader, int pe32plus,
+	size_t sigpos, size_t siglen, char *leafhash)
 {
 	int ret = 0;
 	unsigned int pe_checksum = GET_UINT32_LE(indata + peheader + 88);
@@ -2360,8 +2359,8 @@ int main(int argc, char **argv) {
 	int addBlob = 0;
 	u_char *p = NULL;
 	int ret = 0, i, len = 0, jp = -1, pe32plus = 0, comm = 0, pagehash = 0;
-	unsigned int tmp, peheader = 0, padlen = 0;
-	off_t filesize, fileend, sigfilesize, outdatasize;
+	size_t peheader = 0, padlen = 0;
+	size_t filesize, fileend, sigfilesize, outdatasize;
 	file_type_t type;
 	cmd_type_t cmd = CMD_SIGN;
 	char *failarg = NULL;
@@ -2910,6 +2909,7 @@ int main(int argc, char **argv) {
 
 	if (type == FILE_TYPE_CAB) {
 		unsigned short nfolders;
+		size_t tmp;
 
 		u_char cabsigned[] = {
 			0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
@@ -2953,7 +2953,8 @@ int main(int argc, char **argv) {
 		/* Write what's left */
 		BIO_write(hash, indata+i, filesize-i);
 	} else if (type == FILE_TYPE_PE) {
-		unsigned int sigpos, siglen, nrvas;
+		size_t sigpos, siglen;
+		unsigned int nrvas;
 		unsigned short magic;
 
 		if (jp >= 0)
@@ -3190,7 +3191,7 @@ int main(int argc, char **argv) {
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	int mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
 	memcpy(buf+len, mdbuf, mdlen);
-	int seqhdrlen = asn1_simple_hdr_len((unsigned char*)buf, len);
+	size_t seqhdrlen = asn1_simple_hdr_len((unsigned char*)buf, len);
 
 	if ((sigbio = PKCS7_dataInit(sig, NULL)) == NULL)
 		DO_EXIT_0("Signing failed(PKCS7_dataInit)\n");
