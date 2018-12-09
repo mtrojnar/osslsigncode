@@ -139,23 +139,23 @@ typedef unsigned char u_char;
 #endif
 
 /* MS Authenticode object ids */
-#define SPC_INDIRECT_DATA_OBJID	 "1.3.6.1.4.1.311.2.1.4"
-#define SPC_STATEMENT_TYPE_OBJID "1.3.6.1.4.1.311.2.1.11"
-#define SPC_SP_OPUS_INFO_OBJID	 "1.3.6.1.4.1.311.2.1.12"
+#define SPC_INDIRECT_DATA_OBJID     "1.3.6.1.4.1.311.2.1.4"
+#define SPC_STATEMENT_TYPE_OBJID    "1.3.6.1.4.1.311.2.1.11"
+#define SPC_SP_OPUS_INFO_OBJID      "1.3.6.1.4.1.311.2.1.12"
 #define SPC_INDIVIDUAL_SP_KEY_PURPOSE_OBJID "1.3.6.1.4.1.311.2.1.21"
 #define SPC_COMMERCIAL_SP_KEY_PURPOSE_OBJID "1.3.6.1.4.1.311.2.1.22"
-#define SPC_MS_JAVA_SOMETHING	 "1.3.6.1.4.1.311.15.1"
-#define SPC_PE_IMAGE_DATA_OBJID	 "1.3.6.1.4.1.311.2.1.15"
-#define SPC_CAB_DATA_OBJID		 "1.3.6.1.4.1.311.2.1.25"
+#define SPC_MS_JAVA_SOMETHING       "1.3.6.1.4.1.311.15.1"
+#define SPC_PE_IMAGE_DATA_OBJID     "1.3.6.1.4.1.311.2.1.15"
+#define SPC_CAB_DATA_OBJID          "1.3.6.1.4.1.311.2.1.25"
 #define SPC_TIME_STAMP_REQUEST_OBJID "1.3.6.1.4.1.311.3.2.1"
-#define SPC_SIPINFO_OBJID		 "1.3.6.1.4.1.311.2.1.30"
+#define SPC_SIPINFO_OBJID           "1.3.6.1.4.1.311.2.1.30"
 
 #define SPC_PE_IMAGE_PAGE_HASHES_V1 "1.3.6.1.4.1.311.2.3.1" /* Page hash using SHA1 */
 #define SPC_PE_IMAGE_PAGE_HASHES_V2 "1.3.6.1.4.1.311.2.3.2" /* Page hash using SHA256 */
 
 #define SPC_NESTED_SIGNATURE_OBJID  "1.3.6.1.4.1.311.2.4.1"
 
-#define SPC_RFC3161_OBJID "1.3.6.1.4.1.311.3.3.1"
+#define SPC_RFC3161_OBJID           "1.3.6.1.4.1.311.3.3.1"
 
 /* 1.3.6.1.4.1.311.4... MS Crypto 2.0 stuff... */
 
@@ -223,7 +223,7 @@ IMPLEMENT_ASN1_FUNCTIONS(SpcLink)
 
 typedef struct {
 	SpcString *programName;
-	SpcLink	  *moreInfo;
+	SpcLink   *moreInfo;
 } SpcSpOpusInfo;
 
 DECLARE_ASN1_FUNCTIONS(SpcSpOpusInfo)
@@ -549,12 +549,12 @@ static void print_timestamp_error(const char *url, long http_code)
 
   .. and the blob has the following ASN1 structure:
 
-  0:d=0	 hl=4 l= 291 cons: SEQUENCE
-  4:d=1	 hl=2 l=  10 prim:	OBJECT			  :1.3.6.1.4.1.311.3.2.1
-  16:d=1  hl=4 l= 275 cons:	 SEQUENCE
-  20:d=2  hl=2 l=	9 prim:	  OBJECT			:pkcs7-data
-  31:d=2  hl=4 l= 260 cons:	  cont [ 0 ]
-  35:d=3  hl=4 l= 256 prim:	   OCTET STRING
+  0:d=0  hl=4 l= 291 cons: SEQUENCE
+  4:d=1  hl=2 l=  10 prim:  OBJECT         :1.3.6.1.4.1.311.3.2.1
+  16:d=1 hl=4 l= 275 cons:  SEQUENCE
+  20:d=2 hl=2 l=   9 prim:   OBJECT        :pkcs7-data
+  31:d=2 hl=4 l= 260 cons:   cont [ 0 ]
+  35:d=3 hl=4 l= 256 prim:    OCTET STRING
   <signature>
 
 
@@ -932,8 +932,8 @@ static unsigned char *calc_page_hash(char *indata, size_t peheader,
 	const EVP_MD *md = EVP_get_digestbynid(phtype);
 	int pphlen = 4 + EVP_MD_size(md);
 	int phlen = pphlen * (3 + nsections + sigpos / pagesize);
-	unsigned char *res = malloc(phlen);
-	unsigned char *zeroes = calloc(pagesize, 1);
+	unsigned char *res = OPENSSL_malloc(phlen);
+	unsigned char *zeroes = OPENSSL_zalloc(pagesize);
 	EVP_MD_CTX *mdctx;
 
 	mdctx = EVP_MD_CTX_new();
@@ -971,7 +971,7 @@ static unsigned char *calc_page_hash(char *indata, size_t peheader,
 	PUT_UINT32_LE(lastpos, res + pi*pphlen);
 	memset(res + pi*pphlen + 4, 0, EVP_MD_size(md));
 	pi++;
-	free(zeroes);
+	OPENSSL_free(zeroes);
 	*rphlen = pi*pphlen;
 	return res;
 }
@@ -988,7 +988,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata,
 
 	ASN1_OCTET_STRING *ostr = ASN1_OCTET_STRING_new();
 	ASN1_OCTET_STRING_set(ostr, ph, phlen);
-	free(ph);
+	OPENSSL_free(ph);
 
 	STACK_OF(ASN1_OCTET_STRING) *oset = sk_ASN1_OCTET_STRING_new_null();
 	sk_ASN1_OCTET_STRING_push(oset, ostr);
@@ -1118,7 +1118,7 @@ static unsigned int calc_pe_checksum(BIO *bio, size_t peheader)
 	int nread;
 
 	/* recalculate the checksum */
-	buf = malloc(sizeof(unsigned short)*32768);
+	buf = OPENSSL_malloc(sizeof(unsigned short)*32768);
 
 	(void)BIO_seek(bio, 0);
 	while ((nread = BIO_read(bio, buf, sizeof(unsigned short)*32768)) > 0) {
@@ -1133,7 +1133,7 @@ static unsigned int calc_pe_checksum(BIO *bio, size_t peheader)
 		}
 	}
 
-	free(buf);
+	OPENSSL_free(buf);
 
 	checkSum = 0xffff & (checkSum + (checkSum >> 0x10));
 	checkSum += size;
@@ -1744,7 +1744,7 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash)
 	}
 
 	unsigned long inlen = (unsigned long) gsf_input_remaining(sig);
-	indata = malloc(inlen);
+	indata = OPENSSL_malloc(inlen);
 	if (gsf_input_read(sig, inlen, indata) == NULL) {
 		ret = 1;
 		goto out;
@@ -1753,7 +1753,7 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash)
 	unsigned long exlen = 0;
 	if (exsig != NULL) {
 		exlen = (unsigned long) gsf_input_remaining(exsig);
-		exdata = malloc(exlen);
+		exdata = OPENSSL_malloc(exlen);
 		if (gsf_input_read(exsig, exlen, exdata) == NULL) {
 			ret = 1;
 			goto out;
@@ -1766,8 +1766,8 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash)
 	ret = msi_verify_pkcs7(p7, infile, exdata, exlen, leafhash, 1);
 
 out:
-	free(indata);
-	free(exdata);
+	OPENSSL_free(indata);
+	OPENSSL_free(exdata);
 
 	if (p7)
 		PKCS7_free(p7);
@@ -1780,7 +1780,7 @@ static int msi_extract_dse(GsfInfile *infile, unsigned char **dsebuf,
 {
 	GsfInput *exsig = NULL;
 	gchar decoded[0x40];
-	u_char *buf = NULL;
+	unsigned char *buf = NULL;
 	gsf_off_t size = 0;
 	int i, ret = 0;
 
@@ -1807,12 +1807,12 @@ static int msi_extract_dse(GsfInfile *infile, unsigned char **dsebuf,
 	}
 
 	if (dsebuf != NULL) {
-		buf = malloc(size);
+		buf = OPENSSL_malloc(size);
 		if (gsf_input_read(exsig, size, buf) == NULL) {
 			ret = 1;
 			goto out;
 		}
-		*dsebuf = (unsigned char *) buf;
+		*dsebuf = buf;
 	}
 
 out:
@@ -1871,7 +1871,7 @@ static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
 			goto out;
 		}
 
-		exdata = malloc(exlen);
+		exdata = OPENSSL_malloc(exlen);
 		if (gsf_input_read(exsig, exlen, exdata) == NULL) {
 			printf("Unable to read MsiDigitalSignatureEx\n\n");
 			ret = 1;
@@ -1884,7 +1884,7 @@ static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
 	}
 
 out:
-	free(exdata);
+	OPENSSL_free(exdata);
 	if (outdata)
 		BIO_free_all(outdata);
 
@@ -1912,7 +1912,7 @@ static PKCS7 *msi_extract_signature_to_pkcs7(GsfInfile *infile)
 	}
 
 	size = gsf_input_remaining(sig);
-	buf = malloc(size);
+	buf = OPENSSL_malloc(size);
 	if (gsf_input_read(sig, size, buf) == NULL) {
 		goto out;
 	}
@@ -1921,7 +1921,7 @@ static PKCS7 *msi_extract_signature_to_pkcs7(GsfInfile *infile)
 	p7 = d2i_PKCS7(NULL, &p7buf, size);
 
 out:
-	free(buf);
+	OPENSSL_free(buf);
 	return p7;
 }
 
@@ -1962,7 +1962,7 @@ static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
 	EVP_MD_CTX_free(mdctx);
 }
 
-static void	extract_page_hash (SpcAttributeTypeAndOptionalValue *obj,
+static void extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	unsigned char **ph, size_t *phlen, int *phtype)
 {
 	*phlen = 0;
@@ -2011,7 +2011,7 @@ static void	extract_page_hash (SpcAttributeTypeAndOptionalValue *obj,
 	l = asn1_simple_hdr_len(obj->value->value.sequence->data + l2, obj->value->value.sequence->length - l2);
 	l += l2;
 	*phlen = obj->value->value.sequence->length - l;
-	*ph = malloc(*phlen);
+	*ph = OPENSSL_malloc(*phlen);
 	memcpy(*ph, obj->value->value.sequence->data + l, *phlen);
 	SpcAttributeTypeAndOptionalValue_free(obj);
 }
@@ -2037,7 +2037,7 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, size_t peheader,
 		const unsigned char *p = astr->data;
 		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
 		if (idc) {
-			extract_page_hash (idc->data, &ph, &phlen, &phtype);
+			extract_page_hash(idc->data, &ph, &phlen, &phtype);
 			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
 				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
 				memcpy(mdbuf, idc->messageDigest->digest->data, idc->messageDigest->digest->length);
@@ -2075,8 +2075,8 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, size_t peheader,
 		tohex(cph, hexbuf, (cphlen < 32) ? cphlen : 32);
 		printf("Calculated page hash : %s ...%s\n\n", hexbuf,
 			((phlen != cphlen) || memcmp(ph, cph, phlen)) ? "    MISMATCH!!!":"");
-		free(ph);
-		free(cph);
+		OPENSSL_free(ph);
+		OPENSSL_free(cph);
 	}
 
 	size_t seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
