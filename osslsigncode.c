@@ -1196,9 +1196,9 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 
 	/* compare the provided hash against the computed hash */
 	if (memcmp(mdbuf, cmdbuf, EVP_MD_size(md))) {
-		char *hexstr = OPENSSL_buf2hexstr(cmdbuf, EVP_MD_size(md));
-		printf("Hash value mismatch: %s computed\n", hexstr);
-		OPENSSL_free(hexstr);
+		char hexbuf[EVP_MAX_MD_SIZE*2+1];
+		tohex(cmdbuf, hexbuf, EVP_MD_size(md));
+		printf("Hash value mismatch: %s computed\n", hexbuf);
 		ret = 1;
 		goto out;
 	}
