@@ -1159,7 +1159,7 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 
 	/* decode the provided hash */
 	char *mdid = OPENSSL_strdup(leafhash);
-	char *hash = index(mdid, ':');
+	char *hash = strchr(mdid, ':');
 	if (hash == NULL) {
 		printf("Unable to parse -require-leaf-hash parameter: %s\n", leafhash);
 		ret = 1;
