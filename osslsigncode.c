@@ -2331,7 +2331,7 @@ static char *getpassword(const char *prompt)
 int main(int argc, char **argv) {
 	BIO *btmp, *sigbio, *hash, *outdata;
 	PKCS12 *p12;
-	PKCS7 *p7 = NULL, *cursig = NULL, *outsig = NULL, *sig = NULL, *p7x = NULL;
+	PKCS7 *p7 = NULL, *cursig = NULL, *outsig = NULL, *sig, *p7x = NULL;
 	X509 *cert = NULL;
 	STACK_OF(X509) *certs = NULL, *xcerts = NULL;
 	EVP_PKEY *pkey = NULL;
