@@ -142,8 +142,6 @@ typedef unsigned char u_char;
 #define SPC_INDIRECT_DATA_OBJID     "1.3.6.1.4.1.311.2.1.4"
 #define SPC_STATEMENT_TYPE_OBJID    "1.3.6.1.4.1.311.2.1.11"
 #define SPC_SP_OPUS_INFO_OBJID      "1.3.6.1.4.1.311.2.1.12"
-#define SPC_INDIVIDUAL_SP_KEY_PURPOSE_OBJID "1.3.6.1.4.1.311.2.1.21"
-#define SPC_COMMERCIAL_SP_KEY_PURPOSE_OBJID "1.3.6.1.4.1.311.2.1.22"
 #define SPC_MS_JAVA_SOMETHING       "1.3.6.1.4.1.311.15.1"
 #define SPC_PE_IMAGE_DATA_OBJID     "1.3.6.1.4.1.311.2.1.15"
 #define SPC_CAB_DATA_OBJID          "1.3.6.1.4.1.311.2.1.25"
@@ -1866,21 +1864,21 @@ static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
 	if (exsig != NULL) {
 		exlen = (unsigned long) gsf_input_remaining(exsig);
 		if (exlen > EVP_MAX_MD_SIZE) {
-			printf("MsiDigitalSignatureEx is larger than EVP_MAX_MD_SIZE. Aborting...\n\n");
+			printf("MsiDigitalSignatureEx is larger than EVP_MAX_MD_SIZE\n");
 			ret = 1;
 			goto out;
 		}
 
 		exdata = OPENSSL_malloc(exlen);
 		if (gsf_input_read(exsig, exlen, exdata) == NULL) {
-			printf("Unable to read MsiDigitalSignatureEx\n\n");
+			printf("Unable to read MsiDigitalSignatureEx\n");
 			ret = 1;
 			goto out;
 		}
 
 		tohex(exdata, hexbuf, exlen);
-		printf("Note: MSI includes a MsiDigitalSignatureEx section.\n");
-		printf("MsiDigitalSignatureEx pre-hash: %s\n\n", hexbuf);
+		printf("Note: MSI includes a MsiDigitalSignatureEx section\n");
+		printf("MsiDigitalSignatureEx pre-hash: %s\n", hexbuf);
 	}
 
 out:
@@ -2650,39 +2648,39 @@ int main(int argc, char **argv) {
 				ENGINE_load_dynamic();
 				ENGINE * dyn = ENGINE_by_id("dynamic");
 				if (!dyn)
-					DO_EXIT_0("Failed to load 'dynamic' engine");
+					DO_EXIT_0("Failed to load 'dynamic' engine\n");
 				if (1 != ENGINE_ctrl_cmd_string(dyn, "SO_PATH", p11engine, CMD_MANDATORY))
-					DO_EXIT_1("Failed to set dyn SO_PATH to '%s'", p11engine);
+					DO_EXIT_1("Failed to set dyn SO_PATH to '%s'\n", p11engine);
 
 				if (1 != ENGINE_ctrl_cmd_string(dyn, "ID", "pkcs11", CMD_MANDATORY))
-					DO_EXIT_0("Failed to set dyn ID to 'pkcs11'");
+					DO_EXIT_0("Failed to set dyn ID to 'pkcs11'\n");
 
 				if (1 != ENGINE_ctrl_cmd(dyn, "LIST_ADD", 1, NULL, NULL, CMD_MANDATORY))
-					DO_EXIT_0("Failed to set dyn LIST_ADD to '1'");
+					DO_EXIT_0("Failed to set dyn LIST_ADD to '1'\n");
 
 				if (1 != ENGINE_ctrl_cmd(dyn, "LOAD", 1, NULL, NULL, CMD_MANDATORY))
-					DO_EXIT_0("Failed to set dyn LOAD to '1'");
+					DO_EXIT_0("Failed to set dyn LOAD to '1'\n");
 			} else
 				ENGINE_load_builtin_engines();
 
 			ENGINE * pkcs11 = ENGINE_by_id("pkcs11");
 			if (!pkcs11)
-				DO_EXIT_0("Failed to find and load pkcs11 engine");
+				DO_EXIT_0("Failed to find and load pkcs11 engine\n");
 
 			if (1 != ENGINE_ctrl_cmd_string(pkcs11, "MODULE_PATH", p11module, CMD_MANDATORY))
-				DO_EXIT_1("Failed to set pkcs11 engine MODULE_PATH to '%s'", p11module);
+				DO_EXIT_1("Failed to set pkcs11 engine MODULE_PATH to '%s'\n", p11module);
 		
 			if (pass != NULL) {
 				if (1 != ENGINE_ctrl_cmd_string(pkcs11, "PIN", pass, CMD_MANDATORY))
-					DO_EXIT_0("Failed to set pkcs11 PIN");
+					DO_EXIT_0("Failed to set pkcs11 PIN\n");
 			}
 
 			if (1 != ENGINE_init(pkcs11))
-				DO_EXIT_0("Failed to initialized pkcs11 engine");
+				DO_EXIT_0("Failed to initialized pkcs11 engine\n");
 
 			pkey = ENGINE_load_private_key(pkcs11, keyfile, NULL, NULL);
 			if (pkey == NULL)
-				DO_EXIT_1("Failed to load private key %s", keyfile);
+				DO_EXIT_1("Failed to load private key %s\n", keyfile);
 			if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
 				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
 				 (certs = PEM_read_certs(btmp, "")) == NULL))
@@ -2774,17 +2772,17 @@ int main(int argc, char **argv) {
 
 		src = gsf_input_stdio_new(infile, NULL);
 		if (!src)
-			DO_EXIT_1("Error opening file %s", infile);
+			DO_EXIT_1("Error opening file %s\n", infile);
 		ole = gsf_infile_msole_new(src, NULL);
 
 		if (cmd == CMD_EXTRACT) {
 			if (output_pkcs7) {
 				sig = msi_extract_signature_to_pkcs7(ole);
 				if (!sig)
-					DO_EXIT_0("Unable to extract existing signature.");
+					DO_EXIT_0("Unable to extract existing signature\n");
 				outdata = BIO_new_file(outfile, "w+b");
 				if (outdata == NULL)
-					DO_EXIT_1("Unable to open %s\n\n", outfile);
+					DO_EXIT_1("Unable to open %s\n", outfile);
 				ret = !PEM_write_bio_PKCS7(outdata, sig);
 				BIO_free_all(outdata);
 			} else {
@@ -2806,7 +2804,7 @@ int main(int argc, char **argv) {
 					unsigned long dselen = 0;
 					int has_dse = 0;
 					if (msi_extract_dse(ole, NULL, &dselen, &has_dse) != 0 && has_dse) {
-						DO_EXIT_0("Unable to extract MsiDigitalSigantureEx section.\n");
+						DO_EXIT_0("Unable to extract MsiDigitalSigantureEx section\n");
 					}
 					if (has_dse) {
 						int mdlen = EVP_MD_size(md);
@@ -2820,7 +2818,7 @@ int main(int argc, char **argv) {
 
 				cursig = msi_extract_signature_to_pkcs7(ole);
 				if (cursig == NULL) {
-					DO_EXIT_0("Unable to extract existing signature in -nest mode");
+					DO_EXIT_0("Unable to extract existing signature in -nest mode\n");
 				}
 				if (cmd == CMD_ADD) {
 					sig = cursig;
@@ -2830,7 +2828,7 @@ int main(int argc, char **argv) {
 
 		sink = gsf_output_stdio_new(outfile, NULL);
 		if (!sink)
-			DO_EXIT_1("Error opening output file %s", outfile);
+			DO_EXIT_1("Error opening output file %s\n", outfile);
 		outole = gsf_outfile_msole_new(sink);
 
 		/*
@@ -2879,7 +2877,7 @@ int main(int argc, char **argv) {
 			BIO_push(prehash, BIO_new(BIO_s_null()));
 
 			if (!msi_prehash(ole, NULL, prehash))
-				DO_EXIT_0("unable to calculate MSI pre-hash ('metadata') hash.\n");
+				DO_EXIT_0("Unable to calculate MSI pre-hash ('metadata') hash\n");
 
 			p_msiex = malloc(EVP_MAX_MD_SIZE);
 			len_msiex = BIO_gets(prehash, (char*)p_msiex, EVP_MAX_MD_SIZE);
@@ -2888,7 +2886,7 @@ int main(int argc, char **argv) {
 		}
 
 		if (!msi_handle_dir(ole, outole, hash)) {
-			DO_EXIT_0("unable to msi_handle_dir()\n");
+			DO_EXIT_0("Unable to msi_handle_dir()\n");
 		}
 
 		if (cmd == CMD_REMOVE) {
@@ -2961,8 +2959,7 @@ int main(int argc, char **argv) {
 		unsigned short magic;
 
 		if (jp >= 0)
-			fprintf(stderr, "Warning: -jp option is only valid "
-					"for CAB files.\n");
+			fprintf(stderr, "Warning: -jp option is only valid for CAB files\n");
 
 		magic = GET_UINT16_LE(indata + peheader + 24);
 		if (magic == 0x20b) {
@@ -2994,7 +2991,7 @@ int main(int argc, char **argv) {
 			if (output_pkcs7) {
 				sig = extract_existing_pe_pkcs7(indata, sigpos ? sigpos : fileend, siglen);
 				if (!sig)
-					DO_EXIT_0("Unable to extract existing signature.");
+					DO_EXIT_0("Unable to extract existing signature\n");
 				PEM_write_bio_PKCS7(outdata, sig);
 			} else {
 				BIO_write(outdata, indata + sigpos, siglen);
@@ -3005,7 +3002,7 @@ int main(int argc, char **argv) {
 		if ((cmd == CMD_SIGN && nest) || (cmd == CMD_ATTACH && nest) || cmd == CMD_ADD) {
 			cursig = extract_existing_pe_pkcs7(indata, sigpos ? sigpos : fileend, siglen);
 			if (cursig == NULL) {
-				DO_EXIT_0("Unable to extract existing signature in -nest mode");
+				DO_EXIT_0("Unable to extract existing signature in -nest mode\n");
 			}
 			if (cmd == CMD_ADD) {
 				sig = cursig;
@@ -3073,7 +3070,7 @@ int main(int argc, char **argv) {
 			}
 		}
 		if (!sig)
-			DO_EXIT_0("No valid signature found.");
+			DO_EXIT_0("No valid signature found\n");
 		goto add_only;
 	}
 
@@ -3220,7 +3217,7 @@ add_only:
 #ifdef ENABLE_CURL
 	/* add counter-signature/timestamp */
 	if (nturl && add_timestamp_authenticode(sig, turl, nturl, proxy, noverifypeer))
-		DO_EXIT_0("authenticode timestamping failed\n");
+		DO_EXIT_0("Authenticode timestamping failed\n");
 	if (ntsurl && add_timestamp_rfc3161(sig, tsurl, ntsurl, proxy, md, noverifypeer))
 		DO_EXIT_0("RFC 3161 timestamping failed\n");
 #endif
@@ -3235,11 +3232,10 @@ add_only:
 #endif
 
 	if (nest) {
-		if (cursig == NULL) {
-			DO_EXIT_0("no 'cursig' was extracted. this points to a bug in the code. aborting...\n")
-		}
+		if (cursig == NULL)
+			DO_EXIT_0("Internal error: No 'cursig' was extracted\n")
 		if (pkcs7_set_nested_signature(cursig, sig) == 0)
-			DO_EXIT_0("unable to append the nested signature to the current signature\n");
+			DO_EXIT_0("Unable to append the nested signature to the current signature\n");
 		outsig = cursig;
 	} else {
 		outsig = sig;
@@ -3248,7 +3244,7 @@ add_only:
 	/* Append signature to outfile */
 	if (((len = i2d_PKCS7(outsig, NULL)) <= 0) ||
 		(p = OPENSSL_malloc(len)) == NULL)
-		DO_EXIT_1("i2d_PKCS - memory allocation failed: %d\n", len);
+		DO_EXIT_1("i2d_PKCS memory allocation failed: %d\n", len);
 	i2d_PKCS7(outsig, &p);
 	p -= len;
 	padlen = (8 - len%8) % 8;
@@ -3274,13 +3270,13 @@ add_only:
 		if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
 			GsfOutput *child = gsf_outfile_new_child(outole, "\05DigitalSignature", FALSE);
 			if (!gsf_output_write(child, len, p))
-				DO_EXIT_1("Failed to write MSI 'DigitalSignature' signature to %s", infile);
+				DO_EXIT_1("Failed to write MSI 'DigitalSignature' signature to %s\n", infile);
 			gsf_output_close(child);
 
 			if (p_msiex != NULL) {
 				child = gsf_outfile_new_child(outole, "\05MsiDigitalSignatureEx", FALSE);
 				if (!gsf_output_write(child, len_msiex, p_msiex)) {
-					DO_EXIT_1("Failed to write MSI 'MsiDigitalSignatureEx' signature to %s", infile);
+					DO_EXIT_1("Failed to write MSI 'MsiDigitalSignatureEx' signature to %s\n", infile);
 				}
 				gsf_output_close(child);
 			}
@@ -3320,15 +3316,15 @@ skip_signing:
 		if (type == FILE_TYPE_PE) {
 			outdatasize = get_file_size(outfile);
 			if (!outdatasize)
-				DO_EXIT_0("Error verifying result.\n");
+				DO_EXIT_0("Error verifying result\n");
 			outdataverify = map_file(outfile, outdatasize);
 			if (!outdataverify)
-				DO_EXIT_0("Error verifying result.\n");
+				DO_EXIT_0("Error verifying result\n");
 			int sigpos = GET_UINT32_LE(outdataverify + peheader + 152 + pe32plus*16);
 			int siglen = GET_UINT32_LE(outdataverify + peheader + 152 + pe32plus*16 + 4);
 			ret = verify_pe_file(outdataverify, peheader, pe32plus, sigpos, siglen, leafhash);
 			if (ret) {
-				DO_EXIT_0("Signature mismatch.\n");
+				DO_EXIT_0("Signature mismatch\n");
 			}
 		} else if (type == FILE_TYPE_MSI) {
 #ifdef WITH_GSF
@@ -3337,13 +3333,13 @@ skip_signing:
 
 			src = gsf_input_stdio_new(outfile, NULL);
 			if (!src)
-				DO_EXIT_1("Error opening file %s", outfile);
+				DO_EXIT_1("Error opening file %s\n", outfile);
 			ole = gsf_infile_msole_new(src, NULL);
 			g_object_unref(src);
 			ret = msi_verify_file(ole, leafhash);
 			g_object_unref(ole);
 			if (ret) {
-				DO_EXIT_0("Signature mismatch.\n");
+				DO_EXIT_0("Signature mismatch\n");
 			}
 #else
 			DO_EXIT_1("libgsf is not available, msi support is disabled: %s\n", infile);
@@ -3351,7 +3347,7 @@ skip_signing:
 		} else {
 			DO_EXIT_1("Unknown input type for file: %s\n", infile);
 		}
-		printf("Signature successfully attached.\n");
+		printf("Signature successfully attached\n");
 	} else {
 		printf(ret ? "Failed\n" : "Succeeded\n");
 	}
