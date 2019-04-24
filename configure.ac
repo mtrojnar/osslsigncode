@@ -11,20 +11,6 @@ dnl Checks for programs.
 AC_PROG_CC
 AC_USE_SYSTEM_EXTENSIONS
 
-AC_ARG_ENABLE(
-	[strict],
-	[AS_HELP_STRING([--enable-strict],[enable strict compile mode @<:@disabled@:>@])],
-	,
-	[enable_strict="no"]
-)
-
-AC_ARG_ENABLE(
-	[pedantic],
-	[AS_HELP_STRING([--enable-pedantic],[enable pedantic compile mode @<:@disabled@:>@])],
-	,
-	[enable_pedantic="no"]
-)
-
 AC_ARG_WITH(
 	[curl],
 	[AS_HELP_STRING([--with-curl],[enable curl @<:@enabled@:>@])],
@@ -32,13 +18,10 @@ AC_ARG_WITH(
 	[with_curl="yes"]
 )
 
-if test "${enable_pedantic}" = "yes"; then
-	enable_strict="yes";
-	CFLAGS="${CFLAGS} -pedantic"
-fi
-if test "${enable_strict}" = "yes"; then
-	CFLAGS="${CFLAGS} -Wall -Wextra"
-fi
+CFLAGS="${CFLAGS} -pedantic -Wall -Wextra"
+CFLAGS="${CFLAGS} -Wpointer-arith -Wredundant-decls -Werror=format-security -Werror-implicit-function-declaration"
+# These might not be available on some compilers
+CFLAGS="${CFLAGS} -Wundef -Wmissing-prototypes -Wstrict-prototypes"
 
 PKG_PROG_PKG_CONFIG
 AC_PROG_CPP
