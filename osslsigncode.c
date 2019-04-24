@@ -2,7 +2,7 @@
    OpenSSL based Authenticode signing for PE/MSI/Java CAB files.
 
    Copyright (C) 2005-2015 Per Allansson <pallansson@gmail.com>
-   Copyright (C) 2018 Michał Trojnara <Michal.Trojnara@stunnel.org>
+   Copyright (C) 2018-2019 Michał Trojnara <Michal.Trojnara@stunnel.org>
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -860,7 +860,7 @@ static void usage(const char *argv0)
 	exit(-1);
 }
 
-#define DO_EXIT_0(x)	{ fputs(x, stderr); goto err_cleanup; }
+#define DO_EXIT_0(x)	{ fprintf(stderr, x); goto err_cleanup; }
 #define DO_EXIT_1(x, y) { fprintf(stderr, x, y); goto err_cleanup; }
 #define DO_EXIT_2(x, y, z) { fprintf(stderr, x, y, z); goto err_cleanup; }
 
