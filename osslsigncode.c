@@ -821,7 +821,7 @@ static void usage(const char *argv0)
 			"Usage: %s\n\n\t[ --version | -v ]\n\n"
 			"\t[ sign ]\n"
 			"\t\t( -certs <certfile> -key <keyfile> | -pkcs12 <pkcs12file> |\n"
-			"\t\t  -pkcs11engine <engine> -pkcs11module <module> -certs <certfile> -key <pkcs11 key id>)\n"
+			"\t\t  [ -pkcs11engine <engine> ] -pkcs11module <module> -certs <certfile> -key <pkcs11 key id>)\n"
 			"\t\t[ -pass <password> ] "
 #ifdef PROVIDE_ASKPASS
 			"[ -askpass ]"
@@ -2584,7 +2584,7 @@ int main(int argc, char **argv) {
 
 	if (argc > 0 || (nturl && ntsurl) || !infile ||
 		(cmd != CMD_VERIFY && !outfile) ||
-		(cmd == CMD_SIGN && !((certfile && keyfile) || pkcs12file || (p11engine && p11module)))) {
+		(cmd == CMD_SIGN && !((certfile && keyfile) || pkcs12file || p11module))) {
 		if (failarg)
 			fprintf(stderr, "Unknown option: %s\n", failarg);
 		usage(argv0);
@@ -2610,7 +2610,7 @@ int main(int argc, char **argv) {
 
 	if (cmd == CMD_SIGN) {
 		/* Read certificate and key */
-		if (keyfile && !p11engine && (btmp = BIO_new_file(keyfile, "rb")) != NULL) {
+		if (keyfile && !p11module && (btmp = BIO_new_file(keyfile, "rb")) != NULL) {
 			unsigned char magic[4];
 			unsigned char pvkhdr[4] = { 0x1e, 0xf1, 0xb5, 0xb0 };
 			magic[0] = 0x00;
@@ -2642,23 +2642,26 @@ int main(int argc, char **argv) {
 				 (pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL))
 				DO_EXIT_1("Failed to read PVK file: %s\n", pvkfile);
 			BIO_free(btmp);
-		} else if (p11engine != NULL && p11module != NULL) {
+		} else if (p11module != NULL) {
 			const int CMD_MANDATORY = 0;
-			ENGINE_load_dynamic();
-			ENGINE * dyn = ENGINE_by_id("dynamic");
-			if (!dyn)
-				DO_EXIT_0("Failed to load 'dynamic' engine\n");
-			if (1 != ENGINE_ctrl_cmd_string(dyn, "SO_PATH", p11engine, CMD_MANDATORY))
-				DO_EXIT_1("Failed to set dyn SO_PATH to '%s'\n", p11engine);
+			if (p11engine != NULL) {
+				ENGINE_load_dynamic();
+				ENGINE * dyn = ENGINE_by_id("dynamic");
+				if (!dyn)
+					DO_EXIT_0("Failed to load 'dynamic' engine\n");
+				if (1 != ENGINE_ctrl_cmd_string(dyn, "SO_PATH", p11engine, CMD_MANDATORY))
+					DO_EXIT_1("Failed to set dyn SO_PATH to '%s'\n", p11engine);
 
-			if (1 != ENGINE_ctrl_cmd_string(dyn, "ID", "pkcs11", CMD_MANDATORY))
-				DO_EXIT_0("Failed to set dyn ID to 'pkcs11'\n");
+				if (1 != ENGINE_ctrl_cmd_string(dyn, "ID", "pkcs11", CMD_MANDATORY))
+					DO_EXIT_0("Failed to set dyn ID to 'pkcs11'\n");
 
-			if (1 != ENGINE_ctrl_cmd(dyn, "LIST_ADD", 1, NULL, NULL, CMD_MANDATORY))
-				DO_EXIT_0("Failed to set dyn LIST_ADD to '1'\n");
+				if (1 != ENGINE_ctrl_cmd(dyn, "LIST_ADD", 1, NULL, NULL, CMD_MANDATORY))
+					DO_EXIT_0("Failed to set dyn LIST_ADD to '1'\n");
 
-			if (1 != ENGINE_ctrl_cmd(dyn, "LOAD", 1, NULL, NULL, CMD_MANDATORY))
-				DO_EXIT_0("Failed to set dyn LOAD to '1'\n");
+				if (1 != ENGINE_ctrl_cmd(dyn, "LOAD", 1, NULL, NULL, CMD_MANDATORY))
+					DO_EXIT_0("Failed to set dyn LOAD to '1'\n");
+			} else
+				ENGINE_load_builtin_engines();
 
 			ENGINE * pkcs11 = ENGINE_by_id("pkcs11");
 			if (!pkcs11)
