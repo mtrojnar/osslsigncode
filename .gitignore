@@ -40,3 +40,6 @@ stamp-h1
 *~
 *.gz
 *.bz2
+
+**/*.log
+!myapp.exe
