@@ -1,13 +1,16 @@
 #!/bin/sh
 
 test_result() {
-  if [ $1 -ne 0 ]
+  if [ $1 -eq 0 ]
     then
-      fail=$((fail + 1))
-      result=1
-      printf "Failed\n" >> "results.log"
-    else
       count=$((count + 1))
+    elif [ $1 -eq 125 ]
+      then
+        skip=$((skip + 1))
+      else
+        fail=$((fail + 1))
+        result=1
+        printf "Failed\n" >> "results.log"
     fi
 }
 
@@ -86,8 +89,9 @@ test_result $?
 cat "test8.exe" > "test9.exe"
 printf "\n9. Removing the signature\n" >> "results.log"
 ../../osslsigncode remove-signature -in "test9.exe" -out "test10.exe" 2>> "results.log" 1>&2
-test_result $?
-if [ $result -eq 0 ]
+res=$?
+test_result $res
+if [ $res -eq 0 ]
   then
     # removed signature
     ../../osslsigncode verify -in "test10.exe" 2>> "verify1.log" 1>&2
@@ -96,6 +100,7 @@ if [ $result -eq 0 ]
       fail=$((fail + 1))
       count=$((count - 1))
       result=1
+      printf "Faild: the signature was found\n" >> "results.log"
     else
       cat "verify1.log" >> "results.log"
     fi
@@ -121,17 +126,51 @@ printf "\n10. Verifying the signature\n" >> "results.log"
     ../../osslsigncode verify -in "test6.exe" 2>> "verify2.log" 1>&2 && \
     # attached signature
     ../../osslsigncode verify -in "test8.exe" 2>> "verify2.log" 1>&2
-test_result $?
+res=$?
+test_result $res
 
-if [ $result -eq 0 ] && [ $(grep "Calculated message digest" "verify2.log" | uniq | wc -l) -ne 1 ]
+if [ $res -eq 0 ] && [ $(grep "Calculated message digest" "verify2.log" | uniq | wc -l) -ne 1 ]
   then
     fail=$((fail + 1))
     count=$((count - 1))
     result=1
-  elif [ $result -eq 0 ]
+    printf "Faild: non-unique message digests were found\n" >> "results.log"
+  elif [ $res -eq 0 ]
     then
       printf "Succeeded\n" >> "results.log"
   fi
+
+# 11. Generating page hashes for executable files
+printf "\n11. Generating page hashes for a PE file\n" >> "results.log"
+../../osslsigncode sign -h sha256 -ph \
+    -certs "${script_path}/certs/cert.pem" -key "${script_path}/certs/key.pem" \
+    -in "test.exe" -out "test11.exe" 2>> "results.log" 1>&2
+res=$?
+test_result $res
+
+if [ $res -eq 0 ]
+  then
+    ../../osslsigncode verify -in "test11.exe" 2>> "verify3.log" 1>&2
+    if ! grep -q "Page hash" "verify3.log"
+    then
+      fail=$((fail + 1))
+      count=$((count - 1))
+      result=1
+      printf "Faild: the page hash was not found\n" >> "results.log"
+    else
+      cat "verify1.log" >> "results.log"
+    fi
+  fi
+
+# tests summary
+if [ $count -eq 0 ]
+  then # no test was done
+    result=1
+  fi
+
+#cat "../logs/results.log"
+printf "%s\n" "./newtest.sh finished"
+printf "%s\n" "summary: success $count, skip $skip, fail $fail"
 
 # clean logs
 if [ $result -eq 0 ]
@@ -142,7 +181,4 @@ if [ $result -eq 0 ]
     rm -f sign.pem
   fi
 
-#cat "../logs/results.log"
-printf "%s\n" "./newtest.sh finished"
-printf "%s\n" "summary: success $count, skip $skip, fail $fail"
 exit $result

@@ -43,3 +43,4 @@ stamp-h1
 
 **/*.log
 !myapp.exe
+*.pem
