@@ -28,11 +28,30 @@ else
     OPENSSL=openssl
 fi
 
-printf "\nGenerating a self-signed certificate " >> "makecerts.log"
-$OPENSSL req -config $CONF -new -x509 -days $ddays -keyout tmp/key.pem -out tmp/cert.pem \
-    -subj "/C=PL/ST=Mazovia Province/L=Warsaw/O=osslsigncode/OU=CA/CN=localhost/emailAddress=osslsigncode@example.com" \
-     2>> "makecerts.log" 1>&2
+mkdir "demoCA/"
+touch "demoCA/index.txt"
+touch "demoCA/index.txt.attr"
+echo 1000 > "demoCA/serial"
+date > "makecerts.log"
+
+# generate root CA certificate
+$OPENSSL genrsa -out demoCA/CA.key 1>&2 2>> "makecerts.log"
+$OPENSSL req -config $CONF -new -x509 -days $ddays -key demoCA/CA.key -out tmp/CACert.pem \
+    -subj "/C=PL/O=osslsigncode/OU=Root CA/CN=CA/emailAddress=CA@example.com" \
+    2>> "makecerts.log" 1>&2
 test_result $?
+
+# generate code signing certificate
+$OPENSSL genrsa -out demoCA/key.key 1>&2 2>> "makecerts.log"
+$OPENSSL req -config $CONF -new -key demoCA/key.key -out demoCA/cert.csr \
+    -subj "/C=PL/ST=Mazovia Province/L=Warsaw/O=osslsigncode/OU=CA/CN=localhost/emailAddress=osslsigncode@example.com" \
+    2>> "makecerts.log" 1>&2
+test_result $?
+
+$OPENSSL ca -config $CONF -batch -days $ddays -in demoCA/cert.csr -out demoCA/cert.cer 1>&2 2>> "makecerts.log"
+
+$OPENSSL x509 -in demoCA/cert.cer -out tmp/cert.pem 1>&2 2>> "makecerts.log"
+cat demoCA/key.key >> tmp/key.pem 2>> "makecerts.log"
 
 printf "\nConverting the key to PEM format (with password)\n" >> "makecerts.log"
 $OPENSSL rsa -in tmp/key.pem -out tmp/keyp.pem -passout pass:passme 2>> "makecerts.log" 1>&2
@@ -53,7 +72,7 @@ $OPENSSL pkcs12 -export -in tmp/cert.pem -inkey tmp/key.pem -out tmp/cert.p12 -p
 test_result $?
 
 # copy new files
-if [ -s tmp/cert.pem ] && [ -s tmp/key.pem ] && [ -s tmp/keyp.pem ] && [ -s tmp/key.der ] \
+if [ -s tmp/CACert.pem ] && [ -s tmp/cert.pem ] && [ -s tmp/key.pem ] && [ -s tmp/keyp.pem ] && [ -s tmp/key.der ] \
     && [ -s tmp/key.pvk ] && [ -s tmp/cert.spc ]  && [ -s tmp/cert.p12 ]
   then
     cp tmp/* ./
@@ -65,4 +84,6 @@ if [ -s tmp/cert.pem ] && [ -s tmp/key.pem ] && [ -s tmp/keyp.pem ] && [ -s tmp/
     printf "%s\n" "error logs ${result_path}/makecerts.log"
   fi
 
+# remove the working directory
+rm -rf "demoCA/"
 rm -rf "tmp/"

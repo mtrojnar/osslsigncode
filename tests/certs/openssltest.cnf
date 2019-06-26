@@ -34,6 +34,7 @@ authorityKeyIdentifier          = keyid:always
 basicConstraints                = CA:FALSE
 subjectKeyIdentifier            = hash
 authorityKeyIdentifier          = keyid, issuer
+extendedKeyUsage                = codeSigning
 
 [ ca_extensions ]
 basicConstraints                = critical, CA:true
