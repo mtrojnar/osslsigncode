@@ -1023,7 +1023,6 @@ static SpcLink *get_page_hash_link(int phtype, char *indata,
 	l = i2d_ASN1_SET_ANY(aset, NULL);
 	tmp = p = OPENSSL_malloc(l);
 	l = i2d_ASN1_SET_ANY(aset, &tmp);
-	SpcAttributeTypeAndOptionalValue_free(aval);
 	ASN1_TYPE_free(taval);
 	sk_ASN1_TYPE_free(aset);
 
