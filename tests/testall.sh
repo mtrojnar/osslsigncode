@@ -5,7 +5,7 @@ test_result() {
     then
       count=$((count + 1))
     elif [ $1 -eq 125 ]
-      then
+      then # unused
         skip=$((skip + 1))
       else
         fail=$((fail + 1))
@@ -14,23 +14,7 @@ test_result() {
     fi
 }
 
-result=0
-count=0
-fail=0
-skip=0
-
-result_path=$(pwd)
-cd $(dirname "$0")
-script_path=$(pwd)
-result_path="${result_path}/logs"
-
-rm -rf "${result_path}"
-mkdir "${result_path}"
-cd "${result_path}"
-
-cp "../myapp.exe" "test.exe"
-date > "results.log"
-
+make_tests() {
 # 1. Signing a PE file
 printf "\n1. Signing a PE file\n" >> "results.log"
 ../../osslsigncode sign -h sha256 \
@@ -161,24 +145,46 @@ if [ $res -eq 0 ]
       cat "verify1.log" >> "results.log"
     fi
   fi
+}
 
-# tests summary
-if [ $count -eq 0 ]
-  then # no test was done
-    result=1
-  fi
+result=0
+count=0
+fail=0
+skip=0
 
-#cat "../logs/results.log"
-printf "%s\n" "./newtest.sh finished"
-printf "%s\n" "summary: success $count, skip $skip, fail $fail"
+result_path=$(pwd)
+cd $(dirname "$0")
+script_path=$(pwd)
+result_path="${result_path}/logs"
 
-# clean logs
-if [ $result -eq 0 ]
+rm -rf "${result_path}"
+mkdir "${result_path}"
+cd "${result_path}"
+
+date > "results.log"
+x86_64-w64-mingw32-gcc "../myapp.c" -o "test.exe" 2>> "results.log" 1>&2
+if [ $? -eq 0 ]
   then
-    rm -f test[0-9]*.exe
-    rm -f verify[0-9]*.log
-    rm -f test.exe
-    rm -f sign.pem
+    make_tests
+    # tests summary
+    if [ $count -eq 0 ]
+      then # no test was done
+        result=1
+      fi
+    # clean logs
+    if [ $result -eq 0 ]
+      then
+        rm -f test[0-9]*.exe
+        rm -f verify[0-9]*.log
+        rm -f test.exe
+        rm -f sign.pem
+      fi
+    #cat "../logs/results.log"
+    printf "%s\n" "./newtest.sh finished"
+    printf "%s\n" "summary: success $count, skip $skip, fail $fail"
+  else # cross compilation failed
+    printf "%s\n" "./newtest.sh skipped"
+    result=125
   fi
 
 exit $result
