@@ -917,10 +917,6 @@ static const unsigned char classid_page_hash[] = {
 	0xAE, 0x05, 0xA2, 0x17, 0xDA, 0x8E, 0x60, 0xD6
 };
 
-DEFINE_STACK_OF(ASN1_OCTET_STRING)
-
-DEFINE_STACK_OF(SpcAttributeTypeAndOptionalValue)
-
 static unsigned char *calc_page_hash(char *indata, size_t peheader,
 	int pe32plus, size_t sigpos, int phtype, size_t *rphlen)
 {
@@ -977,26 +973,32 @@ static unsigned char *calc_page_hash(char *indata, size_t peheader,
 static SpcLink *get_page_hash_link(int phtype, char *indata,
 	size_t peheader, int pe32plus, size_t sigpos)
 {
+	unsigned char *p, *tmp;
+	size_t l;
+
 	size_t phlen;
 	unsigned char *ph = calc_page_hash(indata, peheader, pe32plus, sigpos, phtype, &phlen);
 	if (!ph) {
 		fprintf(stderr, "Failed to calculate page hash\n");
 		exit(-1);
 	}
+	char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
+	printf("Calculated page hash            : %s ...\n", hexbuf);
 
-	ASN1_OCTET_STRING *ostr = ASN1_OCTET_STRING_new();
-	ASN1_OCTET_STRING_set(ostr, ph, phlen);
+	ASN1_TYPE *tostr = ASN1_TYPE_new();
+	tostr->type = V_ASN1_OCTET_STRING;
+	tostr->value.octet_string = ASN1_OCTET_STRING_new();
+	ASN1_OCTET_STRING_set(tostr->value.octet_string, ph, phlen);
 	OPENSSL_free(ph);
 
-	STACK_OF(ASN1_OCTET_STRING) *oset = sk_ASN1_OCTET_STRING_new_null();
-	sk_ASN1_OCTET_STRING_push(oset, ostr);
-	unsigned char *p, *tmp;
-	size_t l;
-	l = i2d_ASN1_SET_ANY((ASN1_SEQUENCE_ANY *)oset, NULL);
+	STACK_OF(ASN1_TYPE) *oset = sk_ASN1_TYPE_new_null();
+	sk_ASN1_TYPE_push(oset, tostr);
+	l = i2d_ASN1_SET_ANY(oset, NULL);
 	tmp = p = OPENSSL_malloc(l);
-	i2d_ASN1_SET_ANY((ASN1_SEQUENCE_ANY *)oset, &tmp);
-	ASN1_OCTET_STRING_free(ostr);
-	sk_ASN1_OCTET_STRING_free(oset);
+	i2d_ASN1_SET_ANY(oset, &tmp);
+	ASN1_TYPE_free(tostr);
+	sk_ASN1_TYPE_free(oset);
 
 	SpcAttributeTypeAndOptionalValue *aval = SpcAttributeTypeAndOptionalValue_new();
 	aval->type = OBJ_txt2obj((phtype == NID_sha1) ? SPC_PE_IMAGE_PAGE_HASHES_V1 : SPC_PE_IMAGE_PAGE_HASHES_V2, 1);
@@ -1005,14 +1007,24 @@ static SpcLink *get_page_hash_link(int phtype, char *indata,
 	aval->value->value.set = ASN1_STRING_new();
 	ASN1_STRING_set(aval->value->value.set, p, l);
 	OPENSSL_free(p);
-
-	STACK_OF(SpcAttributeTypeAndOptionalValue) *aset = sk_SpcAttributeTypeAndOptionalValue_new_null();
-	sk_SpcAttributeTypeAndOptionalValue_push(aset, aval);
-	l = i2d_ASN1_SET_ANY((ASN1_SEQUENCE_ANY *)aset, NULL);
+	l = i2d_SpcAttributeTypeAndOptionalValue(aval, NULL);
 	tmp = p = OPENSSL_malloc(l);
-	l = i2d_ASN1_SET_ANY((ASN1_SEQUENCE_ANY *)aset, &tmp);
-	sk_SpcAttributeTypeAndOptionalValue_free(aset);
+	i2d_SpcAttributeTypeAndOptionalValue(aval, &tmp);
 	SpcAttributeTypeAndOptionalValue_free(aval);
+	
+	ASN1_TYPE *taval = ASN1_TYPE_new();
+	taval->type = V_ASN1_SEQUENCE;
+	taval->value.sequence = ASN1_STRING_new();
+	ASN1_STRING_set(taval->value.sequence, p, l);
+	OPENSSL_free(p);
+
+	STACK_OF(ASN1_TYPE) *aset = sk_ASN1_TYPE_new_null();
+	sk_ASN1_TYPE_push(aset, taval);
+	l = i2d_ASN1_SET_ANY(aset, NULL);
+	tmp = p = OPENSSL_malloc(l);
+	l = i2d_ASN1_SET_ANY(aset, &tmp);
+	ASN1_TYPE_free(taval);
+	sk_ASN1_TYPE_free(aset);
 
 	SpcSerializedObject *so = SpcSerializedObject_new();
 	ASN1_OCTET_STRING_set(so->classId, classid_page_hash, sizeof(classid_page_hash));
