@@ -2729,7 +2729,7 @@ int main(int argc, char **argv) {
 	}
 
 	if (certs == NULL && p7 != NULL)
-		certs = p7->d.sign->cert;
+		certs = sk_X509_dup(p7->d.sign->cert);
 
 	/* Check if indata is cab or pe */
 	filesize = get_file_size(infile);
@@ -3179,7 +3179,7 @@ int main(int argc, char **argv) {
 	for(i = sk_X509_num(certs)-1; i>=0; i--)
 		PKCS7_add_certificate(sig, sk_X509_value(certs, i));
 
-	if (p7 == NULL || certs != p7->d.sign->cert) {
+	if (certs) {
 		sk_X509_free(certs);
 		certs = NULL;
 	}
@@ -3373,7 +3373,7 @@ err_cleanup:
 		pass = NULL;
 	}
 	ERR_print_errors_fp(stderr);
-	if (certs && (p7 == NULL || certs != p7->d.sign->cert))
+	if (certs)
 		sk_X509_free(certs);
 	if (p7)
 		PKCS7_free(p7);
