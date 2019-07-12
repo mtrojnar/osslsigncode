@@ -1,0 +1,45 @@
+#!/bin/sh
+# Removing the signature from the PE/MSI file.
+
+. $(dirname $0)/../test_library
+
+# PE file
+test_name="331. Removing the signature from the PE file"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test.exe" -out "test_331_signed.exe" && \
+        ../../osslsigncode remove-signature \
+            -in "test_331_signed.exe" -out "test_331.exe"'
+    verify_no_signature "$?" "331" "exe" "sha256sum"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+# Command is not supported for non-PE
+
+# MSI file
+test_name="332. Removing the signature from the MSI file"
+printf "\n%s\n" "$test_name"
+if [ -s "sample.msi" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "sample.msi" -out "test_332_signed.msi" && \
+        ../../osslsigncode remove-signature \
+            -in "test_332_signed.msi" -out "test_332.msi"'
+    verify_no_signature "$?" "332" "msi" "sha256sum"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+exit 0

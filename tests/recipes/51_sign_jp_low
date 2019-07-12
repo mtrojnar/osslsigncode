@@ -1,0 +1,30 @@
+#!/bin/sh
+# Signing a CAB file with "jp low" option
+# https://support.microsoft.com/en-us/help/193877
+
+. $(dirname $0)/../test_library
+
+# PE file
+#
+
+# CAB file
+test_name="511. Signing a CAB file with jp low option"
+printf "\n%s\n" "$test_name"
+if [ -s "test.ex_" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -jp low \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test.ex_" -out "test_511.ex_"'
+    verify_text "$?" "511" "ex_" "3006030200013000" "HEX" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# MSI file
+#
+
+exit 0

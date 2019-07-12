@@ -1,0 +1,57 @@
+#!/bin/sh
+# Signing a PE/CAB/MSI file with addUnauthenticatedBlob.
+
+. $(dirname $0)/../test_library
+
+# PE file
+test_name="101. Signing a PE file with addUnauthenticatedBlob"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -addUnauthenticatedBlob \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test.exe" -out "test_101.exe" 2>> "results.log" 1>&2'
+    verify_text "$?" "101" "exe" "BEGIN_BLOB" "ASCII" "UNUSED_PATTERN" "MODIFY"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+test_name="102. Signing a CAB file with addUnauthenticatedBlob"
+printf "\n%s\n" "$test_name"
+if [ -s "test.ex_" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -addUnauthenticatedBlob \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test.ex_" -out "test_102.ex_" 2>> "results.log" 1>&2'
+    verify_text "$?" "102" "ex_" "BEGIN_BLOB" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# MSI file
+test_name="103. Signing a MSI file with addUnauthenticatedBlob"
+printf "\n%s\n" "$test_name"
+if [ -s "sample.msi" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -addUnauthenticatedBlob \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "sample.msi" -out "test_103.msi" 2>> "results.log" 1>&2'
+    verify_text "$?" "103" "msi" "BEGIN_BLOB" "ASCII" "UNUSED_PATTERN" "MODIFY"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+exit 0

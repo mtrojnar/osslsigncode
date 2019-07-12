@@ -1,0 +1,58 @@
+#!/bin/sh
+# Signing a PE/CAB/MSI file with specified URL for expanded description of the signed content
+# https://docs.microsoft.com/en-us/windows-hardware/drivers/install/authenticode-signing-of-csps
+
+. $(dirname $0)/../test_library
+
+# PE file
+test_name="151. Signing a PE file with specified URL"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -i "https://www.osslsigncode.com/" \
+            -in "test.exe" -out "test_151.exe"'
+    verify_text "$?" "151" "exe" "https://www.osslsigncode.com/" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+test_name="152. Signing a CAB file with specified URL"
+printf "\n%s\n" "$test_name"
+if [ -s "test.ex_" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -i "https://www.osslsigncode.com/" \
+            -in "test.ex_" -out "test_152.ex_"'
+    verify_text "$?" "152" "ex_" "https://www.osslsigncode.com/" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# MSI file
+test_name="153. Signing a MSI file with specified URL"
+printf "\n%s\n" "$test_name"
+if [ -s "sample.msi" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -i "https://www.osslsigncode.com/" \
+            -in "sample.msi" -out "test_153.msi"'
+    verify_text "$?" "153" "msi" "https://www.osslsigncode.com/" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+exit 0

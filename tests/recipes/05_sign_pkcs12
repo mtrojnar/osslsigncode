@@ -1,0 +1,56 @@
+#!/bin/sh
+# Signing a PE/CAB/MSI file with the certificate and key stored in a PKCS#12 container.
+
+. $(dirname $0)/../test_library
+
+# PE file
+test_name="051. Signing a PE file with a certificate and key stored in a PKCS#12 container"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -pkcs12 "${script_path}/../certs/cert.p12" -pass passme \
+            -in "test.exe" -out "test_051.exe"'
+    verify_signature "$?" "051" "exe" "sha256sum"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+test_name="052. Signing a CAB file with a certificate and key stored in a PKCS#12 container"
+printf "\n%s\n" "$test_name"
+if [ -s "test.ex_" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -pkcs12 "${script_path}/../certs/cert.p12" \
+            -pass passme \
+            -in "test.ex_" -out "test_052.ex_"'
+    verify_text "$?" "052" "ex_" "osslsigncode" "ASCII" "sha256sum" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# MSI file
+test_name="053. Signing a MSI file with a certificate and key stored in a PKCS#12 container"
+printf "\n%s\n" "$test_name"
+if [ -s "sample.msi" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -pkcs12 "${script_path}/../certs/cert.p12" \
+            -pass passme \
+            -in "sample.msi" -out "test_053.msi"'
+    verify_signature "$?" "053" "msi" "sha256sum"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+exit 0
