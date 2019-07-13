@@ -1,0 +1,26 @@
+#!/bin/sh
+# Signing a PE file with md5 set of cryptographic hash functions.
+
+. $(dirname $0)/../test_library
+
+# PE file
+test_name="211. Signing a PE file with md5 set of cryptographic hash functions"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h md5 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test.exe" -out "test_211.exe"'
+    verify_signature "$?" "211" "exe" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+
+# MSI file
+
+exit 0

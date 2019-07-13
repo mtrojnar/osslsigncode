@@ -1,0 +1,60 @@
+#!/bin/sh
+# Checking SHA256 message digests for 01x-05x tests
+
+. $(dirname $0)/../test_library
+res=0
+skip=0
+test_name="061. Checking SHA256 message digests for 01x-05x tests"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ]
+  then
+    if [ $(cat "sha256sum_exe.log" | cut -d' ' -f1 | uniq | wc -l) -ne 1 ]
+      then
+        res=1
+        cat "sha256sum_exe.log" >> "results.log"
+        printf "Non-unique SHA256 message digests found\n" >> "results.log"
+      else
+        rm -f test_0[1-5]*[1-3]*.exe
+      fi
+    rm -f "sha256sum_exe.log"
+  else
+    skip=$($skip+1)
+  fi
+
+if [ -s "test.ex_" ]
+  then
+    if [ $(cat "sha256sum_ex_.log" | cut -d' ' -f1 | uniq | wc -l) -ne 1 ]
+      then
+        res=1
+        cat "sha256sum_ex_.log" >> "results.log"
+        printf "Non-unique SHA256 message digests found\n" >> "results.log"
+      else
+        rm -f test_0[1-5]*[1-3]*.ex_
+      fi
+    rm -f "sha256sum_ex_.log"
+  else
+    skip=$($skip+1)
+  fi
+
+if [ -s "sample.msi" ]
+  then
+    if [ $(cat "sha256sum_msi.log" | cut -d' ' -f1 | uniq | wc -l) -ne 1 ]
+      then
+        res=1
+        cat "sha256sum_msi.log" >> "results.log"
+        printf "Non-unique SHA256 message digests found\n" >> "results.log"
+      else
+        rm -f test_0[1-5]*[1-3]*.msi
+      fi
+    rm -f "sha256sum_msi.log"
+  else
+    skip=$(($skip+1))
+  fi
+
+if [ $skip -lt 3 ]
+  then
+    test_result "$res" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+exit 0

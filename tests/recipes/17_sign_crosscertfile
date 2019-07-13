@@ -1,0 +1,59 @@
+#!/bin/sh
+# Adding an additional certificate to the signature block of the PE/CAB/MSI file.
+# https://docs.microsoft.com/en-us/windows-hardware/drivers/install/authenticode-signing-of-csps
+# https://docs.microsoft.com/en-us/windows/win32/seccertenroll/about-cross-certification
+
+. $(dirname $0)/../test_library
+
+# PE file
+test_name="171. Adding an additional certificate to the signature block of the PE file"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -ac "${script_path}/../certs/crosscert.pem" \
+            -in "test.exe" -out "test_171.exe"'
+    verify_signature "$?" "171" "exe" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+test_name="172. Adding an additional certificate to the signature block of the CAB file"
+printf "\n%s\n" "$test_name"
+if [ -s "test.ex_" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -ac "${script_path}/../certs/crosscert.pem" \
+            -in "test.ex_" -out "test_172.ex_"'
+    verify_text "$?" "172" "ex_" "crosscert" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# MSI file
+test_name="173. Adding an additional certificate to the signature block of the MSI file"
+printf "\n%s\n" "$test_name"
+if [ -s "sample.msi" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -ac "${script_path}/../certs/crosscert.pem" \
+            -in "sample.msi" -out "test_173.msi"'
+    verify_signature "$?" "173" "msi" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+exit 0

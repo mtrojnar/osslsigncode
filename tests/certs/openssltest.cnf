@@ -1,0 +1,59 @@
+# OpenSSL root CA configuration file
+
+[ ca ]
+default_ca                      = CA_default
+
+[ CA_default ]
+# Directory and file locations.
+dir                             = .
+certs                           = $dir/demoCA
+crl_dir                         = $dir/demoCA
+new_certs_dir                   = $dir/demoCA
+database                        = $dir/demoCA/index.txt
+serial                          = $dir/demoCA/serial
+crl_extensions                  = crl_ext
+default_md                      = sha256
+preserve                        = no
+policy                          = policy_match
+x509_extensions                 = usr_cert
+private_key                     = $dir/demoCA/CA.key
+certificate                     = $dir/tmp/CACert.pem
+
+[ req ]
+encrypt_key                     = no
+default_bits                    = 2048
+default_md                      = sha256
+string_mask                     = utf8only
+x509_extensions                 = ca_extensions
+distinguished_name              = req_distinguished_name
+
+[ crl_ext ]
+authorityKeyIdentifier          = keyid:always
+
+[ usr_cert ]
+basicConstraints                = CA:FALSE
+subjectKeyIdentifier            = hash
+authorityKeyIdentifier          = keyid, issuer
+extendedKeyUsage                = codeSigning
+
+[ ca_extensions ]
+basicConstraints                = critical, CA:true
+subjectKeyIdentifier            = hash
+authorityKeyIdentifier          = keyid:always,issuer
+keyUsage                        = critical, digitalSignature, cRLSign, keyCertSign
+
+[ policy_match ]
+countryName                     = match
+organizationName                = match
+organizationalUnitName          = optional
+commonName                      = supplied
+emailAddress                    = optional
+
+[ req_distinguished_name ]
+countryName                     = Country Name (2 letter code)
+stateOrProvinceName             = State or Province Name
+localityName                    = Locality Name
+0.organizationName              = Organization Name
+organizationalUnitName          = Organizational Unit Name
+commonName                      = Common Name
+emailAddress                    = Email Address

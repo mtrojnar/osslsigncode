@@ -1,0 +1,59 @@
+#!/bin/sh
+# Signing a PE/CAB/MSI file with a PVK key file with a password together with a PEM certificate.
+
+. $(dirname $0)/../test_library
+
+printf "The readpass option does'n work correctly with PVK key file - press enter\n" 1>&3
+
+# PE file
+test_name="121. Signing a PE file with a PVK key file with a password read from password.txt file"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -readpass "${script_path}/../certs/password.txt" \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pvk" \
+            -in "test.exe" -out "test_121.exe"'
+    verify_signature "$?" "121" "exe" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+test_name="122. Signing a CAB file with a PVK key file with a password read from password.txt file"
+printf "\n%s\n" "$test_name"
+if [ -s "test.ex_" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -readpass "${script_path}/../certs/password.txt" \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pvk" \
+            -in "test.ex_" -out "test_122.ex_"'
+    verify_text "$?" "122" "ex_" "osslsigncode" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# MSI file
+test_name="123. Signing a MSI file with a PVK key file with a password read from password.txt file"
+printf "\n%s\n" "$test_name"
+if [ -s "sample.msi" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -readpass "${script_path}/../certs/password.txt" \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pvk" \
+            -in "sample.msi" -out "test_123.msi"'
+    verify_signature "$?" "123" "msi" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+exit 0

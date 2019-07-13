@@ -1,0 +1,6 @@
+*.der
+*.pem
+*.pvk
+*.p12
+*.spc
+*.txt

@@ -1,0 +1,168 @@
+# this file is a library sourced from recipes/*
+
+result_path=$(pwd)
+cd $(dirname "$0")/../
+script_path=$(pwd)
+cd "${result_path}"
+
+test_result() {
+#1 last exit status
+#2 test name
+
+  local result=0
+
+  if [ $1 -eq 0 ]
+    then
+      printf "%s\n" "Test succeeded"
+    else
+      printf "%s\n" "Test failed"
+      printf "%-100s\t%s\n" "$2" "failed" 1>&3
+      result=1
+    fi
+  return $result
+}
+
+verify_signature() {
+# $1 sign exit code
+# $2 test number
+# $3 filename extension
+# $4 sha256sum requirement
+
+  local result=0
+
+  if [ "$1" -eq 0 ]
+    then
+      ../../osslsigncode verify -in "test_$2.$3" 2> "verify.log" 1>&2
+      result=$?
+      if [ "$result" -ne 0 ] || grep -q "No signature found" "verify.log"
+      then
+        cat "verify.log" >> "results.log"
+      elif [ "$4" = "sha256sum" ]
+        then
+          sha256sum "test_$2.$3" 2>> "sha256sum_$3.log" 1>&2
+          if [ -s "test_$2_signed.$3" ]
+            then
+              sha256sum "test_$2_signed.$3" 2>> "sha256sum_$3.log" 1>&2
+            fi
+        else
+          rm -f "test_$2.$3" "test_$2_signed.$3"
+      fi
+    else
+      result=1
+    fi
+  return $result
+}
+
+verify_no_signature() {
+# $1 sign exit code
+# $2 test number
+# $3 filename extension
+# $4 sha256sum requirement
+
+  local result=0
+
+  if [ "$1" -eq 0 ]
+    then
+      ../../osslsigncode verify -in "test_$2.$3" 2> "verify.log" 1>&2
+      if grep -q -e "No signature found" -e "MSI file has no signature" "verify.log"
+        then
+          sha256sum "test_$2_signed.$3" 2>> "sha256sum_$3.log" 1>&2
+        else
+          result=1
+          cat "verify.log" >> "results.log"
+          printf "Faild: the signature was found\n"
+        fi
+    else
+      result=1
+    fi
+  return $result
+}
+
+modify_blob() {
+# $1 test number
+# $2 filename extension
+
+  local result=0
+
+  begin_blob=$(echo -n "---BEGIN_BLOB---" | xxd -p)
+  modify_blob=$(echo -n "---MODIFIED_BLOB---" | xxd -p)
+  zero_blob="00000000000000000000000000000000000000"
+  xxd -p -c 1000 "test_$1.$2" | \
+      sed "s/$begin_blob$zero_blob/$begin_blob$modify_blob/" | \
+      xxd -p -r > "test_$1_modifed.$2"
+  ../../osslsigncode verify -in "test_$1_modifed.$2" 2>> "verify.log" 1>&2
+  result=$?
+  if [ "$result" -ne 0 ] || \
+      [ $(grep -e "Calculated DigitalSignature" -e "Calculated message digest" "verify.log" | uniq | wc -l) -ne 1 ]
+    then
+      result=1
+      cat "verify.log" >> "results.log"
+      printf "Faild: verify error or non-unique message digests were found\n"
+    else
+      rm -f "test_$1_modifed.$2"
+    fi
+  return $result
+}
+
+verify_text() {
+# $1 sign exit code
+# $2 test number
+# $3 filename extension
+# $4 searched text
+# $5 ASCII od HEX format
+# $6 sha256sum requirement
+# $7 modify requirement
+
+  local result=0
+
+  if [ "$1" -eq 0 ]
+    then
+      if [ "$3" != "ex_" ]
+        then
+          ../../osslsigncode verify -in "test_$2.$3" 2> "verify.log" 1>&2
+          result=$?
+        fi
+      if [ "$result" -ne 0 ] || grep -q "No signature found" "verify.log"
+      then
+        result=1
+        cat "verify.log" >> "results.log"
+      else
+        if [ "$5" = "ASCII" ]
+          then
+            searched_text=$(echo -n "$4" | xxd -p)
+          else
+            searched_text=$4
+          fi
+        if ! xxd -p -c 1000 "test_$2.$3" | grep $searched_text 2>> /dev/null 1>&2
+          then
+            result=1
+            printf "Faild: $4 not found\n"
+          elif [ "$7" = "MODIFY" ]
+            then
+              modify_blob $2 $3
+              result=$?
+          fi
+        if [ "$result" -eq 0 ]
+          then
+            if [ "$6" = "sha256sum" ]
+              then
+                sha256sum "test_$2.$3" 2>> "sha256sum_$3.log" 1>&2
+                if [ -s "test_$2_signed.$3" ]
+                  then
+                    sha256sum "test_$2_signed.$3" 2>> "sha256sum_$3.log" 1>&2
+                  fi
+              else
+                rm -f "test_$2.$3" "test_$2_signed.$3"
+              fi
+          fi
+        if [ "$result" -eq 0 ] && [ "$2" = "401" ]
+          then
+            printf "Faild: unhashed file metadata was found\n"
+            result=1
+          fi
+      fi
+    else
+      result=1
+    fi
+  return $result
+}

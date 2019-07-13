@@ -1,0 +1,57 @@
+#!/bin/sh
+# Signing a PE/CAB/MSI file with Authenticode timestamping
+
+. $(dirname $0)/../test_library
+
+# PE file
+test_name="071. Signing a PE file with Authenticode timestamping"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -t http://time.certum.pl/ \
+            -in "test.exe" -out "test_071.exe" 2>> "results.log" 1>&2'
+    verify_signature "$?" "071" "exe" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+test_name="072. Signing a CAB file with Authenticode timestamping"
+printf "\n%s\n" "$test_name"
+if [ -s "test.ex_" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -t http://time.certum.pl/ \
+            -in "test.ex_" -out "test_072.ex_" 2>> "results.log" 1>&2'
+    verify_text "$?" "072" "ex_" "Unizeto" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# MSI file
+test_name="073. Signing a MSI file with Authenticode timestamping"
+printf "\n%s\n" "$test_name"
+if [ -s "sample.msi" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -t http://time.certum.pl/ \
+            -in "sample.msi" -out "test_073.msi"'
+    verify_signature "$?" "073" "msi" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+exit 0

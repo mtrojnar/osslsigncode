@@ -1,0 +1,31 @@
+#!/bin/sh
+# Signing a CAB file with "jp high" option
+# There is no implementation:
+# https://github.com/mtrojnar/osslsigncode/blob/0bea1ac8f6d61ed42dd154305a4d5b8c27478ad0/osslsigncode.c#L2555-L2562
+
+. $(dirname $0)/../test_library
+
+# PE file
+#
+
+# CAB file
+test_name="531. Signing a CAB file with jp high option"
+printf "\n%s\n" "$test_name"
+if [ -s "test.ex_" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -jp high \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test.ex_" -out "test_531.ex_"'
+    verify_text "$?" "531" "ex_" "3006030200013000" "HEX" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# MSI file
+#
+
+exit 0

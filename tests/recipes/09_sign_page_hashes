@@ -1,0 +1,28 @@
+#!/bin/sh
+# Generating page hashes for a PE file
+
+. $(dirname $0)/../test_library
+
+# PE file
+test_name="091. Generating page hashes for a PE file"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+    script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 -ph \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test.exe" -out "test_091.exe"'
+    verify_signature "$?" "091" "exe" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+# Command is not supported for non-PE files
+
+# MSI file
+# Command is not supported for non-PE files
+
+exit 0

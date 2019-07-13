@@ -1,0 +1,60 @@
+#!/bin/sh
+# Signing a PE/CAB/MSI file with the commercial purpose set for SPC_STATEMENT_TYPE_OBJID
+# object ID numbers (OIDs) "1.3.6.1.4.1.311.2.1.11"
+# changes default Individual Code Signing: "0x30, 0x0c, x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x15"
+# sets Commercial Code Signing: "0x30, 0x0c, x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x16"
+
+. $(dirname $0)/../test_library
+
+# PE file
+test_name="161. Signing a PE file with the common purpose set"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -comm \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test.exe" -out "test_161.exe"'
+    verify_text "$?" "161" "exe" "300c060a2b060104018237020116" "HEX" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+test_name="162. Signing a CAB file with the common purpose set"
+printf "\n%s\n" "$test_name"
+if [ -s "test.ex_" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -comm \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test.ex_" -out "test_162.ex_"'
+    verify_text "$?" "162" "ex_" "300c060a2b060104018237020116" "HEX" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# MSI file
+test_name="163. Signing a MSI file with the common purpose set"
+printf "\n%s\n" "$test_name"
+if [ -s "sample.msi" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -comm \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "sample.msi" -out "test_163.msi"'
+    verify_text "$?" "163" "msi" "300c060a2b060104018237020116" "HEX" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+exit 0
