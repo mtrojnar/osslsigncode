@@ -1860,9 +1860,9 @@ static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
 	}
 
 	/* Create outdata file */
-	outdata = BIO_new_file(outfile, "w+b");
+	outdata = BIO_new_file(outfile, "w+bx");
 	if (outdata == NULL) {
-		printf("Unable to open %s\n\n", outfile);
+		printf("Unable to create %s\n\n", outfile);
 		ret = 1;
 		goto out;
 	}
@@ -2792,9 +2792,9 @@ int main(int argc, char **argv) {
 				sig = msi_extract_signature_to_pkcs7(ole);
 				if (!sig)
 					DO_EXIT_0("Unable to extract existing signature\n");
-				outdata = BIO_new_file(outfile, "w+b");
+				outdata = BIO_new_file(outfile, "w+bx");
 				if (outdata == NULL)
-					DO_EXIT_1("Unable to open %s\n", outfile);
+					DO_EXIT_1("Unable to create %s\n", outfile);
 				ret = !PEM_write_bio_PKCS7(outdata, sig);
 				BIO_free_all(outdata);
 			} else {
@@ -2913,7 +2913,7 @@ int main(int argc, char **argv) {
 	if (type == FILE_TYPE_CAB || type == FILE_TYPE_PE) {
 		if (cmd != CMD_VERIFY) {
 			/* Create outdata file */
-			outdata = BIO_new_file(outfile, "w+b");
+			outdata = BIO_new_file(outfile, "w+bx");
 			if (outdata == NULL)
 				DO_EXIT_1("Failed to create file: %s\n", outfile);
 			BIO_push(hash, outdata);
@@ -3387,7 +3387,7 @@ err_cleanup:
 		EVP_PKEY_free(pkey);
 	if (hash)
 		BIO_free_all(hash);
-	if (outfile)
+	if (outdata)
 		unlink(outfile);
 	fprintf(stderr, "\nFailed\n");
 	cleanup_lib_state();
