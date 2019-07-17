@@ -1,18 +1,18 @@
 #!/bin/sh
 # Signing a PE/CAB/MSI file with the certificate file in the SPC format
-# and the private key file in the PVK format.
+# and the private key file in the PEM format.
 
 . $(dirname $0)/../test_library
 
 # PE file
-test_name="041. Signing a PE file a SPC certificate file and a PVK key file"
+test_name="041. Signing a PE file a SPC certificate file"
 printf "\n%s\n" "$test_name"
 if [ -s "test.exe" ]
   then
     faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
         script_path=$(pwd)
         ../../osslsigncode sign -h sha256 \
-            -certs "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/key.pvk" \
+            -certs "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/keyp.pem" \
             -pass passme \
             -in "test.exe" -out "test_041.exe"'
     verify_signature "$?" "041" "exe" "sha256sum"
@@ -22,14 +22,14 @@ if [ -s "test.exe" ]
   fi
 
 # CAB file
-test_name="042. Signing a CAB file a SPC certificate file and a PVK key file"
+test_name="042. Signing a CAB file a SPC certificate file"
 printf "\n%s\n" "$test_name"
 if [ -s "test.ex_" ]
   then
     faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
         script_path=$(pwd)
         ../../osslsigncode sign -h sha256 \
-            -certs "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/key.pvk" \
+            -certs "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/keyp.pem" \
             -pass passme \
             -in "test.ex_" -out "test_042.ex_"'
     verify_text "$?" "042" "ex_" "osslsigncode" "ASCII" "sha256sum" "UNUSED_PATTERN"
@@ -39,14 +39,14 @@ if [ -s "test.ex_" ]
   fi
 
 # MSI file
-test_name="043. Signing a MSI file a SPC certificate file and a PVK key file"
+test_name="043. Signing a MSI file a SPC certificate file"
 printf "\n%s\n" "$test_name"
 if [ -s "sample.msi" ]
   then
     faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
         script_path=$(pwd)
         ../../osslsigncode sign -h sha256 \
-            -certs "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/key.pvk" \
+            -certs "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/keyp.pem" \
             -pass passme \
             -in "sample.msi" -out "test_043.msi"'
     verify_signature "$?" "043" "msi" "sha256sum"
