@@ -25,13 +25,22 @@ valid signature for a CAB file containing Java files. It supports getting
 the timestamp through a proxy as well. It also supports signature verification,
 removal and extraction.
 
-## INSTALLATION
+## BUILDING
 
-The usual way:
+Ths build technique works on Linux and macOS, if you have the necessary tools installed:
 ```
+  ./autogen.sh
   ./configure
   make
   make install
+```
+
+* On Linux, (tested on Debian/Ubuntu) you may need `sudo apt-get update && sudo apt-get install build-essential autoconf libtool libssl-dev python3-pkgconfig libcurl4-gnutls-dev`
+* On macOS with Homebrew, you probably need to do these tings before autogen.sh and configure:
+```
+  brew install openssl@1.1 automake pkg-config libtool
+  export LDFLAGS="-L/usr/local/opt/openssl@1.1/lib"
+  export CPPFLAGS="-I/usr/local/opt/openssl@1.1/include"
 ```
 
 ## USAGE
