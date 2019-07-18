@@ -19,7 +19,7 @@ if [ -s "test.ex_" ]
             -jp high \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "test.ex_" -out "test_531.ex_"'
-    verify_text "$?" "531" "ex_" "3006030200013000" "HEX" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "531" "ex_" "UNUSED_PATTERN" "UNUSED_PATTERN" "HEX" "3006030200013000" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

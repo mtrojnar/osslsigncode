@@ -13,7 +13,7 @@ if [ -s "test.exe" ]
         ../../osslsigncode sign -h sha256 \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "test.exe" -out "test_011.exe"'
-    verify_signature "$?" "011" "exe" "sha256sum"
+    verify_signature "$?" "011" "exe" "UNUSED_PATTERN" "sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -29,7 +29,7 @@ if [ -s "test.ex_" ]
         ../../osslsigncode sign -h sha256 \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "test.ex_" -out "test_012.ex_"'
-    verify_text "$?" "012" "ex_" "osslsigncode" "ASCII" "sha256sum" "UNUSED_PATTERN"
+    verify_signature "$?" "012" "ex_" "UNUSED_PATTERN" "sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -45,7 +45,7 @@ if [ -s "sample.msi" ]
         ../../osslsigncode sign -h sha256 \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "sample.msi" -out "test_013.msi"'
-    verify_signature "$?" "013" "msi" "sha256sum"
+    verify_signature "$?" "013" "msi" "UNUSED_PATTERN" "sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

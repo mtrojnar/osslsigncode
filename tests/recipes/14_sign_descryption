@@ -14,7 +14,7 @@ if [ -s "test.exe" ]
             -n "DESCRYPTION_TEXT" \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "test.exe" -out "test_141.exe"'
-    verify_text "$?" "141" "exe" "DESCRYPTION_TEXT" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "141" "exe" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "DESCRYPTION_TEXT" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -31,7 +31,7 @@ if [ -s "test.ex_" ]
             -n "DESCRYPTION_TEXT" \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "test.ex_" -out "test_142.ex_"'
-    verify_text "$?" "142" "ex_" "DESCRYPTION_TEXT" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "142" "ex_" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "DESCRYPTION_TEXT" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -48,7 +48,7 @@ if [ -s "sample.msi" ]
             -n "DESCRYPTION_TEXT" \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "sample.msi" -out "test_143.msi"'
-    verify_text "$?" "143" "msi" "DESCRYPTION_TEXT" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "143" "msi" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "DESCRYPTION_TEXT" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

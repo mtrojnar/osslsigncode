@@ -13,7 +13,7 @@ if [ -s "test.exe" ]
         ../../osslsigncode sign -h sha256 \
             -pkcs12 "${script_path}/../certs/cert.p12" -pass passme \
             -in "test.exe" -out "test_051.exe"'
-    verify_signature "$?" "051" "exe" "sha256sum"
+    verify_signature "$?" "051" "exe" "UNUSED_PATTERN" "sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -30,7 +30,7 @@ if [ -s "test.ex_" ]
             -pkcs12 "${script_path}/../certs/cert.p12" \
             -pass passme \
             -in "test.ex_" -out "test_052.ex_"'
-    verify_text "$?" "052" "ex_" "osslsigncode" "ASCII" "sha256sum" "UNUSED_PATTERN"
+    verify_signature "$?" "052" "ex_" "UNUSED_PATTERN" "sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -47,7 +47,7 @@ if [ -s "sample.msi" ]
             -pkcs12 "${script_path}/../certs/cert.p12" \
             -pass passme \
             -in "sample.msi" -out "test_053.msi"'
-    verify_signature "$?" "053" "msi" "sha256sum"
+    verify_signature "$?" "053" "msi" "UNUSED_PATTERN" "sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

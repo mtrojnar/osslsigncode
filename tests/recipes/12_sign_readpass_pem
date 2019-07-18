@@ -14,7 +14,7 @@ if [ -s "test.exe" ]
             -readpass "${script_path}/../certs/password.txt" \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "test.exe" -out "test_121.exe"'
-    verify_signature "$?" "121" "exe" "UNUSED_PATTERN"
+    verify_signature "$?" "121" "exe" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -31,7 +31,7 @@ if [ -s "test.ex_" ]
             -readpass "${script_path}/../certs/password.txt" \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "test.ex_" -out "test_122.ex_"'
-    verify_text "$?" "122" "ex_" "osslsigncode" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "122" "ex_" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -48,7 +48,7 @@ if [ -s "sample.msi" ]
             -readpass "${script_path}/../certs/password.txt" \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "sample.msi" -out "test_123.msi"'
-    verify_signature "$?" "123" "msi" "UNUSED_PATTERN"
+    verify_signature "$?" "123" "msi" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

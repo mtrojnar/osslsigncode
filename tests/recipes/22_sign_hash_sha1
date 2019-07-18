@@ -13,7 +13,7 @@ if [ -s "test.exe" ]
         ../../osslsigncode sign -h sha1 \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "test.exe" -out "test_221.exe"'
-    verify_signature "$?" "221" "exe" "UNUSED_PATTERN"
+    verify_signature "$?" "221" "exe" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "osslsigncode" "SHA1"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

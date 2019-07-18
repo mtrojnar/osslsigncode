@@ -14,7 +14,7 @@ if [ -s "test.exe" ]
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -t http://time.certum.pl/ \
             -in "test.exe" -out "test_071.exe" 2>> "results.log" 1>&2'
-    verify_signature "$?" "071" "exe" "UNUSED_PATTERN"
+    verify_signature "$?" "071" "exe" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "Unizeto" "Unizeto"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -31,7 +31,7 @@ if [ -s "test.ex_" ]
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -t http://time.certum.pl/ \
             -in "test.ex_" -out "test_072.ex_" 2>> "results.log" 1>&2'
-    verify_text "$?" "072" "ex_" "Unizeto" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "072" "ex_" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "Unizeto" "Unizeto"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -48,7 +48,7 @@ if [ -s "sample.msi" ]
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -t http://time.certum.pl/ \
             -in "sample.msi" -out "test_073.msi"'
-    verify_signature "$?" "073" "msi" "UNUSED_PATTERN"
+    verify_signature "$?" "073" "msi" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "Unizeto" "Unizeto"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
