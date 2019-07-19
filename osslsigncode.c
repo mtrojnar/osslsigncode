@@ -2511,16 +2511,16 @@ int main(int argc, char **argv) {
 			if (--argc < 1) usage(argv0);
 			url = *(++argv);
 #ifdef ENABLE_CURL
-		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-t")) {
+		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-t")) {
 			if (--argc < 1) usage(argv0);
 			turl[nturl++] = *(++argv);
-		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-ts")) {
+		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-ts")) {
 			if (--argc < 1) usage(argv0);
 			tsurl[ntsurl++] = *(++argv);
-		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-p")) {
+		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-p")) {
 			if (--argc < 1) usage(argv0);
 			proxy = *(++argv);
-		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-noverifypeer")) {
+		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-noverifypeer")) {
 			noverifypeer = 1;
 #endif
 		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-addUnauthenticatedBlob")) {
