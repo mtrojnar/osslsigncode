@@ -5,7 +5,7 @@
 script_path=$(pwd)
 
 # PE file
-test_name="371. Comparing the leaf certificate hash against specified SHA256 message digest for the PE file"
+test_name="401. Comparing the leaf certificate hash against specified SHA256 message digest for the PE file"
 printf "\n%s\n" "$test_name"
 if [ -s "test.exe" ]
   then
@@ -13,12 +13,12 @@ if [ -s "test.exe" ]
         script_path=$(pwd)
         ../../osslsigncode sign -h sha256 \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.der" \
-            -in "test.exe" -out "test_371.exe"'
-    ../../osslsigncode verify -in "test_371.exe" \
+            -in "test.exe" -out "test_401.exe"'
+    ../../osslsigncode verify -in "test_401.exe" \
         -require-leaf-hash SHA256:$(sha256sum "${script_path}/../certs/cert.der" | cut -d' ' -f1)
     if test_result "$?" "$test_name"
       then
-        rm -f "test_371.exe"
+        rm -f "test_401.exe"
       fi
   else
     printf "Test skipped\n"
@@ -28,7 +28,7 @@ if [ -s "test.exe" ]
 # Command is not supported for non-PE
 
 # MSI file
-test_name="372. Comparing the leaf certificate hash against specified SHA256 message digest for the MSI file"
+test_name="402. Comparing the leaf certificate hash against specified SHA256 message digest for the MSI file"
 printf "\n%s\n" "$test_name"
 if [ -s "sample.msi" ]
   then
@@ -36,12 +36,12 @@ if [ -s "sample.msi" ]
         script_path=$(pwd)
         ../../osslsigncode sign -h sha256 \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.der" \
-            -in "test.exe" -out "test_372.exe"'
-    ../../osslsigncode verify -in "test_372.exe" \
+            -in "test.exe" -out "test_402.exe"'
+    ../../osslsigncode verify -in "test_402.exe" \
         -require-leaf-hash SHA256:$(sha256sum "${script_path}/../certs/cert.der" | cut -d' ' -f1)
     if test_result "$?" "$test_name"
       then
-        rm -f "test_372.exe"
+        rm -f "test_402.exe"
       fi
   else
     printf "Test skipped\n"
