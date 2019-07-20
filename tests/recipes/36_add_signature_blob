@@ -17,7 +17,7 @@ if [ -s "test.exe" ]
         ../../osslsigncode add \
             -addUnauthenticatedBlob \
             -in "test_361_signed.exe" -out "test_361.exe"'
-    verify_text "$?" "361" "exe" "BEGIN_BLOB" "ASCII" "UNUSED_PATTERN" "MODIFY"
+    verify_signature "$?" "361" "exe" "MODIFY" "UNUSED_PATTERN" "ASCII" "BEGIN_BLOB" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -40,7 +40,7 @@ if [ -s "sample.msi" ]
         ../../osslsigncode add \
             -addUnauthenticatedBlob \
             -in "test_362_signed.msi" -out "test_362.msi"'
-    verify_text "$?" "362" "msi" "BEGIN_BLOB" "ASCII" "UNUSED_PATTERN" "MODIFY"
+    verify_signature "$?" "362" "msi" "MODIFY" "UNUSED_PATTERN" "ASCII" "BEGIN_BLOB" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

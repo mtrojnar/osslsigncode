@@ -25,7 +25,7 @@ if [ -s "sample.msi" ]
         -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/keyp.pem" \
         -pass passme \
         -in "sample.msi" -out "test_411.msi"'
-    verify_text "$?" "411" "msi" "osslsigncode" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "411" "msi" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

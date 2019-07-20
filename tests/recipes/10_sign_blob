@@ -14,7 +14,7 @@ if [ -s "test.exe" ]
             -addUnauthenticatedBlob \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "test.exe" -out "test_101.exe" 2>> "results.log" 1>&2'
-    verify_text "$?" "101" "exe" "BEGIN_BLOB" "ASCII" "UNUSED_PATTERN" "MODIFY"
+    verify_signature "$?" "101" "exe" "MODIFY" "UNUSED_PATTERN" "ASCII" "BEGIN_BLOB" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -31,7 +31,7 @@ if [ -s "test.ex_" ]
             -addUnauthenticatedBlob \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "test.ex_" -out "test_102.ex_" 2>> "results.log" 1>&2'
-    verify_text "$?" "102" "ex_" "BEGIN_BLOB" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "102" "ex_" "MODIFY" "UNUSED_PATTERN" "ASCII" "BEGIN_BLOB" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -48,7 +48,7 @@ if [ -s "sample.msi" ]
             -addUnauthenticatedBlob \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "sample.msi" -out "test_103.msi" 2>> "results.log" 1>&2'
-    verify_text "$?" "103" "msi" "BEGIN_BLOB" "ASCII" "UNUSED_PATTERN" "MODIFY"
+    verify_signature "$?" "103" "msi" "MODIFY" "UNUSED_PATTERN" "ASCII" "BEGIN_BLOB" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

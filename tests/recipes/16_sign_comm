@@ -17,7 +17,7 @@ if [ -s "test.exe" ]
             -comm \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "test.exe" -out "test_161.exe"'
-    verify_text "$?" "161" "exe" "300c060a2b060104018237020116" "HEX" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "161" "exe" "UNUSED_PATTERN" "UNUSED_PATTERN" "HEX" "300c060a2b060104018237020116" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -34,7 +34,7 @@ if [ -s "test.ex_" ]
             -comm \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "test.ex_" -out "test_162.ex_"'
-    verify_text "$?" "162" "ex_" "300c060a2b060104018237020116" "HEX" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "162" "ex_" "UNUSED_PATTERN" "UNUSED_PATTERN" "HEX" "300c060a2b060104018237020116" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -51,7 +51,7 @@ if [ -s "sample.msi" ]
             -comm \
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -in "sample.msi" -out "test_163.msi"'
-    verify_text "$?" "163" "msi" "300c060a2b060104018237020116" "HEX" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "163" "msi" "UNUSED_PATTERN" "UNUSED_PATTERN" "HEX" "300c060a2b060104018237020116" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

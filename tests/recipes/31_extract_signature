@@ -15,7 +15,7 @@ if [ -s "test.exe" ]
             -in "test.exe" -out "test_311.exe" && \
         ../../osslsigncode extract-signature -pem \
             -in "test_311.exe" -out "sign_pe.pem"'
-    verify_signature "$?" "311" "exe" "sha256sum"
+    verify_signature "$?" "311" "exe" "UNUSED_PATTERN" "sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -36,7 +36,7 @@ if [ -s "sample.msi" ]
             -in "sample.msi" -out "test_312.msi" && \
         ../../osslsigncode extract-signature -pem \
             -in "test_312.msi" -out "sign_msi.pem"'
-    verify_signature "$?" "312" "msi" "sha256sum"
+    verify_signature "$?" "312" "msi" "UNUSED_PATTERN" "sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

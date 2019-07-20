@@ -15,7 +15,7 @@ if [ -s "test.exe" ]
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -i "https://www.osslsigncode.com/" \
             -in "test.exe" -out "test_151.exe"'
-    verify_text "$?" "151" "exe" "https://www.osslsigncode.com/" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "151" "exe" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "https://www.osslsigncode.com/" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -32,7 +32,7 @@ if [ -s "test.ex_" ]
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -i "https://www.osslsigncode.com/" \
             -in "test.ex_" -out "test_152.ex_"'
-    verify_text "$?" "152" "ex_" "https://www.osslsigncode.com/" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "152" "ex_" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "https://www.osslsigncode.com/" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -49,7 +49,7 @@ if [ -s "sample.msi" ]
             -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
             -i "https://www.osslsigncode.com/" \
             -in "sample.msi" -out "test_153.msi"'
-    verify_text "$?" "153" "msi" "https://www.osslsigncode.com/" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    verify_signature "$?" "153" "msi" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "https://www.osslsigncode.com/" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

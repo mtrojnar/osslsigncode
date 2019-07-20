@@ -1,0 +1,70 @@
+#!/bin/sh
+# Signing a PE/CAB/MSI file twice with the "nest" flag in the second time
+# in order to add the new signature instead of replacing the first one.
+
+. $(dirname $0)/../test_library
+
+# PE file
+test_name="111. Signing a PE file with the nest flag"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test.exe" -out "test_111_signed.exe"
+        ../../osslsigncode sign -h sha512 \
+            -nest \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test_111_signed.exe" -out "test_111.exe"'
+    verify_signature "$?" "111" "exe" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "SHA256" "SHA512"
+    test_result "$?" "$test_name" 
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+# Error: Cannot sign cab files with flag bits set!
+# cfhead_Flags 0x1e is set here:
+# https://github.com/mtrojnar/osslsigncode/blob/0bea1ac8f6d61ed42dd154305a4d5b8c27478ad0/osslsigncode.c#L2936
+test_name="112. Signing a CAB file with the nest flag"
+printf "\n%s\n" "$test_name"
+if [ -s "test.ex_" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test.ex_" -out "test_112_signed.ex_"
+        ../../osslsigncode sign -h sha512 \
+            -nest \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test_112_signed.ex_" -out "test_112.ex_"'
+    verify_signature "$?" "112" "ex_" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "SHA256" "SHA512"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# MSI file
+test_name="113. Signing a MSI file with the nest flag"
+printf "\n%s\n" "$test_name"
+if [ -s "sample.msi" ]
+  then
+    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "sample.msi" -out "test_113_signed.msi"
+        ../../osslsigncode sign -h sha512 \
+            -nest \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test_113_signed.msi" -out "test_113.msi"'
+    verify_signature "$?" "113" "msi" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "SHA256" "SHA512"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+exit 0
