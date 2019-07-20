@@ -34,7 +34,7 @@ touch "demoCA/index.txt.attr"
 echo 1000 > "demoCA/serial"
 date > "makecerts.log"
 $OPENSSL version 2>> "makecerts.log" 1>&2
-echo "$password" > "password.txt"
+echo -n "$password" > "password.txt"
 
 printf "\nGenerate root CA certificate\n" >> "makecerts.log"
 $OPENSSL genrsa -out demoCA/CA.key 1>&2 2>> "makecerts.log"
