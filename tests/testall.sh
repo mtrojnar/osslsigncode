@@ -13,12 +13,36 @@ mkdir "${result_path}"
 cd "${result_path}"
 
 date > "results.log"
-touch FoobarAppl10.exe
-cp "../sample.wxs" "sample.wxs" 2>> "results.log" 1>&2
+../../osslsigncode -v >> "results.log" 2>/dev/null
 
-x86_64-w64-mingw32-gcc "../myapp.c" -o "test.exe" 2>> "results.log" 1>&2
-gcab -c "test.ex_" "test.exe" 2>> "results.log" 1>&2
-wixl -v "sample.wxs" 2>> "results.log" 1>&2
+if [ -n "$(command -v x86_64-w64-mingw32-gcc)" ]
+  then
+    x86_64-w64-mingw32-gcc "../myapp.c" -o "test.exe" 2>> "results.log" 1>&2
+  else
+    printf "%s\n" "x86_64-w64-mingw32-gcc not found in \$PATH"
+    printf "%s\n" "tests for PE files skipped, please install mingw64-gcc package"
+  fi
+if [ -n "$(command -v gcab)" ]
+  then
+    gcab -c "test.ex_" "test.exe" 2>> "results.log" 1>&2
+  else
+    printf "%s\n" "gcab not found in \$PATH"
+    printf "%s\n" "tests for CAB files skipped, please install gcab package"
+  fi
+if grep -o "no libgsf available" "results.log"
+  then
+    printf "%s\n" "signing MSI files requires libgsf/libgsf-devel packages and reconfiguration osslsigncode"
+  else
+    if [ -n "$(command -v wixl)" ]
+      then
+        touch FoobarAppl10.exe
+        cp "../sample.wxs" "sample.wxs" 2>> "results.log" 1>&2
+        wixl -v "sample.wxs" 2>> "results.log" 1>&2
+      else
+        printf "%s\n" "wixl not found in \$PATH"
+        printf "%s\n" "tests for MSI files skipped, please install msitools package"
+      fi
+  fi
 
 for plik in ${script_path}/recipes/*
   do
