@@ -2763,10 +2763,18 @@ int main(int argc, char **argv) {
 	BIO_set_md(hash, md);
 
 	if (type == FILE_TYPE_CAB) {
+		if (pagehash == 1)
+			fprintf(stderr, "Warning: -ph option is only valid for PE files\n");
+#ifdef WITH_GSF
+		if (add_msi_dse == 1)
+			fprintf(stderr, "Warning: -add-msi-dse option is only valid for MSI files\n");
+#endif
+		if (nest == 1)
+			fprintf(stderr, "Error: -nest option is only valid for PE/MSI files\n");
 		if (filesize < 44)
 			DO_EXIT_1("Corrupt cab file - too short: %s\n", infile);
 		if (indata[0x1e] != 0x00 || indata[0x1f] != 0x00)
-			DO_EXIT_0("Cannot sign cab files with flag bits set!\n"); /* XXX */
+			DO_EXIT_0("Cannot sign CAB files with flag bits set!\n"); /* FLAG_RESERVE_PRESENT */
 	} else if (type == FILE_TYPE_PE) {
 		if (filesize < 64)
 			DO_EXIT_1("Corrupt DOS file - too short: %s\n", infile);
@@ -2776,6 +2784,11 @@ int main(int argc, char **argv) {
 		if (memcmp(indata+peheader, "PE\0\0", 4))
 			DO_EXIT_1("Unrecognized DOS file type: %s\n", infile);
 	} else if (type == FILE_TYPE_MSI) {
+		if (pagehash == 1)
+			fprintf(stderr, "Warning: -ph option is only valid for PE files\n");
+		if (jp >= 0)
+			fprintf(stderr, "Warning: -jp option is only valid for CAB files\n");
+
 #ifdef WITH_GSF
 		GsfInput *src;
 		GsfInfile *ole;
@@ -2944,8 +2957,13 @@ int main(int argc, char **argv) {
 		PUT_UINT32_LE(tmp, buf+4);
 		BIO_write(hash, buf+4, 4);
 
+        /*
+         * FLAG_RESERVE_PRESENT is set if this cabinet file contains any reserved fields.
+         * When this bit is set, the cbCFHeader, cbCFFolder, and cbCFData fields are present in the CFHEADER.
+         * https://www.file-recovery.com/cab-signature-format.htm
+         */
 		memcpy(buf+4, indata+20, 14);
-		buf[4+10] = 0x04; /* RESERVE_PRESENT */
+		buf[4+10] = 0x04; /* FLAG_RESERVE_PRESENT */
 
 		BIO_write(hash, buf+4, 14);
 		BIO_write(outdata, indata+34, 2);
@@ -2972,7 +2990,10 @@ int main(int argc, char **argv) {
 
 		if (jp >= 0)
 			fprintf(stderr, "Warning: -jp option is only valid for CAB files\n");
-
+#ifdef WITH_GSF
+		if (add_msi_dse == 1)
+			fprintf(stderr, "Warning: -add-msi-dse option is only valid for MSI files\n");
+#endif
 		magic = GET_UINT16_LE(indata + peheader + 24);
 		if (magic == 0x20b) {
 			pe32plus = 1;

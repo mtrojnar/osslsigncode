@@ -5,7 +5,7 @@
 . $(dirname $0)/../test_library
 
 # PE file
-#
+# Warning: -jp option is only valid for CAB files
 
 # CAB file
 test_name="511. Signing a CAB file with jp low option"
@@ -25,6 +25,6 @@ if [ -s "test.ex_" ]
   fi
 
 # MSI file
-#
+# Warning: -jp option is only valid for CAB files
 
 exit 0

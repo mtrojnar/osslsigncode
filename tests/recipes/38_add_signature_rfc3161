@@ -23,7 +23,7 @@ if [ -s "test.exe" ]
   fi
 
 # CAB file
-# Command is not supported for non-PE
+# Command is not supported for non-PE/non-MSI files
 
 # MSI file
 test_name="382. Adding an RFC 3161 timestamp to the MSI file"

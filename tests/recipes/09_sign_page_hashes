@@ -20,9 +20,9 @@ if [ -s "test.exe" ]
   fi
 
 # CAB file
-# Command is not supported for non-PE files
+# Warning: -ph option is only valid for PE files
 
 # MSI file
-# Command is not supported for non-PE files
+# Warning: -ph option is only valid for PE files
 
 exit 0
