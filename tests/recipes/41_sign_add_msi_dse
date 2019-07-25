@@ -1,5 +1,5 @@
 #!/bin/sh
-# Signing a MSI file with a PEM key file.
+# Signing a MSI file with the add-msi-dse option.
 # MsiDigitalSignatureEx (msi-dse) is an enhanced signature type that can be used
 # when signing MSI files. In addition to file content, it also hashes some file metadata,
 # specifically file names, file sizes, creation times and modification times.
@@ -8,13 +8,13 @@
 . $(dirname $0)/../test_library
 
 # PE file
-#
+# Warning: -add-msi-dse option is only valid for MSI files
 
 # CAB file
-#
+# Warning: -add-msi-dse option is only valid for MSI files
 
 # MSI file
-test_name="411. Signing a MSI file with the MsiDigitalSignatureEx option"
+test_name="411. Signing a MSI file with the add-msi-dse option"
 printf "\n%s\n" "$test_name"
 if [ -s "sample.msi" ]
   then
@@ -25,7 +25,7 @@ if [ -s "sample.msi" ]
         -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/keyp.pem" \
         -pass passme \
         -in "sample.msi" -out "test_411.msi"'
-    verify_signature "$?" "411" "msi" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
+    verify_signature "$?" "411" "msi" "UNUSED_PATTERN" "UNUSED_PATTERN" "HEX" "4d00730069004400690067006900740061006c005300690067006e0061007400750072006500450078" "UNUSED_PATTERN" #"MsiDigitalSignatureEx"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
