@@ -25,7 +25,7 @@ if [ -s "test.exe" ]
   fi
 
 # CAB file
-# Command is not supported for non-PE
+# Command is not supported for non-PE/non-MSI files
 
 # MSI file
 test_name="402. Comparing the leaf certificate hash against specified SHA256 message digest for the MSI file"

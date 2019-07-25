@@ -19,7 +19,7 @@ if [ -s "test.exe" ]
   fi
 
 # CAB file
-# Command is not supported for non-PE
+# Command is not supported for non-PE/non-MSI files
 
 # MSI file
 test_name="322. Attaching the signature to the MSI file"

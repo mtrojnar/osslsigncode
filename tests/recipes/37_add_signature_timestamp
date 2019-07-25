@@ -23,7 +23,7 @@ if [ -s "test.exe" ]
   fi
 
 # CAB file
-# Command is not supported for non-PE
+# Command is not supported for non-PE/non-MSI files
 
 # MSI file
 test_name="372. Adding an authenticode timestamp to the MSI file"
