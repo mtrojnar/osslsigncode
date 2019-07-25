@@ -93,11 +93,6 @@ verify_signature() {
           result=1
           printf "Failed: $8 not found\n"
         fi
-      if [ "$result" -eq 0 ] && [ "$2" = "401" ]
-        then
-          printf "Failed: unhashed file metadata was found\n"
-          result=1
-        fi
       if [ "$result" -eq 0 ]
         then
           if [ "$5" = "sha256sum" ]
