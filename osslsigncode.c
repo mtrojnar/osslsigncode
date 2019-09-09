@@ -468,6 +468,18 @@ static size_t asn1_simple_hdr_len(const unsigned char *p, size_t len)
 	return (p[1]&0x80) ? (2 + (p[1]&0x7f)) : 2;
 }
 
+/*
+ * Add a custom timestamp to the PKCS7 structure to prevent OpenSSL adding
+ * the _current_ time. This allows to create a deterministic signature when
+ * no trusted timestamp server was specified, making osslsigncode behaviour
+ * similar to signtool.exe.
+ */
+static int pkcs7_add_custom_time(PKCS7_SIGNER_INFO *si, time_t customtimeutc)
+{
+	ASN1_TIME *t = ASN1_TIME_adj(NULL, customtimeutc, 0, 0);
+	return PKCS7_add_signed_attribute(si, NID_pkcs9_signingTime, V_ASN1_UTCTIME, t);
+}
+
 static void tohex(const unsigned char *v, char *b, int len)
 {
 	int i;
@@ -835,6 +847,7 @@ static void usage(const char *argv0)
 			"\t\t[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n"
 			"\t\t[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n"
 #endif
+			"\t\t[ -st <unix-time> ]\n"
 			"\t\t[ -addUnauthenticatedBlob ]\n\n"
 			"\t\t[ -nest ]\n\n"
 			"\t\t[ -verbose ]\n\n"
@@ -1249,7 +1262,7 @@ static PKCS7 *pkcs7_get_nested_signature(PKCS7 *p7, int *has_sig)
  * pkcs7_set_nested_signature adds the p7nest signature to p7
  * as a nested signature (SPC_NESTED_SIGNATURE).
  */
-static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest)
+static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, int custom_ts, time_t customtimeutc)
 {
 	u_char *p = NULL;
 	int len = 0;
@@ -1265,6 +1278,10 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest)
 	OPENSSL_free(p);
 
 	PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+
+	if (custom_ts)
+		pkcs7_add_custom_time(si, customtimeutc);
+
 	if (PKCS7_add_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID), V_ASN1_SEQUENCE, astr) == 0)
 		return 0;
 
@@ -2348,6 +2365,7 @@ int main(int argc, char **argv) {
 	PKCS7_SIGNER_INFO *si;
 	ASN1_STRING *astr;
 	const EVP_MD *md;
+	time_t customtimeutc = (time_t)0;
 
 	const char *argv0 = argv[0];
 	static char buf[64*1024];
@@ -2510,6 +2528,9 @@ int main(int argc, char **argv) {
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-i")) {
 			if (--argc < 1) usage(argv0);
 			url = *(++argv);
+		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-st")) {
+			if (--argc < 1) usage(argv0);
+			customtimeutc = (time_t)strtoul(*(++argv), NULL, 10);
 #ifdef ENABLE_CURL
 		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-t")) {
 			if (--argc < 1) usage(argv0);
@@ -3114,13 +3135,18 @@ int main(int argc, char **argv) {
 	PKCS7_set_type(sig, NID_pkcs7_signed);
 
 	si = NULL;
-	if (cert != NULL)
+	if (cert != NULL) {
 		si = PKCS7_add_signature(sig, cert, pkey, md);
+		if (nturl == 0 && ntsurl == 0)
+			pkcs7_add_custom_time(si, customtimeutc);
+	}
 	if (si == NULL) {
 		for (i=0; i<sk_X509_num(certs); i++) {
 			X509 *signcert = sk_X509_value(certs, i);
 			/* X509_print_fp(stdout, signcert); */
 			si = PKCS7_add_signature(sig, signcert, pkey, md);
+			if (nturl == 0 && ntsurl == 0)
+				pkcs7_add_custom_time(si, customtimeutc);
 			if (si != NULL) break;
 		}
 	}
@@ -3267,7 +3293,7 @@ add_only:
 	if (nest) {
 		if (cursig == NULL)
 			DO_EXIT_0("Internal error: No 'cursig' was extracted\n")
-		if (pkcs7_set_nested_signature(cursig, sig) == 0)
+		if (pkcs7_set_nested_signature(cursig, sig, (nturl == 0 && ntsurl == 0), customtimeutc) == 0)
 			DO_EXIT_0("Unable to append the nested signature to the current signature\n");
 		outsig = cursig;
 	} else {
