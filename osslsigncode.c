@@ -469,10 +469,11 @@ static size_t asn1_simple_hdr_len(const unsigned char *p, size_t len)
 }
 
 /*
- * Add a custom timestamp to the PKCS7 structure to prevent OpenSSL adding
- * the _current_ time. This allows to create a deterministic signature when
- * no trusted timestamp server was specified, making osslsigncode behaviour
- * similar to signtool.exe.
+ * Add a custom, non-trusted time to the PKCS7 structure to prevent OpenSSL
+ * adding the _current_ time. This allows to create a deterministic signature
+ * when no trusted timestamp server was specified, making osslsigncode
+ * behaviour closer to signtool.exe (which doesn't include any non-trusted
+ * time in this case.)
  */
 static int pkcs7_add_custom_time(PKCS7_SIGNER_INFO *si, time_t customtimeutc)
 {
