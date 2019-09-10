@@ -475,10 +475,13 @@ static size_t asn1_simple_hdr_len(const unsigned char *p, size_t len)
  * behaviour closer to signtool.exe (which doesn't include any non-trusted
  * time in this case.)
  */
-static int pkcs7_add_custom_time(PKCS7_SIGNER_INFO *si, time_t customtimeutc)
+static int pkcs7_add_signing_time(PKCS7_SIGNER_INFO *si, time_t signing_time)
 {
-	ASN1_TIME *t = ASN1_TIME_adj(NULL, customtimeutc, 0, 0);
-	return PKCS7_add_signed_attribute(si, NID_pkcs9_signingTime, V_ASN1_UTCTIME, t);
+	if (signing_time == (time_t)-1) /* -st option was not specified */
+		return 1; /* success */
+	return PKCS7_add_signed_attribute(si,
+		NID_pkcs9_signingTime, V_ASN1_UTCTIME,
+		ASN1_TIME_adj(NULL, signing_time, 0, 0));
 }
 
 static void tohex(const unsigned char *v, char *b, int len)
@@ -1263,7 +1266,7 @@ static PKCS7 *pkcs7_get_nested_signature(PKCS7 *p7, int *has_sig)
  * pkcs7_set_nested_signature adds the p7nest signature to p7
  * as a nested signature (SPC_NESTED_SIGNATURE).
  */
-static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, int custom_ts, time_t customtimeutc)
+static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_time)
 {
 	u_char *p = NULL;
 	int len = 0;
@@ -1279,10 +1282,7 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, int custom_ts, t
 	OPENSSL_free(p);
 
 	PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-
-	if (custom_ts)
-		pkcs7_add_custom_time(si, customtimeutc);
-
+	pkcs7_add_signing_time(si, signing_time);
 	if (PKCS7_add_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID), V_ASN1_SEQUENCE, astr) == 0)
 		return 0;
 
@@ -2366,7 +2366,7 @@ int main(int argc, char **argv) {
 	PKCS7_SIGNER_INFO *si;
 	ASN1_STRING *astr;
 	const EVP_MD *md;
-	time_t customtimeutc = (time_t)0;
+	time_t signing_time = (time_t)-1;
 
 	const char *argv0 = argv[0];
 	static char buf[64*1024];
@@ -2531,7 +2531,7 @@ int main(int argc, char **argv) {
 			url = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-st")) {
 			if (--argc < 1) usage(argv0);
-			customtimeutc = (time_t)strtoul(*(++argv), NULL, 10);
+			signing_time = (time_t)strtoul(*(++argv), NULL, 10);
 #ifdef ENABLE_CURL
 		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-t")) {
 			if (--argc < 1) usage(argv0);
@@ -3136,20 +3136,12 @@ int main(int argc, char **argv) {
 	PKCS7_set_type(sig, NID_pkcs7_signed);
 
 	si = NULL;
-	if (cert != NULL) {
+	if (cert != NULL)
 		si = PKCS7_add_signature(sig, cert, pkey, md);
-		if (nturl == 0 && ntsurl == 0)
-			pkcs7_add_custom_time(si, customtimeutc);
-	}
-	if (si == NULL) {
-		for (i=0; i<sk_X509_num(certs); i++) {
-			X509 *signcert = sk_X509_value(certs, i);
-			/* X509_print_fp(stdout, signcert); */
-			si = PKCS7_add_signature(sig, signcert, pkey, md);
-			if (nturl == 0 && ntsurl == 0)
-				pkcs7_add_custom_time(si, customtimeutc);
-			if (si != NULL) break;
-		}
+	for (i=0; si == NULL && i<sk_X509_num(certs); i++) {
+		X509 *signcert = sk_X509_value(certs, i);
+		/* X509_print_fp(stdout, signcert); */
+		si = PKCS7_add_signature(sig, signcert, pkey, md);
 	}
 	EVP_PKEY_free(pkey);
 	pkey = NULL;
@@ -3157,6 +3149,7 @@ int main(int argc, char **argv) {
 	if (si == NULL)
 		DO_EXIT_0("Signing failed(PKCS7_add_signature)\n");
 
+	pkcs7_add_signing_time(si, signing_time);
 	PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
 		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1));
 
@@ -3294,7 +3287,7 @@ add_only:
 	if (nest) {
 		if (cursig == NULL)
 			DO_EXIT_0("Internal error: No 'cursig' was extracted\n")
-		if (pkcs7_set_nested_signature(cursig, sig, (nturl == 0 && ntsurl == 0), customtimeutc) == 0)
+		if (pkcs7_set_nested_signature(cursig, sig, signing_time) == 0)
 			DO_EXIT_0("Unable to append the nested signature to the current signature\n");
 		outsig = cursig;
 	} else {
