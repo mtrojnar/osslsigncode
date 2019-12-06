@@ -1,58 +1,59 @@
 #!/bin/sh
-# Signing a PE/CAB/MSI file with RFC 3161 timestamping
+# Sign a PE/CAB/MSI file with RFC 3161 timestamping
 # An RFC3161 timestamp server provides an essential function in protecting
 # data records for the long-term. It provides proof that the data existed
 # at a particular moment in time and that it has not changed, even by
 # a single binary bit, since it was notarized and time-stamped.
 
 . $(dirname $0)/../test_library
+script_path=$(pwd)
 
 # PE file
-test_name="081. Signing a PE file with RFC 3161 timestamping"
+test_name="081. Sign a PE file with RFC 3161 timestamping"
 printf "\n%s\n" "$test_name"
 if [ -s "test.exe" ]
   then
-    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-           -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-            -ts http://time.certum.pl/ \
-            -in "test.exe" -out "test_081.exe"'
-    verify_signature "$?" "081" "exe" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "Unizeto" "Unizeto"
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -ts http://time.certum.pl/ \
+        -in "test.exe" -out "test_081.exe"
+    verify_signature "$?" "081" "exe" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "Unizeto" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
   fi
 
 # CAB file
-test_name="082. Signing a CAB file with RFC 3161 timestamping"
+test_name="082. Sign a CAB file with RFC 3161 timestamping"
 printf "\n%s\n" "$test_name"
 if [ -s "test.ex_" ]
   then
-    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-            -ts http://time.certum.pl/ \
-            -in "test.ex_" -out "test_082.ex_"'
-    verify_signature "$?" "082" "ex_" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "Unizeto" "Unizeto"
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -ts http://time.certum.pl/ \
+        -in "test.ex_" -out "test_082.ex_"
+    verify_signature "$?" "082" "ex_" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "Unizeto" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
   fi
 
 # MSI file
-test_name="083. Signing a MSI file with RFC 3161 timestamping"
+test_name="083. Sign a MSI file with RFC 3161 timestamping"
 printf "\n%s\n" "$test_name"
 if [ -s "sample.msi" ]
   then
-    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-            -ts http://time.certum.pl/ \
-            -in "sample.msi" -out "test_083.msi"'
-    verify_signature "$?" "083" "msi" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "Unizeto" "Unizeto"
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -ts http://time.certum.pl/ \
+        -in "sample.msi" -out "test_083.msi"
+    verify_signature "$?" "083" "msi" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "Unizeto" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

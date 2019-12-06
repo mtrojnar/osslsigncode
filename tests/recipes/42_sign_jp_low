@@ -1,0 +1,31 @@
+#!/bin/sh
+# Sign a CAB file with "jp low" option
+# https://support.microsoft.com/en-us/help/193877
+
+. $(dirname $0)/../test_library
+script_path=$(pwd)
+
+# PE file
+# Warning: -jp option is only valid for CAB files
+
+# CAB file
+test_name="421. Sign a CAB file with jp low option"
+printf "\n%s\n" "$test_name"
+if [ -s "test.ex_" ]
+  then
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -jp low \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "test.ex_" -out "test_421.ex_"
+    verify_signature "$?" "421" "ex_" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "HEX" "3006030200013000" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# MSI file
+# Warning: -jp option is only valid for CAB files
+
+exit 0

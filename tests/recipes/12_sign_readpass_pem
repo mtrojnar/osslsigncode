@@ -1,54 +1,55 @@
 #!/bin/sh
-# Signing a PE/CAB/MSI file with a PEM key file with a password together with a PEM certificate.
+# Sign a PE/CAB/MSI file with a PEM key file and a password read from password.txt file.
 
 . $(dirname $0)/../test_library
+script_path=$(pwd)
 
 # PE file
-test_name="121. Signing a PE file with a PEM key file with a password read from password.txt file"
+test_name="121. Sign a PE file with the PEM key file and the file with a password"
 printf "\n%s\n" "$test_name"
 if [ -s "test.exe" ]
   then
-    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -readpass "${script_path}/../certs/password.txt" \
-            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-            -in "test.exe" -out "test_121.exe"'
-    verify_signature "$?" "121" "exe" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -readpass "${script_path}/../certs/password.txt" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "test.exe" -out "test_121.exe"
+    verify_signature "$?" "121" "exe" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
   fi
 
 # CAB file
-test_name="122. Signing a CAB file with a PEM key file with a password read from password.txt file"
+test_name="122. Sign a CAB file with a PEM key file and the file with a password"
 printf "\n%s\n" "$test_name"
 if [ -s "test.ex_" ]
   then
-    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -readpass "${script_path}/../certs/password.txt" \
-            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-            -in "test.ex_" -out "test_122.ex_"'
-    verify_signature "$?" "122" "ex_" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -readpass "${script_path}/../certs/password.txt" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "test.ex_" -out "test_122.ex_"
+    verify_signature "$?" "122" "ex_" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
   fi
 
 # MSI file
-test_name="123. Signing a MSI file with a PEM key file with a password read from password.txt file"
+test_name="123. Sign a MSI file with a PEM key file and the file with a password"
 printf "\n%s\n" "$test_name"
 if [ -s "sample.msi" ]
   then
-    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -readpass "${script_path}/../certs/password.txt" \
-            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-            -in "sample.msi" -out "test_123.msi"'
-    verify_signature "$?" "123" "msi" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -readpass "${script_path}/../certs/password.txt" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "sample.msi" -out "test_123.msi"
+    verify_signature "$?" "123" "msi" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

@@ -1,55 +1,56 @@
 #!/bin/sh
-# Signing a PE/CAB/MSI file with the certificate and key stored in a PKCS#12 container
+# Sign a PE/CAB/MSI file with the certificate and key stored in a PKCS#12 container
 # and a password read from password.txt file.
 
 . $(dirname $0)/../test_library
+script_path=$(pwd)
 
 # PE file
-test_name="131. Signing a PE file with a PKCS#12 container and a password read from password.txt file"
+test_name="131. Sign a PE file with a PKCS#12 container and the file with a password"
 printf "\n%s\n" "$test_name"
 if [ -s "test.exe" ]
   then
-    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -readpass "${script_path}/../certs/password.txt" \
-            -pkcs12 "${script_path}/../certs/cert.p12" \
-            -in "test.exe" -out "test_131.exe"'
-    verify_signature "$?" "131" "exe" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -readpass "${script_path}/../certs/password.txt" \
+        -pkcs12 "${script_path}/../certs/cert.p12" \
+        -in "test.exe" -out "test_131.exe"
+    verify_signature "$?" "131" "exe" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
   fi
 
 # CAB file
-test_name="132. Signing a CAB file with a PKCS#12 container and a password read from password.txt file"
+test_name="132. Sign a CAB file with a PKCS#12 container and the file with a password"
 printf "\n%s\n" "$test_name"
 if [ -s "test.ex_" ]
   then
-    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -readpass "${script_path}/../certs/password.txt" \
-            -pkcs12 "${script_path}/../certs/cert.p12" \
-            -in "test.ex_" -out "test_132.ex_"'
-    verify_signature "$?" "132" "ex_" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -readpass "${script_path}/../certs/password.txt" \
+        -pkcs12 "${script_path}/../certs/cert.p12" \
+        -in "test.ex_" -out "test_132.ex_"
+    verify_signature "$?" "132" "ex_" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
   fi
 
 # MSI file
-test_name="133. Signing a MSI file with a PKCS#12 container and a password read from password.txt file"
+test_name="133. Sign a MSI file with a PKCS#12 container and the file with a password"
 printf "\n%s\n" "$test_name"
 if [ -s "sample.msi" ]
   then
-    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -readpass "${script_path}/../certs/password.txt" \
-            -pkcs12 "${script_path}/../certs/cert.p12" \
-            -in "sample.msi" -out "test_133.msi"'
-    verify_signature "$?" "133" "msi" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -readpass "${script_path}/../certs/password.txt" \
+        -pkcs12 "${script_path}/../certs/cert.p12" \
+        -in "sample.msi" -out "test_133.msi"
+    verify_signature "$?" "133" "msi" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
