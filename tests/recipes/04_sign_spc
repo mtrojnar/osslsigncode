@@ -1,55 +1,56 @@
 #!/bin/sh
-# Signing a PE/CAB/MSI file with the certificate file in the SPC format
+# Sign a PE/CAB/MSI file with the certificate file in the SPC format
 # and the private key file in the PEM format.
 
 . $(dirname $0)/../test_library
+script_path=$(pwd)
 
 # PE file
-test_name="041. Signing a PE file a SPC certificate file"
+test_name="041. Sign a PE file a SPC certificate file"
 printf "\n%s\n" "$test_name"
 if [ -s "test.exe" ]
   then
-    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -certs "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/keyp.pem" \
-            -pass passme \
-            -in "test.exe" -out "test_041.exe"'
-    verify_signature "$?" "041" "exe" "UNUSED_PATTERN" "sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/keyp.pem" \
+        -pass passme \
+        -in "test.exe" -out "test_041.exe"
+    verify_signature "$?" "041" "exe" "success" "@2019-09-01 12:00:00" \
+	"sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
   fi
 
 # CAB file
-test_name="042. Signing a CAB file a SPC certificate file"
+test_name="042. Sign a CAB file a SPC certificate file"
 printf "\n%s\n" "$test_name"
 if [ -s "test.ex_" ]
   then
-    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -certs "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/keyp.pem" \
-            -pass passme \
-            -in "test.ex_" -out "test_042.ex_"'
-    verify_signature "$?" "042" "ex_" "UNUSED_PATTERN" "sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/keyp.pem" \
+        -pass passme \
+        -in "test.ex_" -out "test_042.ex_"
+    verify_signature "$?" "042" "ex_" "success" "@2019-09-01 12:00:00" \
+	"sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
   fi
 
 # MSI file
-test_name="043. Signing a MSI file a SPC certificate file"
+test_name="043. Sign a MSI file a SPC certificate file"
 printf "\n%s\n" "$test_name"
 if [ -s "sample.msi" ]
   then
-    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -certs "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/keyp.pem" \
-            -pass passme \
-            -in "sample.msi" -out "test_043.msi"'
-    verify_signature "$?" "043" "msi" "UNUSED_PATTERN" "sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/keyp.pem" \
+        -pass passme \
+        -in "sample.msi" -out "test_043.msi"
+    verify_signature "$?" "043" "msi" "success" "@2019-09-01 12:00:00" \
+	"sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

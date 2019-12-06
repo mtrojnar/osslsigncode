@@ -1,19 +1,20 @@
 #!/bin/sh
-# Signing a PE file with md5 set of cryptographic hash functions.
+# Sign a PE file with MD5 set of cryptographic hash functions.
 
 . $(dirname $0)/../test_library
+script_path=$(pwd)
 
 # PE file
-test_name="211. Signing a PE file with md5 set of cryptographic hash functions"
+test_name="211. Sign a PE file with MD5 set of cryptographic hash functions"
 printf "\n%s\n" "$test_name"
 if [ -s "test.exe" ]
   then
-    faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h md5 \
-            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-            -in "test.exe" -out "test_211.exe"'
-    verify_signature "$?" "211" "exe" "UNUSED_PATTERN" "UNUSED_PATTERN" "ASCII" "osslsigncode" "MD5"
+    ../../osslsigncode sign -h md5 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "test.exe" -out "test_211.exe"
+    verify_signature "$?" "211" "exe" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "MD5" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
