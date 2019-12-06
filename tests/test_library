@@ -16,7 +16,7 @@ test_result() {
       printf "%s\n" "Test succeeded"
     else
       printf "%s\n" "Test failed"
-      printf "%-100s\t%s\n" "$2" "failed" 1>&3
+      printf "%-80s\t%s\n" "$2" "failed" 1>&3
       result=1
     fi
   return "$result"
@@ -25,26 +25,62 @@ test_result() {
 modify_blob() {
 # $1 test number
 # $2 filename extension
+# $3 text searched in a binary file
 
   local result=0
 
-  begin_blob=$(echo -n "---BEGIN_BLOB---" | xxd -p)
-  modify_blob=$(echo -n "---MODIFIED_BLOB---" | xxd -p)
-  zero_blob="00000000000000000000000000000000000000"
+  initial_blob=$(echo -n "$3" | xxd -p)
+  modified_blob=$(echo -n "FAKE" | xxd -p)
+  zero_blob="00000000"
   xxd -p -c 1000 "test_$1.$2" | \
-      sed "s/$begin_blob$zero_blob/$begin_blob$modify_blob/" | \
-      xxd -p -r > "test_$1_modifed.$2"
-  ../../osslsigncode verify -in "test_$1_modifed.$2" 2>> "verify.log" 1>&2
+      sed "s/$initial_blob$zero_blob/$initial_blob$modified_blob/" | \
+      xxd -p -r > "test_$1_changed.$2"
+  ../../osslsigncode verify -CAfile "${script_path}/../certs/CACert.pem" \
+      -in "test_$1_changed.$2" 2>> "verify.log" 1>&2
   result=$?
   if [ "$result" -ne 0 ] || \
       [ $(grep -e "Calculated DigitalSignature" -e "Calculated message digest" "verify.log" | uniq | wc -l) -ne 1 ]
     then
-      result=$?
-      cat "verify.log" >> "results.log"
-      printf "Failed: verify error or non-unique message digests were found\n"
+      printf "Failed: verify error or non-unique message digests found\n" 2>> "verify.log" 1>&2
+      result=1
     else
-      rm -f "test_$1_modifed.$2"
+      rm -f "test_$1_changed.$2"
     fi
+
+  return "$result"
+}
+
+search_pattern() {
+# $1 test number
+# $2 filename extension
+# $3 ASCII or HEX "$7 pattern" format
+# $4 pattern searched in a binary file or verify.log
+# $5 modify requirement
+
+  local result=0
+
+  if [ "$3" = "ASCII" ]
+    then
+      hex_pattern=$(echo -n "$4" | xxd -p)
+    else
+      hex_pattern=$4
+    fi
+  if ! grep -q "$4" "verify.log" && \
+      ! xxd -p -c 1000 "test_$1.$2" | grep "$hex_pattern" 2>> /dev/null 1>&2
+    then
+      result=1
+      printf "Failed: $4 not found\n"
+    elif [ "$5" = "MODIFY" ]
+      then
+        if [ "$2" != "ex_" ]
+         then
+           modify_blob "$1" "$2" "$4"
+           result=$?
+         else
+           printf "MODIFY is not supported for CAB files\n"
+         fi
+      fi
+
   return "$result"
 }
 
@@ -52,11 +88,12 @@ verify_signature() {
 # $1 sign exit code
 # $2 test number
 # $3 filename extension
-# $4 modify requirement
-# $5 sha256sum requirement
-# $6 ASCII or HEX "$7 text" format
-# $7 obligatory text1 searched in a binary file or verify.log
-# $8 optional text2 searched in verify.log
+# $4 expected result
+# $5 fake time
+# $6 sha256sum requirement
+# $7 ASCII or HEX "$7 pattern" format
+# $8 pattern searched in a binary file or verify.log
+# $9 modify requirement
 
   local result=0
 
@@ -64,77 +101,40 @@ verify_signature() {
     then
       if [ "$3" != "ex_" ]
         then
-          ../../osslsigncode verify -in "test_$2.$3" 2> "verify.log" 1>&2
+          cp "test_$2.$3" "test_tmp.tmp"
+          TZ=GMT faketime -f "$5" /bin/bash -c '
+              printf "Verify time: " > "verify.log" && date > "verify.log" && printf "\n" > "verify.log"
+              script_path=$(pwd)
+              ../../osslsigncode verify -CAfile "${script_path}/../certs/CACert.pem" \
+                  -in "test_tmp.tmp" 2> "verify.log" 1>&2'
+          result=$?
+          rm -f "test_tmp.tmp"
+        fi
+      if [ "$7" != "UNUSED_PATTERN" ] && [ "$8" != "UNUSED_PATTERN" ]
+        then
+          search_pattern "$2" "$3" "$7" "$8" "$9"
           result=$?
         fi
-      if [ "$6" = "ASCII" ]
-          then
-            searched_text=$(echo -n "$7" | xxd -p)
-          else
-            searched_text=$7
-          fi
-      if ! grep -q "$7" "verify.log" && \
-          ! xxd -p -c 1000 "test_$2.$3" | grep "$searched_text" 2>> /dev/null 1>&2
+      if [ "$6" = "sha256sum" ]
         then
-          result=1
-          printf "Failed: $7 not found\n"
-        elif [ "$4" = "MODIFY" ]
-          then
-            if [ "$3" != "ex_" ]
-              then
-                modify_blob "$2" "$3"
-                result=$?
-              else
-                printf "MODIFY is not supported for CAB files\n"
-              fi
-        fi
-      if [ "$result" -eq 0 ] && [ "$8" != "UNUSED_PATTERN" ] && ! grep -q "$8" "verify.log"
-        then
-          result=1
-          printf "Failed: $8 not found\n"
-        fi
-      if [ "$result" -eq 0 ]
-        then
-          if [ "$5" = "sha256sum" ]
+          if [ -s "test_$2_signed.$3" ]
             then
-              sha256sum "test_$2.$3" 2>> "sha256sum_$3.log" 1>&2
-              if [ -s "test_$2_signed.$3" ]
-                then
-                  sha256sum "test_$2_signed.$3" 2>> "sha256sum_$3.log" 1>&2
-                fi
+              sha256sum "test_$2_signed.$3" 2>> "sha256sum_$3.log" 1>&2
             else
-              rm -f "test_$2.$3" "test_$2_signed.$3"
+              sha256sum "test_$2.$3" 2>> "sha256sum_$3.log" 1>&2
             fi
-        else
-          cat "verify.log" >> "results.log"
         fi
-    else
-      result=1
-    fi
-  return "$result"
-}
-
-verify_no_signature() {
-# $1 sign exit code
-# $2 test number
-# $3 filename extension
-# $4 sha256sum requirement
-
-  local result=0
-
-  if [ "$1" -eq 0 ]
-    then
-      ../../osslsigncode verify -in "test_$2.$3" 2> "verify.log" 1>&2
-      if grep -q -e "No signature found" -e "MSI file has no signature" "verify.log"
+      if ([ "$4" = "success" ] && [ "$result" -eq 0 ]) || ([ "$4" = "fail" ] && [ "$result" -eq 1 ])
         then
-          sha256sum "test_$2_signed.$3" 2>> "sha256sum_$3.log" 1>&2
+          rm -f "test_$2.$3" "test_$2_signed.$3" "test_$2_modifed.$3" "test_$2_changed.$3"
+          result=0
         else
-          result=1
           cat "verify.log" >> "results.log"
-          printf "Failed: verify error or the signature was found\n"
+          result=1
         fi
     else
       result=1
     fi
+
   return "$result"
 }
