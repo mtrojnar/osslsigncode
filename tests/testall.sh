@@ -43,21 +43,26 @@ if grep -o "no libgsf available" "results.log"
         printf "%s\n" "tests for MSI files skipped, please install msitools package"
       fi
   fi
-
-for plik in ${script_path}/recipes/*
-  do
-    /bin/sh $plik 3>&1 2>> "results.log" 1>&2
-  done
-count=$(grep -c "Test succeeded" "results.log")
-if [ $count -ne 0 ]
+if [ -n "$(command -v faketime)" ]
   then
-    skip=$(grep -c "Test skipped" "results.log")
-    fail=$(grep -c "Test failed" "results.log")
-    printf "%s\n" "./newtest.sh finished"
-    printf "%s\n" "summary: success $count, skip $skip, fail $fail"
-  else # no test was done
-    result=1
+    for plik in ${script_path}/recipes/*
+      do
+        /bin/sh $plik 3>&1 2>> "results.log" 1>&2
+      done
+      count=$(grep -c "Test succeeded" "results.log")
+    if [ $count -ne 0 ]
+      then
+        skip=$(grep -c "Test skipped" "results.log")
+        fail=$(grep -c "Test failed" "results.log")
+        printf "%s\n" "./newtest.sh finished"
+        printf "%s\n" "summary: success $count, skip $skip, fail $fail"
+      else # no test was done
+        result=1
+      fi
+    rm -f "test.exe" "test.ex_" "sample.msi" "sample.wxs" "FoobarAppl10.exe"
+    rm -f "sign_pe.pem" "sign_msi.pem" "verify.log"
+  else
+    printf "%s\n" "faketime not found in \$PATH"
+    printf "%s\n" "tests for PE files skipped, please install faketime package"
   fi
-rm -f "test.exe" "test.ex_" "sample.msi" "sample.wxs" "FoobarAppl10.exe"
-rm -f "sign_pe.pem" "sign_msi.pem" "verify.log"
 exit $result
