@@ -1,0 +1,30 @@
+#!/bin/sh
+# Verify changed PE file after signing.
+
+
+. $(dirname $0)/../test_library
+script_path=$(pwd)
+
+# PE file
+test_name="451. Verify changed PE file after signing"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ]
+  then
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "test.exe" -out "test_451.exe"
+    verify_signature "$?" "451" "exe" "fail" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "Hello world!" "MODIFY"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+# Command is not supported for non-PE files
+
+# MSI file
+# Command is not supported for non-PE files
+
+exit 0
