@@ -7,7 +7,7 @@ script_path=$(pwd)
 # PE file
 test_name="071. Sign a PE file with Authenticode timestamping"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ]
+if [ -s "test.exe" ] && ! grep -q "no libcurl available" "results.log"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
@@ -24,7 +24,7 @@ if [ -s "test.exe" ]
 # CAB file
 test_name="072. Sign a CAB file with Authenticode timestamping"
 printf "\n%s\n" "$test_name"
-if [ -s "test.ex_" ]
+if [ -s "test.ex_" ] && ! grep -q "no libcurl available" "results.log"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
@@ -41,7 +41,7 @@ if [ -s "test.ex_" ]
 # MSI file
 test_name="073. Sign a MSI file with Authenticode timestamping"
 printf "\n%s\n" "$test_name"
-if [ -s "sample.msi" ]
+if [ -s "sample.msi" ] && ! grep -q "no libcurl available" "results.log"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
