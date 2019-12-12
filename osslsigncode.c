@@ -338,6 +338,20 @@ ASN1_SEQUENCE(SpcSipInfo) = {
 IMPLEMENT_ASN1_FUNCTIONS(SpcSipInfo)
 
 
+typedef struct {
+	AlgorithmIdentifier *digestAlgorithm;
+	ASN1_OCTET_STRING *digest;
+} MessageImprint;
+
+DECLARE_ASN1_FUNCTIONS(MessageImprint)
+
+ASN1_SEQUENCE(MessageImprint) = {
+	ASN1_SIMPLE(MessageImprint, digestAlgorithm, AlgorithmIdentifier),
+	ASN1_SIMPLE(MessageImprint, digest, ASN1_OCTET_STRING)
+} ASN1_SEQUENCE_END(MessageImprint)
+
+IMPLEMENT_ASN1_FUNCTIONS(MessageImprint)
+
 #ifdef ENABLE_CURL
 
 typedef struct {
@@ -368,7 +382,6 @@ ASN1_SEQUENCE(TimeStampRequest) = {
 } ASN1_SEQUENCE_END(TimeStampRequest)
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampRequest)
-
 
 /* RFC3161 Time stamping */
 
@@ -403,19 +416,6 @@ ASN1_SEQUENCE(TimeStampResp) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampResp)
 
-typedef struct {
-	AlgorithmIdentifier *digestAlgorithm;
-	ASN1_OCTET_STRING *digest;
-} MessageImprint;
-
-DECLARE_ASN1_FUNCTIONS(MessageImprint)
-
-ASN1_SEQUENCE(MessageImprint) = {
-	ASN1_SIMPLE(MessageImprint, digestAlgorithm, AlgorithmIdentifier),
-	ASN1_SIMPLE(MessageImprint, digest, ASN1_OCTET_STRING)
-} ASN1_SEQUENCE_END(MessageImprint)
-
-IMPLEMENT_ASN1_FUNCTIONS(MessageImprint)
 
 typedef struct {
 	ASN1_INTEGER *version;
@@ -439,6 +439,8 @@ ASN1_SEQUENCE(TimeStampReq) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampReq)
 
+#endif /* ENABLE_CURL */
+
 typedef struct {
 	ASN1_INTEGER *seconds;
 	ASN1_INTEGER *millis;
@@ -454,6 +456,7 @@ ASN1_SEQUENCE(TimeStampAccuracy) = {
 } ASN1_SEQUENCE_END(TimeStampAccuracy)
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampAccuracy)
+
 
 typedef struct {
 	ASN1_INTEGER *version;
@@ -485,7 +488,6 @@ ASN1_SEQUENCE(TimeStampToken) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampToken)
 
-#endif /* ENABLE_CURL */
 
 static SpcSpOpusInfo* createOpus(const char *desc, const char *url)
 {
@@ -918,10 +920,8 @@ static void usage(const char *argv0)
 			"\t\t[ -untrusted <infile> ]\n"
 			"\t\t[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n\n"
 			"\tadd [-addUnauthenticatedBlob] [ -in ] <infile> [ -out ] <outfile>\n"
-#ifdef ENABLE_CURL
 			"\t\t[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n"
 			"\t\t[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n"
-#endif
 			"\n"
 			"",
 			argv0);
@@ -1682,6 +1682,108 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 	return 1;
 }
 
+static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, char *untrusted)
+{
+	X509_STORE *store = NULL;
+	PKCS7_SIGNER_INFO *si;
+	int ret = 0, verok;
+
+	printf("TSA's certificates file: %s\n", untrusted);
+	store = X509_STORE_new();
+	if (!load_file_lookup(store, untrusted, X509_PURPOSE_TIMESTAMP_SIGN)) {
+		fprintf(stderr, "Failed to add timestamp store lookup file\n");
+		ret = 1; /* FAILED */
+	}
+	verok = PKCS7_verify(tmstamp_p7, tmstamp_p7->d.sign->cert, store, 0, NULL, 0);
+	printf("\nTimestamp Server Signature verification: %s\n", verok ? "ok" : "failed");
+	if (!verok) {
+		ERR_print_errors_fp(stdout);
+		ret = 1; /* FAILED */
+	}
+	/* verify the hash provided from the trusted timestamp */
+	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+	verok = TST_verify(tmstamp_p7, si);
+	if (!verok) {
+		ERR_print_errors_fp(stdout);
+		ret = 1; /* FAILED */
+	}
+	X509_STORE_free(store);
+
+	return ret;
+}
+
+static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, char *cafile)
+{
+	X509_STORE *store = NULL;
+	int ret = 0, verok;
+	size_t seqhdrlen;
+	BIO *bio = NULL;
+	int day, sec;
+	time_t time;
+
+	store = X509_STORE_new();
+	if (!load_file_lookup(store, cafile, X509_PURPOSE_CRL_SIGN)) {
+		fprintf(stderr, "Failed to add store lookup file\n");
+		ret = 1; /* FAILED */
+	}
+	if (timestamp_time != NULL) {
+	    if (!ASN1_TIME_diff(&day, &sec, ASN1_TIME_set(NULL, 0), timestamp_time))
+			ret = 1; /* FAILED */
+		time = 86400*day+sec;
+		if (!set_store_time(store, time)) {
+			fprintf(stderr, "Failed to set store time\n");
+			ret = 1; /* FAILED */
+		}
+	}
+	seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
+		p7->d.sign->contents->d.other->value.sequence->length);
+	bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
+		p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
+
+	verok = PKCS7_verify(p7, p7->d.sign->cert, store, bio, NULL, 0);
+	printf("Signature verification: %s\n", verok ? "ok" : "failed");
+	if (!verok) {
+		ERR_print_errors_fp(stdout);
+		ret = 1; /* FAILED */
+	}
+	BIO_free(bio);
+	X509_STORE_free(store);
+
+	return ret;
+}
+
+static int verify_pkcs7(PKCS7 *p7, char *leafhash, char *cafile, char *untrusted)
+{
+	PKCS7 *tmstamp_p7 = NULL;
+	ASN1_UTCTIME *timestamp_time = NULL;
+	int ret = 0, leafok = 0;
+
+	if (!find_signers(p7, leafhash, &leafok))
+		printf("Find signers error"); /* FAILED */
+	if (!print_certs(p7))
+		printf("Print certs error"); /* FAILED */
+	if (!pkcs7_print_attributes(p7->d.sign, &tmstamp_p7, &timestamp_time))
+		ret = 1; /* FAILED */
+	if (leafhash != NULL) {
+		printf("Leaf hash match: %s\n", leafok ? "ok" : "failed");
+		if (!leafok)
+			ret = 1; /* FAILED */
+	}
+	printf("\nCAfile: %s\n", cafile);
+	if (tmstamp_p7)
+		ret |= verify_timestamp(p7, tmstamp_p7, untrusted);
+	if (ret == 1)
+		timestamp_time = NULL;
+	ret |= verify_authenticode(p7, timestamp_time, cafile);
+
+	if (tmstamp_p7) {
+		PKCS7_free(tmstamp_p7);
+		tmstamp_p7 = NULL;
+	}
+
+	return ret;
+}
+
 #ifdef WITH_GSF
 static gint msi_base64_decode(gint x)
 {
@@ -1941,109 +2043,6 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 	g_slist_free(sorted);
 
 	return TRUE;
-}
-
-static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, char *untrusted)
-{
-	X509_STORE *store = NULL;
-	PKCS7_SIGNER_INFO *si;
-	int ret = 0, verok;
-
-	printf("TSA's certificates file: %s\n", untrusted);
-	store = X509_STORE_new();
-	if (!load_file_lookup(store, untrusted, X509_PURPOSE_TIMESTAMP_SIGN)) {
-		fprintf(stderr, "Failed to add timestamp store lookup file\n");
-		ret = 1; /* FAILED */
-	}
-	verok = PKCS7_verify(tmstamp_p7, tmstamp_p7->d.sign->cert, store, 0, NULL, 0);
-	printf("\nTimestamp Server Signature verification: %s\n", verok ? "ok" : "failed");
-	if (!verok) {
-		ERR_print_errors_fp(stdout);
-		ret = 1; /* FAILED */
-	}
-	/* verify the hash provided from the trusted timestamp */
-	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-	verok = TST_verify(tmstamp_p7, si);
-	if (!verok) {
-		ERR_print_errors_fp(stdout);
-		ret = 1; /* FAILED */
-	}
-	X509_STORE_free(store);
-
-	return ret;
-}
-
-static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, char *cafile)
-{
-	X509_STORE *store = NULL;
-	int ret = 0, verok;
-	size_t seqhdrlen;
-	BIO *bio = NULL;
-	int day, sec;
-	time_t time;
-
-	store = X509_STORE_new();
-	if (!load_file_lookup(store, cafile, X509_PURPOSE_CRL_SIGN)) {
-		fprintf(stderr, "Failed to add store lookup file\n");
-		ret = 1; /* FAILED */
-	}
-	if (timestamp_time != NULL) {
-	    if (!ASN1_TIME_diff(&day, &sec, ASN1_TIME_set(NULL, 0), timestamp_time))
-			ret = 1; /* FAILED */
-		time = 86400*day+sec;
-		if (!set_store_time(store, time)) {
-			fprintf(stderr, "Failed to set store time\n");
-			ret = 1; /* FAILED */
-		}
-	}
-	seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
-		p7->d.sign->contents->d.other->value.sequence->length);
-	bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
-		p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
-
-	verok = PKCS7_verify(p7, p7->d.sign->cert, store, bio, NULL, 0);
-	printf("Signature verification: %s\n", verok ? "ok" : "failed");
-	if (!verok) {
-		ERR_print_errors_fp(stdout);
-		ret = 1; /* FAILED */
-	}
-	BIO_free(bio);
-	X509_STORE_free(store);
-
-	return ret;
-}
-
-static int verify_pkcs7(PKCS7 *p7, char *leafhash, char *cafile, char *untrusted)
-{
-	PKCS7 *tmstamp_p7 = NULL;
-	ASN1_UTCTIME *timestamp_time = NULL;
-	int ret = 0, leafok = 0;
-
-	if (!find_signers(p7, leafhash, &leafok))
-		printf("Find signers error"); /* FAILED */
-	if (!print_certs(p7))
-		printf("Print certs error"); /* FAILED */
-	if (!pkcs7_print_attributes(p7->d.sign, &tmstamp_p7, &timestamp_time))
-		ret = 1; /* FAILED */
-	if (leafhash != NULL) {
-		printf("Leaf hash match: %s\n", leafok ? "ok" : "failed");
-		if (!leafok)
-			ret = 1; /* FAILED */
-	}
-	printf("\nCAfile: %s\n", cafile);
-	if (tmstamp_p7)
-		ret |= verify_timestamp(p7, tmstamp_p7, untrusted);
-	if (ret == 1)
-		timestamp_time = NULL;
-
-	ret |= verify_authenticode(p7, timestamp_time, cafile);
-
-	if (tmstamp_p7) {
-		PKCS7_free(tmstamp_p7);
-		tmstamp_p7 = NULL;
-	}
-
-	return ret;
 }
 
 /*
