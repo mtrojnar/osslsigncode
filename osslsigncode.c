@@ -1372,7 +1372,7 @@ static ASN1_UTCTIME *get_signing_time(PKCS7_SIGNER_INFO *si)
 	char object_txt[128];
 	int i;
 
-	auth_attr = PKCS7_get_signed_attributes(si);  // cont[0]
+	auth_attr = PKCS7_get_signed_attributes(si);  /* cont[0] */
 	if (auth_attr)
 		for (i=0; i<X509at_get_attr_count(auth_attr); i++) {
 			attr = X509at_get_attr(auth_attr, i);
@@ -1532,7 +1532,7 @@ static int pkcs7_print_attributes(PKCS7_SIGNED *p7_signed, PKCS7 **tmstamp_p7, A
 	printf("\nSigning Time: ");
 	print_time(get_signing_time(si));
 
-	unauth_attr = PKCS7_get_attributes(si); // cont[1]
+	unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
 	if (unauth_attr)
 		for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
 			attr = X509at_get_attr(unauth_attr, i);
@@ -1620,11 +1620,10 @@ static int TST_verify(PKCS7 *tmstamp_p7, PKCS7_SIGNER_INFO *si)
 			fprintf(stderr, "\tComputed message digest : %s\n", hexbuf);
 			tohex(hash->data, hexbuf, hash->length);
 			fprintf(stderr, "\tReceived message digest : %s\n" , hexbuf);
-			printf("Trusted Timestamp verification: failed\n");
+			printf("File's message digest verification: failed\n");
 			return 0; /* FAILED */
-		} else
-			printf("Trusted Timestamp verification: ok\n");
-	} // else Countersignature Timestamp
+		} /* else Computed and received message digests matched */
+	} /* else Countersignature Timestamp */
 	TimeStampToken_free(token);
 	return 1; /* OK */
 }
@@ -1772,6 +1771,8 @@ static int verify_pkcs7(PKCS7 *p7, char *leafhash, char *cafile, char *untrusted
 	printf("\nCAfile: %s\n", cafile);
 	if (tmstamp_p7)
 		ret |= verify_timestamp(p7, tmstamp_p7, untrusted);
+	else
+		printf("\nFile is not timestamped\n");
 	if (ret == 1)
 		timestamp_time = NULL;
 	ret |= verify_authenticode(p7, timestamp_time, cafile);
