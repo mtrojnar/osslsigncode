@@ -937,6 +937,7 @@ static void usage(const char *argv0, const char *cmd)
     if (on_list(cmd, cmds_attach)) {
 		printf("%1sattach-signature [ -sigin ] <sigfile>\n", "");
 		printf("%12s[ -CAfile <infile> ]\n", "");
+		printf("%12s[ -CRLfile <infile> ]\n", "");
 		printf("%12s[ -untrusted <infile> ]\n", "");
 		printf("%12s[ -nest ]\n", "");
 		printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
@@ -954,6 +955,7 @@ static void usage(const char *argv0, const char *cmd)
     if (on_list(cmd, cmds_verify)) {
 		printf("%1sverify [ -in ] <infile>\n", "");
 		printf("%12s[ -CAfile <infile> ]\n", "");
+		printf("%12s[ -CRLfile <infile> ]\n", "");
 		printf("%12s[ -untrusted <infile> ]\n", "");
 		printf("%12s[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n", "");
 		printf("%12s[ -verbose ]\n\n", "");
@@ -1017,7 +1019,7 @@ static void help_for(const char *argv0, const char *cmd) {
     if (on_list(cmd, cmds_verify)) {
 		printf("\nUse the \"verify\" command to verify embedded signatures.\n");
 		printf("Verification determines if the signing certificate was issued by a trusted party,\n");
-		printf("whether that certificate has been revoked (TODO), and whether the certificate is valid\n");
+		printf("whether that certificate has been revoked, and whether the certificate is valid\n");
 		printf("under a specific policy. Options allow you to specify requirements that must be met\n");
 		printf("and to specify how to find needed CA or TSA certificates, if appropriate.\n\n");
 		printf("Options:\n");
@@ -1040,13 +1042,16 @@ static void help_for(const char *argv0, const char *cmd) {
 #endif
     const char *cmds_CAfile[] = {"attach-signature", "verify", NULL};
     if (on_list(cmd, cmds_CAfile))
-        printf("%-24s= CA certificate file\n", "-CAfile");
+        printf("%-24s= the file containing one or more trusted certificates in PEM format\n", "-CAfile");
     const char *cmds_certs[] = {"sign", NULL};
     if (on_list(cmd, cmds_certs))
         printf("%-24s= the signing certificate to use\n", "-certs");
     const char *cmds_comm[] = {"sign", NULL};
     if (on_list(cmd, cmds_comm))
         printf("%-24s= set commercial purpose (default: individual purpose)\n", "-comm");
+    const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
+    if (on_list(cmd, cmds_CRLfile))
+        printf("%-24s= the file containing one or more CRLs in PEM format\n", "-CRLfile");
     const char *cmds_h[] = {"sign", NULL};
     if (on_list(cmd, cmds_h)) {
         printf("%-24s= {md5|sha1|sha2(56)|sha384|sha512}\n", "-h");
@@ -1136,12 +1141,13 @@ static void help_for(const char *argv0, const char *cmd) {
     const char *cmds_untrusted[] = {"attach-signature", "verify", NULL};
     if (on_list(cmd, cmds_untrusted)) {
         printf("%-24s= set of additional untrusted certificates which may be needed\n", "-untrusted");
-		printf("%26swhen building the certificate chain for the Time-Stamp Authority's signing certificate\n", "");
+		printf("%26swhen building the certificate chain for the Time-Stamp Authority's signing certificate,\n", "");
+		printf("%26sthe file should contain one or more certificates in PEM format\n", "");
 	}
     const char *cmds_verbose[] = {"sign", "verify", NULL};
-    if (on_list(cmd, cmds_verbose))
+    if (on_list(cmd, cmds_verbose)) {
         printf("%-24s= include additional output in the log\n", "-verbose");
-
+	}
 	usage(argv0, cmd);
 }
 
@@ -1607,7 +1613,7 @@ static ASN1_UTCTIME *get_signing_time(PKCS7_SIGNER_INFO *si)
 	return time;
 }
 
-static int load_file_lookup(X509_STORE *store, char *name, int purpose)
+static int load_file_lookup(X509_STORE *store, char *certs, char *crl, int purpose)
 {
 	X509_LOOKUP *lookup;
 	X509_VERIFY_PARAM *param;
@@ -1615,12 +1621,20 @@ static int load_file_lookup(X509_STORE *store, char *name, int purpose)
 	lookup = X509_STORE_add_lookup(store, X509_LOOKUP_file());
 	if (!lookup)
         return 0; /* FAILED */
-	if (!X509_load_cert_file(lookup, name, X509_FILETYPE_PEM)) {
-		fprintf(stderr, "Error: no certificate found in %s\n", name);
+	if (!X509_load_cert_file(lookup, certs, X509_FILETYPE_PEM)) {
+		fprintf(stderr, "Error: no certificate found in %s\n", certs);
         return 0; /* FAILED */
 	}
+	if (crl)
+		if (!X509_load_crl_file(lookup, crl, X509_FILETYPE_PEM)) {
+			fprintf(stderr, "Error: no CRL found in %s\n", crl);
+			return 0; /* FAILED */
+		}
 	param = X509_STORE_get0_param(store);
 	if (param == NULL)
+        return 0; /* FAILED */
+	if (crl)
+		if (!X509_VERIFY_PARAM_set_flags(param, X509_V_FLAG_CRL_CHECK))
         return 0; /* FAILED */
 	if (!X509_VERIFY_PARAM_set_purpose(param, purpose))
         return 0; /* FAILED */
@@ -1905,7 +1919,7 @@ static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, char *untrusted)
 
 	printf("TSA's certificates file: %s\n", untrusted);
 	store = X509_STORE_new();
-	if (!load_file_lookup(store, untrusted, X509_PURPOSE_TIMESTAMP_SIGN)) {
+	if (!load_file_lookup(store, untrusted, NULL, X509_PURPOSE_TIMESTAMP_SIGN)) {
 		fprintf(stderr, "Failed to add timestamp store lookup file\n");
 		ret = 1; /* FAILED */
 	}
@@ -1927,7 +1941,7 @@ static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, char *untrusted)
 	return ret;
 }
 
-static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, char *cafile)
+static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, char *cafile, char *crlfile)
 {
 	X509_STORE *store = NULL;
 	int ret = 0, verok;
@@ -1937,7 +1951,7 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, char *ca
 	time_t time;
 
 	store = X509_STORE_new();
-	if (!load_file_lookup(store, cafile, X509_PURPOSE_CRL_SIGN)) {
+	if (!load_file_lookup(store, cafile, crlfile, X509_PURPOSE_CRL_SIGN)) {
 		fprintf(stderr, "Failed to add store lookup file\n");
 		ret = 1; /* FAILED */
 	}
@@ -1967,7 +1981,7 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, char *ca
 	return ret;
 }
 
-static int verify_pkcs7(PKCS7 *p7, char *leafhash, char *cafile, char *untrusted)
+static int verify_pkcs7(PKCS7 *p7, char *leafhash, char *cafile, char *crlfile, char *untrusted)
 {
 	PKCS7 *tmstamp_p7 = NULL;
 	ASN1_UTCTIME *timestamp_time = NULL;
@@ -1985,13 +1999,15 @@ static int verify_pkcs7(PKCS7 *p7, char *leafhash, char *cafile, char *untrusted
 			ret = 1; /* FAILED */
 	}
 	printf("\nCAfile: %s\n", cafile);
+	if (crlfile)
+		printf("CRLfile: %s\n", crlfile);
 	if (tmstamp_p7)
 		ret |= verify_timestamp(p7, tmstamp_p7, untrusted);
 	else
 		printf("\nFile is not timestamped\n");
 	if (ret == 1)
 		timestamp_time = NULL;
-	ret |= verify_authenticode(p7, timestamp_time, cafile);
+	ret |= verify_authenticode(p7, timestamp_time, cafile, crlfile);
 
 	if (tmstamp_p7) {
 		PKCS7_free(tmstamp_p7);
@@ -2268,7 +2284,7 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
  */
 static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile,
 	unsigned char *exdata, size_t exlen, char *leafhash,
-	int allownest, char *cafile, char *untrusted)
+	int allownest, char *cafile, char *crlfile, char *untrusted)
 {
 	int ret = 0;
 	int mdtype = -1;
@@ -2375,14 +2391,14 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile,
 	}
 #endif
 	printf("\n");
-	ret |= verify_pkcs7(p7, leafhash, cafile, untrusted);
+	ret |= verify_pkcs7(p7, leafhash, cafile, crlfile, untrusted);
 
 	if (allownest) {
 		int has_sig = 0;
 		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
 		if (p7nest) {
 			printf("\n");
-			int nest_ret = msi_verify_pkcs7(p7nest, infile, exdata, exlen, leafhash, 0, cafile, untrusted);
+			int nest_ret = msi_verify_pkcs7(p7nest, infile, exdata, exlen, leafhash, 0, cafile, crlfile, untrusted);
 			if (ret == 0)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
@@ -2402,7 +2418,7 @@ out:
 /*
  * msi_verify_file checks whether or not the signature of infile is valid.
  */
-static int msi_verify_file(GsfInfile *infile, char *leafhash, char *cafile, char *untrusted)
+static int msi_verify_file(GsfInfile *infile, char *leafhash, char *cafile, char *crlfile, char *untrusted)
 {
 	GsfInput *sig = NULL;
 	GsfInput *exsig = NULL;
@@ -2447,7 +2463,7 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash, char *cafile, char
 	const unsigned char *blob = (unsigned char *)indata;
 	p7 = d2i_PKCS7(NULL, &blob, inlen);
 
-	ret = msi_verify_pkcs7(p7, infile, exdata, exlen, leafhash, 1, cafile, untrusted);
+	ret = msi_verify_pkcs7(p7, infile, exdata, exlen, leafhash, 1, cafile, crlfile, untrusted);
 
 out:
 	OPENSSL_free(indata);
@@ -2702,7 +2718,7 @@ static void extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 
 static int verify_pe_pkcs7(PKCS7 *p7, char *indata, size_t peheader,
 	int pe32plus, size_t sigpos, size_t siglen,
-	char *leafhash, int allownest, char *cafile, char *untrusted)
+	char *leafhash, int allownest, char *cafile, char *crlfile, char *untrusted)
 {
 	int ret = 0;
 	int mdtype = -1, phtype = -1;
@@ -2763,14 +2779,14 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, size_t peheader,
 		OPENSSL_free(cph);
 	}
 
-	ret |= verify_pkcs7(p7, leafhash, cafile, untrusted);
+	ret |= verify_pkcs7(p7, leafhash, cafile, crlfile, untrusted);
 
 	if (allownest) {
 		int has_sig = 0;
 		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
 		if (p7nest) {
 			printf("\n");
-			int nest_ret = verify_pe_pkcs7(p7nest, indata, peheader, pe32plus, sigpos, siglen, leafhash, 0, cafile, untrusted);
+			int nest_ret = verify_pe_pkcs7(p7nest, indata, peheader, pe32plus, sigpos, siglen, leafhash, 0, cafile, crlfile, untrusted);
 			if (ret == 0)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
@@ -2814,7 +2830,7 @@ static PKCS7 *extract_existing_pe_pkcs7(char *indata,
 }
 
 static int verify_pe_file(char *indata, size_t peheader, int pe32plus,
-	size_t sigpos, size_t siglen, char *leafhash, char *cafile, char *untrusted)
+	size_t sigpos, size_t siglen, char *leafhash, char *cafile, char *crlfile, char *untrusted)
 {
 	int ret = 0;
 	unsigned int pe_checksum = GET_UINT32_LE(indata + peheader + 88);
@@ -2839,7 +2855,7 @@ static int verify_pe_file(char *indata, size_t peheader, int pe32plus,
 		return -1;
 	}
 
-	ret = verify_pe_pkcs7(p7, indata, peheader, pe32plus, sigpos, siglen, leafhash, 1, cafile, untrusted);
+	ret = verify_pe_pkcs7(p7, indata, peheader, pe32plus, sigpos, siglen, leafhash, 1, cafile, crlfile, untrusted);
 	PKCS7_free(p7);
 	return ret;
 }
@@ -2995,6 +3011,7 @@ int main(int argc, char **argv) {
 	int askpass = 0;
 
 	char *cafile = NULL;
+	char *crlfile = NULL;
 	char *untrusted = NULL;
 	char *leafhash = NULL;
 #ifdef ENABLE_CURL
@@ -3197,6 +3214,9 @@ int main(int argc, char **argv) {
 			if (--argc < 1) usage(argv0, "all");
 			OPENSSL_free(cafile);
 			cafile = OPENSSL_strdup(*++argv);
+		} else if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && !strcmp(*argv, "-CRLfile")) {
+			if (--argc < 1) usage(argv0, "all");
+			crlfile = OPENSSL_strdup(*++argv);
 		} else if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && !strcmp(*argv, "-untrusted")) {
 			if (--argc < 1) usage(argv0, "all");
 			OPENSSL_free(untrusted);
@@ -3494,7 +3514,7 @@ int main(int argc, char **argv) {
 			}
 			goto skip_signing;
 		} else if (cmd == CMD_VERIFY) {
-			ret = msi_verify_file(ole, leafhash, cafile, untrusted);
+			ret = msi_verify_file(ole, leafhash, cafile, crlfile, untrusted);
 			goto skip_signing;
 		} else if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
 			if (nest || cmd == CMD_ADD) {
@@ -3722,7 +3742,7 @@ int main(int argc, char **argv) {
 		}
 
 		if (cmd == CMD_VERIFY) {
-			ret = verify_pe_file(indata, peheader, pe32plus, sigpos ? sigpos : fileend, siglen, leafhash, cafile, untrusted);
+			ret = verify_pe_file(indata, peheader, pe32plus, sigpos ? sigpos : fileend, siglen, leafhash, cafile, crlfile, untrusted);
 			goto skip_signing;
 		}
 		if (sigpos > 0) {
@@ -4031,7 +4051,7 @@ skip_signing:
 				DO_EXIT_0("Error verifying result\n");
 			int sigpos = GET_UINT32_LE(outdataverify + peheader + 152 + pe32plus*16);
 			int siglen = GET_UINT32_LE(outdataverify + peheader + 152 + pe32plus*16 + 4);
-			ret = verify_pe_file(outdataverify, peheader, pe32plus, sigpos, siglen, leafhash, cafile, untrusted);
+			ret = verify_pe_file(outdataverify, peheader, pe32plus, sigpos, siglen, leafhash, cafile, crlfile, untrusted);
 			if (ret) {
 				DO_EXIT_0("Signature mismatch\n");
 			}
@@ -4045,7 +4065,7 @@ skip_signing:
 				DO_EXIT_1("Error opening file %s\n", outfile);
 			ole = gsf_infile_msole_new(src, NULL);
 			g_object_unref(src);
-			ret = msi_verify_file(ole, leafhash, cafile, untrusted);
+			ret = msi_verify_file(ole, leafhash, cafile, crlfile, untrusted);
 			g_object_unref(ole);
 			if (ret) {
 				DO_EXIT_0("Signature mismatch\n");
@@ -4062,6 +4082,8 @@ skip_signing:
 	}
 	OPENSSL_free(cafile);
 	OPENSSL_free(untrusted);
+	if (crlfile)
+		OPENSSL_free(crlfile);
 	cleanup_lib_state();
 
 	return ret;
