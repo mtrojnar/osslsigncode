@@ -1,0 +1,45 @@
+#!/bin/sh
+# Verify PE/MSI file signed with the revoked cert.
+
+. $(dirname $0)/../test_library
+
+# PE file
+test_name="551. Verify PE file signed with the revoked cert"
+printf "\n%s\n" "$test_name"
+if [ -s "test.exe" ] && ! grep -q "no libcurl available" "results.log"
+  then
+    TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/revoked.pem" -key "${script_path}/../certs/key.pem" \
+            -ts http://time.certum.pl/ \
+            -in "test.exe" -out "test_551.exe" 2>> "results.log" 1>&2'
+    verify_signature "$?" "551" "exe" "fail" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+# Command is not supported for non-PE/non-MSI files
+
+# MSI file
+test_name="553. Verify MSI file signed with the revoked cert"
+printf "\n%s\n" "$test_name"
+if [ -s "sample.msi" ] && ! grep -q "no libcurl available" "results.log"
+  then
+    TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/revoked.pem" -key "${script_path}/../certs/key.pem" \
+            -ts http://time.certum.pl/ \
+            -in "sample.msi" -out "test_553.msi"'
+    verify_signature "$?" "553" "msi" "fail" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+exit 0
