@@ -2,7 +2,7 @@
    OpenSSL based Authenticode signing for PE/MSI/Java CAB files.
 
    Copyright (C) 2005-2015 Per Allansson <pallansson@gmail.com>
-   Copyright (C) 2018-2019 Michał Trojnara <Michal.Trojnara@stunnel.org>
+   Copyright (C) 2018-2020 Michał Trojnara <Michal.Trojnara@stunnel.org>
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
