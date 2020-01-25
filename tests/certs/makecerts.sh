@@ -47,6 +47,38 @@ TZ=GMT faketime -f '@2017-01-01 00:00:00' /bin/bash -c '
       2>> "makecerts.log" 1>&2'
 test_result $?
 
+printf "\nGenerate private RSA encrypted key\n" >> "makecerts.log"
+$OPENSSL genrsa -des3 -out demoCA/private.key -passout pass:$password \
+    2>> "makecerts.log" 1>&2
+test_result $?
+cat demoCA/private.key >> tmp/keyp.pem 2>> "makecerts.log"
+
+printf "\nGenerate private RSA decrypted key\n" >> "makecerts.log"
+$OPENSSL rsa -in demoCA/private.key -passin pass:$password -out tmp/key.pem \
+    2>> "makecerts.log" 1>&2
+test_result $?
+
+printf "\nGenerate a certificate to revoke\n" >> "makecerts.log"
+$OPENSSL req -config $CONF -new -key demoCA/private.key -passin pass:$password -out demoCA/revoked.csr \
+    -subj "/C=PL/O=osslsigncode/OU=CA/CN=revoked/emailAddress=revoked@example.com" \
+    2>> "makecerts.log" 1>&2
+$OPENSSL ca -config $CONF -batch -in demoCA/revoked.csr -out demoCA/revoked.cer \
+    2>> "makecerts.log" 1>&2
+$OPENSSL x509 -in demoCA/revoked.cer -out tmp/revoked.pem \
+    2>> "makecerts.log" 1>&2
+
+printf "\nRevoke above certificate\n" >> "makecerts.log"
+$OPENSSL ca -config $CONF -revoke demoCA/1000.pem \
+    2>> "makecerts.log" 1>&2
+
+printf "\nGenerate CRL file\n" >> "makecerts.log"
+TZ=GMT faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+  script_path=$(pwd)
+  OPENSSL=openssl
+  CONF="${script_path}/openssltest.cnf"
+  $OPENSSL ca -config $CONF -gencrl -crldays 8766 -out tmp/CACertCRL.pem \
+      2>> "makecerts.log" 1>&2'
+
 printf "\nGenerate CSP Cross-Certificate\n" >> "makecerts.log"
 $OPENSSL genrsa -out demoCA/cross.key \
     2>> "makecerts.log" 1>&2
@@ -57,17 +89,6 @@ TZ=GMT faketime -f '@2018-01-01 00:00:00' /bin/bash -c '
 $OPENSSL req -config $CONF -new -x509 -days 900 -key demoCA/cross.key -out tmp/crosscert.pem \
     -subj "/C=PL/O=osslsigncode/OU=CSP/CN=crosscert/emailAddress=CA@example.com" \
     2>> "makecerts.log" 1>&2'
-test_result $?
-
-printf "\nGenerate private RSA encrypted key\n" >> "makecerts.log"
-$OPENSSL genrsa -des3 -out demoCA/private.key -passout pass:$password \
-    2>> "makecerts.log" 1>&2
-test_result $?
-cat demoCA/private.key >> tmp/keyp.pem 2>> "makecerts.log"
-
-printf "\nGenerate private RSA decrypted key\n" >> "makecerts.log"
-$OPENSSL rsa -in demoCA/private.key -passin pass:$password -out tmp/key.pem \
-    2>> "makecerts.log" 1>&2
 test_result $?
 
 printf "\nGenerate code signing certificate\n" >> "makecerts.log"
@@ -116,6 +137,7 @@ test_result $?
 
 # copy new files
 if [ -s tmp/CACert.pem ] && [ -s tmp/crosscert.pem ] && [ -s tmp/expired.pem ] && [ -s tmp/cert.pem ] && \
+    [ -s tmp/CACertCRL.pem ] && [ -s tmp/revoked.pem ] && \
     [ -s tmp/key.pem ] && [ -s tmp/keyp.pem ] && [ -s tmp/key.der ] && \
     [ -s tmp/cert.der ] && [ -s tmp/cert.spc ] && [ -s tmp/cert.p12 ]
   then
