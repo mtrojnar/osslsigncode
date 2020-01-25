@@ -1141,7 +1141,6 @@ static void help_for(const char *argv0, const char *cmd) {
     const char *cmds_untrusted[] = {"attach-signature", "verify", NULL};
     if (on_list(cmd, cmds_untrusted)) {
         printf("%-24s= set of additional untrusted certificates which may be needed\n", "-untrusted");
-		printf("%26swhen building the certificate chain for the Time-Stamp Authority's signing certificate,\n", "");
 		printf("%26sthe file should contain one or more certificates in PEM format\n", "");
 	}
     const char *cmds_verbose[] = {"sign", "verify", NULL};
