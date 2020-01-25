@@ -3068,20 +3068,18 @@ int main(int argc, char **argv) {
 
 	md = EVP_sha1();
 
-	if (!strcmp(argv[1], "--help")) {
-		printf(PACKAGE_STRING ", using:\n\t%s\n\t%s\n\n",
-			SSLeay_version(SSLEAY_VERSION),
+	if (argc > 1) {
+		if (!strcmp(argv[1], "--help")) {
+			printf(PACKAGE_STRING ", using:\n\t%s\n\t%s\n\n",
+				SSLeay_version(SSLEAY_VERSION),
 #ifdef ENABLE_CURL
-			curl_version()
+				curl_version()
 #else
-			"no libcurl available"
+				"no libcurl available"
 #endif
 			);
-		help_for(argv0, "all");
-	}
-
-	if (argc > 1) {
-		if (!strcmp(argv[1], "sign")) {
+			help_for(argv0, "all");
+		} else if (!strcmp(argv[1], "sign")) {
 			cmd = CMD_SIGN;
 			argv++;
 			argc--;
