@@ -13,15 +13,8 @@ if [ -s "test.exe" ]
         -st "1556668800" \
         -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.der" \
         -in "test.exe" -out "test_401.exe"
-    TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
-        printf "Verify time: " && date && printf "\n"
-        script_path=$(pwd)
-        ../../osslsigncode verify -CAfile "${script_path}/../certs/CACert.pem" -in "test_401.exe" \
-            -require-leaf-hash SHA256:$(sha256sum "${script_path}/../certs/cert.der" | cut -d" " -f1)'
-    if test_result "$?" "$test_name"
-      then
-        rm -f "test_401.exe"
-      fi
+    verify_leaf_hash "$?" "401" "exe" "@2019-05-01 00:00:00"
+    test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
   fi
@@ -30,23 +23,16 @@ if [ -s "test.exe" ]
 # Command is not supported for non-PE/non-MSI files
 
 # MSI file
-test_name="402. Compare the leaf certificate hash against specified SHA256 message digest for the MSI file"
+test_name="403. Compare the leaf certificate hash against specified SHA256 message digest for the MSI file"
 printf "\n%s\n" "$test_name"
 if [ -s "sample.msi" ]
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
         -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.der" \
-        -in "sample.msi" -out "test_402.msi"
-    TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
-        printf "Verify time: " && date && printf "\n"
-        script_path=$(pwd)
-        ../../osslsigncode verify -CAfile "${script_path}/../certs/CACert.pem" -in "test_402.msi" \
-            -require-leaf-hash SHA256:$(sha256sum "${script_path}/../certs/cert.der" | cut -d" " -f1)'
-    if test_result "$?" "$test_name"
-      then
-        rm -f "test_402.msi"
-      fi
+        -in "sample.msi" -out "test_403.msi"
+    verify_leaf_hash "$?" "403" "msi" "@2019-05-01 00:00:00"
+    test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
   fi

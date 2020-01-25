@@ -11,6 +11,7 @@ if [ -s "test.exe" ]
   then
     ../../osslsigncode attach-signature -sigin "sign_pe.pem" \
         -CAfile "${script_path}/../certs/CACert.pem" \
+        -CRLfile "${script_path}/../certs/CACertCRL.pem" \
         -in "test.exe" -out "test_321.exe"
     verify_signature "$?" "321" "exe" "success" "@2019-09-01 12:00:00" \
 	"sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
@@ -29,6 +30,7 @@ if [ -s "sample.msi" ]
   then
     ../../osslsigncode attach-signature -sigin "sign_msi.pem" \
         -CAfile "${script_path}/../certs/CACert.pem" \
+        -CRLfile "${script_path}/../certs/CACertCRL.pem" \
         -in "sample.msi" -out "test_322.msi"
     verify_signature "$?" "322" "msi" "success" "@2019-09-01 12:00:00" \
 	"sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
