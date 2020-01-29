@@ -2,7 +2,7 @@
 # mingw64-gcc, gcab, msitools, libgsf, libgsf-devel
 # vim-common, libfaketime packages are required
 
-result=1
+result=0
 count=0
 skip=0
 fail=0
@@ -11,6 +11,7 @@ result_path=$(pwd)
 cd $(dirname "$0")
 script_path=$(pwd)
 result_path="${result_path}/logs"
+certs_path="${script_path}/certs"
 
 make_tests() {
   for plik in ${script_path}/recipes/*
@@ -22,7 +23,7 @@ make_tests() {
     then
       skip=$(grep -c "Test skipped" "results.log")
       fail=$(grep -c "Test failed" "results.log")
-      printf "%s\n" "./newtest.sh finished"
+      printf "%s\n" "testall.sh finished"
       printf "%s\n" "summary: success $count, skip $skip, fail $fail"
     else # no test was done
       result=1
@@ -35,6 +36,23 @@ cd "${result_path}"
 
 date > "results.log"
 ../../osslsigncode -v >> "results.log" 2>/dev/null
+
+cd ${certs_path}
+if [ -s CACert.pem ] && [ -s crosscert.pem ] && [ -s expired.pem ] && [ -s cert.pem ] && \
+    [ -s CACertCRL.pem ] && [ -s revoked.pem ] && [ -s key.pem ] && [ -s keyp.pem ] && \
+    [ -s key.der ] && [ -s cert.der ] && [ -s cert.spc ] && [ -s cert.p12 ]
+  then
+    printf "%s\n" "keys & certificates path: ${certs_path}"
+  else
+    ./makecerts.sh $1
+    result=$?
+  fi
+cd "${result_path}"
+
+if [ "$result" -ne 0 ]
+  then
+    exit $result
+  fi
 
 # PE and CAB files support
 if [ -n "$(command -v x86_64-w64-mingw32-gcc)" ]
@@ -91,4 +109,5 @@ if [ -n "$(command -v faketime)" ]
     printf "%s\n" "faketime not found in \$PATH"
     printf "%s\n" "tests skipped, please install faketime package"
   fi
+
 exit $result
