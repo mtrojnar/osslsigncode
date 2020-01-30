@@ -17,7 +17,7 @@ script_path=$(pwd)
 # MSI file
 test_name="411. Sign a MSI file with the add-msi-dse option"
 printf "\n%s\n" "$test_name"
-if [ -s "sample.msi" ]
+if test -s "sample.msi"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \

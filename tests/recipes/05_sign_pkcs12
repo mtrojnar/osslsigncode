@@ -7,7 +7,7 @@ script_path=$(pwd)
 # PE file
 test_name="051. Sign a PE file with a certificate and key stored in a PKCS#12 container"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ]
+if test -s "test.exe"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
@@ -23,7 +23,7 @@ if [ -s "test.exe" ]
 # CAB file
 test_name="052. Sign a CAB file with a certificate and key stored in a PKCS#12 container"
 printf "\n%s\n" "$test_name"
-if [ -s "test.ex_" ]
+if test -s "test.ex_"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
@@ -40,7 +40,7 @@ if [ -s "test.ex_" ]
 # MSI file
 test_name="053. Sign a MSI file with a certificate and key stored in a PKCS#12 container"
 printf "\n%s\n" "$test_name"
-if [ -s "sample.msi" ]
+if test -s "sample.msi"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \

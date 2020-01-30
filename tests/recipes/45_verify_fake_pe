@@ -8,7 +8,7 @@ script_path=$(pwd)
 # PE file
 test_name="451. Verify changed PE file after signing"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ]
+if test -s "test.exe"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \

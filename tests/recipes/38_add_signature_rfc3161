@@ -7,7 +7,7 @@ script_path=$(pwd)
 # PE file
 test_name="381. Add RFC 3161 timestamp to signed PE file"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ] && ! grep -q "no libcurl available" "results.log"
+if test -s "test.exe" && ! grep -q "no libcurl available" "results.log"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
@@ -29,7 +29,7 @@ if [ -s "test.exe" ] && ! grep -q "no libcurl available" "results.log"
 # MSI file
 test_name="382. Add RFC 3161 timestamp to signed MSI file"
 printf "\n%s\n" "$test_name"
-if [ -s "sample.msi" ] && ! grep -q "no libcurl available" "results.log"
+if test -s "sample.msi" && ! grep -q "no libcurl available" "results.log"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \

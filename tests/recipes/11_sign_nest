@@ -8,7 +8,7 @@ script_path=$(pwd)
 # PE file
 test_name="111. Sign a PE file with the nest flag"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ]
+if test -s "test.exe"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
@@ -32,7 +32,7 @@ if [ -s "test.exe" ]
 # MSI file
 test_name="113. Sign a MSI file with the nest flag"
 printf "\n%s\n" "$test_name"
-if [ -s "sample.msi" ]
+if test -s "sample.msi"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \

@@ -6,7 +6,7 @@
 # PE file
 test_name="511. Verify PE file signature after the cert has been expired"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ]
+if test -s "test.exe"
   then
     TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
         script_path=$(pwd)
@@ -26,7 +26,7 @@ if [ -s "test.exe" ]
 # MSI file
 test_name="513. Verify MSI file signature after the cert has been expired"
 printf "\n%s\n" "$test_name"
-if [ -s "sample.msi" ]
+if test -s "sample.msi"
   then
     TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
         script_path=$(pwd)

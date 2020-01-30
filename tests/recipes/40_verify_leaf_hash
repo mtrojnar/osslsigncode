@@ -7,7 +7,7 @@ script_path=$(pwd)
 # PE file
 test_name="401. Compare the leaf certificate hash against specified SHA256 message digest for the PE file"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ]
+if test -s "test.exe"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
@@ -25,7 +25,7 @@ if [ -s "test.exe" ]
 # MSI file
 test_name="403. Compare the leaf certificate hash against specified SHA256 message digest for the MSI file"
 printf "\n%s\n" "$test_name"
-if [ -s "sample.msi" ]
+if test -s "sample.msi"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \

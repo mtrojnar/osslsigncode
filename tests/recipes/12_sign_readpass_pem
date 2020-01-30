@@ -7,7 +7,7 @@ script_path=$(pwd)
 # PE file
 test_name="121. Sign a PE file with the PEM key file and the file with a password"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ]
+if test -s "test.exe"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
@@ -24,7 +24,7 @@ if [ -s "test.exe" ]
 # CAB file
 test_name="122. Sign a CAB file with a PEM key file and the file with a password"
 printf "\n%s\n" "$test_name"
-if [ -s "test.ex_" ]
+if test -s "test.ex_"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
@@ -41,7 +41,7 @@ if [ -s "test.ex_" ]
 # MSI file
 test_name="123. Sign a MSI file with a PEM key file and the file with a password"
 printf "\n%s\n" "$test_name"
-if [ -s "sample.msi" ]
+if test -s "sample.msi"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \

@@ -6,7 +6,7 @@
 # PE file
 test_name="521. Verify PE file signature with timestamping after the cert has been expired"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ] && ! grep -q "no libcurl available" "results.log"
+if test -s "test.exe" && ! grep -q "no libcurl available" "results.log"
   then
     TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
         script_path=$(pwd)
@@ -27,7 +27,7 @@ if [ -s "test.exe" ] && ! grep -q "no libcurl available" "results.log"
 # MSI file
 test_name="523. Verify MSI file signature with timestamping after the cert has been expired"
 printf "\n%s\n" "$test_name"
-if [ -s "sample.msi" ] && ! grep -q "no libcurl available" "results.log"
+if test -s "sample.msi" && ! grep -q "no libcurl available" "results.log"
   then
     TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
         script_path=$(pwd)
