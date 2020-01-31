@@ -1919,7 +1919,7 @@ static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, char *untrusted)
 	printf("TSA's certificates file: %s\n", untrusted);
 	store = X509_STORE_new();
 	if (!load_file_lookup(store, untrusted, NULL, X509_PURPOSE_TIMESTAMP_SIGN)) {
-		fprintf(stderr, "Failed to add timestamp store lookup file\n");
+		printf("\nUse the \"-untrusted\" option to add the CA cert bundle to verify timestamp server.\n");
 		ret = 1; /* FAILED */
 	}
 	verok = PKCS7_verify(tmstamp_p7, tmstamp_p7->d.sign->cert, store, 0, NULL, 0);
@@ -2966,6 +2966,7 @@ static char *getpassword(const char *prompt)
 }
 #endif
 
+#ifndef ENABLE_CURL
 static char *get_cafile(void)
 {
 	const char *sslpart1, *sslpart2;
@@ -2988,6 +2989,7 @@ static char *get_cafile(void)
 	OPENSSL_free(openssl_dir);
 	return cafile;
 }
+#endif
 
 int main(int argc, char **argv) {
 	BIO *btmp, *sigbio, *hash, *outdata;
@@ -3107,8 +3109,13 @@ int main(int argc, char **argv) {
 	}
 
 	if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH)) {
+#ifdef ENABLE_CURL
+		cafile = OPENSSL_strdup(CA_BUNDLE_PATH);
+		untrusted = OPENSSL_strdup(CA_BUNDLE_PATH);
+#else
 		cafile = get_cafile();
 		untrusted = get_cafile();
+#endif
 	}
 
 	for (argc--,argv++; argc >= 1; argc--,argv++) {
