@@ -1919,7 +1919,7 @@ static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, char *untrusted)
 	printf("TSA's certificates file: %s\n", untrusted);
 	store = X509_STORE_new();
 	if (!load_file_lookup(store, untrusted, NULL, X509_PURPOSE_TIMESTAMP_SIGN)) {
-		fprintf(stderr, "Failed to add timestamp store lookup file\n");
+		printf("\nUse the \"-untrusted\" option to add the CA cert bundle to verify timestamp server.\n");
 		ret = 1; /* FAILED */
 	}
 	verok = PKCS7_verify(tmstamp_p7, tmstamp_p7->d.sign->cert, store, 0, NULL, 0);
@@ -2971,6 +2971,10 @@ static char *get_cafile(void)
 	const char *sslpart1, *sslpart2;
 	char *cafile, *openssl_dir, *str_begin, *str_end;
 
+#ifdef CA_BUNDLE_PATH
+	if (strcmp(CA_BUNDLE_PATH, ""))
+		return OPENSSL_strdup(CA_BUNDLE_PATH);
+#endif
 	sslpart1 = OpenSSL_version(OPENSSL_DIR);
 	sslpart2 = "/certs/ca-bundle.crt";
 	str_begin = strchr(sslpart1, '"');
