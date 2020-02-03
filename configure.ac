@@ -127,7 +127,6 @@ if test "${with_curl}" = "yes"; then
 	OPTIONAL_LIBCURL_CFLAGS="${LIBCURL_CFLAGS}"
 	OPTIONAL_LIBCURL_LIBS="${LIBCURL_LIBS}"
 	AC_DEFINE([ENABLE_CURL], [1], [libcurl is enabled])
-	AC_DEFINE_UNQUOTED([CA_BUNDLE_PATH], ["$(curl-config --ca)"], [CA bundle install path])
 fi
 
 AC_SUBST([OPTIONAL_LIBCURL_CFLAGS])
