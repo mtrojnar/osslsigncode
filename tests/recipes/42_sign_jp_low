@@ -11,7 +11,7 @@ script_path=$(pwd)
 # CAB file
 test_name="421. Sign a CAB file with jp low option"
 printf "\n%s\n" "$test_name"
-if [ -s "test.ex_" ]
+if test -s "test.ex_"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \

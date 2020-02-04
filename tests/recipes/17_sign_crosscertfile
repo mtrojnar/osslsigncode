@@ -9,7 +9,7 @@ script_path=$(pwd)
 # PE file
 test_name="171. Add an additional certificate to the signature block of the PE file"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ]
+if test -s "test.exe"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
@@ -26,7 +26,7 @@ if [ -s "test.exe" ]
 # CAB file
 test_name="172. Add an additional certificate to the signature block of the CAB file"
 printf "\n%s\n" "$test_name"
-if [ -s "test.ex_" ]
+if test -s "test.ex_"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
@@ -43,7 +43,7 @@ if [ -s "test.ex_" ]
 # MSI file
 test_name="173. Add an additional certificate to the signature block of the MSI file"
 printf "\n%s\n" "$test_name"
-if [ -s "sample.msi" ]
+if test -s "sample.msi"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \

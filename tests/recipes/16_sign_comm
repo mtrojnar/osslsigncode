@@ -10,7 +10,7 @@ script_path=$(pwd)
 # PE file
 test_name="161. Sign a PE file with the common purpose set"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ]
+if test -s "test.exe"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
@@ -27,7 +27,7 @@ if [ -s "test.exe" ]
 # CAB file
 test_name="162. Sign a CAB file with the common purpose set"
 printf "\n%s\n" "$test_name"
-if [ -s "test.ex_" ]
+if test -s "test.ex_"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
@@ -44,7 +44,7 @@ if [ -s "test.ex_" ]
 # MSI file
 test_name="163. Sign a MSI file with the common purpose set"
 printf "\n%s\n" "$test_name"
-if [ -s "sample.msi" ]
+if test -s "sample.msi"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \

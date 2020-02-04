@@ -19,7 +19,7 @@ make_tests() {
       /bin/sh $plik 3>&1 2>> "results.log" 1>&2
     done
     count=$(grep -c "Test succeeded" "results.log")
-  if [ $count -ne 0 ]
+  if test $count -ne 0
     then
       skip=$(grep -c "Test skipped" "results.log")
       fail=$(grep -c "Test failed" "results.log")
@@ -38,9 +38,9 @@ date > "results.log"
 ../../osslsigncode -v >> "results.log" 2>/dev/null
 
 cd ${certs_path}
-if [ -s CACert.pem ] && [ -s crosscert.pem ] && [ -s expired.pem ] && [ -s cert.pem ] && \
-    [ -s CACertCRL.pem ] && [ -s revoked.pem ] && [ -s key.pem ] && [ -s keyp.pem ] && \
-    [ -s key.der ] && [ -s cert.der ] && [ -s cert.spc ] && [ -s cert.p12 ]
+if test -s CACert.pem -a -s crosscert.pem -a -s expired.pem -a -s cert.pem \
+    -a -s CACertCRL.pem -a -s revoked.pem -a -s key.pem -a -s keyp.pem \
+    -a -s key.der -a -s cert.der -a -s cert.spc -a -s cert.p12
   then
     printf "%s\n" "keys & certificates path: ${certs_path}"
   else
@@ -49,16 +49,16 @@ if [ -s CACert.pem ] && [ -s crosscert.pem ] && [ -s expired.pem ] && [ -s cert.
   fi
 cd "${result_path}"
 
-if [ "$result" -ne 0 ]
+if test "$result" -ne 0
   then
     exit $result
   fi
 
 # PE and CAB files support
-if [ -n "$(command -v x86_64-w64-mingw32-gcc)" ]
+if test -n "$(command -v x86_64-w64-mingw32-gcc)"
   then
     x86_64-w64-mingw32-gcc "../myapp.c" -o "test.exe" 2>> "results.log" 1>&2
-    if [ -n "$(command -v gcab)" ]
+    if test -n "$(command -v gcab)"
       then
         gcab -c "test.ex_" "test.exe" 2>> "results.log" 1>&2
       else
@@ -75,7 +75,7 @@ if grep -q "no libgsf available" "results.log"
   then
     printf "%s\n" "signing MSI files requires libgsf/libgsf-devel packages and reconfiguration osslsigncode"
   else
-    if [ -n "$(command -v wixl)" ]
+    if test -n "$(command -v wixl)"
       then
         touch FoobarAppl10.exe
         cp "../sample.wxs" "sample.wxs" 2>> "results.log" 1>&2
@@ -93,9 +93,9 @@ if grep -q "no libcurl available" "results.log"
   fi
 
 # Tests requirements
-if [ -n "$(command -v faketime)" ]
+if test -n "$(command -v faketime)"
   then
-    if [ -n "$(command -v xxd)" ]
+    if test -n "$(command -v xxd)"
       then
         make_tests
         result=$?

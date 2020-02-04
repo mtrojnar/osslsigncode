@@ -3,7 +3,7 @@
 result=0
 
 test_result() {
-  if [ "$1" == 0 ]
+  if test "$1" -eq 0
     then
       printf "Succeeded\n" >> "makecerts.log"
     else
@@ -139,9 +139,9 @@ make_certs() {
   test_result $?
 
 # copy new files
-  if [ -s tmp/CACert.pem ] && [ -s tmp/crosscert.pem ] && [ -s tmp/expired.pem ] && [ -s tmp/cert.pem ] && \
-    [ -s tmp/CACertCRL.pem ] && [ -s tmp/revoked.pem ] && [ -s tmp/key.pem ] && [ -s tmp/keyp.pem ] && \
-    [ -s tmp/key.der ] && [ -s tmp/cert.der ] && [ -s tmp/cert.spc ] && [ -s tmp/cert.p12 ]
+  if test -s tmp/CACert.pem -a -s tmp/crosscert.pem -a -s tmp/expired.pem -a -s tmp/cert.pem \
+    -a -s tmp/CACertCRL.pem -a -s tmp/revoked.pem -a -s tmp/key.pem -a -s tmp/keyp.pem \
+    -a -s tmp/key.der -a -s tmp/cert.der -a -s tmp/cert.spc -a -s tmp/cert.p12
   then
     cp tmp/* ./
     printf "%s\n" "keys & certificates successfully generated"
@@ -164,7 +164,7 @@ make_certs() {
 }
 
 # Tests requirement
-if [ -n "$(command -v faketime)" ]
+if test -n "$(command -v faketime)"
   then
     make_certs $1
     result=$?

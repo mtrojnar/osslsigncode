@@ -7,7 +7,7 @@ script_path=$(pwd)
 # PE file
 test_name="231. Signing a PE file with SHA1 set of cryptographic hash functions"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ]
+if test -s "test.exe"
   then
     ../../osslsigncode sign -h sha2 \
         -st "1556668800" \

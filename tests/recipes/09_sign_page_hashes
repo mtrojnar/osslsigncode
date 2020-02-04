@@ -7,7 +7,7 @@ script_path=$(pwd)
 # PE file
 test_name="091. Generate page hashes for a PE file"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ]
+if test -s "test.exe"
   then
     ../../osslsigncode sign -h sha256 -ph \
         -st "1556668800" \

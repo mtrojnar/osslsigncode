@@ -11,7 +11,7 @@ test_result() {
 
   local result=0
 
-  if [ "$1" -eq 0 ]
+  if test "$1" -eq 0
     then
       printf "%s\n" "Test succeeded"
     else
@@ -40,8 +40,8 @@ modify_blob() {
       -CRLfile "${script_path}/../certs/CACertCRL.pem" \
       -in "test_$1_changed.$2" 2>> "verify.log" 1>&2
   result=$?
-  if [ "$result" -ne 0 ] || \
-      [ $(grep -e "Calculated DigitalSignature" -e "Calculated message digest" "verify.log" | uniq | wc -l) -ne 1 ]
+  if test "$result" -ne 0 \
+      -o $(grep -e "Calculated DigitalSignature" -e "Calculated message digest" "verify.log" | uniq | wc -l) -ne 1
     then
       printf "Failed: verify error or non-unique message digests found\n" 2>> "verify.log" 1>&2
       result=1
@@ -61,7 +61,7 @@ search_pattern() {
 
   local result=0
 
-  if [ "$3" = "ASCII" ]
+  if test "$3" = "ASCII"
     then
       hex_pattern=$(echo -n "$4" | xxd -p)
     else
@@ -72,9 +72,9 @@ search_pattern() {
     then
       result=1
       printf "Failed: $4 not found\n"
-    elif [ "$5" = "MODIFY" ]
+    elif test "$5" = "MODIFY"
       then
-        if [ "$2" != "ex_" ]
+        if test "$2" != "ex_"
          then
            modify_blob "$1" "$2" "$4"
            result=$?
@@ -99,9 +99,9 @@ verify_signature() {
 
   local result=0
   printf "" > "verify.log"
-  if [ "$1" -eq 0 ]
+  if test "$1" -eq 0
     then
-      if [ "$3" != "ex_" ]
+      if test "$3" != "ex_"
         then
           cp "test_$2.$3" "test_tmp.tmp"
           TZ=GMT faketime -f "$5" /bin/bash -c '
@@ -116,25 +116,25 @@ verify_signature() {
         else
            printf "VERIFY is not supported for CAB files\n"
         fi
-      if [ "$result" -eq 0 ] && [ "$7" != "UNUSED_PATTERN" ] && [ "$8" != "UNUSED_PATTERN" ]
+      if test "$result" -eq 0 -a "$7" != "UNUSED_PATTERN" -a "$8" != "UNUSED_PATTERN"
         then
           search_pattern "$2" "$3" "$7" "$8" "$9"
           result=$?
         fi
-      if [ "$6" = "sha256sum" ]
+      if test "$6" = "sha256sum"
         then
-          if [ -s "test_$2_signed.$3" ]
+          if test -s "test_$2_signed.$3"
             then
               sha256sum "test_$2_signed.$3" 2>> "sha256sum_$3.log" 1>&2
             else
               sha256sum "test_$2.$3" 2>> "sha256sum_$3.log" 1>&2
             fi
         fi
-      if [ "$4" = "success" ] && [ "$result" -eq 0 ]
+      if test "$4" = "success" -a "$result" -eq 0
         then
           rm -f "test_$2.$3" "test_$2_signed.$3" "test_$2_modifed.$3" "test_$2_changed.$3"
           result=0
-        elif [ "$4" = "fail" ] && [ "$result" -eq 1 ]
+        elif test "$4" = "fail" -a "$result" -eq 1
           then
             rm -f "test_$2.$3" "test_$2_signed.$3" "test_$2_modifed.$3" "test_$2_changed.$3"
             cat "verify.log" >> "results.log"
@@ -157,9 +157,9 @@ verify_leaf_hash() {
 
   local result=0
   printf "" > "verify.log"
-  if [ "$1" -eq 0 ]
+  if test "$1" -eq 0
     then
-      if [ "$3" != "ex_" ]
+      if test "$3" != "ex_"
         then
           cp "test_$2.$3" "test_tmp.tmp"
           TZ=GMT faketime -f "$4" /bin/bash -c '
@@ -175,7 +175,7 @@ verify_leaf_hash() {
         else
            printf "VERIFY is not supported for CAB files\n"
         fi
-      if [ "$result" -eq 0 ]
+      if test "$result" -eq 0
         then
           rm -f "test_$2.$3"
         else

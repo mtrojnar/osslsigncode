@@ -7,9 +7,9 @@ res=0
 skip=0
 test_name="351. Checking SHA256 message digests for 31x-34x tests"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ]
+if test -s "test.exe"
   then
-    if [ $(cat "sha256sum_exe.log" | cut -d' ' -f1 | uniq | wc -l) -ne 1 ]
+    if test $(cat "sha256sum_exe.log" | cut -d' ' -f1 | uniq | wc -l) -ne 1
       then
         res=1
         cat "sha256sum_exe.log" >> "results.log"
@@ -22,9 +22,9 @@ if [ -s "test.exe" ]
     skip=$(($skip+1))
   fi
 
-if [ -s "sample.msi" ]
+if test -s "sample.msi"
   then
-    if [ $(cat "sha256sum_msi.log" | cut -d' ' -f1 | uniq | wc -l) -ne 1 ]
+    if test $(cat "sha256sum_msi.log" | cut -d' ' -f1 | uniq | wc -l) -ne 1
       then
         res=1
         cat "sha256sum_msi.log" >> "results.log"
@@ -37,7 +37,7 @@ if [ -s "sample.msi" ]
     skip=$(($skip+1))
   fi
 
-if [ $skip -lt 2 ]
+if test $skip -lt 2
   then
     test_result "$res" "$test_name"
   else

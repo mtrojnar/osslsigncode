@@ -7,7 +7,7 @@ script_path=$(pwd)
 # PE file
 test_name="321. Attach the signature to the PE file"
 printf "\n%s\n" "$test_name"
-if [ -s "test.exe" ]
+if test -s "test.exe"
   then
     ../../osslsigncode attach-signature -sigin "sign_pe.pem" \
         -CAfile "${script_path}/../certs/CACert.pem" \
@@ -26,7 +26,7 @@ if [ -s "test.exe" ]
 # MSI file
 test_name="322. Attach the signature to the MSI file"
 printf "\n%s\n" "$test_name"
-if [ -s "sample.msi" ]
+if test -s "sample.msi"
   then
     ../../osslsigncode attach-signature -sigin "sign_msi.pem" \
         -CAfile "${script_path}/../certs/CACert.pem" \
