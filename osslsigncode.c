@@ -451,9 +451,9 @@ typedef struct {
 DECLARE_ASN1_FUNCTIONS(TimeStampAccuracy)
 
 ASN1_SEQUENCE(TimeStampAccuracy) = {
-        ASN1_OPT(TimeStampAccuracy, seconds, ASN1_INTEGER),
-        ASN1_IMP_OPT(TimeStampAccuracy, millis, ASN1_INTEGER, 0),
-        ASN1_IMP_OPT(TimeStampAccuracy, micros, ASN1_INTEGER, 1)
+	ASN1_OPT(TimeStampAccuracy, seconds, ASN1_INTEGER),
+	ASN1_IMP_OPT(TimeStampAccuracy, millis, ASN1_INTEGER, 0),
+	ASN1_IMP_OPT(TimeStampAccuracy, micros, ASN1_INTEGER, 1)
 } ASN1_SEQUENCE_END(TimeStampAccuracy)
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampAccuracy)
@@ -465,11 +465,11 @@ typedef struct {
 	MessageImprint *messageImprint;
 	ASN1_INTEGER *serial;
 	ASN1_GENERALIZEDTIME *time;
-    TimeStampAccuracy *accuracy;
-    ASN1_BOOLEAN ordering;
-    ASN1_INTEGER *nonce;
-    GENERAL_NAME *tsa;
-    STACK_OF(X509_EXTENSION) *extensions;
+	TimeStampAccuracy *accuracy;
+	ASN1_BOOLEAN ordering;
+	ASN1_INTEGER *nonce;
+	GENERAL_NAME *tsa;
+	STACK_OF(X509_EXTENSION) *extensions;
 } TimeStampToken;
 
 DECLARE_ASN1_FUNCTIONS(TimeStampToken)
@@ -884,22 +884,22 @@ static void cleanup_lib_state(void)
 }
 
 static bool on_list(const char *txt, const char *list[]) {
-    while (*list)
-        if (!strcmp(txt, *list++))
-            return true;
-    return false;
+	while (*list)
+		if (!strcmp(txt, *list++))
+			return true;
+	return false;
 }
 
 static void usage(const char *argv0, const char *cmd)
 {
 	printf("\nUsage: %s", argv0);
-    const char *cmds_all[] = {"all", NULL};
-    if (on_list(cmd, cmds_all)) {
+	const char *cmds_all[] = {"all", NULL};
+	if (on_list(cmd, cmds_all)) {
 		printf("\n\n%1s[ --version | -v ]\n", "");
 		printf("%1s[ --help ]\n\n", "");
 	}
-    const char *cmds_sign[] = {"all", "sign", NULL};
-    if (on_list(cmd, cmds_sign)) {
+	const char *cmds_sign[] = {"all", "sign", NULL};
+	if (on_list(cmd, cmds_sign)) {
 		printf("%1s[ sign ] ( -certs <certfile> -key <keyfile> | -pkcs12 <pkcs12file> |\n", "");
 		printf("%12s  [ -pkcs11engine <engine> ] -pkcs11module <module> -certs <certfile> -key <pkcs11 key id>)\n", "");
 		printf("%12s[ -pass <password>", "");
@@ -924,8 +924,8 @@ static void usage(const char *argv0, const char *cmd)
 #endif
 		printf("%12s[ -in ] <infile> [-out ] <outfile>\n\n", "");
 	}
-    const char *cmds_add[] = {"all", "add", NULL};
-    if (on_list(cmd, cmds_add)) {
+	const char *cmds_add[] = {"all", "add", NULL};
+	if (on_list(cmd, cmds_add)) {
 		printf("%1sadd [-addUnauthenticatedBlob]\n", "");
 #ifdef ENABLE_CURL
 		printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
@@ -933,8 +933,8 @@ static void usage(const char *argv0, const char *cmd)
 #endif
 		printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
 	}
-    const char *cmds_attach[] = {"all", "attach-signature", NULL};
-    if (on_list(cmd, cmds_attach)) {
+	const char *cmds_attach[] = {"all", "attach-signature", NULL};
+	if (on_list(cmd, cmds_attach)) {
 		printf("%1sattach-signature [ -sigin ] <sigfile>\n", "");
 		printf("%12s[ -CAfile <infile> ]\n", "");
 		printf("%12s[ -CRLfile <infile> ]\n", "");
@@ -942,17 +942,17 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -nest ]\n", "");
 		printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
 	}
-    const char *cmds_extract[] = {"all", "extract-signature", NULL};
-    if (on_list(cmd, cmds_extract)) {
+	const char *cmds_extract[] = {"all", "extract-signature", NULL};
+	if (on_list(cmd, cmds_extract)) {
 		printf("%1sextract-signature [ -pem ]\n", "");
 		printf("%12s[ -in ] <infile> [ -out ] <sigfile>\n\n", "");
 	}
-    const char *cmds_remove[] = {"all", "remove-signature", NULL};
-    if (on_list(cmd, cmds_remove))
+	const char *cmds_remove[] = {"all", "remove-signature", NULL};
+	if (on_list(cmd, cmds_remove))
 		printf("%1sremove-signature [ -in ] <infile> [ -out ] <outfile>\n\n", "");
 
-    const char *cmds_verify[] = {"all", "verify", NULL};
-    if (on_list(cmd, cmds_verify)) {
+	const char *cmds_verify[] = {"all", "verify", NULL};
+	if (on_list(cmd, cmds_verify)) {
 		printf("%1sverify [ -in ] <infile>\n", "");
 		printf("%12s[ -CAfile <infile> ]\n", "");
 		printf("%12s[ -CRLfile <infile> ]\n", "");
@@ -966,8 +966,8 @@ static void usage(const char *argv0, const char *cmd)
 
 static void help_for(const char *argv0, const char *cmd) {
 
-    const char *cmds_all[] = {"all", NULL};
-    if (on_list(cmd, cmds_all)) {
+	const char *cmds_all[] = {"all", NULL};
+	if (on_list(cmd, cmds_all)) {
 		printf("osslsigncode is a small tool that implements part of the functionality of the Microsoft\n");
 		printf("tool signtool.exe - more exactly the Authenticode signing and timestamping.\n");
 		printf("It can sign and timestamp PE (EXE/SYS/DLL/etc), CAB and MSI files,\n");
@@ -984,39 +984,39 @@ static void help_for(const char *argv0, const char *cmd) {
 		printf("%-22s = verifies the digital signature of a file\n\n", "verify");
 		printf("For help on a specific command, enter %s <command> --help\n", argv0);
 	}
-    const char *cmds_add[] = {"add", NULL};
-    if (on_list(cmd, cmds_add)) {
+	const char *cmds_add[] = {"add", NULL};
+	if (on_list(cmd, cmds_add)) {
 		printf("\nUse the \"add\" command to add an unauthenticated blob or a timestamp to a previously-signed file.\n\n");
 		printf("Options:\n");
 	}
-    const char *cmds_attach[] = {"attach-signature", NULL};
-    if (on_list(cmd, cmds_attach)) {
+	const char *cmds_attach[] = {"attach-signature", NULL};
+	if (on_list(cmd, cmds_attach)) {
 		printf("\nUse the \"attach-signature\" command to attach the signature stored in the \"sigin\" file.\n");
 		printf("In order to verify this signature you should specify how to find needed CA or TSA\n");
 		printf("certificates, if appropriate.\n\n");
 		printf("Options:\n");
 	}
-    const char *cmds_extract[] = {"extract-signature", NULL};
-    if (on_list(cmd, cmds_extract)) {
+	const char *cmds_extract[] = {"extract-signature", NULL};
+	if (on_list(cmd, cmds_extract)) {
 		printf("\nUse the \"extract-signature\" command to extract the embedded signature from a previously-signed file.\n");
 		printf("DER is the default format of the output file, but can be changed to PEM.\n\n");
 		printf("Options:\n");
 	}
-    const char *cmds_remove[] = {"remove-signature", NULL};
-    if (on_list(cmd, cmds_remove)) {
+	const char *cmds_remove[] = {"remove-signature", NULL};
+	if (on_list(cmd, cmds_remove)) {
 		printf("\nUse the \"remove-signature\" command to remove sections of the embedded signature on a file.\n\n");
 		printf("Options:\n");
 	}
-    const char *cmds_sign[] = {"sign", NULL};
-    if (on_list(cmd, cmds_sign)) {
+	const char *cmds_sign[] = {"sign", NULL};
+	if (on_list(cmd, cmds_sign)) {
 		printf("\nUse the \"sign\" command to sign files using embedded signatures.\n");
 		printf("Signing  protects a file from tampering, and allows users to verify the signer\n");
 		printf("based on a signing certificate. The options below allow you to specify signing\n");
 		printf("parameters and to select the signing certificate you wish to use.\n\n");
 		printf("Options:\n");
 	}
-    const char *cmds_verify[] = {"verify", NULL};
-    if (on_list(cmd, cmds_verify)) {
+	const char *cmds_verify[] = {"verify", NULL};
+	if (on_list(cmd, cmds_verify)) {
 		printf("\nUse the \"verify\" command to verify embedded signatures.\n");
 		printf("Verification determines if the signing certificate was issued by a trusted party,\n");
 		printf("whether that certificate has been revoked, and whether the certificate is valid\n");
@@ -1024,128 +1024,128 @@ static void help_for(const char *argv0, const char *cmd) {
 		printf("and to specify how to find needed CA or TSA certificates, if appropriate.\n\n");
 		printf("Options:\n");
 	}
-    const char *cmds_ac[] = {"sign", NULL};
-    if (on_list(cmd, cmds_ac))
-        printf("%-24s= an additional certificate to be added to the signature block\n", "-ac");
+	const char *cmds_ac[] = {"sign", NULL};
+	if (on_list(cmd, cmds_ac))
+	printf("%-24s= an additional certificate to be added to the signature block\n", "-ac");
 #ifdef WITH_GSF
-    const char *cmds_add_msi_dse[] = {"sign", NULL};
-    if (on_list(cmd, cmds_add_msi_dse))
-        printf("%-24s= sign a MSI file with the add-msi-dse option\n", "-add-msi-dse");
+	const char *cmds_add_msi_dse[] = {"sign", NULL};
+	if (on_list(cmd, cmds_add_msi_dse))
+		printf("%-24s= sign a MSI file with the add-msi-dse option\n", "-add-msi-dse");
 #endif
-    const char *cmds_addUnauthenticatedBlob[] = {"sign", "add", NULL};
-    if (on_list(cmd, cmds_addUnauthenticatedBlob))
-        printf("%-24s= add an unauthenticated blob to the PE/MSI file\n", "-addUnauthenticatedBlob");
+	const char *cmds_addUnauthenticatedBlob[] = {"sign", "add", NULL};
+	if (on_list(cmd, cmds_addUnauthenticatedBlob))
+		printf("%-24s= add an unauthenticated blob to the PE/MSI file\n", "-addUnauthenticatedBlob");
 #ifdef PROVIDE_ASKPASS
-    const char *cmds_askpass[] = {"sign", NULL};
-    if (on_list(cmd, cmds_askpass))
-        printf("%-24s= ask for the private key password\n", "-askpass");
+	const char *cmds_askpass[] = {"sign", NULL};
+	if (on_list(cmd, cmds_askpass))
+		printf("%-24s= ask for the private key password\n", "-askpass");
 #endif
-    const char *cmds_CAfile[] = {"attach-signature", "verify", NULL};
-    if (on_list(cmd, cmds_CAfile))
-        printf("%-24s= the file containing one or more trusted certificates in PEM format\n", "-CAfile");
-    const char *cmds_certs[] = {"sign", NULL};
-    if (on_list(cmd, cmds_certs))
-        printf("%-24s= the signing certificate to use\n", "-certs");
-    const char *cmds_comm[] = {"sign", NULL};
-    if (on_list(cmd, cmds_comm))
-        printf("%-24s= set commercial purpose (default: individual purpose)\n", "-comm");
-    const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
-    if (on_list(cmd, cmds_CRLfile))
-        printf("%-24s= the file containing one or more CRLs in PEM format\n", "-CRLfile");
-    const char *cmds_h[] = {"sign", NULL};
-    if (on_list(cmd, cmds_h)) {
-        printf("%-24s= {md5|sha1|sha2(56)|sha384|sha512}\n", "-h");
+	const char *cmds_CAfile[] = {"attach-signature", "verify", NULL};
+	if (on_list(cmd, cmds_CAfile))
+		printf("%-24s= the file containing one or more trusted certificates in PEM format\n", "-CAfile");
+	const char *cmds_certs[] = {"sign", NULL};
+	if (on_list(cmd, cmds_certs))
+		printf("%-24s= the signing certificate to use\n", "-certs");
+	const char *cmds_comm[] = {"sign", NULL};
+	if (on_list(cmd, cmds_comm))
+		printf("%-24s= set commercial purpose (default: individual purpose)\n", "-comm");
+	const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
+	if (on_list(cmd, cmds_CRLfile))
+		printf("%-24s= the file containing one or more CRLs in PEM format\n", "-CRLfile");
+	const char *cmds_h[] = {"sign", NULL};
+	if (on_list(cmd, cmds_h)) {
+		printf("%-24s= {md5|sha1|sha2(56)|sha384|sha512}\n", "-h");
 		printf("%26sset of cryptographic hash functions\n", "");
 	}
-    const char *cmds_i[] = {"sign", NULL};
-    if (on_list(cmd, cmds_i))
-        printf("%-24s= specifies a URL for expanded description of the signed content\n", "-i");
-    const char *cmds_in[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", "verify", NULL};
-    if (on_list(cmd, cmds_in))
-        printf("%-24s= input file\n", "-in");
-    const char *cmds_jp[] = {"sign", NULL};
-    if (on_list(cmd, cmds_jp)) {
-        printf("%-24s= low | medium | high\n", "-jp");
+	const char *cmds_i[] = {"sign", NULL};
+	if (on_list(cmd, cmds_i))
+		printf("%-24s= specifies a URL for expanded description of the signed content\n", "-i");
+	const char *cmds_in[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", "verify", NULL};
+	if (on_list(cmd, cmds_in))
+		printf("%-24s= input file\n", "-in");
+	const char *cmds_jp[] = {"sign", NULL};
+	if (on_list(cmd, cmds_jp)) {
+		printf("%-24s= low | medium | high\n", "-jp");
 		printf("%26slevels of permissions in Microsoft Internet Explorer 4.x for CAB files\n", "");
 		printf("%26sonly \"low\" level is now supported\n", "");
 	}
-    const char *cmds_key[] = {"sign", NULL};
-    if (on_list(cmd, cmds_key))
-        printf("%-24s= the private key to use\n", "-key");
-    const char *cmds_n[] = {"sign", NULL};
-    if (on_list(cmd, cmds_n))
-        printf("%-24s= specifies a description of the signed content\n", "-n");
-    const char *cmds_nest[] = {"attach-signature", "sign", NULL};
-    if (on_list(cmd, cmds_nest))
-        printf("%-24s= add the new nested signature instead of replacing the first one\n", "-nest");
+	const char *cmds_key[] = {"sign", NULL};
+	if (on_list(cmd, cmds_key))
+		printf("%-24s= the private key to use\n", "-key");
+	const char *cmds_n[] = {"sign", NULL};
+	if (on_list(cmd, cmds_n))
+		printf("%-24s= specifies a description of the signed content\n", "-n");
+	const char *cmds_nest[] = {"attach-signature", "sign", NULL};
+	if (on_list(cmd, cmds_nest))
+		printf("%-24s= add the new nested signature instead of replacing the first one\n", "-nest");
 #ifdef ENABLE_CURL
-    const char *cmds_noverifypeer[] = {"add", "sign", NULL};
-    if (on_list(cmd, cmds_noverifypeer))
-        printf("%-24s= do not verify the Time-Stamp Authority's SSL certificate\n", "-noverifypeer");
+	const char *cmds_noverifypeer[] = {"add", "sign", NULL};
+	if (on_list(cmd, cmds_noverifypeer))
+		printf("%-24s= do not verify the Time-Stamp Authority's SSL certificate\n", "-noverifypeer");
 #endif
-    const char *cmds_out[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", NULL};
-    if (on_list(cmd, cmds_out))
-        printf("%-24s= output file\n", "-out");
+	const char *cmds_out[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", NULL};
+	if (on_list(cmd, cmds_out))
+		printf("%-24s= output file\n", "-out");
 #ifdef ENABLE_CURL
-    const char *cmds_p[] = {"add", "sign", NULL};
-    if (on_list(cmd, cmds_p))
-        printf("%-24s= proxy to connect to the desired Time-Stamp Authority server\n", "-p");
+	const char *cmds_p[] = {"add", "sign", NULL};
+	if (on_list(cmd, cmds_p))
+		printf("%-24s= proxy to connect to the desired Time-Stamp Authority server\n", "-p");
 #endif
-    const char *cmds_pass[] = {"sign", NULL};
-    if (on_list(cmd, cmds_pass))
-        printf("%-24s= the private key password\n", "-pass");
-    const char *cmds_pem[] = {"extract-signature", NULL};
-    if (on_list(cmd, cmds_pem))
-        printf("%-24s= output data format PEM to use (default: DER)\n", "-pem");
-    const char *cmds_ph[] = {"sign", NULL};
-    if (on_list(cmd, cmds_ph))
-        printf("%-24s= generate page hashes for executable files\n", "-ph");
-    const char *cmds_pkcs11engine[] = {"sign", NULL};
-    if (on_list(cmd, cmds_pkcs11engine))
-        printf("%-24s= PKCS11 engine\n", "-pkcs11engine");
-    const char *cmds_pkcs11module[] = {"sign", NULL};
-    if (on_list(cmd, cmds_pkcs11module))
-        printf("%-24s= PKCS11 module\n", "-pkcs11module");
-    const char *cmds_pkcs12[] = {"sign", NULL};
-    if (on_list(cmd, cmds_pkcs12))
-        printf("%-24s= PKCS#12 container with the certificate and the private key\n", "-pkcs12");
-    const char *cmds_readpass[] = {"sign", NULL};
-    if (on_list(cmd, cmds_readpass))
-        printf("%-24s= the private key password source\n", "-readpass");
-    const char *cmds_require_leaf_hash[] = {"verify", NULL};
-    if (on_list(cmd, cmds_require_leaf_hash)) {
-        printf("%-24s= {md5|sha1|sha2(56)|sha384|sha512}:XXXXXXXXXXXX...\n", "-require-leaf-hash");
+	const char *cmds_pass[] = {"sign", NULL};
+	if (on_list(cmd, cmds_pass))
+		printf("%-24s= the private key password\n", "-pass");
+	const char *cmds_pem[] = {"extract-signature", NULL};
+	if (on_list(cmd, cmds_pem))
+		printf("%-24s= output data format PEM to use (default: DER)\n", "-pem");
+	const char *cmds_ph[] = {"sign", NULL};
+	if (on_list(cmd, cmds_ph))
+		printf("%-24s= generate page hashes for executable files\n", "-ph");
+	const char *cmds_pkcs11engine[] = {"sign", NULL};
+	if (on_list(cmd, cmds_pkcs11engine))
+		printf("%-24s= PKCS11 engine\n", "-pkcs11engine");
+	const char *cmds_pkcs11module[] = {"sign", NULL};
+	if (on_list(cmd, cmds_pkcs11module))
+		printf("%-24s= PKCS11 module\n", "-pkcs11module");
+	const char *cmds_pkcs12[] = {"sign", NULL};
+	if (on_list(cmd, cmds_pkcs12))
+		printf("%-24s= PKCS#12 container with the certificate and the private key\n", "-pkcs12");
+	const char *cmds_readpass[] = {"sign", NULL};
+	if (on_list(cmd, cmds_readpass))
+		printf("%-24s= the private key password source\n", "-readpass");
+	const char *cmds_require_leaf_hash[] = {"verify", NULL};
+	if (on_list(cmd, cmds_require_leaf_hash)) {
+		printf("%-24s= {md5|sha1|sha2(56)|sha384|sha512}:XXXXXXXXXXXX...\n", "-require-leaf-hash");
 		printf("%26sspecifies an optional hash algorithm to use when computing\n", "");
 		printf("%26sthe leaf certificate (in DER form) hash and compares\n", "");
 		printf("%26sthe provided hash against the computed hash\n", "");
 	}
-    const char *cmds_sigin[] = {"attach-signature", NULL};
-    if (on_list(cmd, cmds_sigin))
-        printf("%-24s= a file containing the signature to be attached\n", "-sigin");
-    const char *cmds_st[] = {"sign", NULL};
-    if (on_list(cmd, cmds_st))
-        printf("%-24s= the unix-time to set the signing time\n", "-st");
+	const char *cmds_sigin[] = {"attach-signature", NULL};
+	if (on_list(cmd, cmds_sigin))
+		printf("%-24s= a file containing the signature to be attached\n", "-sigin");
+	const char *cmds_st[] = {"sign", NULL};
+	if (on_list(cmd, cmds_st))
+		printf("%-24s= the unix-time to set the signing time\n", "-st");
 #ifdef ENABLE_CURL
-    const char *cmds_t[] = {"add", "sign", NULL};
-    if (on_list(cmd, cmds_t)) {
-        printf("%-24s= specifies that the digital signature will be timestamped\n", "-t");
+	const char *cmds_t[] = {"add", "sign", NULL};
+	if (on_list(cmd, cmds_t)) {
+		printf("%-24s= specifies that the digital signature will be timestamped\n", "-t");
 		printf("%26sby the Time-Stamp Authority (TSA) indicated by the URL\n", "");
 		printf("%26sthis option cannot be used with the -ts option\n", "");
 	}
-    const char *cmds_ts[] = {"add", "sign", NULL};
-    if (on_list(cmd, cmds_ts)) {
-        printf("%-24s= specifies the URL of the RFC 3161 Time-Stamp Authority server\n", "-ts");
+	const char *cmds_ts[] = {"add", "sign", NULL};
+	if (on_list(cmd, cmds_ts)) {
+		printf("%-24s= specifies the URL of the RFC 3161 Time-Stamp Authority server\n", "-ts");
 		printf("%26sthis option cannot be used with the -t option\n", "");
 	}
 #endif
-    const char *cmds_untrusted[] = {"attach-signature", "verify", NULL};
-    if (on_list(cmd, cmds_untrusted)) {
-        printf("%-24s= set of additional untrusted certificates which may be needed\n", "-untrusted");
+	const char *cmds_untrusted[] = {"attach-signature", "verify", NULL};
+	if (on_list(cmd, cmds_untrusted)) {
+		printf("%-24s= set of additional untrusted certificates which may be needed\n", "-untrusted");
 		printf("%26sthe file should contain one or more certificates in PEM format\n", "");
 	}
-    const char *cmds_verbose[] = {"sign", "verify", NULL};
-    if (on_list(cmd, cmds_verbose)) {
-        printf("%-24s= include additional output in the log\n", "-verbose");
+	const char *cmds_verbose[] = {"sign", "verify", NULL};
+	if (on_list(cmd, cmds_verbose)) {
+		printf("%-24s= include additional output in the log\n", "-verbose");
 	}
 	usage(argv0, cmd);
 }
@@ -1301,7 +1301,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata,
 	tmp = p = OPENSSL_malloc(l);
 	i2d_SpcAttributeTypeAndOptionalValue(aval, &tmp);
 	SpcAttributeTypeAndOptionalValue_free(aval);
-	
+
 	ASN1_TYPE *taval = ASN1_TYPE_new();
 	taval->type = V_ASN1_SEQUENCE;
 	taval->value.sequence = ASN1_STRING_new();
@@ -1608,7 +1608,7 @@ static ASN1_UTCTIME *get_signing_time(PKCS7_SIGNER_INFO *si)
 				/* "1.2.840.113549.1.9.5" */
 				time = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
 			}
-		}		
+		}
 	return time;
 }
 
@@ -1619,26 +1619,24 @@ static int load_file_lookup(X509_STORE *store, char *certs, char *crl, int purpo
 
 	lookup = X509_STORE_add_lookup(store, X509_LOOKUP_file());
 	if (!lookup)
-        return 0; /* FAILED */
+		return 0; /* FAILED */
 	if (!X509_load_cert_file(lookup, certs, X509_FILETYPE_PEM)) {
 		fprintf(stderr, "Error: no certificate found in %s\n", certs);
-        return 0; /* FAILED */
+		return 0; /* FAILED */
 	}
-	if (crl)
-		if (!X509_load_crl_file(lookup, crl, X509_FILETYPE_PEM)) {
+	if (crl && !X509_load_crl_file(lookup, crl, X509_FILETYPE_PEM)) {
 			fprintf(stderr, "Error: no CRL found in %s\n", crl);
 			return 0; /* FAILED */
 		}
 	param = X509_STORE_get0_param(store);
 	if (param == NULL)
-        return 0; /* FAILED */
-	if (crl)
-		if (!X509_VERIFY_PARAM_set_flags(param, X509_V_FLAG_CRL_CHECK))
-        return 0; /* FAILED */
+		return 0; /* FAILED */
+	if (crl && !X509_VERIFY_PARAM_set_flags(param, X509_V_FLAG_CRL_CHECK))
+			return 0; /* FAILED */
 	if (!X509_VERIFY_PARAM_set_purpose(param, purpose))
-        return 0; /* FAILED */
+		return 0; /* FAILED */
 	if (!X509_STORE_set1_param(store, param))
-        return 0; /* FAILED */
+		return 0; /* FAILED */
 
 	return 1; /* OK */
 }
@@ -1649,15 +1647,15 @@ static int set_store_time(X509_STORE *store, time_t time)
 
 	param = X509_VERIFY_PARAM_new();
 	if (param == NULL)
-        return 0; /* FAILED */
+		return 0; /* FAILED */
 	X509_VERIFY_PARAM_set_time(param, time);
 	if (!X509_STORE_set1_param(store, param)) {
 		X509_VERIFY_PARAM_free(param);
-        return 0; /* FAILED */
+		return 0; /* FAILED */
 	}
 	X509_VERIFY_PARAM_free(param);
 
-    return 1; /* OK */
+	return 1; /* OK */
 }
 
 static ASN1_UTCTIME *print_timestamp(PKCS7_SIGNER_INFO *si)
@@ -1955,7 +1953,7 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, char *ca
 		ret = 1; /* FAILED */
 	}
 	if (timestamp_time != NULL) {
-	    if (!ASN1_TIME_diff(&day, &sec, ASN1_TIME_set(NULL, 0), timestamp_time))
+		if (!ASN1_TIME_diff(&day, &sec, ASN1_TIME_set(NULL, 0), timestamp_time))
 			ret = 1; /* FAILED */
 		time = 86400*day+sec;
 		if (!set_store_time(store, time)) {
@@ -3381,7 +3379,7 @@ int main(int argc, char **argv) {
 
 			if (1 != ENGINE_ctrl_cmd_string(pkcs11, "MODULE_PATH", p11module, CMD_MANDATORY))
 				DO_EXIT_1("Failed to set pkcs11 engine MODULE_PATH to '%s'\n", p11module);
-		
+
 			if (pass != NULL) {
 				if (1 != ENGINE_ctrl_cmd_string(pkcs11, "PIN", pass, CMD_MANDATORY))
 					DO_EXIT_0("Failed to set pkcs11 PIN\n");
