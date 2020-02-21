@@ -1,5 +1,5 @@
 #!/bin/sh
-# Verify PE/MSI file signature after the cert has been expired.
+# Verify PE/CAB/MSI file signature after the cert has been expired.
 
 . $(dirname $0)/../test_library
 
@@ -21,7 +21,21 @@ if test -s "test.exe"
   fi
 
 # CAB file
-# Command is not supported for non-PE/non-MSI files
+test_name="512. Verify CAB file signature after the cert has been expired"
+printf "\n%s\n" "$test_name"
+if test -s "test.ex_"
+  then
+    TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -in "test.ex_" -out "test_512.ex_" 2>> "results.log" 1>&2'
+    verify_signature "$?" "512" "ex_" "fail" "@2025-01-01 12:00:00" \
+	"UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
 
 # MSI file
 test_name="513. Verify MSI file signature after the cert has been expired"

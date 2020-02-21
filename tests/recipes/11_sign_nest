@@ -27,7 +27,25 @@ if test -s "test.exe"
   fi
 
 # CAB file
-# Error: -nest option is only valid for PE/MSI files
+test_name="112. Sign a CAB file with the nest flag"
+printf "\n%s\n" "$test_name"
+if test -s "test.ex_"
+  then
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "test.ex_" -out "test_112_signed.ex_"
+    ../../osslsigncode sign -h sha512 \
+        -nest \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "test_112_signed.ex_" -out "test_112.ex_"
+    verify_signature "$?" "112" "ex_" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "SHA512" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
 
 # MSI file
 test_name="113. Sign a MSI file with the nest flag"

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Verify PE/MSI file signature with Authenticode timestamping after the cert has been expired.
+# Verify PE/CAB/MSI file signature with Authenticode timestamping after the cert has been expired.
 
 . $(dirname $0)/../test_library
 
@@ -22,7 +22,22 @@ if test -s "test.exe" && ! grep -q "no libcurl available" "results.log"
   fi
 
 # CAB file
-# Command is not supported for non-PE/non-MSI files
+test_name="522. Verify CAB file signature with timestamping after the cert has been expired"
+printf "\n%s\n" "$test_name"
+if test -s "test.ex_" && ! grep -q "no libcurl available" "results.log"
+  then
+    TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
+        script_path=$(pwd)
+        ../../osslsigncode sign -h sha256 \
+            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+            -t http://time.certum.pl/ \
+            -in "test.ex_" -out "test_522.ex_" 2>> "results.log" 1>&2'
+    verify_signature "$?" "522" "ex_" "success" "@2025-01-01 12:00:00" \
+	"UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
 
 # MSI file
 test_name="523. Verify MSI file signature with timestamping after the cert has been expired"

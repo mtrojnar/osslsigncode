@@ -22,6 +22,21 @@ if test -s "test.exe"
     skip=$(($skip+1))
   fi
 
+if test -s "test.ex_"
+  then
+    if test $(cat "sha256sum_ex_.log" | cut -d' ' -f1 | uniq | wc -l) -ne 1
+      then
+        res=1
+        cat "sha256sum_ex_.log" >> "results.log"
+        printf "Non-unique SHA256 message digests found\n" >> "results.log"
+      else
+        rm -f test_3[1-4]*[1-2]*.ex_
+      fi
+    rm -f "sha256sum_ex_.log"
+  else
+    skip=$(($skip+1))
+  fi
+
 if test -s "sample.msi"
   then
     if test $(cat "sha256sum_msi.log" | cut -d' ' -f1 | uniq | wc -l) -ne 1
