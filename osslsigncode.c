@@ -1625,14 +1625,14 @@ static int load_file_lookup(X509_STORE *store, char *certs, char *crl, int purpo
 		return 0; /* FAILED */
 	}
 	if (crl && !X509_load_crl_file(lookup, crl, X509_FILETYPE_PEM)) {
-			fprintf(stderr, "Error: no CRL found in %s\n", crl);
-			return 0; /* FAILED */
-		}
+		fprintf(stderr, "Error: no CRL found in %s\n", crl);
+		return 0; /* FAILED */
+	}
 	param = X509_STORE_get0_param(store);
 	if (param == NULL)
 		return 0; /* FAILED */
 	if (crl && !X509_VERIFY_PARAM_set_flags(param, X509_V_FLAG_CRL_CHECK))
-			return 0; /* FAILED */
+		return 0; /* FAILED */
 	if (!X509_VERIFY_PARAM_set_purpose(param, purpose))
 		return 0; /* FAILED */
 	if (!X509_STORE_set1_param(store, param))
@@ -2392,24 +2392,19 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile,
 #endif
 	printf("\n");
 	ret |= verify_pkcs7(p7, leafhash, cafile, crlfile, untrusted);
-
+	printf("\n");
 	if (allownest) {
 		int has_sig = 0;
 		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
 		if (p7nest) {
-			printf("\n");
 			int nest_ret = msi_verify_pkcs7(p7nest, infile, exdata, exlen, leafhash, 0, cafile, crlfile, untrusted);
 			if (ret == 0)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
 		} else if (!p7nest && has_sig) {
-			printf("\nFailed to decode nested signature!\n");
+			printf("Failed to decode nested signature!\n");
 			ret = 1;
-		} else {
-			printf("\n");
 		}
-	} else {
-		printf("\n");
 	}
 out:
 	return ret;
@@ -2783,24 +2778,19 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, size_t peheader,
 	}
 
 	ret |= verify_pkcs7(p7, leafhash, cafile, crlfile, untrusted);
-
+	printf("\n");
 	if (allownest) {
 		int has_sig = 0;
 		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
 		if (p7nest) {
-			printf("\n");
 			int nest_ret = verify_pe_pkcs7(p7nest, indata, peheader, pe32plus, sigpos, siglen, leafhash, 0, cafile, crlfile, untrusted);
 			if (ret == 0)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
 		} else if (!p7nest && has_sig) {
-			printf("\nFailed to decode nested signature!\n");
+			printf("Failed to decode nested signature!\n");
 			ret = 1;
-		} else {
-			printf("\n");
 		}
-	} else {
-		printf("\n");
 	}
 
 	return ret;
@@ -2860,8 +2850,55 @@ static int verify_pe_file(char *indata, size_t peheader, int pe32plus,
 
 	ret = verify_pe_pkcs7(p7, indata, peheader, pe32plus, sigpos, siglen, leafhash, 1, cafile, crlfile, untrusted);
 	PKCS7_free(p7);
+
 	return ret;
 }
+
+static int extract_pe_file(char *indata, size_t sigpos, size_t siglen, BIO *outdata, int output_pkcs7)
+{
+	int ret = 0;
+	PKCS7 *sig;
+
+	(void)BIO_reset(outdata);
+	if (output_pkcs7) {
+		sig = extract_existing_pe_pkcs7(indata, sigpos, siglen);
+		if (!sig) {
+			fprintf(stderr, "Unable to extract existing signature\n");
+			return 1; /* FAILED */
+		}
+		ret = !PEM_write_bio_PKCS7(outdata, sig);
+		} else {
+			ret = !BIO_write(outdata, indata + sigpos, siglen);
+	}
+
+	return ret;
+}
+
+static void sign_pe_file(char *indata, size_t i , int pe32plus, size_t *fileend, BIO *hash, BIO *outdata)
+{
+	int len = 0;
+	static char buf[64*1024];
+
+	BIO_write(hash, indata, i);
+	memset(buf, 0, 4);
+	BIO_write(outdata, buf, 4); /* zero out checksum */
+	i += 4;
+	BIO_write(hash, indata + i, 60+pe32plus*16);
+	i += 60+pe32plus*16;
+	memset(buf, 0, 8);
+	BIO_write(outdata, buf, 8); /* zero out sigtable offset + pos */
+	i += 8;
+	BIO_write(hash, indata + i, *fileend - i);
+
+	/* pad (with 0's) pe file to 8 byte boundary */
+	len = 8 - *fileend % 8;
+	if (len > 0 && len != 8) {
+		memset(buf, 0, len);
+		BIO_write(hash, buf, len);
+		*fileend += len;
+	}
+}
+
 
 /*
  * CAB file support
@@ -3278,7 +3315,7 @@ static off_t get_file_size(const char *infile)
 	return st.st_size;
 }
 
-static char* map_file(const char *infile, const off_t size)
+static char *map_file(const char *infile, const off_t size)
 {
 	char *indata = NULL;
 #ifdef WIN32
@@ -4087,30 +4124,21 @@ int main(int argc, char **argv) {
 
 		/* Since fix for MS Bulletin MS12-024 we can really assume
 		   that signature should be last part of file */
-		if (sigpos > 0 && sigpos + siglen != filesize)
+		if (sigpos > 0 && sigpos < filesize && sigpos + siglen != filesize)
 			DO_EXIT_1("Corrupt PE file - current signature not at end of file: %s\n", infile);
 
 		if ((cmd == CMD_REMOVE || cmd == CMD_EXTRACT) && sigpos == 0)
 			DO_EXIT_1("PE file does not have any signature: %s\n", infile);
 
 		if (cmd == CMD_EXTRACT) {
-			/* A lil' bit of ugliness. Reset stream, write signature and skip forward */
-			(void)BIO_reset(outdata);
-			if (output_pkcs7) {
-				sig = extract_existing_pe_pkcs7(indata, sigpos ? sigpos : fileend, siglen);
-				if (!sig)
-					DO_EXIT_0("Unable to extract existing signature\n");
-				PEM_write_bio_PKCS7(outdata, sig);
-			} else {
-				BIO_write(outdata, indata + sigpos, siglen);
-			}
+			ret = extract_pe_file(indata, sigpos ? sigpos : fileend, siglen, outdata, output_pkcs7);
 			goto skip_signing;
 		}
 
 		if ((cmd == CMD_SIGN && nest) || (cmd == CMD_ATTACH && nest) || cmd == CMD_ADD) {
 			cursig = extract_existing_pe_pkcs7(indata, sigpos ? sigpos : fileend, siglen);
 			if (cursig == NULL) {
-				DO_EXIT_0("Unable to extract existing signature in -nest mode\n");
+				DO_EXIT_0("Unable to extract existing signature\n");
 			}
 			if (cmd == CMD_ADD) {
 				sig = cursig;
@@ -4126,26 +4154,7 @@ int main(int argc, char **argv) {
 			fileend = sigpos;
 		}
 
-		BIO_write(hash, indata, peheader + 88);
-		i = peheader + 88;
-		memset(buf, 0, 4);
-		BIO_write(outdata, buf, 4); /* zero out checksum */
-		i += 4;
-		BIO_write(hash, indata + i, 60+pe32plus*16);
-		i += 60+pe32plus*16;
-		memset(buf, 0, 8);
-		BIO_write(outdata, buf, 8); /* zero out sigtable offset + pos */
-		i += 8;
-
-		BIO_write(hash, indata + i, fileend - i);
-
-		/* pad (with 0's) pe file to 8 byte boundary */
-		len = 8 - fileend % 8;
-		if (len > 0 && len != 8) {
-			memset(buf, 0, len);
-			BIO_write(hash, buf, len);
-			fileend += len;
-		}
+		sign_pe_file(indata, peheader + 88, pe32plus, &fileend, hash, outdata);
 	}
 
 	if (cmd == CMD_ADD)
@@ -4451,7 +4460,7 @@ skip_signing:
 			siglen = GET_UINT32_LE(outdataverify + 48);
 			if (sigpos < filesize && sigpos + siglen != filesize)
 				DO_EXIT_2("Checkpoint error:\n\tadditional data offset %lu bytes\n\tadditional data size %lu bytes\n", sigpos, siglen);
-			header_size = GET_UINT32_LE(indata + 36);
+			header_size = GET_UINT32_LE(outdataverify + 36);
 			if (flags == 4 && header_size != 20)
 				DO_EXIT_1("Checkpoint error: additional header size 0x%08lX\n", header_size);
 			ret = verify_cab_file(outdataverify, sigpos, siglen, leafhash, cafile, crlfile, untrusted);
