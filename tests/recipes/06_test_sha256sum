@@ -13,8 +13,6 @@ if test -s "test.exe"
         res=1
         cat "sha256sum_exe.log" >> "results.log"
         printf "Non-unique SHA256 message digests found\n" >> "results.log"
-      else
-        rm -f test_0[1-5]*[1-3]*.exe
       fi
     rm -f "sha256sum_exe.log"
   else
@@ -28,8 +26,6 @@ if test -s "test.ex_"
         res=1
         cat "sha256sum_ex_.log" >> "results.log"
         printf "Non-unique SHA256 message digests found\n" >> "results.log"
-      else
-        rm -f test_0[1-5]*[1-3]*.ex_
       fi
     rm -f "sha256sum_ex_.log"
   else
@@ -43,8 +39,6 @@ if test -s "sample.msi"
         res=1
         cat "sha256sum_msi.log" >> "results.log"
         printf "Non-unique SHA256 message digests found\n" >> "results.log"
-      else
-        rm -f test_0[1-5]*[1-3]*.msi
       fi
     rm -f "sha256sum_msi.log"
   else

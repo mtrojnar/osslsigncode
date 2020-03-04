@@ -1,0 +1,69 @@
+#!/bin/sh
+# Attach the signature to the signed PE/CAB/MSI file.
+
+. $(dirname $0)/../test_library
+script_path=$(pwd)
+
+# PE file
+test_name="331. Attach the signature to the signed PE file"
+printf "\n%s\n" "$test_name"
+if test -s "test.exe"
+  then
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "test.exe" -out "test_331_signed.exe"
+    ../../osslsigncode attach-signature \
+        -sigin "sign_pe.pem" \
+        -CAfile "${script_path}/../certs/CACert.pem" \
+        -CRLfile "${script_path}/../certs/CACertCRL.pem" \
+        -in "test_331_signed.exe" -out "test_331.exe"
+    verify_signature "$?" "331" "exe" "success" "@2019-09-01 12:00:00" \
+	"sha256sum" "ASCII" "SHA512" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+test_name="332. Attach the signature to the signed CAB file"
+printf "\n%s\n" "$test_name"
+if [ -s "test.ex_" ]
+  then
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "test.ex_" -out "test_332_signed.ex_"
+    ../../osslsigncode attach-signature \
+        -sigin "sign_cab.pem" \
+        -CAfile "${script_path}/../certs/CACert.pem" \
+        -CRLfile "${script_path}/../certs/CACertCRL.pem" \
+        -in "test_332_signed.ex_" -out "test_332.ex_"
+    verify_signature "$?" "332" "ex_" "success" "@2019-09-01 12:00:00" \
+	"sha256sum" "ASCII" "SHA512" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# MSI file
+test_name="333. Attach the signature to the signed MSI file"
+printf "\n%s\n" "$test_name"
+if test -s "sample.msi"
+  then
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "sample.msi" -out "test_333_signed.msi"
+    ../../osslsigncode attach-signature -sigin "sign_msi.pem" \
+        -CAfile "${script_path}/../certs/CACert.pem" \
+        -CRLfile "${script_path}/../certs/CACertCRL.pem" \
+        -in "test_333_signed.msi" -out "test_333.msi"
+    verify_signature "$?" "333" "msi" "success" "@2019-09-01 12:00:00" \
+	"sha256sum" "ASCII" "SHA512" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+exit 0

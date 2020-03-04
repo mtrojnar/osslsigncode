@@ -1,11 +1,11 @@
 #!/bin/sh
-# Checking SHA256 message digests for 31x-34x tests.
+# Checking SHA256 message digests for 31x-33x tests.
 
 . $(dirname $0)/../test_library
 res=0
 res=0
 skip=0
-test_name="351. Checking SHA256 message digests for 31x-34x tests"
+test_name="361. Checking SHA256 message digests for 31x-33x tests"
 printf "\n%s\n" "$test_name"
 if test -s "test.exe"
   then
@@ -14,8 +14,6 @@ if test -s "test.exe"
         res=1
         cat "sha256sum_exe.log" >> "results.log"
         printf "Non-unique SHA256 message digests found\n" >> "results.log"
-      else
-        rm -f test_3[1-4]*[1-2]*.exe
       fi
     rm -f "sha256sum_exe.log"
   else
@@ -29,8 +27,6 @@ if test -s "test.ex_"
         res=1
         cat "sha256sum_ex_.log" >> "results.log"
         printf "Non-unique SHA256 message digests found\n" >> "results.log"
-      else
-        rm -f test_3[1-4]*[1-2]*.ex_
       fi
     rm -f "sha256sum_ex_.log"
   else
@@ -44,8 +40,6 @@ if test -s "sample.msi"
         res=1
         cat "sha256sum_msi.log" >> "results.log"
         printf "Non-unique SHA256 message digests found\n" >> "results.log"
-      else
-        rm -f test_3[1-4]*[1-2]*.msi
       fi
     rm -f "sha256sum_msi.log"
   else
