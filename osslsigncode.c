@@ -166,6 +166,24 @@ typedef unsigned char u_char;
 #define WIN_CERT_REVISION_2             0x0200
 #define WIN_CERT_TYPE_PKCS_SIGNED_DATA  0x0002
 
+/*
+ * FLAG_PREV_CABINET is set if the cabinet file is not the first in a set
+ * of cabinet files. When this bit is set, the szCabinetPrev and szDiskPrev
+ * fields are present in this CFHEADER.
+ */
+#define FLAG_PREV_CABINET 0x0001
+/*
+ * FLAG_NEXT_CABINET is set if the cabinet file is not the last in a set of
+ * cabinet files. When this bit is set, the szCabinetNext and szDiskNext
+* fields are present in this CFHEADER.
+*/
+#define FLAG_NEXT_CABINET 0x0002
+/*
+ * FLAG_RESERVE_PRESENT is set if the cabinet file contains any reserved
+ * fields. When this bit is set, the cbCFHeader, cbCFFolder, and cbCFData
+ * fields are present in this CFHEADER.
+ */
+#define FLAG_RESERVE_PRESENT 0x0004
 
 /*
   ASN.1 definitions (more or less from official MS Authenticode docs)
@@ -1153,6 +1171,8 @@ static void help_for(const char *argv0, const char *cmd) {
 #define DO_EXIT_0(x)	{ fprintf(stderr, x); goto err_cleanup; }
 #define DO_EXIT_1(x, y) { fprintf(stderr, x, y); goto err_cleanup; }
 #define DO_EXIT_2(x, y, z) { fprintf(stderr, x, y, z); goto err_cleanup; }
+
+#define GET_UINT8_LE(p) ((u_char*)(p))[0]
 
 #define GET_UINT16_LE(p) (((u_char*)(p))[0] | (((u_char*)(p))[1]<<8))
 
@@ -2904,11 +2924,75 @@ static void sign_pe_file(char *indata, size_t i , int pe32plus, size_t *fileend,
  * CAB file support
  * https://www.file-recovery.com/cab-signature-format.htm
  */
+
+static int verify_cab_header(char *indata, char *infile, cmd_type_t cmd,
+			size_t filesize, size_t *header_size, size_t *sigpos, size_t *siglen)
+{
+	int ret = 1;
+	size_t reserved, flags = 0;
+
+	if (filesize < 44)	{
+		printf("Corrupt cab file - too short: %s\n", infile);
+		ret = 0; /* FAILED */
+	}
+	reserved = GET_UINT32_LE(indata + 4);
+	if (reserved) {
+		printf("Reserved1: 0x%08lX\n", reserved);
+		ret = 0; /* FAILED */
+	}
+	/* flags specify bit-mapped values that indicate the presence of optional data */
+	flags = GET_UINT16_LE(indata + 30);
+#if 1
+	if (flags & FLAG_PREV_CABINET) {
+			/* FLAG_NEXT_CABINET works */
+			printf("Multivolume cabinet file is unsupported: flags 0x%04lX\n", flags);
+			ret = 0; /* FAILED */
+	}
+#endif
+	if (!(flags & FLAG_RESERVE_PRESENT) &&
+			(cmd == CMD_REMOVE || cmd == CMD_EXTRACT)) {
+		printf("CAB file does not have any signature: %s\n", infile);
+		ret = 0; /* FAILED */
+	}
+
+	if (flags & FLAG_RESERVE_PRESENT) {
+		/*
+		* Additional headers is located at offset 36 (cbCFHeader, cbCFFolder, cbCFData);
+		* size of header (4 bytes, little-endian order) must be 20 (checkpoint).
+		*/
+		*header_size = GET_UINT32_LE(indata + 36);
+		if (*header_size != 20) {
+			printf("Additional header size: 0x%08lX\n", *header_size);
+			ret = 0; /* FAILED */
+		}
+		reserved = GET_UINT32_LE(indata + 40);
+		if (reserved != 0x00100000) {
+			printf("abReserved: 0x%08lX\n", reserved);
+			ret = 0; /* FAILED */
+		}
+		/*
+		* File size is defined at offset 8, however if additional header exists, this size is not valid.
+		* sigpos - additional data offset is located at offset 44 (from file beginning)
+		* and consist of 4 bytes (little-endian order)
+		* siglen - additional data size is located at offset 48 (from file beginning)
+		* and consist of 4 bytes (little-endian order)
+		* If there are additional headers, size of the CAB archive file is calcualted
+		* as additional data offset plus additional data size.
+		*/
+		*sigpos = GET_UINT32_LE(indata + 44);
+		*siglen = GET_UINT32_LE(indata + 48);
+		if (*sigpos < filesize && *sigpos + *siglen != filesize) {
+			printf("Additional data offset:\t%lu bytes\nAdditional data size:\t%lu bytes\n", *sigpos, *siglen);
+			printf("File size:\t\t%lu bytes\n", filesize);
+			ret = 0; /* FAILED */
+		}
+	}
+	return ret;
+}
+
 static int calc_cab_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, size_t offset)
 {
-	int ret = 0;
-	unsigned int i;
-	size_t folders, flags;
+	size_t coffFiles, nfolders, flags;
 	static unsigned char bfb[16*1024*1024];
 	EVP_MD_CTX *mdctx;
 	mdctx = EVP_MD_CTX_new();
@@ -2925,28 +3009,31 @@ static int calc_cab_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, siz
 	/*
 	 * u4 cbCabinet - size of this cabinet file in bytes: 8-11
 	 * u4 reserved2 00000000: 12-15
-	 * u4 coffFiles - offset of the first CFFILE entry: 16-19
+	 */
+	BIO_read(bio, bfb, 8);
+	EVP_DigestUpdate(mdctx, bfb, 8);
+	 /* u4 coffFiles - offset of the first CFFILE entry: 16-19 */
+	BIO_read(bio, bfb, 4);
+	coffFiles = GET_UINT32_LE(bfb);
+	EVP_DigestUpdate(mdctx, bfb, 4);
+	/*
 	 * u4 reserved3 00000000: 20-23
 	 * u1 versionMinor 03: 24
 	 * u1 versionMajor 01: 25
 	 */
-	BIO_read(bio, bfb, 18);
-	EVP_DigestUpdate(mdctx, bfb, 18);
+	BIO_read(bio, bfb, 6);
+	EVP_DigestUpdate(mdctx, bfb, 6);
 	/* u2 cFolders - number of CFFOLDER entries in this cabinet: 26-27 */
 	BIO_read(bio, bfb, 2);
+	nfolders = GET_UINT16_LE(bfb);
 	EVP_DigestUpdate(mdctx, bfb, 2);
-	folders = GET_UINT16_LE(bfb);
 	/* u2 cFiles - number of CFFILE entries in this cabinet: 28-29 */
 	BIO_read(bio, bfb, 2);
 	EVP_DigestUpdate(mdctx, bfb, 2);
-	/* u2 flags 0400 FLAG_RESERVE_PRESENT: 30-31 */
+	/* u2 flags: 30-31 */
 	BIO_read(bio, bfb, 2);
-	EVP_DigestUpdate(mdctx, bfb, 2);
 	flags = GET_UINT16_LE(bfb);
-	if (flags != 4) {
-		printf("Checkpoint error: flags 0x%04lX\n", flags);
-		ret = 1; /* FAILED */
-	}
+	EVP_DigestUpdate(mdctx, bfb, 2);
 	/* u2 setID must be the same for all cabinets in a set: 32-33 */
 	BIO_read(bio, bfb, 2);
 	EVP_DigestUpdate(mdctx, bfb, 2);
@@ -2963,30 +3050,57 @@ static int calc_cab_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, siz
 	/* u22 abReserve: 56-59 */
 	BIO_read(bio, bfb, 4);
 	EVP_DigestUpdate(mdctx, bfb, 4);
+
+	/* TODO */
+	if (flags & FLAG_PREV_CABINET) {
+		/* szCabinetPrev */
+		do {
+			BIO_read(bio, bfb, 1);
+			EVP_DigestUpdate(mdctx, bfb, 1);
+		} while (bfb[0]);
+		/* szDiskPrev */
+		do {
+			BIO_read(bio, bfb, 1);
+			EVP_DigestUpdate(mdctx, bfb, 1);
+		} while (bfb[0]);
+	}
+	if (flags & FLAG_NEXT_CABINET) {
+		/* szCabinetNext */
+		do {
+			BIO_read(bio, bfb, 1);
+			EVP_DigestUpdate(mdctx, bfb, 1);
+		} while (bfb[0]);
+		/* szDiskNext */
+		do {
+			BIO_read(bio, bfb, 1);
+			EVP_DigestUpdate(mdctx, bfb, 1);
+		} while (bfb[0]);
+	}
 	/*
 	 * (u8 * cFolders) CFFOLDER - structure contains information about
 	 * one of the folders or partial folders stored in this cabinet file
 	 */
-	for (i = 60; folders; folders--, i+=8) {
-			BIO_read(bio, bfb, 8);
-			EVP_DigestUpdate(mdctx, bfb, 8);
-		}
+	while (nfolders) {
+		BIO_read(bio, bfb, 8);
+		EVP_DigestUpdate(mdctx, bfb, 8);
+		nfolders--;
+	}
 	/* (variable) ab - the compressed data bytes */
-	while (i < offset) {
-		size_t want = offset - i;
+	while (coffFiles < offset) {
+		size_t want = offset - coffFiles;
 		if (want > sizeof(bfb))
 			want = sizeof(bfb);
 		int l = BIO_read(bio, bfb, want);
 		if (l <= 0)
 			break;
 		EVP_DigestUpdate(mdctx, bfb, l);
-		i += l;
+		coffFiles += l;
 	}
 
 	EVP_DigestFinal(mdctx, mdbuf, NULL);
 	EVP_MD_CTX_free(mdctx);
 
-	return ret;
+	return 0; /* OK */
 }
 
 static int verify_cab_pkcs7(PKCS7 *p7, char *indata, size_t sigpos, char *leafhash,
@@ -3068,13 +3182,13 @@ static PKCS7 *extract_existing_cab_pkcs7(char *indata, size_t sigpos, size_t sig
 	return p7;
 }
 
-static int verify_cab_file(char *indata, size_t sigpos, size_t siglen,
+static int verify_cab_file(char *indata, size_t header_size, size_t sigpos, size_t siglen,
 			char *leafhash, char *cafile, char *crlfile, char *untrusted)
 {
 	PKCS7 *p7;
 	int ret = 0;
 
-	if (siglen == 0) {
+	if (header_size != 20) {
 		printf("No signature found\n\n");
 		return 1; /* FAILED */
 	}
@@ -3110,11 +3224,52 @@ static int extract_cab_file(char *indata, size_t sigpos, size_t siglen, BIO *out
 	return ret;
 }
 
+static void write_optional_names(size_t flags, char *indata, BIO *outdata, int *len)
+{
+	int i;
+
+	i = *len;
+	/* TODO */
+	if (flags & FLAG_PREV_CABINET) {
+		/* szCabinetPrev */
+		while (GET_UINT8_LE(indata+i)) {
+			BIO_write(outdata, indata+i, 1);
+			i++;
+		}
+		BIO_write(outdata, indata+i, 1);
+		i++;
+		/* szDiskPrev */
+		while (GET_UINT8_LE(indata+i)) {
+			BIO_write(outdata, indata+i, 1);
+			i++;
+		}
+		BIO_write(outdata, indata+i, 1);
+		i++;
+	}
+	if (flags & FLAG_NEXT_CABINET) {
+		/* szCabinetNext */
+		while (GET_UINT8_LE(indata+i)) {
+			BIO_write(outdata, indata+i, 1);
+			i++;
+		}
+		BIO_write(outdata, indata+i, 1);
+		i++;
+		/* szDiskNext */
+		while (GET_UINT8_LE(indata+i)) {
+			BIO_write(outdata, indata+i, 1);
+			i++;
+		}
+		BIO_write(outdata, indata+i, 1);
+		i++;
+	}
+	*len = i;
+}
+
 static void remove_cab_file(char *indata, size_t siglen, size_t filesize, BIO *outdata)
 {
 	int i;
 	unsigned short nfolders;
-	size_t tmp;
+	size_t tmp, flags;
 	static char buf[64*1024];
 
 	/*
@@ -3129,7 +3284,8 @@ static void remove_cab_file(char *indata, size_t siglen, size_t filesize, BIO *o
 	/* u4 reserved2 00000000: 12-15 */
 	BIO_write(outdata, indata+12, 4);
 	/* u4 coffFiles - offset of the first CFFILE entry: 16-19 */
-	PUT_UINT32_LE(44, buf);
+	tmp = GET_UINT32_LE(indata+16) - 24;
+	PUT_UINT32_LE(tmp, buf);
 	BIO_write(outdata, buf, 4);
 	/*
 	 * u4 reserved3 00000000: 20-23
@@ -3139,34 +3295,41 @@ static void remove_cab_file(char *indata, size_t siglen, size_t filesize, BIO *o
 	 * u2 cFiles - number of CFFILE entries in this cabinet: 28-29
 	 */
 	BIO_write(outdata, indata+20, 10);
-	/* u2 flags 0000 FLAG_RESERVE_PRESENT: 30-31 */
-	PUT_UINT16_LE(0, buf);
+	/* u2 flags: 30-31 */
+	flags = GET_UINT16_LE(indata+30);
+	PUT_UINT32_LE(flags & (FLAG_PREV_CABINET | FLAG_NEXT_CABINET), buf);
 	BIO_write(outdata, buf, 2);
 	/*
 	 * u2 setID must be the same for all cabinets in a set: 32-33
 	 * u2 iCabinet - number of this cabinet file in a set: 34-35
 	 */
 	BIO_write(outdata, indata+32, 4);
+	i = 60;
+	write_optional_names(flags, indata, outdata, &i);
 	/*
 	 * (u8 * cFolders) CFFOLDER - structure contains information about
 	 * one of the folders or partial folders stored in this cabinet file
 	 */
 	nfolders = GET_UINT16_LE(indata + 26);
-	for (i = 60; nfolders; nfolders--, i+=8) {
+	while (nfolders) {
 		tmp = GET_UINT32_LE(indata+i);
 		tmp -= 24;
 		PUT_UINT32_LE(tmp, buf);
 		BIO_write(outdata, buf, 4);
 		BIO_write(outdata, indata+i+4, 4);
+		i+=8;
+		nfolders--;
 	}
 	/* Write what's left - the compressed data bytes */
 	BIO_write(outdata, indata+i, filesize-siglen-i);
 }
 
-static void add_cab_file(char *indata, size_t fileend, BIO *hash, BIO *outdata)
+static void modify_cab_header(char *indata, size_t fileend, BIO *hash, BIO *outdata)
 {
 	int i;
 	unsigned short nfolders;
+	size_t flags;
+	static char buf[64*1024];
 
 	/* u1 signature[4] 4643534D MSCF: 0-3 */
 	BIO_write(hash, indata, 4);
@@ -3181,39 +3344,48 @@ static void add_cab_file(char *indata, size_t fileend, BIO *hash, BIO *outdata)
 	 * u1 versionMajor 01: 25
 	 * u2 cFolders - number of CFFOLDER entries in this cabinet: 26-27
 	 * u2 cFiles - number of CFFILE entries in this cabinet: 28-29
-	 * u2 flags 0400 FLAG_RESERVE_PRESENT: 30-31
-	 * u2 setID must be the same for all cabinets in a set: 32-33
 	 */
-	BIO_write(hash, indata+8, 26);
+	BIO_write(hash, indata+8, 22);
+	/* u2 flags: 30-31 */
+	flags = GET_UINT16_LE(indata+30);
+	PUT_UINT32_LE(flags, buf);
+	BIO_write(hash, buf, 2);
+	/* u2 setID must be the same for all cabinets in a set: 32-33 */
+	BIO_write(hash, indata+32, 2);
 	/*
 	 * u2 iCabinet - number of this cabinet file in a set: 34-35
 	 * u2 cbCFHeader: 36-37
 	 * u1 cbCFFolder: 38
 	 * u1 cbCFData: 39
-	 * u22 abReserve: 40-55
+	 * u22 abReserve: 40-43
 	 * - Additional data offset: 44-47
 	 * - Additional data size: 48-51
 	 */
 	BIO_write(outdata, indata+34, 22);
-	/*  u22 abReserve: 56-59 */
+	/* u24 abReserve: 52-59 */
 	BIO_write(hash, indata+56, 4);
+
+	i = 60;
+	write_optional_names(flags, indata, hash, &i);
 	/*
 	 * (u8 * cFolders) CFFOLDER - structure contains information about
 	 * one of the folders or partial folders stored in this cabinet file
 	 */
 	nfolders = GET_UINT16_LE(indata + 26);
-	for (i = 60; nfolders; nfolders--, i+=8) {
+	while (nfolders) {
 		BIO_write(hash, indata+i, 8);
+		i+=8;
+		nfolders--;
 	}
 	/* Write what's left - the compressed data bytes */
 	BIO_write(hash, indata+i, fileend-i);
 }
 
-static void sign_cab_file(char *indata, size_t fileend, BIO *hash, BIO *outdata)
+static void add_cab_header(char *indata, size_t fileend, BIO *hash, BIO *outdata)
 {
 	int i;
 	unsigned short nfolders;
-	size_t tmp;
+	size_t tmp, flags;
 	static char buf[64*1024];
 	u_char cabsigned[] = {
 		0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
@@ -3224,6 +3396,7 @@ static void sign_cab_file(char *indata, size_t fileend, BIO *hash, BIO *outdata)
 
 	/* u1 signature[4] 4643534D MSCF: 0-3 */
 	BIO_write(hash, indata, 4);
+	/* u4 reserved1 00000000: 4-7 */
 	BIO_write(outdata, indata+4, 4);
 	/* u4 cbCabinet - size of this cabinet file in bytes: 8-11 */
 	tmp = GET_UINT32_LE(indata+8) + 24;
@@ -3241,29 +3414,35 @@ static void sign_cab_file(char *indata, size_t fileend, BIO *hash, BIO *outdata)
 	 * u1 versionMajor 01: 25
 	 * u2 cFolders - number of CFFOLDER entries in this cabinet: 26-27
 	 * u2 cFiles - number of CFFILE entries in this cabinet: 28-29
-	 * u2 flags 0000 FLAG_RESERVE_PRESENT: 30-31
-	 * u2 setID must be the same for all cabinets in a set: 32-33
 	 */
-	memcpy(buf+4, indata+20, 14);
-	/* u2 flags 0400 FLAG_RESERVE_PRESENT */
-	buf[4+10] = 0x04;
+	memcpy(buf+4, indata+20, 10);
+	flags = GET_UINT16_LE(indata+30);
+	buf[4+10] = flags | FLAG_RESERVE_PRESENT;
+	/* u2 setID must be the same for all cabinets in a set: 32-33 */
+	memcpy(buf+16, indata+32, 2);
+
 	BIO_write(hash, buf+4, 14);
 	/* u2 iCabinet - number of this cabinet file in a set: 34-35 */
 	BIO_write(outdata, indata+34, 2);
 	memcpy(cabsigned+8, buf, 4);
 	BIO_write(outdata, cabsigned, 20);
 	BIO_write(hash, cabsigned+20, 4);
+
+	i = 36;
+	write_optional_names(flags, indata, hash, &i);
 	/*
 	 * (u8 * cFolders) CFFOLDER - structure contains information about
 	 * one of the folders or partial folders stored in this cabinet file
 	 */
 	nfolders = GET_UINT16_LE(indata + 26);
-	for (i = 36; nfolders; nfolders--, i+=8) {
+	while (nfolders) {
 		tmp = GET_UINT32_LE(indata+i);
 		tmp += 24;
 		PUT_UINT32_LE(tmp, buf);
 		BIO_write(hash, buf, 4);
 		BIO_write(hash, indata+i+4, 4);
+		i+=8;
+		nfolders--;
 	}
 	/* Write what's left - the compressed data bytes */
 	BIO_write(hash, indata+i, fileend-i);
@@ -3442,10 +3621,10 @@ int main(int argc, char **argv) {
 	int ret = 0, i, len = 0, jp = -1, pe32plus = 0, comm = 0, pagehash = 0;
 	size_t peheader = 0, padlen = 0;
 	size_t filesize, fileend, sigfilesize, outdatasize;
-	size_t reserved1, flags, sigpos, siglen, header_size;
 	file_type_t type;
 	cmd_type_t cmd = CMD_SIGN;
 	char *failarg = NULL;
+	size_t header_size = 0, sigpos = 0, siglen = 0;
 
 	static u_char purpose_ind[] = {
 		0x30, 0x0c,
@@ -3878,41 +4057,8 @@ int main(int argc, char **argv) {
 		if (add_msi_dse == 1)
 			fprintf(stderr, "Warning: -add-msi-dse option is only valid for MSI files\n");
 #endif
-		if (filesize < 44)
-			DO_EXIT_1("Corrupt cab file - too short: %s\n", infile);
-		reserved1 = GET_UINT32_LE(indata + 4);
-		if (reserved1 != 0) {
-			DO_EXIT_1("Checkpoint error: reserved1 0x%08lX\n", reserved1);
-		}
-		/*
-		 * Two bytes at offset 30 is a flag defining whether additional headers exist, or not.
-		 * FLAG_RESERVE_PRESENT
-		 */
-		flags = GET_UINT16_LE(indata + 30);
-		if (flags != 0 && flags != 4)
-			DO_EXIT_1("Checkpoint error: FLAG_RESERVE_PRESENT 0x%04lx\n", flags);
-		if (flags == 0 && (cmd == CMD_REMOVE || cmd == CMD_EXTRACT))
-			DO_EXIT_1("CAB file does not have any signature: %s\n", infile);
-		/*
-		* File size is defined at offset 8, however if additional header exists, this size is not valid.
-		* sigpos - additional data offset is located at offset 44 (from file beginning)
-		* and consist of 4 bytes (little-endian order)
-		* siglen - additional data size is located at offset 48 (from file beginning)
-		* and consist of 4 bytes (little-endian order)
-		* If there are additional headers, size of the CAB archive file is calcualted
-		* as additional data offset plus additional data size.
-		*/
-		sigpos = GET_UINT32_LE(indata + 44);
-		siglen = GET_UINT32_LE(indata + 48);
-		if (flags == 4 && sigpos < filesize && sigpos + siglen != filesize)
-			DO_EXIT_2("Checkpoint error:\n\tadditional data offset 0x%08lX\n\tadditional data size 0x%08lX\n", sigpos, siglen);
-		/*
-		* Additional headers is located at offset 36 (cbCFHeader, cbCFFolder, cbCFData);
-		* size of header (4 bytes, little-endian order) must be 20 (checkpoint).
-		*/
-		header_size = GET_UINT32_LE(indata + 36);
-		if (flags == 4 && header_size != 20)
-			DO_EXIT_1("Checkpoint error: additional header size 0x%08lX\n", header_size);
+		if (!verify_cab_header(indata, infile, cmd, filesize, &header_size, &sigpos, &siglen))
+			goto err_cleanup;
 
 	} else if (type == FILE_TYPE_PE) {
 		if (filesize < 64)
@@ -4082,18 +4228,21 @@ int main(int argc, char **argv) {
 			goto skip_signing;
 		}
 		if (cmd == CMD_VERIFY) {
-			ret = verify_cab_file(indata, sigpos, siglen, leafhash, cafile, crlfile, untrusted);
+			ret = verify_cab_file(indata, header_size, sigpos, siglen, leafhash, cafile, crlfile, untrusted);
 			goto skip_signing;
 		}
 		if ((cmd == CMD_SIGN && nest) || (cmd == CMD_ATTACH && nest) || cmd == CMD_ADD) {
 			cursig = extract_existing_cab_pkcs7(indata, sigpos, siglen);
 			if (!cursig)
 				DO_EXIT_0("Unable to extract existing signature\n");
-			add_cab_file(indata, sigpos, hash, outdata);
 			if (cmd == CMD_ADD)
 				sig = cursig;
-		} else
-			sign_cab_file(indata, fileend, hash, outdata);
+		}
+		if (header_size == 20)
+			/* Strip current signature and modify header */
+			modify_cab_header(indata, sigpos, hash, outdata);
+		else
+			add_cab_header(indata, fileend, hash, outdata);
 
 	} else if (type == FILE_TYPE_PE) {
 		size_t sigpos, siglen;
@@ -4453,17 +4602,9 @@ skip_signing:
 			outdataverify = map_file(outfile, outdatasize);
 			if (!outdataverify)
 				DO_EXIT_0("Error verifying result\n");
-			flags = GET_UINT16_LE(outdataverify + 30); /* FLAG_RESERVE_PRESENT */
-			if (flags != 4)
-				DO_EXIT_1("Checkpoint error: FLAG_RESERVE_PRESENT 0x%04lx\n", flags);
-			sigpos = GET_UINT32_LE(outdataverify + 44);
-			siglen = GET_UINT32_LE(outdataverify + 48);
-			if (sigpos < filesize && sigpos + siglen != filesize)
-				DO_EXIT_2("Checkpoint error:\n\tadditional data offset %lu bytes\n\tadditional data size %lu bytes\n", sigpos, siglen);
-			header_size = GET_UINT32_LE(outdataverify + 36);
-			if (flags == 4 && header_size != 20)
-				DO_EXIT_1("Checkpoint error: additional header size 0x%08lX\n", header_size);
-			ret = verify_cab_file(outdataverify, sigpos, siglen, leafhash, cafile, crlfile, untrusted);
+			if (!verify_cab_header(outdataverify, outfile, cmd, outdatasize, &header_size, &sigpos, &siglen))
+				goto err_cleanup;
+			ret = verify_cab_file(outdataverify, header_size, sigpos, siglen, leafhash, cafile, crlfile, untrusted);
 			if (ret) {
 				DO_EXIT_0("Signature mismatch\n");
 			}
