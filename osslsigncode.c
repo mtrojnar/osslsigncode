@@ -3446,6 +3446,83 @@ static void add_cab_header(char *indata, size_t fileend, BIO *hash, BIO *outdata
 	BIO_write(hash, indata+i, fileend-i);
 }
 
+static void add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp)
+{
+	ASN1_STRING *astr;
+	int len;
+	const u_char *attrs = NULL;
+	static const u_char java_attrs_low[] = {
+		0x30, 0x06, 0x03, 0x02, 0x00, 0x01, 0x30, 0x00
+	};
+
+	switch (jp) {
+		case 0:
+			attrs = java_attrs_low;
+			len = sizeof(java_attrs_low);
+			break;
+		case 1:
+			/* XXX */
+		case 2:
+			/* XXX */
+		default:
+			break;
+		}
+
+	if (attrs) {
+		astr = ASN1_STRING_new();
+		ASN1_STRING_set(astr, attrs, len);
+		PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_MS_JAVA_SOMETHING),
+				V_ASN1_SEQUENCE, astr);
+	}
+}
+
+static void add_purpose_attribute(PKCS7_SIGNER_INFO *si, int comm)
+{
+	ASN1_STRING *astr;
+	static u_char purpose_ind[] = {
+		0x30, 0x0c,
+		0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x15
+	};
+	static u_char purpose_comm[] = {
+		0x30, 0x0c,
+		0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x16
+	};
+
+	astr = ASN1_STRING_new();
+	if (comm) {
+		ASN1_STRING_set(astr, purpose_comm, sizeof(purpose_comm));
+	} else {
+		ASN1_STRING_set(astr, purpose_ind, sizeof(purpose_ind));
+	}
+	PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_STATEMENT_TYPE_OBJID),
+			V_ASN1_SEQUENCE, astr);
+}
+
+static int add_opus_attribute(PKCS7_SIGNER_INFO *si, char *desc, char *url)
+{
+	SpcSpOpusInfo *opus;
+	ASN1_STRING *astr;
+	int len;
+	u_char *p = NULL;
+
+	opus = createOpus(desc, url);
+	if ((len = i2d_SpcSpOpusInfo(opus, NULL)) <= 0 || (p = OPENSSL_malloc(len)) == NULL) {
+		SpcSpOpusInfo_free(opus);
+		return 0; /* FAILED */
+	}
+	i2d_SpcSpOpusInfo(opus, &p);
+	p -= len;
+	astr = ASN1_STRING_new();
+	ASN1_STRING_set(astr, p, len);
+	OPENSSL_free(p);
+
+	PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_SP_OPUS_INFO_OBJID),
+			V_ASN1_SEQUENCE, astr);
+
+	SpcSpOpusInfo_free(opus);
+
+	return 1; /* OK */
+}
 
 static STACK_OF(X509) *PEM_read_certs_with_pass(BIO *bin, char *certpass)
 {
@@ -3630,7 +3707,6 @@ int main(int argc, char **argv) {
 	STACK_OF(X509) *certs = NULL, *xcerts = NULL;
 	EVP_PKEY *pkey = NULL;
 	PKCS7_SIGNER_INFO *si;
-	ASN1_STRING *astr;
 	const EVP_MD *md;
 	time_t signing_time = (time_t)-1;
 
@@ -3664,16 +3740,6 @@ int main(int argc, char **argv) {
 	cmd_type_t cmd = CMD_SIGN;
 	char *failarg = NULL;
 	size_t header_size = 0, sigpos = 0, siglen = 0;
-
-	static u_char purpose_ind[] = {
-		0x30, 0x0c,
-		0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x15
-	};
-
-	static u_char purpose_comm[] = {
-		0x30, 0x0c,
-		0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x16
-	};
 
 	static u_char msi_signature[] = {
 		0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1
@@ -4379,58 +4445,13 @@ int main(int argc, char **argv) {
 	PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
 		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1));
 
-	if (type == FILE_TYPE_CAB && jp >= 0) {
-		const u_char *attrs = NULL;
-		static const u_char java_attrs_low[] = {
-			0x30, 0x06, 0x03, 0x02, 0x00, 0x01, 0x30, 0x00
-		};
+	if (type == FILE_TYPE_CAB && jp >= 0)
+		add_jp_attribute(si, jp);
 
-		switch (jp) {
-			case 0:
-				attrs = java_attrs_low;
-				len = sizeof(java_attrs_low);
-				break;
-			case 1:
-				/* XXX */
-			case 2:
-				/* XXX */
-			default:
-				break;
-		}
+	add_purpose_attribute(si, comm);
 
-		if (attrs) {
-			astr = ASN1_STRING_new();
-			ASN1_STRING_set(astr, attrs, len);
-			PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_MS_JAVA_SOMETHING),
-				V_ASN1_SEQUENCE, astr);
-		}
-	}
-
-	astr = ASN1_STRING_new();
-	if (comm) {
-		ASN1_STRING_set(astr, purpose_comm, sizeof(purpose_comm));
-	} else {
-		ASN1_STRING_set(astr, purpose_ind, sizeof(purpose_ind));
-	}
-	PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_STATEMENT_TYPE_OBJID),
-		V_ASN1_SEQUENCE, astr);
-
-	if (desc || url) {
-		SpcSpOpusInfo *opus = createOpus(desc, url);
-		if ((len = i2d_SpcSpOpusInfo(opus, NULL)) <= 0 ||
-			(p = OPENSSL_malloc(len)) == NULL)
-			DO_EXIT_0("Couldn't allocate memory for opus info\n");
-		i2d_SpcSpOpusInfo(opus, &p);
-		p -= len;
-		astr = ASN1_STRING_new();
-		ASN1_STRING_set(astr, p, len);
-		OPENSSL_free(p);
-
-		PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_SP_OPUS_INFO_OBJID),
-			V_ASN1_SEQUENCE, astr);
-
-		SpcSpOpusInfo_free(opus);
-	}
+	if ((desc || url) && !add_opus_attribute(si, desc, url))
+		DO_EXIT_0("Couldn't allocate memory for opus info\n");
 
 	PKCS7_content_new(sig, NID_pkcs7_data);
 
