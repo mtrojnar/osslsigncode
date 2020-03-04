@@ -2894,7 +2894,7 @@ static int extract_pe_file(char *indata, size_t sigpos, size_t siglen, BIO *outd
 	return ret;
 }
 
-static void sign_pe_file(char *indata, size_t i , int pe32plus, size_t *fileend, BIO *hash, BIO *outdata)
+static void modify_pe_header(char *indata, size_t i , int pe32plus, size_t *fileend, BIO *hash, BIO *outdata)
 {
 	int len = 0;
 	static char buf[64*1024];
@@ -2918,7 +2918,6 @@ static void sign_pe_file(char *indata, size_t i , int pe32plus, size_t *fileend,
 		*fileend += len;
 	}
 }
-
 
 /*
  * CAB file support
@@ -3357,12 +3356,12 @@ static void modify_cab_header(char *indata, size_t fileend, BIO *hash, BIO *outd
 	 * u2 cbCFHeader: 36-37
 	 * u1 cbCFFolder: 38
 	 * u1 cbCFData: 39
-	 * u22 abReserve: 40-43
+	 * u16 abReserve: 40-55
 	 * - Additional data offset: 44-47
 	 * - Additional data size: 48-51
 	 */
 	BIO_write(outdata, indata+34, 22);
-	/* u24 abReserve: 52-59 */
+	/* u4 abReserve: 56-59 */
 	BIO_write(hash, indata+56, 4);
 
 	i = 60;
@@ -3420,7 +3419,6 @@ static void add_cab_header(char *indata, size_t fileend, BIO *hash, BIO *outdata
 	buf[4+10] = flags | FLAG_RESERVE_PRESENT;
 	/* u2 setID must be the same for all cabinets in a set: 32-33 */
 	memcpy(buf+16, indata+32, 2);
-
 	BIO_write(hash, buf+4, 14);
 	/* u2 iCabinet - number of this cabinet file in a set: 34-35 */
 	BIO_write(outdata, indata+34, 2);
@@ -3583,6 +3581,47 @@ static char *get_cafile(void)
 	return cafile;
 }
 
+static PKCS7 *attach_sigfile(char *sigfile, file_type_t type)
+{
+	PKCS7 *sig = NULL;
+	size_t sigfilesize;
+	char *insigdata;
+	BIO *sigbio;
+	const char pemhdr[] = "-----BEGIN PKCS7-----";
+
+	sigfilesize = get_file_size(sigfile);
+	if (!sigfilesize){
+		fprintf(stderr, "Failed to open file: %s\n", sigfile);
+		return NULL; /* FAILED */
+	}
+	insigdata = map_file(sigfile, sigfilesize);
+	if (insigdata == NULL) {
+		fprintf(stderr, "Failed to open file: %s\n", sigfile);
+		return NULL; /* FAILED */
+	}
+
+	if (sigfilesize >= sizeof(pemhdr) && !memcmp(insigdata, pemhdr, sizeof(pemhdr)-1)) {
+		sigbio = BIO_new_mem_buf(insigdata, sigfilesize);
+		sig = PEM_read_bio_PKCS7(sigbio, NULL, NULL, NULL);
+		BIO_free_all(sigbio);
+	} else {
+		if (type == FILE_TYPE_PE) {
+			sig = extract_existing_pe_pkcs7(insigdata, 0, sigfilesize);
+		} else if (type == FILE_TYPE_CAB) {
+			sig = extract_existing_cab_pkcs7(insigdata, 0, sigfilesize);
+		} else if (type == FILE_TYPE_MSI) {
+#ifdef WITH_GSF
+			const unsigned char *p = (unsigned char*)insigdata;
+			sig = d2i_PKCS7(NULL, &p, sigfilesize);
+#else
+			fprintf(stderr, "libgsf is not available, msi support is disabled\n");
+			return NULL; /* FAILED */
+#endif
+		}
+	}
+	return sig; /* OK */
+}
+
 int main(int argc, char **argv) {
 	BIO *btmp, *sigbio, *hash, *outdata;
 	PKCS12 *p12;
@@ -3597,7 +3636,7 @@ int main(int argc, char **argv) {
 
 	const char *argv0 = argv[0];
 	static char buf[64*1024];
-	char *xcertfile, *certfile, *keyfile, *pvkfile, *pkcs12file, *infile, *outfile, *sigfile, *desc, *url, *indata, *insigdata, *outdataverify;
+	char *xcertfile, *certfile, *keyfile, *pvkfile, *pkcs12file, *infile, *outfile, *sigfile, *desc, *url, *indata, *outdataverify;
 	char *p11engine, *p11module;
 	char *pass = NULL, *readpass = NULL;
 	int output_pkcs7 = 0;
@@ -3620,7 +3659,7 @@ int main(int argc, char **argv) {
 	u_char *p = NULL;
 	int ret = 0, i, len = 0, jp = -1, pe32plus = 0, comm = 0, pagehash = 0;
 	size_t peheader = 0, padlen = 0;
-	size_t filesize, fileend, sigfilesize, outdatasize;
+	size_t filesize, fileend, outdatasize;
 	file_type_t type;
 	cmd_type_t cmd = CMD_SIGN;
 	char *failarg = NULL;
@@ -4303,41 +4342,16 @@ int main(int argc, char **argv) {
 			fileend = sigpos;
 		}
 
-		sign_pe_file(indata, peheader + 88, pe32plus, &fileend, hash, outdata);
+		modify_pe_header(indata, peheader + 88, pe32plus, &fileend, hash, outdata);
 	}
 
 	if (cmd == CMD_ADD)
 		goto add_only;
 
 	if (cmd == CMD_ATTACH) {
-		const char pemhdr[] = "-----BEGIN PKCS7-----";
-		sigfilesize = get_file_size(sigfile);
-		if (!sigfilesize)
-			goto err_cleanup;
-		insigdata = map_file(sigfile, sigfilesize);
-		if (insigdata == NULL)
-			DO_EXIT_1("Failed to open file: %s\n", infile);
-
-		if (sigfilesize >= sizeof(pemhdr) && !memcmp(insigdata, pemhdr, sizeof(pemhdr)-1)) {
-			sigbio = BIO_new_mem_buf(insigdata, sigfilesize);
-			sig = PEM_read_bio_PKCS7(sigbio, NULL, NULL, NULL);
-			BIO_free_all(sigbio);
-		} else {
-			if (type == FILE_TYPE_PE) {
-				sig = extract_existing_pe_pkcs7(insigdata, 0, sigfilesize);
-			} else if (type == FILE_TYPE_CAB) {
-				sig = extract_existing_cab_pkcs7(insigdata, 0, sigfilesize);
-			} else if (type == FILE_TYPE_MSI) {
-#ifdef WITH_GSF
-				const unsigned char *p = (unsigned char*)insigdata;
-				sig = d2i_PKCS7(NULL, &p, sigfilesize);
-#else
-				DO_EXIT_1("libgsf is not available, msi support is disabled: %s\n", infile);
-#endif
-			}
-		}
+		sig = attach_sigfile(sigfile, type);
 		if (!sig)
-			DO_EXIT_0("No valid signature found\n");
+			DO_EXIT_0("Unable to extract valid signature\n");
 		goto add_only;
 	}
 
