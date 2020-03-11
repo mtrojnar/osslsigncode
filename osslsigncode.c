@@ -186,7 +186,7 @@ typedef unsigned char u_char;
 #define FLAG_RESERVE_PRESENT 0x0004
 
 typedef struct {
-	size_t peheader;
+	size_t header_size;
 	int pe32plus;
 	unsigned short magic;
 	unsigned int pe_checksum;
@@ -194,7 +194,8 @@ typedef struct {
 	size_t sigpos;
 	size_t siglen;
 	size_t fileend;
-} PE_HEADER;
+	size_t flags;
+} FILE_HEADER;
 
 /*
   ASN.1 definitions (more or less from official MS Authenticode docs)
@@ -1238,12 +1239,12 @@ static const unsigned char classid_page_hash[] = {
 	0xAE, 0x05, 0xA2, 0x17, 0xDA, 0x8E, 0x60, 0xD6
 };
 
-static unsigned char *calc_page_hash(char *indata, size_t peheader,
+static unsigned char *calc_page_hash(char *indata, size_t header_size,
 	int pe32plus, size_t sigpos, int phtype, size_t *rphlen)
 {
-	unsigned short nsections = GET_UINT16_LE(indata + peheader + 6);
-	size_t pagesize = GET_UINT32_LE(indata + peheader + 56);
-	size_t hdrsize = GET_UINT32_LE(indata + peheader + 84);
+	unsigned short nsections = GET_UINT16_LE(indata + header_size + 6);
+	size_t pagesize = GET_UINT32_LE(indata + header_size + 56);
+	size_t hdrsize = GET_UINT32_LE(indata + header_size + 84);
 	const EVP_MD *md = EVP_get_digestbynid(phtype);
 	int pphlen = 4 + EVP_MD_size(md);
 	int phlen = pphlen * (3 + nsections + sigpos / pagesize);
@@ -1253,15 +1254,15 @@ static unsigned char *calc_page_hash(char *indata, size_t peheader,
 
 	mdctx = EVP_MD_CTX_new();
 	EVP_DigestInit(mdctx, md);
-	EVP_DigestUpdate(mdctx, indata, peheader + 88);
-	EVP_DigestUpdate(mdctx, indata + peheader + 92, 60 + pe32plus*16);
-	EVP_DigestUpdate(mdctx, indata + peheader + 160 + pe32plus*16, hdrsize - (peheader + 160 + pe32plus*16));
+	EVP_DigestUpdate(mdctx, indata, header_size + 88);
+	EVP_DigestUpdate(mdctx, indata + header_size + 92, 60 + pe32plus*16);
+	EVP_DigestUpdate(mdctx, indata + header_size + 160 + pe32plus*16, hdrsize - (header_size + 160 + pe32plus*16));
 	EVP_DigestUpdate(mdctx, zeroes, pagesize - hdrsize);
 	memset(res, 0, 4);
 	EVP_DigestFinal(mdctx, res + 4, NULL);
 
-	unsigned short sizeofopthdr = GET_UINT16_LE(indata + peheader + 20);
-	char *sections = indata + peheader + 24 + sizeofopthdr;
+	unsigned short sizeofopthdr = GET_UINT16_LE(indata + header_size + 20);
+	char *sections = indata + header_size + 24 + sizeofopthdr;
 	int i, pi = 1;
 	size_t lastpos = 0;
 	for (i=0; i<nsections; i++) {
@@ -1292,13 +1293,13 @@ static unsigned char *calc_page_hash(char *indata, size_t peheader,
 }
 
 static SpcLink *get_page_hash_link(int phtype, char *indata,
-	size_t peheader, int pe32plus, size_t sigpos)
+	size_t header_size, int pe32plus, size_t sigpos)
 {
 	unsigned char *p, *tmp;
 	size_t l;
 
 	size_t phlen;
-	unsigned char *ph = calc_page_hash(indata, peheader, pe32plus, sigpos, phtype, &phlen);
+	unsigned char *ph = calc_page_hash(indata, header_size, pe32plus, sigpos, phtype, &phlen);
 	if (!ph) {
 		fprintf(stderr, "Failed to calculate page hash\n");
 		exit(-1);
@@ -1359,7 +1360,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata,
 }
 
 static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md,
-	file_type_t type, int pagehash, char *indata, size_t peheader,
+	file_type_t type, int pagehash, char *indata, size_t header_size,
 	int pe32plus, size_t sigpos)
 {
 	static const unsigned char msistr[] = {
@@ -1390,7 +1391,7 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md,
 			int phtype = NID_sha1;
 			if (EVP_MD_size(md) > EVP_MD_size(EVP_sha1()))
 				phtype = NID_sha256;
-			pid->file = get_page_hash_link(phtype, indata, peheader, pe32plus, sigpos);
+			pid->file = get_page_hash_link(phtype, indata, header_size, pe32plus, sigpos);
 		} else {
 			pid->file = get_obsolete_link();
 		}
@@ -1440,7 +1441,7 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md,
 	SpcIndirectDataContent_free(idc);
 }
 
-static unsigned int calc_pe_checksum(BIO *bio, PE_HEADER *header)
+static unsigned int calc_pe_checksum(BIO *bio, FILE_HEADER *header)
 {
 	unsigned int checkSum = 0;
 	unsigned short val;
@@ -1456,7 +1457,7 @@ static unsigned int calc_pe_checksum(BIO *bio, PE_HEADER *header)
 		int i;
 		for (i = 0; i < nread / 2; i++) {
 			val = buf[i];
-			if (size == header->peheader + 88 || size == header->peheader + 90)
+			if (size == header->header_size + 88 || size == header->header_size + 90)
 				val = 0;
 			checkSum += val;
 			checkSum = 0xffff & (checkSum + (checkSum >> 0x10));
@@ -1472,13 +1473,13 @@ static unsigned int calc_pe_checksum(BIO *bio, PE_HEADER *header)
 	return checkSum;
 }
 
-static void recalc_pe_checksum(BIO *bio, PE_HEADER *header)
+static void recalc_pe_checksum(BIO *bio, FILE_HEADER *header)
 {
 	unsigned int checkSum = calc_pe_checksum(bio, header);
 	char buf[4];
 
 	/* write back checksum */
-	(void)BIO_seek(bio, header->peheader + 88);
+	(void)BIO_seek(bio, header->header_size + 88);
 	PUT_UINT32_LE(checkSum, buf);
 	BIO_write(bio, buf, 4);
 }
@@ -2656,7 +2657,7 @@ out:
 /*
  * PE file support
 */
-static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, PE_HEADER *header)
+static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, FILE_HEADER *header)
 {
 	static unsigned char bfb[16*1024*1024];
 	EVP_MD_CTX *mdctx;
@@ -2667,14 +2668,14 @@ static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, PE_
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 
 	(void)BIO_seek(bio, 0);
-	BIO_read(bio, bfb, header->peheader + 88);
-	EVP_DigestUpdate(mdctx, bfb, header->peheader + 88);
+	BIO_read(bio, bfb, header->header_size + 88);
+	EVP_DigestUpdate(mdctx, bfb, header->header_size + 88);
 	BIO_read(bio, bfb, 4);
 	BIO_read(bio, bfb, 60 + header->pe32plus * 16);
 	EVP_DigestUpdate(mdctx, bfb, 60 + header->pe32plus * 16);
 	BIO_read(bio, bfb, 8);
 
-	size_t n = header->peheader + 88 + 4 + 60 + header->pe32plus * 16 + 8;
+	size_t n = header->header_size + 88 + 4 + 60 + header->pe32plus * 16 + 8;
 	while (n < header->sigpos) {
 		size_t want = header->sigpos - n;
 		if (want > sizeof(bfb))
@@ -2744,7 +2745,7 @@ static void extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	SpcAttributeTypeAndOptionalValue_free(obj);
 }
 
-static int verify_pe_pkcs7(PKCS7 *p7, char *indata, PE_HEADER *header,
+static int verify_pe_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	char *leafhash, int allownest, char *cafile, char *crlfile, char *untrusted)
 {
 	int ret = 0;
@@ -2798,7 +2799,7 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, PE_HEADER *header,
 		tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
 		printf("Page hash            : %s ...\n", hexbuf);
 		size_t cphlen = 0;
-		unsigned char *cph = calc_page_hash(indata, header->peheader, header->pe32plus, header->sigpos, phtype, &phlen);
+		unsigned char *cph = calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &phlen);
 		tohex(cph, hexbuf, (cphlen < 32) ? cphlen : 32);
 		printf("Calculated page hash : %s ...%s\n\n", hexbuf,
 			((phlen != cphlen) || memcmp(ph, cph, phlen)) ? "    MISMATCH!!!":"");
@@ -2829,7 +2830,7 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, PE_HEADER *header,
  * extract_existing_pe_pkcs7 retrieves a decoded PKCS7 struct
  * corresponding to the existing signature of the PE file.
  */
-static PKCS7 *extract_existing_pe_pkcs7(char *indata, PE_HEADER *header)
+static PKCS7 *extract_existing_pe_pkcs7(char *indata, FILE_HEADER *header)
 {
 	size_t pos = 0;
 	PKCS7 *p7 = NULL;
@@ -2849,7 +2850,7 @@ static PKCS7 *extract_existing_pe_pkcs7(char *indata, PE_HEADER *header)
 
 	return p7;
 }
-static int verify_pe_file(char *indata, PE_HEADER *header,
+static int verify_pe_file(char *indata, FILE_HEADER *header,
 	char *leafhash, char *cafile, char *crlfile, char *untrusted)
 {
 	int ret = 0;
@@ -2882,7 +2883,7 @@ static int verify_pe_file(char *indata, PE_HEADER *header,
 	return ret;
 }
 
-static int extract_pe_file(char *indata, PE_HEADER *header, BIO *outdata, int output_pkcs7)
+static int extract_pe_file(char *indata, FILE_HEADER *header, BIO *outdata, int output_pkcs7)
 {
 	int ret = 0;
 	PKCS7 *sig;
@@ -2902,7 +2903,7 @@ static int extract_pe_file(char *indata, PE_HEADER *header, BIO *outdata, int ou
 	return ret;
 }
 
-static int verify_pe_header(char *indata, char *infile, size_t filesize, PE_HEADER *header)
+static int verify_pe_header(char *indata, char *infile, size_t filesize, FILE_HEADER *header)
 {
 	int ret = 1;
 
@@ -2910,16 +2911,16 @@ static int verify_pe_header(char *indata, char *infile, size_t filesize, PE_HEAD
 		printf("Corrupt DOS file - too short: %s\n", infile);
 		ret = 0; /* FAILED */
 	}
-	header->peheader = GET_UINT32_LE(indata+60);
-	if (filesize < header->peheader + 160) {
+	header->header_size = GET_UINT32_LE(indata+60);
+	if (filesize < header->header_size + 160) {
 		printf("Corrupt DOS file - too short: %s\n", infile);
 		ret = 0; /* FAILED */
 	}
-	if (memcmp(indata + header->peheader, "PE\0\0", 4)) {
+	if (memcmp(indata + header->header_size, "PE\0\0", 4)) {
 		printf("Unrecognized DOS file type: %s\n", infile);
 		ret = 0; /* FAILED */
 	}
-	header->magic = GET_UINT16_LE(indata + header->peheader + 24);
+	header->magic = GET_UINT16_LE(indata + header->header_size + 24);
 	if (header->magic == 0x20b) {
 		header->pe32plus = 1;
 	} else if (header->magic == 0x10b) {
@@ -2928,14 +2929,14 @@ static int verify_pe_header(char *indata, char *infile, size_t filesize, PE_HEAD
 		printf("Corrupt PE file - found unknown magic %04X: %s\n", header->magic, infile);
 		ret = 0; /* FAILED */
 	}
-	header->pe_checksum = GET_UINT32_LE(indata + header->peheader + 88);
-	header->nrvas = GET_UINT32_LE(indata + header->peheader + 116 + header->pe32plus * 16);
+	header->pe_checksum = GET_UINT32_LE(indata + header->header_size + 88);
+	header->nrvas = GET_UINT32_LE(indata + header->header_size + 116 + header->pe32plus * 16);
 	if (header->nrvas < 5) {
 		printf("Can not handle PE files without certificate table resource: %s\n", infile);
 		ret = 0; /* FAILED */
 	}
-	header->sigpos = GET_UINT32_LE(indata + header->peheader + 152 + header->pe32plus * 16);
-	header->siglen = GET_UINT32_LE(indata + header->peheader + 152 + header->pe32plus * 16 + 4);
+	header->sigpos = GET_UINT32_LE(indata + header->header_size + 152 + header->pe32plus * 16);
+	header->siglen = GET_UINT32_LE(indata + header->header_size + 152 + header->pe32plus * 16 + 4);
 
 	/* Since fix for MS Bulletin MS12-024 we can really assume
 	   that signature should be last part of file */
@@ -2948,12 +2949,12 @@ static int verify_pe_header(char *indata, char *infile, size_t filesize, PE_HEAD
 	return ret;
 }
 
-static void modify_pe_header(char *indata, PE_HEADER *header, BIO *hash, BIO *outdata)
+static void modify_pe_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
 {
 	int len = 0, i;
 	static char buf[64*1024];
 
-	i = header->peheader + 88;
+	i = header->header_size + 88;
 	BIO_write(hash, indata, i);
 	memset(buf, 0, 4);
 	BIO_write(outdata, buf, 4); /* zero out checksum */
@@ -2979,11 +2980,10 @@ static void modify_pe_header(char *indata, PE_HEADER *header, BIO *hash, BIO *ou
  * https://www.file-recovery.com/cab-signature-format.htm
  */
 
-static int verify_cab_header(char *indata, char *infile, cmd_type_t cmd,
-			size_t filesize, size_t *header_size, size_t *sigpos, size_t *siglen)
+static int verify_cab_header(char *indata, char *infile, size_t filesize, FILE_HEADER *header)
 {
 	int ret = 1;
-	size_t reserved, flags = 0;
+	size_t reserved;
 
 	if (filesize < 44) {
 		printf("Corrupt cab file - too short: %s\n", infile);
@@ -2995,28 +2995,22 @@ static int verify_cab_header(char *indata, char *infile, cmd_type_t cmd,
 		ret = 0; /* FAILED */
 	}
 	/* flags specify bit-mapped values that indicate the presence of optional data */
-	flags = GET_UINT16_LE(indata + 30);
+	header->flags = GET_UINT16_LE(indata + 30);
 #if 1
-	if (flags & FLAG_PREV_CABINET) {
-			/* FLAG_NEXT_CABINET works */
-			printf("Multivolume cabinet file is unsupported: flags 0x%04lX\n", flags);
-			ret = 0; /* FAILED */
-	}
-#endif
-	if (!(flags & FLAG_RESERVE_PRESENT) &&
-			(cmd == CMD_REMOVE || cmd == CMD_EXTRACT)) {
-		printf("CAB file does not have any signature: %s\n", infile);
+	if (header->flags & FLAG_PREV_CABINET) {
+		/* FLAG_NEXT_CABINET works */
+		printf("Multivolume cabinet file is unsupported: flags 0x%04lX\n", header->flags);
 		ret = 0; /* FAILED */
 	}
-
-	if (flags & FLAG_RESERVE_PRESENT) {
+#endif
+	if (header->flags & FLAG_RESERVE_PRESENT) {
 		/*
 		* Additional headers is located at offset 36 (cbCFHeader, cbCFFolder, cbCFData);
 		* size of header (4 bytes, little-endian order) must be 20 (checkpoint).
 		*/
-		*header_size = GET_UINT32_LE(indata + 36);
-		if (*header_size != 20) {
-			printf("Additional header size: 0x%08lX\n", *header_size);
+		header->header_size = GET_UINT32_LE(indata + 36);
+		if (header->header_size != 20) {
+			printf("Additional header size: 0x%08lX\n", header->header_size);
 			ret = 0; /* FAILED */
 		}
 		reserved = GET_UINT32_LE(indata + 40);
@@ -3033,14 +3027,17 @@ static int verify_cab_header(char *indata, char *infile, cmd_type_t cmd,
 		* If there are additional headers, size of the CAB archive file is calcualted
 		* as additional data offset plus additional data size.
 		*/
-		*sigpos = GET_UINT32_LE(indata + 44);
-		*siglen = GET_UINT32_LE(indata + 48);
-		if (*sigpos < filesize && *sigpos + *siglen != filesize) {
-			printf("Additional data offset:\t%lu bytes\nAdditional data size:\t%lu bytes\n", *sigpos, *siglen);
+		header->sigpos = GET_UINT32_LE(indata + 44);
+		header->siglen = GET_UINT32_LE(indata + 48);
+		if (header->sigpos < filesize && header->sigpos + header->siglen != filesize) {
+			printf("Additional data offset:\t%lu bytes\nAdditional data size:\t%lu bytes\n",
+					header->sigpos, header->siglen);
 			printf("File size:\t\t%lu bytes\n", filesize);
 			ret = 0; /* FAILED */
 		}
 	}
+	header->fileend = filesize;
+
 	return ret;
 }
 
@@ -3157,7 +3154,7 @@ static int calc_cab_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, siz
 	return 0; /* OK */
 }
 
-static int verify_cab_pkcs7(PKCS7 *p7, char *indata, size_t sigpos, char *leafhash,
+static int verify_cab_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header, char *leafhash,
 		int allownest, char *cafile, char *crlfile, char *untrusted)
 {
 	int ret = 0;
@@ -3196,8 +3193,8 @@ static int verify_cab_pkcs7(PKCS7 *p7, char *indata, size_t sigpos, char *leafha
 	tohex(mdbuf, hexbuf, EVP_MD_size(md));
 	printf("Current message digest    : %s\n", hexbuf);
 
-	bio = BIO_new_mem_buf(indata, sigpos);
-	ret |= calc_cab_digest(bio, md, cmdbuf, sigpos);
+	bio = BIO_new_mem_buf(indata, header->sigpos);
+	ret |= calc_cab_digest(bio, md, cmdbuf, header->sigpos);
 	BIO_free(bio);
 
 	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
@@ -3212,7 +3209,7 @@ static int verify_cab_pkcs7(PKCS7 *p7, char *indata, size_t sigpos, char *leafha
 		int has_sig = 0;
 		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
 		if (p7nest) {
-			int nest_ret = verify_cab_pkcs7(p7nest, indata, sigpos, leafhash, 0, cafile, crlfile, untrusted);
+			int nest_ret = verify_cab_pkcs7(p7nest, indata, header, leafhash, 0, cafile, crlfile, untrusted);
 			if (ret == 0)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
@@ -3225,54 +3222,54 @@ static int verify_cab_pkcs7(PKCS7 *p7, char *indata, size_t sigpos, char *leafha
 	return ret;
 }
 
-static PKCS7 *extract_existing_cab_pkcs7(char *indata, size_t sigpos, size_t siglen)
+static PKCS7 *extract_existing_cab_pkcs7(char *indata, FILE_HEADER *header)
 {
 	PKCS7 *p7 = NULL;
 	const unsigned char *blob;
 
-	blob = (unsigned char*)indata + sigpos;
-	p7 = d2i_PKCS7(NULL, &blob, siglen);
+	blob = (unsigned char*)indata + header->sigpos;
+	p7 = d2i_PKCS7(NULL, &blob, header->siglen);
 
 	return p7;
 }
 
-static int verify_cab_file(char *indata, size_t header_size, size_t sigpos, size_t siglen,
+static int verify_cab_file(char *indata, FILE_HEADER *header,
 			char *leafhash, char *cafile, char *crlfile, char *untrusted)
 {
 	PKCS7 *p7;
 	int ret = 0;
 
-	if (header_size != 20) {
+	if (header->header_size != 20) {
 		printf("No signature found\n\n");
 		return 1; /* FAILED */
 	}
-	p7 = extract_existing_cab_pkcs7(indata, sigpos, siglen);
+	p7 = extract_existing_cab_pkcs7(indata, header);
 	if (!p7) {
 		printf("Failed to extract PKCS7 data\n\n");
 		return -1; /* FAILED */
 	}
 
-	ret |= verify_cab_pkcs7(p7, indata, sigpos, leafhash, 1, cafile, crlfile, untrusted);
+	ret |= verify_cab_pkcs7(p7, indata, header, leafhash, 1, cafile, crlfile, untrusted);
 	PKCS7_free(p7);
 
 	return ret;
 }
 
-static int extract_cab_file(char *indata, size_t sigpos, size_t siglen, BIO *outdata, int output_pkcs7)
+static int extract_cab_file(char *indata, FILE_HEADER *header, BIO *outdata, int output_pkcs7)
 {
 	int ret = 0;
 	PKCS7 *sig;
 
 	(void)BIO_reset(outdata);
 	if (output_pkcs7) {
-		sig = extract_existing_cab_pkcs7(indata, sigpos, siglen);
+		sig = extract_existing_cab_pkcs7(indata, header);
 		if (!sig) {
 			fprintf(stderr, "Unable to extract existing signature\n");
 			return 1; /* FAILED */
 		}
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
 	} else {
-		ret = !BIO_write(outdata, indata + sigpos, siglen);
+		ret = !BIO_write(outdata, indata + header->sigpos, header->siglen);
 	}
 
 	return ret;
@@ -3319,7 +3316,7 @@ static void write_optional_names(size_t flags, char *indata, BIO *outdata, int *
 	*len = i;
 }
 
-static void remove_cab_file(char *indata, size_t siglen, size_t filesize, BIO *outdata)
+static void remove_cab_file(char *indata, FILE_HEADER *header, size_t filesize, BIO *outdata)
 {
 	int i;
 	unsigned short nfolders;
@@ -3375,10 +3372,10 @@ static void remove_cab_file(char *indata, size_t siglen, size_t filesize, BIO *o
 		nfolders--;
 	}
 	/* Write what's left - the compressed data bytes */
-	BIO_write(outdata, indata+i, filesize-siglen-i);
+	BIO_write(outdata, indata + i, filesize - header->siglen - i);
 }
 
-static void modify_cab_header(char *indata, size_t fileend, BIO *hash, BIO *outdata)
+static void modify_cab_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
 {
 	int i;
 	unsigned short nfolders;
@@ -3427,15 +3424,15 @@ static void modify_cab_header(char *indata, size_t fileend, BIO *hash, BIO *outd
 	 */
 	nfolders = GET_UINT16_LE(indata + 26);
 	while (nfolders) {
-		BIO_write(hash, indata+i, 8);
-		i+=8;
+		BIO_write(hash, indata + i, 8);
+		i += 8;
 		nfolders--;
 	}
 	/* Write what's left - the compressed data bytes */
-	BIO_write(hash, indata+i, fileend-i);
+	BIO_write(hash, indata + i, header->sigpos - i);
 }
 
-static void add_cab_header(char *indata, size_t fileend, BIO *hash, BIO *outdata)
+static void add_cab_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
 {
 	int i;
 	unsigned short nfolders;
@@ -3489,16 +3486,16 @@ static void add_cab_header(char *indata, size_t fileend, BIO *hash, BIO *outdata
 	 */
 	nfolders = GET_UINT16_LE(indata + 26);
 	while (nfolders) {
-		tmp = GET_UINT32_LE(indata+i);
+		tmp = GET_UINT32_LE(indata + i);
 		tmp += 24;
 		PUT_UINT32_LE(tmp, buf);
 		BIO_write(hash, buf, 4);
-		BIO_write(hash, indata+i+4, 4);
-		i+=8;
+		BIO_write(hash, indata + i + 4, 4);
+		i += 8;
 		nfolders--;
 	}
 	/* Write what's left - the compressed data bytes */
-	BIO_write(hash, indata+i, fileend-i);
+	BIO_write(hash, indata + i, header->fileend - i);
 }
 
 static void add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp)
@@ -3718,7 +3715,7 @@ static PKCS7 *attach_sigfile(char *sigfile, file_type_t type)
 	PKCS7 *sig = NULL;
 	size_t sigfilesize;
 	char *insigdata;
-	PE_HEADER sigheader;
+	FILE_HEADER header;
 	BIO *sigbio;
 	const char pemhdr[] = "-----BEGIN PKCS7-----";
 
@@ -3739,15 +3736,17 @@ static PKCS7 *attach_sigfile(char *sigfile, file_type_t type)
 		BIO_free_all(sigbio);
 	} else {
 		if (type == FILE_TYPE_PE) {
-			if (!verify_pe_header(insigdata, sigfile, sigfilesize, &sigheader))
+			if (!verify_pe_header(insigdata, sigfile, sigfilesize, &header))
 				return NULL; /* FAILED */
-			sig = extract_existing_pe_pkcs7(insigdata, &sigheader);
+			sig = extract_existing_pe_pkcs7(insigdata, &header);
 			if (!sig) {
 				fprintf(stderr, "Failed to extract PKCS7 data: %s\n", sigfile);
 				return NULL; /* FAILED */
 			}
 		} else if (type == FILE_TYPE_CAB) {
-			sig = extract_existing_cab_pkcs7(insigdata, 0, sigfilesize);
+			if (!verify_cab_header(insigdata, sigfile, sigfilesize, &header))
+				return NULL; /* FAILED */
+			sig = extract_existing_cab_pkcs7(insigdata, &header);
 			if (!sig) {
 				fprintf(stderr, "Failed to extract PKCS7 data: %s\n", sigfile);
 				return NULL; /* FAILED */
@@ -3800,13 +3799,12 @@ int main(int argc, char **argv) {
 	int addBlob = 0;
 	u_char *p = NULL;
 	int ret = 0, i, len = 0, jp = -1, comm = 0, pagehash = 0;
-	PE_HEADER header;
+	FILE_HEADER header;
 	size_t padlen = 0;
 	size_t filesize, fileend, outdatasize;
 	file_type_t type;
 	cmd_type_t cmd = CMD_SIGN;
 	char *failarg = NULL;
-	size_t header_size = 0, sigpos = 0, siglen = 0;
 
 	static u_char msi_signature[] = {
 		0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1
@@ -4229,7 +4227,7 @@ int main(int argc, char **argv) {
 		if (add_msi_dse == 1)
 			fprintf(stderr, "Warning: -add-msi-dse option is only valid for MSI files\n");
 #endif
-		if (!verify_cab_header(indata, infile, cmd, filesize, &header_size, &sigpos, &siglen))
+		if (!verify_cab_header(indata, infile, filesize, &header))
 			goto err_cleanup;
 
 	} else if (type == FILE_TYPE_PE) {
@@ -4391,30 +4389,34 @@ int main(int argc, char **argv) {
 	}
 
 	if (type == FILE_TYPE_CAB) {
+		if (!(header.flags & FLAG_RESERVE_PRESENT) &&
+				(cmd == CMD_REMOVE || cmd == CMD_EXTRACT)) {
+			DO_EXIT_1("CAB file does not have any signature: %s\n", infile);
+		}
 		if (cmd == CMD_EXTRACT) {
-			ret = extract_cab_file(indata, sigpos, siglen, outdata, output_pkcs7);
+			ret = extract_cab_file(indata, &header, outdata, output_pkcs7);
 			goto skip_signing;
 		}
 		if (cmd == CMD_REMOVE) {
-			remove_cab_file(indata, siglen, filesize, outdata);
+			remove_cab_file(indata, &header, filesize, outdata);
 			goto skip_signing;
 		}
 		if (cmd == CMD_VERIFY) {
-			ret = verify_cab_file(indata, header_size, sigpos, siglen, leafhash, cafile, crlfile, untrusted);
+			ret = verify_cab_file(indata, &header, leafhash, cafile, crlfile, untrusted);
 			goto skip_signing;
 		}
 		if ((cmd == CMD_SIGN && nest) || (cmd == CMD_ATTACH && nest) || cmd == CMD_ADD) {
-			cursig = extract_existing_cab_pkcs7(indata, sigpos, siglen);
+			cursig = extract_existing_cab_pkcs7(indata, &header);
 			if (!cursig)
 				DO_EXIT_0("Unable to extract existing signature\n");
 			if (cmd == CMD_ADD)
 				sig = cursig;
 		}
-		if (header_size == 20)
+		if (header.header_size == 20)
 			/* Strip current signature and modify header */
-			modify_cab_header(indata, sigpos, hash, outdata);
+			modify_cab_header(indata, &header, hash, outdata);
 		else
-			add_cab_header(indata, fileend, hash, outdata);
+			add_cab_header(indata, &header, hash, outdata);
 
 	} else if (type == FILE_TYPE_PE) {
 		if ((cmd == CMD_REMOVE || cmd == CMD_EXTRACT) && header.sigpos == 0)
@@ -4514,8 +4516,9 @@ int main(int argc, char **argv) {
 		p7x = NULL;
 	}
 
-	if (type == FILE_TYPE_PE)
-		get_indirect_data_blob(&p, &len, md, type, pagehash, indata, header.peheader, header.pe32plus, header.fileend);
+	if (type == FILE_TYPE_PE || type == FILE_TYPE_CAB)
+		get_indirect_data_blob(&p, &len, md, type, pagehash, indata,
+				header.header_size, header.pe32plus, header.fileend);
 	else
 		get_indirect_data_blob(&p, &len, md, type, pagehash, indata, 0, 0, fileend);
 	len -= EVP_MD_size(md);
@@ -4631,7 +4634,7 @@ skip_signing:
 	if (type == FILE_TYPE_PE) {
 		if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
 			/* Update signature position and size */
-			(void)BIO_seek(outdata, header.peheader + 152 + header.pe32plus * 16);
+			(void)BIO_seek(outdata, header.header_size + 152 + header.pe32plus * 16);
 			PUT_UINT32_LE(header.fileend, buf); /* Previous file end = signature table start */
 			BIO_write(outdata, buf, 4);
 			PUT_UINT32_LE(len+8+padlen, buf);
@@ -4673,9 +4676,9 @@ skip_signing:
 			outdataverify = map_file(outfile, outdatasize);
 			if (!outdataverify)
 				DO_EXIT_0("Error verifying result\n");
-			if (!verify_cab_header(outdataverify, outfile, cmd, outdatasize, &header_size, &sigpos, &siglen))
+			if (!verify_cab_header(outdataverify, outfile, outdatasize, &header))
 				goto err_cleanup;
-			ret = verify_cab_file(outdataverify, header_size, sigpos, siglen, leafhash, cafile, crlfile, untrusted);
+			ret = verify_cab_file(outdataverify, &header, leafhash, cafile, crlfile, untrusted);
 			if (ret)
 				DO_EXIT_0("Signature mismatch\n");
 		} else if (type == FILE_TYPE_MSI) {
