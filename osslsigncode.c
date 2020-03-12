@@ -3930,6 +3930,35 @@ static char *getpassword(const char *prompt)
 }
 #endif
 
+static int read_password(char *readpass, int askpass, char **pass)
+{
+	char passbuf[4096];
+	int passfd, passlen;
+
+	if (readpass) {
+		passfd = open(readpass, O_RDONLY);
+		if (passfd < 0) {
+			fprintf(stderr, "Failed to open password file: %s\n", readpass);
+			return 0; /* FAILED */
+		}
+		passlen = read(passfd, passbuf, sizeof(passbuf)-1);
+		close(passfd);
+		if (passlen <= 0) {
+			fprintf(stderr, "Failed to read password from file: %s\n", readpass);
+			return 0; /* FAILED */
+		}
+		passbuf[passlen] = 0x00;
+		*pass = strdup(passbuf);
+		memset(passbuf, 0, sizeof(passbuf));
+#ifdef PROVIDE_ASKPASS
+	} else if (askpass) {
+		*pass = getpassword("Password: ");
+#endif
+	}
+
+	return 1; /* OK */
+}
+
 static char *get_cafile(void)
 {
 	const char *sslpart1, *sslpart2;
@@ -4313,23 +4342,8 @@ int main(int argc, char **argv) {
 		usage(argv0, "all");
 	}
 
-	if (readpass) {
-		char passbuf[4096];
-		int passfd = open(readpass, O_RDONLY);
-		if (passfd < 0)
-			DO_EXIT_1("Failed to open password file: %s\n", readpass);
-		int passlen = read(passfd, passbuf, sizeof(passbuf)-1);
-		close(passfd);
-		if (passlen <= 0)
-			DO_EXIT_1("Failed to read password from file: %s\n", readpass);
-		passbuf[passlen] = 0x00;
-		pass = strdup(passbuf);
-		memset(passbuf, 0, sizeof(passbuf));
-#ifdef PROVIDE_ASKPASS
-	} else if (askpass) {
-		pass = getpassword("Password: ");
-#endif
-	}
+	if (!read_password(readpass, askpass, &pass))
+		goto err_cleanup;
 
 	if (cmd == CMD_SIGN) {
 		/* Read certificate and key */
