@@ -3714,6 +3714,44 @@ static int add_opus_attribute(PKCS7_SIGNER_INFO *si, char *desc, char *url)
 	return 1; /* OK */
 }
 
+static int set_signing_bob(PKCS7 *sig, BIO *hash, char *buf, int len)
+{
+	unsigned char mdbuf[EVP_MAX_MD_SIZE];
+	int mdlen;
+	size_t seqhdrlen;
+	BIO *sigbio;
+	PKCS7 *td7;
+
+	mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
+	memcpy(buf+len, mdbuf, mdlen);
+	seqhdrlen = asn1_simple_hdr_len((unsigned char*)buf, len);
+
+	if ((sigbio = PKCS7_dataInit(sig, NULL)) == NULL)
+		return 0; /* FAILED */
+	BIO_write(sigbio, buf+seqhdrlen, len-seqhdrlen+mdlen);
+	(void)BIO_flush(sigbio);
+
+	if (!PKCS7_dataFinal(sig, sigbio))
+		return 0; /* FAILED */
+	BIO_free_all(sigbio);
+
+	/*
+	   replace the data part with the MS Authenticode
+	   spcIndirectDataContext blob
+	 */
+	td7 = PKCS7_new();
+	td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+	td7->d.other = ASN1_TYPE_new();
+	td7->d.other->type = V_ASN1_SEQUENCE;
+	td7->d.other->value.sequence = ASN1_STRING_new();
+	ASN1_STRING_set(td7->d.other->value.sequence, buf, len+mdlen);
+	if (!PKCS7_set_content(sig, td7)) {
+		PKCS7_free(td7);
+		return 0; /* FAILED */
+	}
+	return 1; /* OK */
+}
+
 static STACK_OF(X509) *PEM_read_certs_with_pass(BIO *bin, char *certpass)
 {
 	STACK_OF(X509) *certs = sk_X509_new_null();
@@ -3907,7 +3945,7 @@ static PKCS7 *attach_sigfile(char *sigfile, file_type_t type)
 }
 
 int main(int argc, char **argv) {
-	BIO *btmp, *sigbio, *hash, *outdata;
+	BIO *btmp, *hash, *outdata;
 	PKCS12 *p12;
 	PKCS7 *p7 = NULL, *cursig = NULL, *outsig = NULL, *sig = NULL, *p7x = NULL;
 	X509 *cert = NULL;
@@ -4581,33 +4619,9 @@ int main(int argc, char **argv) {
 	len -= EVP_MD_size(md);
 	memcpy(buf, p, len);
 	OPENSSL_free(p);
-	unsigned char mdbuf[EVP_MAX_MD_SIZE];
-	int mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
-	memcpy(buf+len, mdbuf, mdlen);
-	size_t seqhdrlen = asn1_simple_hdr_len((unsigned char*)buf, len);
 
-	if ((sigbio = PKCS7_dataInit(sig, NULL)) == NULL)
-		DO_EXIT_0("Signing failed(PKCS7_dataInit)\n");
-	BIO_write(sigbio, buf+seqhdrlen, len-seqhdrlen+mdlen);
-	(void)BIO_flush(sigbio);
-
-	if (!PKCS7_dataFinal(sig, sigbio))
-		DO_EXIT_0("Signing failed(PKCS7_dataFinal)\n");
-	BIO_free_all(sigbio);
-
-	/* replace the data part with the MS Authenticode
-	   spcIndirectDataContext blob */
-	PKCS7 *td7 = PKCS7_new();
-	td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
-	td7->d.other = ASN1_TYPE_new();
-	td7->d.other->type = V_ASN1_SEQUENCE;
-	td7->d.other->value.sequence = ASN1_STRING_new();
-	ASN1_STRING_set(td7->d.other->value.sequence, buf, len+mdlen);
-	if (!PKCS7_set_content(sig, td7)) {
-		PKCS7_free(td7);
-		DO_EXIT_0("Signing failed(PKCS7_set_content)\n");
-	}
-
+	if (!set_signing_bob(sig, hash, buf, len))
+		DO_EXIT_0("Signing failed\n");
 
 add_only:
 
