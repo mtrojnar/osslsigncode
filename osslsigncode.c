@@ -2652,7 +2652,146 @@ out:
 	return p7;
 }
 
+static int msi_extract_file(GsfInfile *ole, char *outfile, int output_pkcs7)
+{
+	int ret = 0;
+	BIO *outdata;
+	PKCS7 *sig;
+
+	if (output_pkcs7) {
+		sig = msi_extract_signature_to_pkcs7(ole);
+		if (!sig) {
+			fprintf(stderr, "Unable to extract existing signature\n");
+			return 1; /* FAILED */
+		}
+		outdata = BIO_new_file(outfile, "w+bx");
+		if (outdata == NULL) {
+			fprintf(stderr, "Unable to create %s\n", outfile);
+			return 1; /* FAILED */
+		}
+		ret = !PEM_write_bio_PKCS7(outdata, sig);
+		BIO_free_all(outdata);
+	} else {
+		ret = msi_extract_signature_to_file(ole, outfile);
+	}
+
+	return ret;
+}
+
+/*
+ * Perform a sanity check for the MsiDigitalSignatureEx section.
+ * If the file we're attempting to sign has an MsiDigitalSignatureEx
+ * section, we can't add a nested signature of a different MD type
+ * without breaking the initial signature.
+ */
+static int msi_check_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md)
+{
+	unsigned long dselen = 0;
+	int mdlen, has_dse = 0;
+
+	if (msi_extract_dse(ole, NULL, &dselen, &has_dse) != 0 && has_dse) {
+		fprintf(stderr, "Unable to extract MsiDigitalSigantureEx section\n\n");
+		return 0; /* FAILED */
+	}
+	if (has_dse) {
+		mdlen = EVP_MD_size(md);
+		if (dselen != (unsigned long)mdlen) {
+			fprintf(stderr,"Unable to add nested signature with a different MD type (-h parameter) "
+				"than what exists in the MSI file already.\nThis is due to the presence of "
+				"MsiDigitalSigantureEx (-add-msi-dse parameter).\n\n");
+				return 0; /* FAILED */
+		}
+	}
+
+	return 1; /* OK */
+}
+
+/*
+ * MsiDigitalSignatureEx is an enhanced signature type that
+ * can be used when signing MSI files.  In addition to
+ * file content, it also hashes some file metadata, specifically
+ * file names, file sizes, creation times and modification times.
+ *
+ * The file content hashing part stays the same, so the
+ * msi_handle_dir() function can be used across both variants.
+ *
+ * When an MsiDigitalSigntaureEx section is present in an MSI file,
+ * the meaning of the DigitalSignature section changes:  Instead
+ * of being merely a file content hash (as what is output by the
+ * msi_handle_dir() function), it is now hashes both content
+ * and metadata.
+ *
+ * Here is how it works:
+ *
+ * First, a "pre-hash" is calculated. This is the "metadata" hash.
+ * It iterates over the files in the MSI in the same order as the
+ * file content hashing method would - but it only processes the
+ * metadata.
+ *
+ * Once the pre-hash is calculated, a new hash is created for
+ * calculating the hash of the file content.  The output of the
+ * pre-hash is added as the first element of the file content hash.
+ *
+ * After the pre-hash is written, what follows is the "regular"
+ * stream of data that would normally be written when performing
+ * file content hashing.
+ *
+ * The output of this hash, which combines both metadata and file
+ * content, is what will be output in signed form to the
+ * DigitalSignature section when in 'MsiDigitalSignatureEx' mode.
+ *
+ * As mentioned previously, this new mode of operation is signalled
+ * by the presence of a 'MsiDigitalSignatureEx' section in the MSI
+ * file.  This section must come after the 'DigitalSignature'
+ * section, and its content must be the output of the pre-hash
+ * ("metadata") hash.
+ */
+
+static int msi_calc_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md,
+			BIO *hash, u_char *p_msiex, int *len_msiex)
+{
+	BIO *prehash;
+
+	prehash = BIO_new(BIO_f_md());
+	BIO_set_md(prehash, md);
+	BIO_push(prehash, BIO_new(BIO_s_null()));
+
+	if (!msi_prehash(ole, NULL, prehash)) {
+		fprintf(stderr, "Unable to calculate MSI pre-hash ('metadata') hash\n");
+		return 0; /* FAILED */
+	}
+	*len_msiex = BIO_gets(prehash, (char*)p_msiex, EVP_MAX_MD_SIZE);
+	BIO_write(hash, p_msiex, *len_msiex);
+
+	return 1; /* OK */
+}
 #endif
+
+static int msi_add_DigitalSignature(GsfOutfile *outole, u_char *p, int len)
+{
+	GsfOutput *child;
+	int ret = 1;
+
+	child = gsf_outfile_new_child(outole, "\05DigitalSignature", FALSE);
+	if (!gsf_output_write(child, len, p))
+		ret = 0;
+	gsf_output_close(child);
+
+	return ret;
+}
+
+static int msi_add_MsiDigitalSignatureEx(GsfOutfile *outole, u_char *p_msiex, int len_msiex)
+{
+	GsfOutput *child;
+	int ret = 1;
+
+	child = gsf_outfile_new_child(outole, "\05MsiDigitalSignatureEx", FALSE);
+	if (!gsf_output_write(child, len_msiex, p_msiex))
+		ret = 0;
+	gsf_output_close(child);
+
+	return ret;
+}
 
 /*
  * PE file support
@@ -2850,8 +2989,9 @@ static PKCS7 *extract_existing_pe_pkcs7(char *indata, FILE_HEADER *header)
 
 	return p7;
 }
+
 static int verify_pe_file(char *indata, FILE_HEADER *header,
-	char *leafhash, char *cafile, char *crlfile, char *untrusted)
+		char *leafhash, char *cafile, char *crlfile, char *untrusted)
 {
 	int ret = 0;
 
@@ -2944,7 +3084,6 @@ static int verify_pe_header(char *indata, char *infile, size_t filesize, FILE_HE
 		printf("Corrupt PE file - current signature not at end of file: %s\n", infile);
 		ret = 0; /* FAILED */
 	}
-	header->fileend = filesize;
 
 	return ret;
 }
@@ -3036,7 +3175,6 @@ static int verify_cab_header(char *indata, char *infile, size_t filesize, FILE_H
 			ret = 0; /* FAILED */
 		}
 	}
-	header->fileend = filesize;
 
 	return ret;
 }
@@ -3730,6 +3868,10 @@ static PKCS7 *attach_sigfile(char *sigfile, file_type_t type)
 		return NULL; /* FAILED */
 	}
 
+	/* reset header */
+	memset(&header, 0, sizeof(FILE_HEADER));
+	header.fileend = sigfilesize;
+
 	if (sigfilesize >= sizeof(pemhdr) && !memcmp(insigdata, pemhdr, sizeof(pemhdr)-1)) {
 		sigbio = BIO_new_mem_buf(insigdata, sigfilesize);
 		sig = PEM_read_bio_PKCS7(sigbio, NULL, NULL, NULL);
@@ -3801,7 +3943,7 @@ int main(int argc, char **argv) {
 	int ret = 0, i, len = 0, jp = -1, comm = 0, pagehash = 0;
 	FILE_HEADER header;
 	size_t padlen = 0;
-	size_t filesize, fileend, outdatasize;
+	size_t filesize, outdatasize;
 	file_type_t type;
 	cmd_type_t cmd = CMD_SIGN;
 	char *failarg = NULL;
@@ -4201,7 +4343,9 @@ int main(int argc, char **argv) {
 	if (indata == NULL)
 		DO_EXIT_1("Failed to open file: %s\n", infile);
 
-	fileend = filesize;
+	/* reset header */
+	memset(&header, 0, sizeof(FILE_HEADER));
+	header.fileend = filesize;
 
 	if (!memcmp(indata, "MSCF", 4)) {
 		type = FILE_TYPE_CAB;
@@ -4250,123 +4394,39 @@ int main(int argc, char **argv) {
 		GsfInput *src;
 		GsfInfile *ole;
 
-		BIO_push(hash, BIO_new(BIO_s_null()));
-
 		src = gsf_input_stdio_new(infile, NULL);
 		if (!src)
 			DO_EXIT_1("Error opening file %s\n", infile);
 		ole = gsf_infile_msole_new(src, NULL);
 
 		if (cmd == CMD_EXTRACT) {
-			if (output_pkcs7) {
-				sig = msi_extract_signature_to_pkcs7(ole);
-				if (!sig)
-					DO_EXIT_0("Unable to extract existing signature\n");
-				outdata = BIO_new_file(outfile, "w+bx");
-				if (outdata == NULL)
-					DO_EXIT_1("Unable to create %s\n", outfile);
-				ret = !PEM_write_bio_PKCS7(outdata, sig);
-				BIO_free_all(outdata);
-			} else {
-				ret = msi_extract_signature_to_file(ole, outfile);
-			}
+			ret = msi_extract_file(ole, outfile, output_pkcs7);
 			goto skip_signing;
 		} else if (cmd == CMD_VERIFY) {
 			ret = msi_verify_file(ole, leafhash, cafile, crlfile, untrusted);
 			goto skip_signing;
-		} else if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
-			if (nest || cmd == CMD_ADD) {
-				/*
-				 * Perform a sanity check for the MsiDigitalSignatureEx section.
-				 * If the file we're attempting to sign has an MsiDigitalSignatureEx
-				 * section, we can't add a nested signature of a different MD type
-				 * without breaking the initial signature.
-				 */
-				{
-					unsigned long dselen = 0;
-					int has_dse = 0;
-					if (msi_extract_dse(ole, NULL, &dselen, &has_dse) != 0 && has_dse) {
-						DO_EXIT_0("Unable to extract MsiDigitalSigantureEx section\n");
-					}
-					if (has_dse) {
-						int mdlen = EVP_MD_size(md);
-						if (dselen != (unsigned long)mdlen) {
-							DO_EXIT_0("Unable to add nested signature with a different MD type (-h parameter) "
-								"than what exists in the MSI file already. This is due to the presence of "
-								"MsiDigitalSigantureEx (-add-msi-dse parameter).\n");
-						}
-					}
-				}
-
-				cursig = msi_extract_signature_to_pkcs7(ole);
-				if (cursig == NULL) {
-					DO_EXIT_0("Unable to extract existing signature in -nest mode\n");
-				}
-				if (cmd == CMD_ADD) {
-					sig = cursig;
-				}
+		} else if ((cmd == CMD_SIGN && nest) || (cmd == CMD_ATTACH && nest) || cmd == CMD_ADD) {
+			if (!msi_check_MsiDigitalSignatureEx(ole, md))
+				goto err_cleanup;
+			cursig = msi_extract_signature_to_pkcs7(ole);
+			if (cursig == NULL) {
+				DO_EXIT_0("Unable to extract existing signature in -nest mode\n");
+			}
+			if (cmd == CMD_ADD) {
+				sig = cursig;
 			}
 		}
-
 		sink = gsf_output_stdio_new(outfile, NULL);
 		if (!sink)
 			DO_EXIT_1("Error opening output file %s\n", outfile);
 		outole = gsf_outfile_msole_new(sink);
 
-		/*
-		 * MsiDigitalSignatureEx is an enhanced signature type that
-		 * can be used when signing MSI files.  In addition to
-		 * file content, it also hashes some file metadata, specifically
-		 * file names, file sizes, creation times and modification times.
-		 *
-		 * The file content hashing part stays the same, so the
-		 * msi_handle_dir() function can be used across both variants.
-		 *
-		 * When an MsiDigitalSigntaureEx section is present in an MSI file,
-		 * the meaning of the DigitalSignature section changes:  Instead
-		 * of being merely a file content hash (as what is output by the
-		 * msi_handle_dir() function), it is now hashes both content
-		 * and metadata.
-		 *
-		 * Here is how it works:
-		 *
-		 * First, a "pre-hash" is calculated. This is the "metadata" hash.
-		 * It iterates over the files in the MSI in the same order as the
-		 * file content hashing method would - but it only processes the
-		 * metadata.
-		 *
-		 * Once the pre-hash is calculated, a new hash is created for
-		 * calculating the hash of the file content.  The output of the
-		 * pre-hash is added as the first element of the file content hash.
-		 *
-		 * After the pre-hash is written, what follows is the "regular"
-		 * stream of data that would normally be written when performing
-		 * file content hashing.
-		 *
-		 * The output of this hash, which combines both metadata and file
-		 * content, is what will be output in signed form to the
-		 * DigitalSignature section when in 'MsiDigitalSignatureEx' mode.
-		 *
-		 * As mentioned previously, this new mode of operation is signalled
-		 * by the presence of a 'MsiDigitalSignatureEx' section in the MSI
-		 * file.  This section must come after the 'DigitalSignature'
-		 * section, and its content must be the output of the pre-hash
-		 * ("metadata") hash.
-		 */
+		BIO_push(hash, BIO_new(BIO_s_null()));
 		if (add_msi_dse) {
-			BIO *prehash = BIO_new(BIO_f_md());
-			BIO_set_md(prehash, md);
-			BIO_push(prehash, BIO_new(BIO_s_null()));
-
-			if (!msi_prehash(ole, NULL, prehash))
-				DO_EXIT_0("Unable to calculate MSI pre-hash ('metadata') hash\n");
-
 			p_msiex = malloc(EVP_MAX_MD_SIZE);
-			len_msiex = BIO_gets(prehash, (char*)p_msiex, EVP_MAX_MD_SIZE);
-
-			BIO_write(hash, p_msiex, len_msiex);
+			if (!msi_calc_MsiDigitalSignatureEx(ole, md, hash, p_msiex, &len_msiex))
+				goto err_cleanup;
 		}
-
 		if (!msi_handle_dir(ole, outole, hash)) {
 			DO_EXIT_0("Unable to msi_handle_dir()\n");
 		}
@@ -4516,11 +4576,8 @@ int main(int argc, char **argv) {
 		p7x = NULL;
 	}
 
-	if (type == FILE_TYPE_PE || type == FILE_TYPE_CAB)
-		get_indirect_data_blob(&p, &len, md, type, pagehash, indata,
+	get_indirect_data_blob(&p, &len, md, type, pagehash, indata,
 				header.header_size, header.pe32plus, header.fileend);
-	else
-		get_indirect_data_blob(&p, &len, md, type, pagehash, indata, 0, 0, fileend);
 	len -= EVP_MD_size(md);
 	memcpy(buf, p, len);
 	OPENSSL_free(p);
@@ -4597,7 +4654,6 @@ add_only:
 
 	if (type == FILE_TYPE_PE || type == FILE_TYPE_CAB) {
 		BIO_write(outdata, p, len);
-
 		/* pad (with 0's) asn1 blob to 8 byte boundary */
 		if (padlen > 0) {
 			memset(p, 0, padlen);
@@ -4607,19 +4663,10 @@ add_only:
 	} else if (type == FILE_TYPE_MSI) {
 		/* Only output signatures if we're signing. */
 		if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
-			GsfOutput *child = gsf_outfile_new_child(outole, "\05DigitalSignature", FALSE);
-			if (!gsf_output_write(child, len, p))
+			if (!msi_add_DigitalSignature(outole, p, len))
 				DO_EXIT_1("Failed to write MSI 'DigitalSignature' signature to %s\n", infile);
-			gsf_output_close(child);
-
-			if (p_msiex != NULL) {
-				child = gsf_outfile_new_child(outole, "\05MsiDigitalSignatureEx", FALSE);
-				if (!gsf_output_write(child, len_msiex, p_msiex)) {
-					DO_EXIT_1("Failed to write MSI 'MsiDigitalSignatureEx' signature to %s\n", infile);
-				}
-				gsf_output_close(child);
-			}
-
+			if (p_msiex != NULL && !msi_add_MsiDigitalSignatureEx(outole, p_msiex, len_msiex))
+				DO_EXIT_1("Failed to write MSI 'MsiDigitalSignatureEx' signature to %s\n", infile);
 			gsf_output_close(GSF_OUTPUT(outole));
 			g_object_unref(sink);
 		}
