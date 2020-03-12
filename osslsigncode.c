@@ -3714,6 +3714,72 @@ static int add_opus_attribute(PKCS7_SIGNER_INFO *si, char *desc, char *url)
 	return 1; /* OK */
 }
 
+static int create_new_signature(PKCS7 *sig, STACK_OF(X509) *certs, STACK_OF(X509) *xcerts,
+			X509 *cert, EVP_PKEY *pkey, const EVP_MD *md, time_t signing_time,
+			file_type_t type, int jp, int comm, char *desc, char *url)
+{
+	int i;
+	PKCS7_SIGNER_INFO *si;
+	X509 *signcert;
+
+	PKCS7_set_type(sig, NID_pkcs7_signed);
+	si = NULL;
+	if (cert != NULL)
+		si = PKCS7_add_signature(sig, cert, pkey, md);
+
+	for (i=0; si == NULL && i<sk_X509_num(certs); i++) {
+		signcert = sk_X509_value(certs, i);
+		/* X509_print_fp(stdout, signcert); */
+		si = PKCS7_add_signature(sig, signcert, pkey, md);
+	}
+	EVP_PKEY_free(pkey);
+	pkey = NULL;
+
+	if (si == NULL) {
+		fprintf(stderr, "PKCS7_add_signature failed\n");
+		return 0; /* FAILED */
+	}
+
+	pkcs7_add_signing_time(si, signing_time);
+	PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
+		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1));
+
+	if (type == FILE_TYPE_CAB && jp >= 0)
+		add_jp_attribute(si, jp);
+
+	add_purpose_attribute(si, comm);
+
+	if ((desc || url) && !add_opus_attribute(si, desc, url)) {
+		fprintf(stderr, "Couldn't allocate memory for opus info\n");
+		return 0; /* FAILED */
+	}
+
+	PKCS7_content_new(sig, NID_pkcs7_data);
+
+	if (cert != NULL) {
+		PKCS7_add_certificate(sig, cert);
+		X509_free(cert);
+		cert = NULL;
+	}
+	if (xcerts) {
+		for(i = sk_X509_num(xcerts)-1; i>=0; i--)
+			PKCS7_add_certificate(sig, sk_X509_value(xcerts, i));
+	}
+	for (i = sk_X509_num(certs)-1; i>=0; i--)
+		PKCS7_add_certificate(sig, sk_X509_value(certs, i));
+
+	if (certs) {
+		sk_X509_free(certs);
+		certs = NULL;
+	}
+	if (xcerts) {
+		sk_X509_free(xcerts);
+		xcerts = NULL;
+	}
+
+	return 1; /* OK */
+}
+
 static int set_signing_bob(PKCS7 *sig, BIO *hash, char *buf, int len)
 {
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
@@ -3726,13 +3792,17 @@ static int set_signing_bob(PKCS7 *sig, BIO *hash, char *buf, int len)
 	memcpy(buf+len, mdbuf, mdlen);
 	seqhdrlen = asn1_simple_hdr_len((unsigned char*)buf, len);
 
-	if ((sigbio = PKCS7_dataInit(sig, NULL)) == NULL)
+	if ((sigbio = PKCS7_dataInit(sig, NULL)) == NULL) {
+		fprintf(stderr, "PKCS7_dataInit failed\n");
 		return 0; /* FAILED */
+	}
 	BIO_write(sigbio, buf+seqhdrlen, len-seqhdrlen+mdlen);
 	(void)BIO_flush(sigbio);
 
-	if (!PKCS7_dataFinal(sig, sigbio))
+	if (!PKCS7_dataFinal(sig, sigbio)) {
+		fprintf(stderr, "PKCS7_dataFinal failed\n");
 		return 0; /* FAILED */
+	}
 	BIO_free_all(sigbio);
 
 	/*
@@ -3747,6 +3817,7 @@ static int set_signing_bob(PKCS7 *sig, BIO *hash, char *buf, int len)
 	ASN1_STRING_set(td7->d.other->value.sequence, buf, len+mdlen);
 	if (!PKCS7_set_content(sig, td7)) {
 		PKCS7_free(td7);
+		fprintf(stderr, "PKCS7_set_content failed\n");
 		return 0; /* FAILED */
 	}
 	return 1; /* OK */
@@ -3951,7 +4022,6 @@ int main(int argc, char **argv) {
 	X509 *cert = NULL;
 	STACK_OF(X509) *certs = NULL, *xcerts = NULL;
 	EVP_PKEY *pkey = NULL;
-	PKCS7_SIGNER_INFO *si;
 	const EVP_MD *md;
 	time_t signing_time = (time_t)-1;
 
@@ -4361,6 +4431,8 @@ int main(int argc, char **argv) {
 				 (xcerts = PEM_read_certs(btmp, "")) == NULL))
 				DO_EXIT_1("Failed to read cross certificate file: %s\n", xcertfile);
 			BIO_free(btmp);
+			PKCS7_free(p7x);
+			p7x = NULL;
 		}
 
 		if (pass) {
@@ -4555,63 +4627,13 @@ int main(int argc, char **argv) {
 		goto skip_signing;
 
 	sig = PKCS7_new();
-	PKCS7_set_type(sig, NID_pkcs7_signed);
+	if (!create_new_signature(sig, certs, xcerts, cert, pkey, md, signing_time,
+				type, jp, comm, desc, url))
+		DO_EXIT_0("Creating a new signature failed\n");
 
-	si = NULL;
-	if (cert != NULL)
-		si = PKCS7_add_signature(sig, cert, pkey, md);
-	for (i=0; si == NULL && i<sk_X509_num(certs); i++) {
-		X509 *signcert = sk_X509_value(certs, i);
-		/* X509_print_fp(stdout, signcert); */
-		si = PKCS7_add_signature(sig, signcert, pkey, md);
-	}
-	EVP_PKEY_free(pkey);
-	pkey = NULL;
-
-	if (si == NULL)
-		DO_EXIT_0("Signing failed(PKCS7_add_signature)\n");
-
-	pkcs7_add_signing_time(si, signing_time);
-	PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
-		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1));
-
-	if (type == FILE_TYPE_CAB && jp >= 0)
-		add_jp_attribute(si, jp);
-
-	add_purpose_attribute(si, comm);
-
-	if ((desc || url) && !add_opus_attribute(si, desc, url))
-		DO_EXIT_0("Couldn't allocate memory for opus info\n");
-
-	PKCS7_content_new(sig, NID_pkcs7_data);
-
-	if (cert != NULL) {
-		PKCS7_add_certificate(sig, cert);
-		X509_free(cert);
-		cert = NULL;
-	}
-	if (xcerts) {
-		for(i = sk_X509_num(xcerts)-1; i>=0; i--)
-			PKCS7_add_certificate(sig, sk_X509_value(xcerts, i));
-	}
-	for(i = sk_X509_num(certs)-1; i>=0; i--)
-		PKCS7_add_certificate(sig, sk_X509_value(certs, i));
-
-	if (certs) {
-		sk_X509_free(certs);
-		certs = NULL;
-	}
 	if (p7) {
 		PKCS7_free(p7);
 		p7 = NULL;
-	}
-	if (xcerts) {
-		sk_X509_free(xcerts);
-		xcerts = NULL;
-	}
-	if (p7x) {
-		PKCS7_free(p7x);
-		p7x = NULL;
 	}
 
 	get_indirect_data_blob(&p, &len, md, type, pagehash, indata,
@@ -4785,8 +4807,6 @@ err_cleanup:
 		sk_X509_free(certs);
 	if (p7)
 		PKCS7_free(p7);
-	if (p7x)
-		PKCS7_free(p7x);
 	if (xcerts)
 		sk_X509_free(xcerts);
 	if (cert)
