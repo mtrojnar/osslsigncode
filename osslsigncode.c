@@ -3959,6 +3959,165 @@ static int read_password(char *readpass, int askpass, char **pass)
 	return 1; /* OK */
 }
 
+static char *read_key(char **keyfile, char *p11module)
+{
+	unsigned char magic[4];
+	unsigned char pvkhdr[4] = { 0x1e, 0xf1, 0xb5, 0xb0 };
+	char *pvkfile = NULL;
+	BIO *btmp;
+
+	if (*keyfile && !p11module && (btmp = BIO_new_file(*keyfile, "rb")) != NULL) {
+		magic[0] = 0x00;
+		BIO_read(btmp, magic, 4);
+		if (!memcmp(magic, pvkhdr, 4)) {
+			pvkfile = *keyfile;
+			*keyfile = NULL;
+		}
+		BIO_free(btmp);
+		return pvkfile;
+	} else
+		return NULL;
+}
+
+static int read_certificate(char *pkcs12file, char *pvkfile, char *certfile,
+		char *xcertfile, char *keyfile, char *p11module, char *p11engine,
+		char **pass, EVP_PKEY **pkey, X509 **cert, STACK_OF(X509) **certs,
+		STACK_OF(X509) **xcerts)
+{
+	PKCS12 *p12;
+	PKCS7 *p7 = NULL, *p7x = NULL;
+	BIO *btmp;
+	const int CMD_MANDATORY = 0;
+	ENGINE *dyn, *pkcs11;
+	int ret = 1;
+
+	if (pkcs12file != NULL) {
+		if ((btmp = BIO_new_file(pkcs12file, "rb")) == NULL ||
+				(p12 = d2i_PKCS12_bio(btmp, NULL)) == NULL) {
+			fprintf(stderr, "Failed to read PKCS#12 file: %s\n", pkcs12file);
+			ret = 0; /* FAILED */
+		}
+		BIO_free(btmp);
+		if (!PKCS12_parse(p12, *pass ? *pass : "", pkey, cert, certs)) {
+			fprintf(stderr, "Failed to parse PKCS#12 file: %s (Wrong password?)\n", pkcs12file);
+			ret = 0; /* FAILED */
+		}
+		PKCS12_free(p12);
+	} else if (pvkfile != NULL) {
+		if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
+				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
+				(*certs = PEM_read_certs(btmp, "")) == NULL)) {
+			fprintf(stderr, "Failed to read certificate file: %s\n", certfile);
+			ret = 0; /* FAILED */
+		}
+		BIO_free(btmp);
+		if ((btmp = BIO_new_file(pvkfile, "rb")) == NULL ||
+				((*pkey = b2i_PVK_bio(btmp, NULL, *pass ? *pass : "")) == NULL &&
+				(BIO_seek(btmp, 0) == 0) &&
+				(*pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL)) {
+			fprintf(stderr, "Failed to read PVK file: %s\n", pvkfile);
+			ret = 0; /* FAILED */
+		}
+		BIO_free(btmp);
+	} else if (p11module != NULL) {
+		if (p11engine != NULL) {
+			ENGINE_load_dynamic();
+			dyn = ENGINE_by_id("dynamic");
+			if (!dyn) {
+				fprintf(stderr, "Failed to load 'dynamic' engine\n");
+				ret = 0; /* FAILED */
+			}
+			if (1 != ENGINE_ctrl_cmd_string(dyn, "SO_PATH", p11engine, CMD_MANDATORY)) {
+				fprintf(stderr, "Failed to set dyn SO_PATH to '%s'\n", p11engine);
+				ret = 0; /* FAILED */
+			}
+			if (1 != ENGINE_ctrl_cmd_string(dyn, "ID", "pkcs11", CMD_MANDATORY)) {
+				fprintf(stderr, "Failed to set dyn ID to 'pkcs11'\n");
+				ret = 0; /* FAILED */
+			}
+			if (1 != ENGINE_ctrl_cmd(dyn, "LIST_ADD", 1, NULL, NULL, CMD_MANDATORY)) {
+				fprintf(stderr, "Failed to set dyn LIST_ADD to '1'\n");
+				ret = 0; /* FAILED */
+			}
+			if (1 != ENGINE_ctrl_cmd(dyn, "LOAD", 1, NULL, NULL, CMD_MANDATORY)) {
+				fprintf(stderr, "Failed to set dyn LOAD to '1'\n");
+				ret = 0; /* FAILED */
+			}
+		} else
+			ENGINE_load_builtin_engines();
+		pkcs11 = ENGINE_by_id("pkcs11");
+		if (!pkcs11) {
+			fprintf(stderr, "Failed to find and load pkcs11 engine\n");
+			ret = 0; /* FAILED */
+		}
+		if (1 != ENGINE_ctrl_cmd_string(pkcs11, "MODULE_PATH", p11module, CMD_MANDATORY)) {
+			fprintf(stderr, "Failed to set pkcs11 engine MODULE_PATH to '%s'\n", p11module);
+			ret = 0; /* FAILED */
+		}
+		if (*pass != NULL &&
+				1 != ENGINE_ctrl_cmd_string(pkcs11, "PIN", *pass, CMD_MANDATORY)) {
+			fprintf(stderr, "Failed to set pkcs11 PIN\n");
+			ret = 0; /* FAILED */
+		}
+		if (1 != ENGINE_init(pkcs11)) {
+			fprintf(stderr, "Failed to initialized pkcs11 engine\n");
+			ret = 0; /* FAILED */
+		}
+		*pkey = ENGINE_load_private_key(pkcs11, keyfile, NULL, NULL);
+		if (*pkey == NULL) {
+			fprintf(stderr, "Failed to load private key %s\n", keyfile);
+			ret = 0; /* FAILED */
+		}
+		if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
+				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
+				(*certs = PEM_read_certs(btmp, "")) == NULL)) {
+			fprintf(stderr, "Failed to read certificate file: %s\n", certfile);
+			ret = 0; /* FAILED */
+		}
+		BIO_free(btmp);
+	} else {
+		if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
+				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
+				(*certs = PEM_read_certs(btmp, "")) == NULL)) {
+			fprintf(stderr, "Failed to read certificate file: %s\n", certfile);
+			ret = 0; /* FAILED */
+		}
+		BIO_free(btmp);
+		if ((btmp = BIO_new_file(keyfile, "rb")) == NULL ||
+				((*pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
+				(BIO_seek(btmp, 0) == 0) &&
+				(*pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, *pass ? *pass : "")) == NULL &&
+				(BIO_seek(btmp, 0) == 0) &&
+				(*pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL)) {
+			fprintf(stderr, "Failed to read private key file: %s (Wrong password?)\n", keyfile);
+			ret = 0; /* FAILED */
+		}
+		BIO_free(btmp);
+	}
+
+	if (*certs == NULL && p7 != NULL)
+		*certs = sk_X509_dup(p7->d.sign->cert);
+
+	if (xcertfile) {
+		if ((btmp = BIO_new_file(xcertfile, "rb")) == NULL ||
+				((p7x = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
+				(*xcerts = PEM_read_certs(btmp, "")) == NULL)) {
+			fprintf(stderr, "Failed to read cross certificate file: %s\n", xcertfile);
+			ret = 0; /* FAILED */
+		}
+		BIO_free(btmp);
+		PKCS7_free(p7x);
+		p7x = NULL;
+	}
+
+	if (*pass) {
+		memset(*pass, 0, strlen(*pass));
+		*pass = NULL;
+	}
+
+	return ret; /* OK */
+}
+
 static char *get_cafile(void)
 {
 	const char *sslpart1, *sslpart2;
@@ -4045,9 +4204,8 @@ static PKCS7 *attach_sigfile(char *sigfile, file_type_t type)
 }
 
 int main(int argc, char **argv) {
-	BIO *btmp, *hash, *outdata;
-	PKCS12 *p12;
-	PKCS7 *p7 = NULL, *cursig = NULL, *outsig = NULL, *sig = NULL, *p7x = NULL;
+	BIO *hash, *outdata;
+	PKCS7 *cursig = NULL, *outsig = NULL, *sig = NULL;
 	X509 *cert = NULL;
 	STACK_OF(X509) *certs = NULL, *xcerts = NULL;
 	EVP_PKEY *pkey = NULL;
@@ -4347,116 +4505,11 @@ int main(int argc, char **argv) {
 
 	if (cmd == CMD_SIGN) {
 		/* Read certificate and key */
-		if (keyfile && !p11module && (btmp = BIO_new_file(keyfile, "rb")) != NULL) {
-			unsigned char magic[4];
-			unsigned char pvkhdr[4] = { 0x1e, 0xf1, 0xb5, 0xb0 };
-			magic[0] = 0x00;
-			BIO_read(btmp, magic, 4);
-			if (!memcmp(magic, pvkhdr, 4)) {
-				pvkfile = keyfile;
-				keyfile = NULL;
-			}
-			BIO_free(btmp);
-		}
-
-		if (pkcs12file != NULL) {
-			if ((btmp = BIO_new_file(pkcs12file, "rb")) == NULL ||
-				(p12 = d2i_PKCS12_bio(btmp, NULL)) == NULL)
-				DO_EXIT_1("Failed to read PKCS#12 file: %s\n", pkcs12file);
-			BIO_free(btmp);
-			if (!PKCS12_parse(p12, pass ? pass : "", &pkey, &cert, &certs))
-				DO_EXIT_1("Failed to parse PKCS#12 file: %s (Wrong password?)\n", pkcs12file);
-			PKCS12_free(p12);
-		} else if (pvkfile != NULL) {
-			if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
-				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
-				 (certs = PEM_read_certs(btmp, "")) == NULL))
-				DO_EXIT_1("Failed to read certificate file: %s\n", certfile);
-			BIO_free(btmp);
-			if ((btmp = BIO_new_file(pvkfile, "rb")) == NULL ||
-				((pkey = b2i_PVK_bio(btmp, NULL, pass ? pass : "")) == NULL &&
-				 (BIO_seek(btmp, 0) == 0) &&
-				 (pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL))
-				DO_EXIT_1("Failed to read PVK file: %s\n", pvkfile);
-			BIO_free(btmp);
-		} else if (p11module != NULL) {
-			const int CMD_MANDATORY = 0;
-			if (p11engine != NULL) {
-				ENGINE_load_dynamic();
-				ENGINE * dyn = ENGINE_by_id("dynamic");
-				if (!dyn)
-					DO_EXIT_0("Failed to load 'dynamic' engine\n");
-				if (1 != ENGINE_ctrl_cmd_string(dyn, "SO_PATH", p11engine, CMD_MANDATORY))
-					DO_EXIT_1("Failed to set dyn SO_PATH to '%s'\n", p11engine);
-
-				if (1 != ENGINE_ctrl_cmd_string(dyn, "ID", "pkcs11", CMD_MANDATORY))
-					DO_EXIT_0("Failed to set dyn ID to 'pkcs11'\n");
-
-				if (1 != ENGINE_ctrl_cmd(dyn, "LIST_ADD", 1, NULL, NULL, CMD_MANDATORY))
-					DO_EXIT_0("Failed to set dyn LIST_ADD to '1'\n");
-
-				if (1 != ENGINE_ctrl_cmd(dyn, "LOAD", 1, NULL, NULL, CMD_MANDATORY))
-					DO_EXIT_0("Failed to set dyn LOAD to '1'\n");
-			} else
-				ENGINE_load_builtin_engines();
-
-			ENGINE * pkcs11 = ENGINE_by_id("pkcs11");
-			if (!pkcs11)
-				DO_EXIT_0("Failed to find and load pkcs11 engine\n");
-
-			if (1 != ENGINE_ctrl_cmd_string(pkcs11, "MODULE_PATH", p11module, CMD_MANDATORY))
-				DO_EXIT_1("Failed to set pkcs11 engine MODULE_PATH to '%s'\n", p11module);
-
-			if (pass != NULL) {
-				if (1 != ENGINE_ctrl_cmd_string(pkcs11, "PIN", pass, CMD_MANDATORY))
-					DO_EXIT_0("Failed to set pkcs11 PIN\n");
-			}
-
-			if (1 != ENGINE_init(pkcs11))
-				DO_EXIT_0("Failed to initialized pkcs11 engine\n");
-
-			pkey = ENGINE_load_private_key(pkcs11, keyfile, NULL, NULL);
-			if (pkey == NULL)
-				DO_EXIT_1("Failed to load private key %s\n", keyfile);
-			if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
-				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
-				 (certs = PEM_read_certs(btmp, "")) == NULL))
-				DO_EXIT_1("Failed to read certificate file: %s\n", certfile);
-			BIO_free(btmp);
-		} else {
-			if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
-				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
-				 (certs = PEM_read_certs(btmp, "")) == NULL))
-				DO_EXIT_1("Failed to read certificate file: %s\n", certfile);
-			BIO_free(btmp);
-			if ((btmp = BIO_new_file(keyfile, "rb")) == NULL ||
-				((pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
-				  (BIO_seek(btmp, 0) == 0) &&
-				  (pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, pass ? pass : "")) == NULL &&
-				  (BIO_seek(btmp, 0) == 0) &&
-				  (pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL))
-				DO_EXIT_1("Failed to read private key file: %s (Wrong password?)\n", keyfile);
-			BIO_free(btmp);
-		}
-
-		if (xcertfile) {
-			if ((btmp = BIO_new_file(xcertfile, "rb")) == NULL ||
-				((p7x = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
-				 (xcerts = PEM_read_certs(btmp, "")) == NULL))
-				DO_EXIT_1("Failed to read cross certificate file: %s\n", xcertfile);
-			BIO_free(btmp);
-			PKCS7_free(p7x);
-			p7x = NULL;
-		}
-
-		if (pass) {
-			memset (pass, 0, strlen(pass));
-			pass = NULL;
-		}
+		pvkfile = read_key(&keyfile, p11module);
+		if (!read_certificate(pkcs12file, pvkfile, certfile, xcertfile, keyfile,
+				p11module, p11engine, &pass, &pkey, &cert, &certs, &xcerts))
+			goto err_cleanup;
 	}
-
-	if (certs == NULL && p7 != NULL)
-		certs = sk_X509_dup(p7->d.sign->cert);
 
 	/* Check if indata is cab or pe */
 	filesize = get_file_size(infile);
@@ -4645,11 +4698,6 @@ int main(int argc, char **argv) {
 				type, jp, comm, desc, url))
 		DO_EXIT_0("Creating a new signature failed\n");
 
-	if (p7) {
-		PKCS7_free(p7);
-		p7 = NULL;
-	}
-
 	get_indirect_data_blob(&p, &len, md, type, pagehash, indata,
 				header.header_size, header.pe32plus, header.fileend);
 	len -= EVP_MD_size(md);
@@ -4812,15 +4860,9 @@ skip_signing:
 	return ret;
 
 err_cleanup:
-	if (pass) {
-		memset (pass, 0, strlen(pass));
-		pass = NULL;
-	}
 	ERR_print_errors_fp(stderr);
 	if (certs)
 		sk_X509_free(certs);
-	if (p7)
-		PKCS7_free(p7);
 	if (xcerts)
 		sk_X509_free(xcerts);
 	if (cert)
