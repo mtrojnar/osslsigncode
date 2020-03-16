@@ -186,6 +186,45 @@ typedef unsigned char u_char;
 #define FLAG_RESERVE_PRESENT 0x0004
 
 typedef struct {
+	char *infile;
+	char *outfile;
+	char *sigfile;
+	char *certfile;
+	char *xcertfile;
+	char *keyfile;
+	char *pkcs12file;
+	int output_pkcs7;
+	char *p11engine;
+	char *p11module;
+	int askpass;
+	char *readpass;
+	char *pass;
+	int comm;
+	int pagehash;
+	char *desc;
+	const EVP_MD *md;
+	char *url;
+	time_t signing_time;
+#ifdef ENABLE_CURL
+	char *turl[MAX_TS_SERVERS];
+	char *tsurl[MAX_TS_SERVERS];
+	char *proxy;
+	int noverifypeer;
+#endif
+	int addBlob;
+	int nest;
+	int verbose;
+#ifdef WITH_GSF
+	int add_msi_dse;
+#endif
+	char *cafile;
+	char *crlfile;
+	char *untrusted;
+	char *leafhash;
+	int jp;
+} GLOBAL_OPTIONS;
+
+typedef struct {
 	size_t header_size;
 	int pe32plus;
 	unsigned short magic;
@@ -600,9 +639,6 @@ static int add_unauthenticated_blob(PKCS7 *sig)
 	return 0;
 }
 
-
-static int g_verbose = 0;
-
 #ifdef ENABLE_CURL
 
 static int blob_has_nl = 0;
@@ -869,23 +905,23 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	return (int)c;
 }
 
-static int add_timestamp_authenticode(PKCS7 *sig, char **url, int nurls,
-	char *proxy, int noverifypeer)
+static int add_timestamp_authenticode(PKCS7 *sig, int nurls, GLOBAL_OPTIONS *options)
 {
 	int i;
 	for (i=0; i<nurls; i++) {
-		int res = add_timestamp(sig, url[i], proxy, 0, NULL, g_verbose || nurls == 1, noverifypeer);
+		int res = add_timestamp(sig, options->turl[i], options->proxy, 0, NULL,
+				options->verbose || nurls == 1, options->noverifypeer);
 		if (!res) return 0;
 	}
 	return -1;
 }
 
-static int add_timestamp_rfc3161(PKCS7 *sig, char **url, int nurls,
-	char *proxy, const EVP_MD *md, int noverifypeer)
+static int add_timestamp_rfc3161(PKCS7 *sig, int nurls, GLOBAL_OPTIONS *options)
 {
 	int i;
 	for (i=0; i<nurls; i++) {
-		int res = add_timestamp(sig, url[i], proxy, 1, md, g_verbose || nurls == 1, noverifypeer);
+		int res = add_timestamp(sig, options->tsurl[i], options->proxy, 1, options->md,
+				options->verbose || nurls == 1, options->noverifypeer);
 		if (!res) return 0;
 	}
 	return -1;
@@ -1775,7 +1811,8 @@ static PKCS7 *find_rfc3161(const unsigned char *data, int length, ASN1_UTCTIME *
 	return p7; /* OK */
 }
 
-static int pkcs7_print_attributes(PKCS7_SIGNED *p7_signed, PKCS7 **tmstamp_p7, ASN1_UTCTIME **timestamp_time)
+static int pkcs7_print_attributes(PKCS7_SIGNED *p7_signed, PKCS7 **tmstamp_p7,
+			ASN1_UTCTIME **timestamp_time, int verbose)
 {
 	PKCS7_SIGNER_INFO *si;
 	STACK_OF(X509_ATTRIBUTE) *unauth_attr;
@@ -1826,7 +1863,7 @@ static int pkcs7_print_attributes(PKCS7_SIGNED *p7_signed, PKCS7 **tmstamp_p7, A
 				value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTF8STRING, NULL);
 				if (value == NULL)
 					return 0; /* FAILED */
-				if (g_verbose)
+				if (verbose)
 					printf("Data Blob: %s\n", OPENSSL_buf2hexstr(value->data, value->length));
 				printf("Data Blob length: %d bytes\n", value->length);
 			} else if (!strcmp(object_txt, SPC_NESTED_SIGNATURE_OBJID)) {
@@ -1940,15 +1977,15 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 	return 1;
 }
 
-static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, char *untrusted)
+static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, GLOBAL_OPTIONS *options)
 {
 	X509_STORE *store = NULL;
 	PKCS7_SIGNER_INFO *si;
 	int ret = 0, verok;
 
-	printf("TSA's certificates file: %s\n", untrusted);
+	printf("TSA's certificates file: %s\n", options->untrusted);
 	store = X509_STORE_new();
-	if (!load_file_lookup(store, untrusted, NULL, X509_PURPOSE_TIMESTAMP_SIGN)) {
+	if (!load_file_lookup(store, options->untrusted, NULL, X509_PURPOSE_TIMESTAMP_SIGN)) {
 		printf("\nUse the \"-untrusted\" option to add the CA cert bundle to verify timestamp server.\n");
 		ret = 1; /* FAILED */
 	}
@@ -1970,7 +2007,7 @@ static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, char *untrusted)
 	return ret;
 }
 
-static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, char *cafile, char *crlfile)
+static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, GLOBAL_OPTIONS *options)
 {
 	X509_STORE *store = NULL;
 	int ret = 0, verok;
@@ -1980,7 +2017,7 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, char *ca
 	time_t time;
 
 	store = X509_STORE_new();
-	if (!load_file_lookup(store, cafile, crlfile, X509_PURPOSE_CRL_SIGN)) {
+	if (!load_file_lookup(store, options->cafile, options->crlfile, X509_PURPOSE_CRL_SIGN)) {
 		fprintf(stderr, "Failed to add store lookup file\n");
 		ret = 1; /* FAILED */
 	}
@@ -2010,33 +2047,33 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, char *ca
 	return ret;
 }
 
-static int verify_pkcs7(PKCS7 *p7, char *leafhash, char *cafile, char *crlfile, char *untrusted)
+static int verify_pkcs7(PKCS7 *p7, GLOBAL_OPTIONS *options)
 {
 	PKCS7 *tmstamp_p7 = NULL;
 	ASN1_UTCTIME *timestamp_time = NULL;
 	int ret = 0, leafok = 0;
 
-	if (!find_signers(p7, leafhash, &leafok))
+	if (!find_signers(p7, options->leafhash, &leafok))
 		printf("Find signers error"); /* FAILED */
 	if (!print_certs(p7))
 		printf("Print certs error"); /* FAILED */
-	if (!pkcs7_print_attributes(p7->d.sign, &tmstamp_p7, &timestamp_time))
+	if (!pkcs7_print_attributes(p7->d.sign, &tmstamp_p7, &timestamp_time, options->verbose))
 		ret = 1; /* FAILED */
-	if (leafhash != NULL) {
+	if (options->leafhash != NULL) {
 		printf("Leaf hash match: %s\n", leafok ? "ok" : "failed");
 		if (!leafok)
 			ret = 1; /* FAILED */
 	}
-	printf("\nCAfile: %s\n", cafile);
-	if (crlfile)
-		printf("CRLfile: %s\n", crlfile);
+	printf("\nCAfile: %s\n", options->cafile);
+	if (options->crlfile)
+		printf("CRLfile: %s\n", options->crlfile);
 	if (tmstamp_p7)
-		ret |= verify_timestamp(p7, tmstamp_p7, untrusted);
+		ret |= verify_timestamp(p7, tmstamp_p7, options);
 	else
 		printf("\nFile is not timestamped\n");
 	if (ret == 1)
 		timestamp_time = NULL;
-	ret |= verify_authenticode(p7, timestamp_time, cafile, crlfile);
+	ret |= verify_authenticode(p7, timestamp_time, options);
 
 	if (tmstamp_p7) {
 		PKCS7_free(tmstamp_p7);
@@ -2314,9 +2351,8 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
  * msi_verify_pkcs7 is a helper function for msi_verify_file.
  * It exists to make it easier to implement verification of nested signatures.
  */
-static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile,
-	unsigned char *exdata, size_t exlen, char *leafhash,
-	int allownest, char *cafile, char *crlfile, char *untrusted)
+static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
+		size_t exlen, int allownest, GLOBAL_OPTIONS *options)
 {
 	int ret = 0;
 	int mdtype = -1;
@@ -2423,13 +2459,13 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile,
 	}
 #endif
 	printf("\n");
-	ret |= verify_pkcs7(p7, leafhash, cafile, crlfile, untrusted);
+	ret |= verify_pkcs7(p7, options);
 	printf("\n");
 	if (allownest) {
 		int has_sig = 0;
 		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
 		if (p7nest) {
-			int nest_ret = msi_verify_pkcs7(p7nest, infile, exdata, exlen, leafhash, 0, cafile, crlfile, untrusted);
+			int nest_ret = msi_verify_pkcs7(p7nest, infile, exdata, exlen, 0, options);
 			if (ret == 0)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
@@ -2445,7 +2481,7 @@ out:
 /*
  * msi_verify_file checks whether or not the signature of infile is valid.
  */
-static int msi_verify_file(GsfInfile *infile, char *leafhash, char *cafile, char *crlfile, char *untrusted)
+static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 {
 	GsfInput *sig = NULL;
 	GsfInput *exsig = NULL;
@@ -2490,7 +2526,7 @@ static int msi_verify_file(GsfInfile *infile, char *leafhash, char *cafile, char
 	const unsigned char *blob = (unsigned char *)indata;
 	p7 = d2i_PKCS7(NULL, &blob, inlen);
 
-	ret = msi_verify_pkcs7(p7, infile, exdata, exlen, leafhash, 1, cafile, crlfile, untrusted);
+	ret = msi_verify_pkcs7(p7, infile, exdata, exlen, 1, options);
 
 out:
 	OPENSSL_free(indata);
@@ -2652,27 +2688,27 @@ out:
 	return p7;
 }
 
-static int msi_extract_file(GsfInfile *ole, char *outfile, int output_pkcs7)
+static int msi_extract_file(GsfInfile *ole, GLOBAL_OPTIONS *options)
 {
 	int ret = 0;
 	BIO *outdata;
 	PKCS7 *sig;
 
-	if (output_pkcs7) {
+	if (options->output_pkcs7) {
 		sig = msi_extract_signature_to_pkcs7(ole);
 		if (!sig) {
 			fprintf(stderr, "Unable to extract existing signature\n");
 			return 1; /* FAILED */
 		}
-		outdata = BIO_new_file(outfile, "w+bx");
+		outdata = BIO_new_file(options->outfile, "w+bx");
 		if (outdata == NULL) {
-			fprintf(stderr, "Unable to create %s\n", outfile);
+			fprintf(stderr, "Unable to create %s\n", options->outfile);
 			return 1; /* FAILED */
 		}
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
 		BIO_free_all(outdata);
 	} else {
-		ret = msi_extract_signature_to_file(ole, outfile);
+		ret = msi_extract_signature_to_file(ole, options->outfile);
 	}
 
 	return ret;
@@ -2885,7 +2921,7 @@ static void extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 }
 
 static int verify_pe_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
-	char *leafhash, int allownest, char *cafile, char *crlfile, char *untrusted)
+			int allownest, GLOBAL_OPTIONS *options)
 {
 	int ret = 0;
 	int mdtype = -1, phtype = -1;
@@ -2946,13 +2982,13 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 		OPENSSL_free(cph);
 	}
 
-	ret |= verify_pkcs7(p7, leafhash, cafile, crlfile, untrusted);
+	ret |= verify_pkcs7(p7, options);
 	printf("\n");
 	if (allownest) {
 		int has_sig = 0;
 		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
 		if (p7nest) {
-			int nest_ret = verify_pe_pkcs7(p7nest, indata, header, leafhash, 0, cafile, crlfile, untrusted);
+			int nest_ret = verify_pe_pkcs7(p7nest, indata, header, 0, options);
 			if (ret == 0)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
@@ -2990,8 +3026,7 @@ static PKCS7 *extract_existing_pe_pkcs7(char *indata, FILE_HEADER *header)
 	return p7;
 }
 
-static int verify_pe_file(char *indata, FILE_HEADER *header,
-		char *leafhash, char *cafile, char *crlfile, char *untrusted)
+static int verify_pe_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *options)
 {
 	int ret = 0;
 
@@ -3017,7 +3052,7 @@ static int verify_pe_file(char *indata, FILE_HEADER *header,
 		return -1;
 	}
 
-	ret = verify_pe_pkcs7(p7, indata, header, leafhash, 1, cafile, crlfile, untrusted);
+	ret = verify_pe_pkcs7(p7, indata, header, 1, options);
 	PKCS7_free(p7);
 
 	return ret;
@@ -3292,8 +3327,8 @@ static int calc_cab_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, siz
 	return 0; /* OK */
 }
 
-static int verify_cab_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header, char *leafhash,
-		int allownest, char *cafile, char *crlfile, char *untrusted)
+static int verify_cab_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
+			int allownest, GLOBAL_OPTIONS *options)
 {
 	int ret = 0;
 	int mdtype = -1, phtype = -1;
@@ -3341,13 +3376,13 @@ static int verify_cab_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header, char *
 		ret = 1; /* FAILED */
 	printf("Calculated message digest : %s%s\n\n", hexbuf, mdok?"":"    MISMATCH!!!");
 
-	ret |= verify_pkcs7(p7, leafhash, cafile, crlfile, untrusted);
+	ret |= verify_pkcs7(p7, options);
 	printf("\n");
 	if (allownest) {
 		int has_sig = 0;
 		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
 		if (p7nest) {
-			int nest_ret = verify_cab_pkcs7(p7nest, indata, header, leafhash, 0, cafile, crlfile, untrusted);
+			int nest_ret = verify_cab_pkcs7(p7nest, indata, header, 0, options);
 			if (ret == 0)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
@@ -3371,8 +3406,7 @@ static PKCS7 *extract_existing_cab_pkcs7(char *indata, FILE_HEADER *header)
 	return p7;
 }
 
-static int verify_cab_file(char *indata, FILE_HEADER *header,
-			char *leafhash, char *cafile, char *crlfile, char *untrusted)
+static int verify_cab_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *options)
 {
 	PKCS7 *p7;
 	int ret = 0;
@@ -3387,7 +3421,7 @@ static int verify_cab_file(char *indata, FILE_HEADER *header,
 		return -1; /* FAILED */
 	}
 
-	ret |= verify_cab_pkcs7(p7, indata, header, leafhash, 1, cafile, crlfile, untrusted);
+	ret |= verify_cab_pkcs7(p7, indata, header, 1, options);
 	PKCS7_free(p7);
 
 	return ret;
@@ -3715,8 +3749,7 @@ static int add_opus_attribute(PKCS7_SIGNER_INFO *si, char *desc, char *url)
 }
 
 static int create_new_signature(PKCS7 *sig, STACK_OF(X509) *certs, STACK_OF(X509) *xcerts,
-			X509 *cert, EVP_PKEY *pkey, const EVP_MD *md, time_t signing_time,
-			file_type_t type, int jp, int comm, char *desc, char *url)
+			X509 *cert, EVP_PKEY *pkey, file_type_t type, GLOBAL_OPTIONS *options)
 {
 	int i;
 	PKCS7_SIGNER_INFO *si;
@@ -3725,12 +3758,12 @@ static int create_new_signature(PKCS7 *sig, STACK_OF(X509) *certs, STACK_OF(X509
 	PKCS7_set_type(sig, NID_pkcs7_signed);
 	si = NULL;
 	if (cert != NULL)
-		si = PKCS7_add_signature(sig, cert, pkey, md);
+		si = PKCS7_add_signature(sig, cert, pkey, options->md);
 
 	for (i=0; si == NULL && i<sk_X509_num(certs); i++) {
 		signcert = sk_X509_value(certs, i);
 		/* X509_print_fp(stdout, signcert); */
-		si = PKCS7_add_signature(sig, signcert, pkey, md);
+		si = PKCS7_add_signature(sig, signcert, pkey, options->md);
 	}
 	EVP_PKEY_free(pkey);
 	pkey = NULL;
@@ -3740,16 +3773,17 @@ static int create_new_signature(PKCS7 *sig, STACK_OF(X509) *certs, STACK_OF(X509
 		return 0; /* FAILED */
 	}
 
-	pkcs7_add_signing_time(si, signing_time);
+	pkcs7_add_signing_time(si, options->signing_time);
 	PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
 		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1));
 
-	if (type == FILE_TYPE_CAB && jp >= 0)
-		add_jp_attribute(si, jp);
+	if (type == FILE_TYPE_CAB && options->jp >= 0)
+		add_jp_attribute(si, options->jp);
 
-	add_purpose_attribute(si, comm);
+	add_purpose_attribute(si, options->comm);
 
-	if ((desc || url) && !add_opus_attribute(si, desc, url)) {
+	if ((options->desc || options->url) &&
+			!add_opus_attribute(si, options->desc, options->url)) {
 		fprintf(stderr, "Couldn't allocate memory for opus info\n");
 		return 0; /* FAILED */
 	}
@@ -3930,48 +3964,49 @@ static char *getpassword(const char *prompt)
 }
 #endif
 
-static int read_password(char *readpass, int askpass, char **pass)
+static int read_password(GLOBAL_OPTIONS *options)
 {
 	char passbuf[4096];
 	int passfd, passlen;
 
-	if (readpass) {
-		passfd = open(readpass, O_RDONLY);
+	if (options->readpass) {
+		passfd = open(options->readpass, O_RDONLY);
 		if (passfd < 0) {
-			fprintf(stderr, "Failed to open password file: %s\n", readpass);
+			fprintf(stderr, "Failed to open password file: %s\n", options->readpass);
 			return 0; /* FAILED */
 		}
 		passlen = read(passfd, passbuf, sizeof(passbuf)-1);
 		close(passfd);
 		if (passlen <= 0) {
-			fprintf(stderr, "Failed to read password from file: %s\n", readpass);
+			fprintf(stderr, "Failed to read password from file: %s\n", options->readpass);
 			return 0; /* FAILED */
 		}
 		passbuf[passlen] = 0x00;
-		*pass = strdup(passbuf);
+		options->pass = strdup(passbuf);
 		memset(passbuf, 0, sizeof(passbuf));
 #ifdef PROVIDE_ASKPASS
-	} else if (askpass) {
-		*pass = getpassword("Password: ");
+	} else if (options->askpass) {
+		options->pass = getpassword("Password: ");
 #endif
 	}
 
 	return 1; /* OK */
 }
 
-static char *read_key(char **keyfile, char *p11module)
+static char *read_key(GLOBAL_OPTIONS *options)
 {
 	unsigned char magic[4];
 	unsigned char pvkhdr[4] = { 0x1e, 0xf1, 0xb5, 0xb0 };
 	char *pvkfile = NULL;
 	BIO *btmp;
 
-	if (*keyfile && !p11module && (btmp = BIO_new_file(*keyfile, "rb")) != NULL) {
+	if (options->keyfile && !options->p11module &&
+			(btmp = BIO_new_file(options->keyfile, "rb")) != NULL) {
 		magic[0] = 0x00;
 		BIO_read(btmp, magic, 4);
 		if (!memcmp(magic, pvkhdr, 4)) {
-			pvkfile = *keyfile;
-			*keyfile = NULL;
+			pvkfile = options->keyfile;
+			options->keyfile = NULL;
 		}
 		BIO_free(btmp);
 		return pvkfile;
@@ -3979,10 +4014,8 @@ static char *read_key(char **keyfile, char *p11module)
 		return NULL;
 }
 
-static int read_certificate(char *pkcs12file, char *pvkfile, char *certfile,
-		char *xcertfile, char *keyfile, char *p11module, char *p11engine,
-		char **pass, EVP_PKEY **pkey, X509 **cert, STACK_OF(X509) **certs,
-		STACK_OF(X509) **xcerts)
+static int read_certificate(GLOBAL_OPTIONS *options, char *pvkfile, EVP_PKEY **pkey,
+			X509 **cert, STACK_OF(X509) **certs, STACK_OF(X509) **xcerts)
 {
 	PKCS12 *p12;
 	PKCS7 *p7 = NULL, *p7x = NULL;
@@ -3991,44 +4024,44 @@ static int read_certificate(char *pkcs12file, char *pvkfile, char *certfile,
 	ENGINE *dyn, *pkcs11;
 	int ret = 1;
 
-	if (pkcs12file != NULL) {
-		if ((btmp = BIO_new_file(pkcs12file, "rb")) == NULL ||
+	if (options->pkcs12file != NULL) {
+		if ((btmp = BIO_new_file(options->pkcs12file, "rb")) == NULL ||
 				(p12 = d2i_PKCS12_bio(btmp, NULL)) == NULL) {
-			fprintf(stderr, "Failed to read PKCS#12 file: %s\n", pkcs12file);
+			fprintf(stderr, "Failed to read PKCS#12 file: %s\n", options->pkcs12file);
 			ret = 0; /* FAILED */
 		}
 		BIO_free(btmp);
-		if (!PKCS12_parse(p12, *pass ? *pass : "", pkey, cert, certs)) {
-			fprintf(stderr, "Failed to parse PKCS#12 file: %s (Wrong password?)\n", pkcs12file);
+		if (!PKCS12_parse(p12, options->pass ? options->pass : "", pkey, cert, certs)) {
+			fprintf(stderr, "Failed to parse PKCS#12 file: %s (Wrong password?)\n", options->pkcs12file);
 			ret = 0; /* FAILED */
 		}
 		PKCS12_free(p12);
 	} else if (pvkfile != NULL) {
-		if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
+		if ((btmp = BIO_new_file(options->certfile, "rb")) == NULL ||
 				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
 				(*certs = PEM_read_certs(btmp, "")) == NULL)) {
-			fprintf(stderr, "Failed to read certificate file: %s\n", certfile);
+			fprintf(stderr, "Failed to read certificate file: %s\n", options->certfile);
 			ret = 0; /* FAILED */
 		}
 		BIO_free(btmp);
 		if ((btmp = BIO_new_file(pvkfile, "rb")) == NULL ||
-				((*pkey = b2i_PVK_bio(btmp, NULL, *pass ? *pass : "")) == NULL &&
+				((*pkey = b2i_PVK_bio(btmp, NULL, options->pass ? options->pass : "")) == NULL &&
 				(BIO_seek(btmp, 0) == 0) &&
 				(*pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL)) {
 			fprintf(stderr, "Failed to read PVK file: %s\n", pvkfile);
 			ret = 0; /* FAILED */
 		}
 		BIO_free(btmp);
-	} else if (p11module != NULL) {
-		if (p11engine != NULL) {
+	} else if (options->p11module != NULL) {
+		if (options->p11engine != NULL) {
 			ENGINE_load_dynamic();
 			dyn = ENGINE_by_id("dynamic");
 			if (!dyn) {
 				fprintf(stderr, "Failed to load 'dynamic' engine\n");
 				ret = 0; /* FAILED */
 			}
-			if (1 != ENGINE_ctrl_cmd_string(dyn, "SO_PATH", p11engine, CMD_MANDATORY)) {
-				fprintf(stderr, "Failed to set dyn SO_PATH to '%s'\n", p11engine);
+			if (1 != ENGINE_ctrl_cmd_string(dyn, "SO_PATH", options->p11engine, CMD_MANDATORY)) {
+				fprintf(stderr, "Failed to set dyn SO_PATH to '%s'\n", options->p11engine);
 				ret = 0; /* FAILED */
 			}
 			if (1 != ENGINE_ctrl_cmd_string(dyn, "ID", "pkcs11", CMD_MANDATORY)) {
@@ -4050,12 +4083,12 @@ static int read_certificate(char *pkcs12file, char *pvkfile, char *certfile,
 			fprintf(stderr, "Failed to find and load pkcs11 engine\n");
 			ret = 0; /* FAILED */
 		}
-		if (1 != ENGINE_ctrl_cmd_string(pkcs11, "MODULE_PATH", p11module, CMD_MANDATORY)) {
-			fprintf(stderr, "Failed to set pkcs11 engine MODULE_PATH to '%s'\n", p11module);
+		if (1 != ENGINE_ctrl_cmd_string(pkcs11, "MODULE_PATH", options->p11module, CMD_MANDATORY)) {
+			fprintf(stderr, "Failed to set pkcs11 engine MODULE_PATH to '%s'\n", options->p11module);
 			ret = 0; /* FAILED */
 		}
-		if (*pass != NULL &&
-				1 != ENGINE_ctrl_cmd_string(pkcs11, "PIN", *pass, CMD_MANDATORY)) {
+		if (options->pass != NULL &&
+				1 != ENGINE_ctrl_cmd_string(pkcs11, "PIN", options->pass, CMD_MANDATORY)) {
 			fprintf(stderr, "Failed to set pkcs11 PIN\n");
 			ret = 0; /* FAILED */
 		}
@@ -4063,33 +4096,33 @@ static int read_certificate(char *pkcs12file, char *pvkfile, char *certfile,
 			fprintf(stderr, "Failed to initialized pkcs11 engine\n");
 			ret = 0; /* FAILED */
 		}
-		*pkey = ENGINE_load_private_key(pkcs11, keyfile, NULL, NULL);
+		*pkey = ENGINE_load_private_key(pkcs11, options->keyfile, NULL, NULL);
 		if (*pkey == NULL) {
-			fprintf(stderr, "Failed to load private key %s\n", keyfile);
+			fprintf(stderr, "Failed to load private key %s\n", options->keyfile);
 			ret = 0; /* FAILED */
 		}
-		if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
+		if ((btmp = BIO_new_file(options->certfile, "rb")) == NULL ||
 				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
 				(*certs = PEM_read_certs(btmp, "")) == NULL)) {
-			fprintf(stderr, "Failed to read certificate file: %s\n", certfile);
+			fprintf(stderr, "Failed to read certificate file: %s\n", options->certfile);
 			ret = 0; /* FAILED */
 		}
 		BIO_free(btmp);
 	} else {
-		if ((btmp = BIO_new_file(certfile, "rb")) == NULL ||
+		if ((btmp = BIO_new_file(options->certfile, "rb")) == NULL ||
 				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
 				(*certs = PEM_read_certs(btmp, "")) == NULL)) {
-			fprintf(stderr, "Failed to read certificate file: %s\n", certfile);
+			fprintf(stderr, "Failed to read certificate file: %s\n", options->certfile);
 			ret = 0; /* FAILED */
 		}
 		BIO_free(btmp);
-		if ((btmp = BIO_new_file(keyfile, "rb")) == NULL ||
+		if ((btmp = BIO_new_file(options->keyfile, "rb")) == NULL ||
 				((*pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
 				(BIO_seek(btmp, 0) == 0) &&
-				(*pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, *pass ? *pass : "")) == NULL &&
+				(*pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, options->pass ? options->pass : "")) == NULL &&
 				(BIO_seek(btmp, 0) == 0) &&
 				(*pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL)) {
-			fprintf(stderr, "Failed to read private key file: %s (Wrong password?)\n", keyfile);
+			fprintf(stderr, "Failed to read private key file: %s (Wrong password?)\n", options->keyfile);
 			ret = 0; /* FAILED */
 		}
 		BIO_free(btmp);
@@ -4098,11 +4131,11 @@ static int read_certificate(char *pkcs12file, char *pvkfile, char *certfile,
 	if (*certs == NULL && p7 != NULL)
 		*certs = sk_X509_dup(p7->d.sign->cert);
 
-	if (xcertfile) {
-		if ((btmp = BIO_new_file(xcertfile, "rb")) == NULL ||
+	if (options->xcertfile) {
+		if ((btmp = BIO_new_file(options->xcertfile, "rb")) == NULL ||
 				((p7x = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
 				(*xcerts = PEM_read_certs(btmp, "")) == NULL)) {
-			fprintf(stderr, "Failed to read cross certificate file: %s\n", xcertfile);
+			fprintf(stderr, "Failed to read cross certificate file: %s\n", options->xcertfile);
 			ret = 0; /* FAILED */
 		}
 		BIO_free(btmp);
@@ -4110,9 +4143,9 @@ static int read_certificate(char *pkcs12file, char *pvkfile, char *certfile,
 		p7x = NULL;
 	}
 
-	if (*pass) {
-		memset(*pass, 0, strlen(*pass));
-		*pass = NULL;
+	if (options->pass) {
+		memset(options->pass, 0, strlen(options->pass));
+		options->pass = NULL;
 	}
 
 	return ret; /* OK */
@@ -4203,40 +4236,24 @@ static PKCS7 *attach_sigfile(char *sigfile, file_type_t type)
 	return sig; /* OK */
 }
 
-int main(int argc, char **argv) {
-	BIO *hash, *outdata;
+int main(int argc, char **argv)
+{
+	GLOBAL_OPTIONS options;
+	FILE_HEADER header;
+
+	BIO *hash = NULL;
+	BIO *outdata = NULL;
 	PKCS7 *cursig = NULL, *outsig = NULL, *sig = NULL;
 	X509 *cert = NULL;
 	STACK_OF(X509) *certs = NULL, *xcerts = NULL;
 	EVP_PKEY *pkey = NULL;
-	const EVP_MD *md;
-	time_t signing_time = (time_t)-1;
 
 	const char *argv0 = argv[0];
 	static char buf[64*1024];
-	char *xcertfile, *certfile, *keyfile, *pvkfile, *pkcs12file, *infile, *outfile, *sigfile, *desc, *url, *indata, *outdataverify;
-	char *p11engine, *p11module;
-	char *pass = NULL, *readpass = NULL;
-	int output_pkcs7 = 0;
-	int askpass = 0;
-
-	char *cafile = NULL;
-	char *crlfile = NULL;
-	char *untrusted = NULL;
-	char *leafhash = NULL;
-#ifdef ENABLE_CURL
-	char *turl[MAX_TS_SERVERS], *proxy = NULL, *tsurl[MAX_TS_SERVERS];
-	int noverifypeer = 0;
-#endif
-	int nest = 0;
-#ifdef WITH_GSF
-	int add_msi_dse = 0;
-#endif
+	char *indata, *outdataverify, *pvkfile = NULL;
 	int nturl = 0, ntsurl = 0;
-	int addBlob = 0;
 	u_char *p = NULL;
-	int ret = 0, i, len = 0, jp = -1, comm = 0, pagehash = 0;
-	FILE_HEADER header;
+	int ret = 0, i, len = 0;
 	size_t padlen = 0;
 	size_t filesize, outdatasize;
 	file_type_t type;
@@ -4254,9 +4271,6 @@ int main(int argc, char **argv) {
 	int len_msiex = 0;
 #endif
 
-	xcertfile = certfile = keyfile = pvkfile = pkcs12file = p11module = p11engine = infile = outfile = sigfile = desc = url = NULL;
-	hash = outdata = NULL;
-
 	/* Set up OpenSSL */
 	ERR_load_crypto_strings();
 	OPENSSL_add_all_algorithms_conf();
@@ -4268,7 +4282,11 @@ int main(int argc, char **argv) {
 		!OBJ_create(SPC_NESTED_SIGNATURE_OBJID, NULL, NULL))
 		DO_EXIT_0("Failed to add objects\n");
 
-	md = EVP_sha1();
+	/* reset options */
+	memset(&options, 0, sizeof(GLOBAL_OPTIONS));
+	options.md = EVP_sha1();
+	options.signing_time = (time_t)-1;
+	options.jp = -1;
 
 	if (argc > 1) {
 		if (!strcmp(argv[1], "--help")) {
@@ -4309,120 +4327,120 @@ int main(int argc, char **argv) {
 	}
 
 	if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH)) {
-		cafile = get_cafile();
-		untrusted = get_cafile();
+		options.cafile = get_cafile();
+		options.untrusted = get_cafile();
 	}
 
 	for (argc--,argv++; argc >= 1; argc--,argv++) {
 		if (!strcmp(*argv, "-in")) {
 			if (--argc < 1) usage(argv0, "all");
-			infile = *(++argv);
+			options.infile = *(++argv);
 		} else if (!strcmp(*argv, "-out")) {
 			if (--argc < 1) usage(argv0, "all");
-			outfile = *(++argv);
+			options.outfile = *(++argv);
 		} else if (!strcmp(*argv, "-sigin")) {
 			if (--argc < 1) usage(argv0, "all");
-			sigfile = *(++argv);
+			options.sigfile = *(++argv);
 		} else if ((cmd == CMD_SIGN) && (!strcmp(*argv, "-spc") || !strcmp(*argv, "-certs"))) {
 			if (--argc < 1) usage(argv0, "all");
-			certfile = *(++argv);
+			options.certfile = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-ac")) {
 			if (--argc < 1) usage(argv0, "all");
-			xcertfile = *(++argv);
+			options.xcertfile = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-key")) {
 			if (--argc < 1) usage(argv0, "all");
-			keyfile = *(++argv);
+			options.keyfile = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs12")) {
 			if (--argc < 1) usage(argv0, "all");
-			pkcs12file = *(++argv);
+			options.pkcs12file = *(++argv);
 		} else if ((cmd == CMD_EXTRACT) && !strcmp(*argv, "-pem")) {
-			output_pkcs7 = 1;
+			options.output_pkcs7 = 1;
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11engine")) {
 			if (--argc < 1) usage(argv0, "all");
-			p11engine = *(++argv);
+			options.p11engine = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11module")) {
 			if (--argc < 1) usage(argv0, "all");
-			p11module = *(++argv);
+			options.p11module = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pass")) {
-			if (askpass || readpass) usage(argv0, "all");
+			if (options.askpass || options.readpass) usage(argv0, "all");
 			if (--argc < 1) usage(argv0, "all");
-			pass = strdup(*(++argv));
+			options.pass = strdup(*(++argv));
 			memset(*argv, 0, strlen(*argv));
 #ifdef PROVIDE_ASKPASS
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-askpass")) {
-			if (pass || readpass) usage(argv0, "all");
-			askpass = 1;
+			if (options.pass || options.readpass) usage(argv0, "all");
+			options.askpass = 1;
 #endif
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-readpass")) {
-			if (askpass || pass) usage(argv0, "all");
+			if (options.askpass || options.pass) usage(argv0, "all");
 			if (--argc < 1) usage(argv0, "all");
-			readpass = *(++argv);
+			options.readpass = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-comm")) {
-			comm = 1;
+			options.comm = 1;
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-ph")) {
-			pagehash = 1;
+			options.pagehash = 1;
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-n")) {
 			if (--argc < 1) usage(argv0, "all");
-			desc = *(++argv);
+			options.desc = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-h")) {
 			if (--argc < 1) usage(argv0, "all");
 			++argv;
 			if (!strcmp(*argv, "md5")) {
-				md = EVP_md5();
+				options.md = EVP_md5();
 			} else if (!strcmp(*argv, "sha1")) {
-				md = EVP_sha1();
+				options.md = EVP_sha1();
 			} else if (!strcmp(*argv, "sha2") || !strcmp(*argv, "sha256")) {
-				md = EVP_sha256();
+				options.md = EVP_sha256();
 			} else if (!strcmp(*argv, "sha384")) {
-				md = EVP_sha384();
+				options.md = EVP_sha384();
 			} else if (!strcmp(*argv, "sha512")) {
-				md = EVP_sha512();
+				options.md = EVP_sha512();
 			} else {
 				usage(argv0, "all");
 			}
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-i")) {
 			if (--argc < 1) usage(argv0, "all");
-			url = *(++argv);
+			options.url = *(++argv);
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-st")) {
 			if (--argc < 1) usage(argv0, "all");
-			signing_time = (time_t)strtoul(*(++argv), NULL, 10);
+			options.signing_time = (time_t)strtoul(*(++argv), NULL, 10);
 #ifdef ENABLE_CURL
 		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-t")) {
 			if (--argc < 1) usage(argv0, "all");
-			turl[nturl++] = *(++argv);
+			options.turl[nturl++] = *(++argv);
 		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-ts")) {
 			if (--argc < 1) usage(argv0, "all");
-			tsurl[ntsurl++] = *(++argv);
+			options.tsurl[ntsurl++] = *(++argv);
 		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-p")) {
 			if (--argc < 1) usage(argv0, "all");
-			proxy = *(++argv);
+			options.proxy = *(++argv);
 		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-noverifypeer")) {
-			noverifypeer = 1;
+			options.noverifypeer = 1;
 #endif
 		} else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-addUnauthenticatedBlob")) {
-			addBlob = 1;
+			options.addBlob = 1;
 		} else if ((cmd == CMD_SIGN || cmd == CMD_ATTACH) && !strcmp(*argv, "-nest")) {
-			nest = 1;
+			options.nest = 1;
 		} else if ((cmd == CMD_SIGN || cmd == CMD_VERIFY) && !strcmp(*argv, "-verbose")) {
-			g_verbose = 1;
+			options.verbose = 1;
 #ifdef WITH_GSF
 		} else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-add-msi-dse")) {
-			add_msi_dse = 1;
+			options.add_msi_dse = 1;
 #endif
 		} else if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && !strcmp(*argv, "-CAfile")) {
 			if (--argc < 1) usage(argv0, "all");
-			OPENSSL_free(cafile);
-			cafile = OPENSSL_strdup(*++argv);
+			OPENSSL_free(options.cafile);
+			options.cafile = OPENSSL_strdup(*++argv);
 		} else if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && !strcmp(*argv, "-CRLfile")) {
 			if (--argc < 1) usage(argv0, "all");
-			crlfile = OPENSSL_strdup(*++argv);
+			options.crlfile = OPENSSL_strdup(*++argv);
 		} else if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && !strcmp(*argv, "-untrusted")) {
 			if (--argc < 1) usage(argv0, "all");
-			OPENSSL_free(untrusted);
-			untrusted = OPENSSL_strdup(*++argv);
+			OPENSSL_free(options.untrusted);
+			options.untrusted = OPENSSL_strdup(*++argv);
 		} else if ((cmd == CMD_VERIFY) && !strcmp(*argv, "-require-leaf-hash")) {
 			if (--argc < 1) usage(argv0, "all");
-			leafhash = (*++argv);
+			options.leafhash = (*++argv);
 		} else if (!strcmp(*argv, "-v") || !strcmp(*argv, "--version")) {
 			printf(PACKAGE_STRING ", using:\n\t%s\n\t%s\n",
 				SSLeay_version(SSLEAY_VERSION),
@@ -4463,62 +4481,62 @@ int main(int argc, char **argv) {
 			ap = *(++argv);
 			for (i=0; ap[i]; i++) ap[i] = tolower((int)ap[i]);
 			if (!strcmp(ap, "low")) {
-				jp = 0;
+				options.jp = 0;
 			} else if (!strcmp(ap, "medium")) {
-				jp = 1;
+				options.jp = 1;
 			} else if (!strcmp(ap, "high")) {
-				jp = 2;
+				options.jp = 2;
 			}
-			if (jp != 0) usage(argv0, "all"); /* XXX */
+			if (options.jp != 0) usage(argv0, "all"); /* XXX */
 		} else {
 			failarg = *argv;
 			break;
 		}
 	}
 
-	if (!infile && argc > 0) {
-		infile = *(argv++);
+	if (!options.infile && argc > 0) {
+		options.infile = *(argv++);
 		argc--;
 	}
 
-	if (cmd != CMD_VERIFY && (!outfile && argc > 0)) {
+	if (cmd != CMD_VERIFY && (!options.outfile && argc > 0)) {
 		if (!strcmp(*argv, "-out")) {
 			argv++;
 			argc--;
 		}
 		if (argc > 0) {
-			outfile = *(argv++);
+			options.outfile = *(argv++);
 			argc--;
 		}
 	}
 
-	if (argc > 0 || (nturl && ntsurl) || !infile ||
-		(cmd != CMD_VERIFY && !outfile) ||
-		(cmd == CMD_SIGN && !((certfile && keyfile) || pkcs12file || p11module))) {
+	if (argc > 0 || (nturl && ntsurl) || !options.infile ||
+		(cmd != CMD_VERIFY && !options.outfile) ||
+		(cmd == CMD_SIGN && !((options.certfile && options.keyfile) ||
+			options.pkcs12file || options.p11module))) {
 		if (failarg)
 			fprintf(stderr, "Unknown option: %s\n", failarg);
 		usage(argv0, "all");
 	}
 
-	if (!read_password(readpass, askpass, &pass))
+	if (!read_password(&options))
 		goto err_cleanup;
 
 	if (cmd == CMD_SIGN) {
 		/* Read certificate and key */
-		pvkfile = read_key(&keyfile, p11module);
-		if (!read_certificate(pkcs12file, pvkfile, certfile, xcertfile, keyfile,
-				p11module, p11engine, &pass, &pkey, &cert, &certs, &xcerts))
+		pvkfile = read_key(&options);
+		if (!read_certificate(&options, pvkfile, &pkey, &cert, &certs, &xcerts))
 			goto err_cleanup;
 	}
 
 	/* Check if indata is cab or pe */
-	filesize = get_file_size(infile);
+	filesize = get_file_size(options.infile);
 	if (filesize == 0)
 		goto err_cleanup;
 
-	indata = map_file(infile, filesize);
+	indata = map_file(options.infile, filesize);
 	if (indata == NULL)
-		DO_EXIT_1("Failed to open file: %s\n", infile);
+		DO_EXIT_1("Failed to open file: %s\n", options.infile);
 
 	/* reset header */
 	memset(&header, 0, sizeof(FILE_HEADER));
@@ -4535,55 +4553,56 @@ int main(int argc, char **argv) {
 		gsf_initialized = 1;
 #endif
 	} else {
-		DO_EXIT_1("Unrecognized file type: %s\n", infile);
+		DO_EXIT_1("Unrecognized file type: %s\n", options.infile);
 	}
 
 	hash = BIO_new(BIO_f_md());
-	BIO_set_md(hash, md);
+	BIO_set_md(hash, options.md);
 
 	if (type == FILE_TYPE_CAB) {
-		if (pagehash == 1)
+		if (options.pagehash == 1)
 			fprintf(stderr, "Warning: -ph option is only valid for PE files\n");
 #ifdef WITH_GSF
-		if (add_msi_dse == 1)
+		if (options.add_msi_dse == 1)
 			fprintf(stderr, "Warning: -add-msi-dse option is only valid for MSI files\n");
 #endif
-		if (!verify_cab_header(indata, infile, filesize, &header))
+		if (!verify_cab_header(indata, options.infile, filesize, &header))
 			goto err_cleanup;
 
 	} else if (type == FILE_TYPE_PE) {
-		if (jp >= 0)
+		if (options.jp >= 0)
 			fprintf(stderr, "Warning: -jp option is only valid for CAB files\n");
 #ifdef WITH_GSF
-		if (add_msi_dse == 1)
+		if (options.add_msi_dse == 1)
 			fprintf(stderr, "Warning: -add-msi-dse option is only valid for MSI files\n");
 #endif
-		if (!verify_pe_header(indata, infile, filesize, &header))
+		if (!verify_pe_header(indata, options.infile, filesize, &header))
 			goto err_cleanup;
 
 	} else if (type == FILE_TYPE_MSI) {
-		if (pagehash == 1)
+		if (options.pagehash == 1)
 			fprintf(stderr, "Warning: -ph option is only valid for PE files\n");
-		if (jp >= 0)
+		if (options.jp >= 0)
 			fprintf(stderr, "Warning: -jp option is only valid for CAB files\n");
 
 #ifdef WITH_GSF
 		GsfInput *src;
 		GsfInfile *ole;
 
-		src = gsf_input_stdio_new(infile, NULL);
+		src = gsf_input_stdio_new(options.infile, NULL);
 		if (!src)
-			DO_EXIT_1("Error opening file %s\n", infile);
+			DO_EXIT_1("Error opening file %s\n", options.infile);
 		ole = gsf_infile_msole_new(src, NULL);
 
 		if (cmd == CMD_EXTRACT) {
-			ret = msi_extract_file(ole, outfile, output_pkcs7);
+			ret = msi_extract_file(ole, &options);
 			goto skip_signing;
 		} else if (cmd == CMD_VERIFY) {
-			ret = msi_verify_file(ole, leafhash, cafile, crlfile, untrusted);
+			ret = msi_verify_file(ole, &options);
 			goto skip_signing;
-		} else if ((cmd == CMD_SIGN && nest) || (cmd == CMD_ATTACH && nest) || cmd == CMD_ADD) {
-			if (!msi_check_MsiDigitalSignatureEx(ole, md))
+		} else if ((cmd == CMD_SIGN && options.nest) ||
+				(cmd == CMD_ATTACH && options.nest) || cmd == CMD_ADD) {
+			if (!msi_check_MsiDigitalSignatureEx(ole, options.md))
 				goto err_cleanup;
 			cursig = msi_extract_signature_to_pkcs7(ole);
 			if (cursig == NULL) {
@@ -4593,15 +4612,15 @@ int main(int argc, char **argv) {
 				sig = cursig;
 			}
 		}
-		sink = gsf_output_stdio_new(outfile, NULL);
+		sink = gsf_output_stdio_new(options.outfile, NULL);
 		if (!sink)
-			DO_EXIT_1("Error opening output file %s\n", outfile);
+			DO_EXIT_1("Error opening output file %s\n", options.outfile);
 		outole = gsf_outfile_msole_new(sink);
 
 		BIO_push(hash, BIO_new(BIO_s_null()));
-		if (add_msi_dse) {
+		if (options.add_msi_dse) {
 			p_msiex = malloc(EVP_MAX_MD_SIZE);
-			if (!msi_calc_MsiDigitalSignatureEx(ole, md, hash, p_msiex, &len_msiex))
+			if (!msi_calc_MsiDigitalSignatureEx(ole, options.md, hash, p_msiex, &len_msiex))
 				goto err_cleanup;
 		}
 		if (!msi_handle_dir(ole, outole, hash)) {
@@ -4613,25 +4632,25 @@ int main(int argc, char **argv) {
 			g_object_unref(sink);
 		}
 #else
-		DO_EXIT_1("libgsf is not available, msi support is disabled: %s\n", infile);
+		DO_EXIT_1("libgsf is not available, msi support is disabled: %s\n", options.infile);
 #endif
 	}
 
 	if ((type == FILE_TYPE_CAB || type == FILE_TYPE_PE) && (cmd != CMD_VERIFY)) {
 		/* Create outdata file */
-		outdata = BIO_new_file(outfile, "w+bx");
+		outdata = BIO_new_file(options.outfile, "w+bx");
 		if (outdata == NULL)
-			DO_EXIT_1("Failed to create file: %s\n", outfile);
+			DO_EXIT_1("Failed to create file: %s\n", options.outfile);
 		BIO_push(hash, outdata);
 	}
 
 	if (type == FILE_TYPE_CAB) {
 		if (!(header.flags & FLAG_RESERVE_PRESENT) &&
 				(cmd == CMD_REMOVE || cmd == CMD_EXTRACT)) {
-			DO_EXIT_1("CAB file does not have any signature: %s\n", infile);
+			DO_EXIT_1("CAB file does not have any signature: %s\n", options.infile);
 		}
 		if (cmd == CMD_EXTRACT) {
-			ret = extract_cab_file(indata, &header, outdata, output_pkcs7);
+			ret = extract_cab_file(indata, &header, outdata, options.output_pkcs7);
 			goto skip_signing;
 		}
 		if (cmd == CMD_REMOVE) {
@@ -4639,10 +4658,11 @@ int main(int argc, char **argv) {
 			goto skip_signing;
 		}
 		if (cmd == CMD_VERIFY) {
-			ret = verify_cab_file(indata, &header, leafhash, cafile, crlfile, untrusted);
+			ret = verify_cab_file(indata, &header, &options);
 			goto skip_signing;
 		}
-		if ((cmd == CMD_SIGN && nest) || (cmd == CMD_ATTACH && nest) || cmd == CMD_ADD) {
+		if ((cmd == CMD_SIGN && options.nest) ||
+				(cmd == CMD_ATTACH && options.nest) || cmd == CMD_ADD) {
 			cursig = extract_existing_cab_pkcs7(indata, &header);
 			if (!cursig)
 				DO_EXIT_0("Unable to extract existing signature\n");
@@ -4657,12 +4677,13 @@ int main(int argc, char **argv) {
 
 	} else if (type == FILE_TYPE_PE) {
 		if ((cmd == CMD_REMOVE || cmd == CMD_EXTRACT) && header.sigpos == 0)
-			DO_EXIT_1("PE file does not have any signature: %s\n", infile);
+			DO_EXIT_1("PE file does not have any signature: %s\n", options.infile);
 		if (cmd == CMD_EXTRACT) {
-			ret = extract_pe_file(indata, &header, outdata, output_pkcs7);
+			ret = extract_pe_file(indata, &header, outdata, options.output_pkcs7);
 			goto skip_signing;
 		}
-		if ((cmd == CMD_SIGN && nest) || (cmd == CMD_ATTACH && nest) || cmd == CMD_ADD) {
+		if ((cmd == CMD_SIGN && options.nest) ||
+				(cmd == CMD_ATTACH && options.nest) || cmd == CMD_ADD) {
 			cursig = extract_existing_pe_pkcs7(indata, &header);
 			if (!cursig)
 				DO_EXIT_0("Unable to extract existing signature\n");
@@ -4670,7 +4691,7 @@ int main(int argc, char **argv) {
 				sig = cursig;
 		}
 		if (cmd == CMD_VERIFY) {
-			ret = verify_pe_file(indata, &header, leafhash, cafile, crlfile, untrusted);
+			ret = verify_pe_file(indata, &header, &options);
 			goto skip_signing;
 		}
 		if (header.sigpos > 0) {
@@ -4684,7 +4705,7 @@ int main(int argc, char **argv) {
 		goto add_only;
 
 	if (cmd == CMD_ATTACH) {
-		sig = attach_sigfile(sigfile, type);
+		sig = attach_sigfile(options.sigfile, type);
 		if (!sig)
 			DO_EXIT_0("Unable to extract valid signature\n");
 		goto add_only;
@@ -4694,13 +4715,12 @@ int main(int argc, char **argv) {
 		goto skip_signing;
 
 	sig = PKCS7_new();
-	if (!create_new_signature(sig, certs, xcerts, cert, pkey, md, signing_time,
-				type, jp, comm, desc, url))
+	if (!create_new_signature(sig, certs, xcerts, cert, pkey, type, &options))
 		DO_EXIT_0("Creating a new signature failed\n");
 
-	get_indirect_data_blob(&p, &len, md, type, pagehash, indata,
+	get_indirect_data_blob(&p, &len, options.md, type, options.pagehash, indata,
 				header.header_size, header.pe32plus, header.fileend);
-	len -= EVP_MD_size(md);
+	len -= EVP_MD_size(options.md);
 	memcpy(buf, p, len);
 	OPENSSL_free(p);
 
@@ -4711,13 +4731,13 @@ add_only:
 
 #ifdef ENABLE_CURL
 	/* add counter-signature/timestamp */
-	if (nturl && add_timestamp_authenticode(sig, turl, nturl, proxy, noverifypeer))
+	if (nturl && add_timestamp_authenticode(sig, nturl, &options))
 		DO_EXIT_0("Authenticode timestamping failed\n");
-	if (ntsurl && add_timestamp_rfc3161(sig, tsurl, ntsurl, proxy, md, noverifypeer))
+	if (ntsurl && add_timestamp_rfc3161(sig, ntsurl, &options))
 		DO_EXIT_0("RFC 3161 timestamping failed\n");
 #endif
 
-	if (addBlob && add_unauthenticated_blob(sig))
+	if (options.addBlob && add_unauthenticated_blob(sig))
 		DO_EXIT_0("Adding unauthenticated blob failed\n");
 
 #if 0
@@ -4725,10 +4745,10 @@ add_only:
 		DO_EXIT_0("PKCS7 output failed\n");
 #endif
 
-	if (nest) {
+	if (options.nest) {
 		if (cursig == NULL)
 			DO_EXIT_0("Internal error: No 'cursig' was extracted\n")
-		if (pkcs7_set_nested_signature(cursig, sig, signing_time) == 0)
+		if (pkcs7_set_nested_signature(cursig, sig, options.signing_time) == 0)
 			DO_EXIT_0("Unable to append the nested signature to the current signature\n");
 		outsig = cursig;
 	} else {
@@ -4762,9 +4782,9 @@ add_only:
 		/* Only output signatures if we're signing. */
 		if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
 			if (!msi_add_DigitalSignature(outole, p, len))
-				DO_EXIT_1("Failed to write MSI 'DigitalSignature' signature to %s\n", infile);
+				DO_EXIT_1("Failed to write MSI 'DigitalSignature' signature to %s\n", options.infile);
 			if (p_msiex != NULL && !msi_add_MsiDigitalSignatureEx(outole, p_msiex, len_msiex))
-				DO_EXIT_1("Failed to write MSI 'MsiDigitalSignatureEx' signature to %s\n", infile);
+				DO_EXIT_1("Failed to write MSI 'MsiDigitalSignatureEx' signature to %s\n", options.infile);
 			gsf_output_close(GSF_OUTPUT(outole));
 			g_object_unref(sink);
 		}
@@ -4803,27 +4823,27 @@ skip_signing:
 
 	if (cmd == CMD_ATTACH) {
 		if (type == FILE_TYPE_PE) {
-			outdatasize = get_file_size(outfile);
+			outdatasize = get_file_size(options.outfile);
 			if (!outdatasize)
 				DO_EXIT_0("Error verifying result\n");
-			outdataverify = map_file(outfile, outdatasize);
+			outdataverify = map_file(options.outfile, outdatasize);
 			if (!outdataverify)
 				DO_EXIT_0("Error verifying result\n");
-			if (!verify_pe_header(outdataverify, outfile, outdatasize, &header))
+			if (!verify_pe_header(outdataverify, options.outfile, outdatasize, &header))
 				goto err_cleanup;
-			ret = verify_pe_file(outdataverify, &header, leafhash, cafile, crlfile, untrusted);
+			ret = verify_pe_file(outdataverify, &header, &options);
 			if (ret)
 				DO_EXIT_0("Signature mismatch\n");
 		} else if (type == FILE_TYPE_CAB) {
-			outdatasize = get_file_size(outfile);
+			outdatasize = get_file_size(options.outfile);
 			if (!outdatasize)
 				DO_EXIT_0("Error verifying result\n");
-			outdataverify = map_file(outfile, outdatasize);
+			outdataverify = map_file(options.outfile, outdatasize);
 			if (!outdataverify)
 				DO_EXIT_0("Error verifying result\n");
-			if (!verify_cab_header(outdataverify, outfile, outdatasize, &header))
+			if (!verify_cab_header(outdataverify, options.outfile, outdatasize, &header))
 				goto err_cleanup;
-			ret = verify_cab_file(outdataverify, &header, leafhash, cafile, crlfile, untrusted);
+			ret = verify_cab_file(outdataverify, &header, &options);
 			if (ret)
 				DO_EXIT_0("Signature mismatch\n");
 		} else if (type == FILE_TYPE_MSI) {
@@ -4831,30 +4851,30 @@ skip_signing:
 			GsfInput *src;
 			GsfInfile *ole;
 
-			src = gsf_input_stdio_new(outfile, NULL);
+			src = gsf_input_stdio_new(options.outfile, NULL);
 			if (!src)
-				DO_EXIT_1("Error opening file %s\n", outfile);
+				DO_EXIT_1("Error opening file %s\n", options.outfile);
 			ole = gsf_infile_msole_new(src, NULL);
 			g_object_unref(src);
-			ret = msi_verify_file(ole, leafhash, cafile, crlfile, untrusted);
+			ret = msi_verify_file(ole, &options);
 			g_object_unref(ole);
 			if (ret)
 				DO_EXIT_0("Signature mismatch\n");
 #else
-			DO_EXIT_1("libgsf is not available, msi support is disabled: %s\n", infile);
+			DO_EXIT_1("libgsf is not available, msi support is disabled: %s\n", options.infile);
 #endif
 		} else {
-			DO_EXIT_1("Unknown input type for file: %s\n", infile);
+			DO_EXIT_1("Unknown input type for file: %s\n", options.infile);
 		}
 		printf("Signature successfully attached\n");
 	} else {
 		printf(ret ? "Failed\n" : "Succeeded\n");
 	}
 
-	OPENSSL_free(cafile);
-	OPENSSL_free(untrusted);
-	if (crlfile)
-		OPENSSL_free(crlfile);
+	OPENSSL_free(options.cafile);
+	OPENSSL_free(options.untrusted);
+	if (options.crlfile)
+		OPENSSL_free(options.crlfile);
 	cleanup_lib_state();
 
 	return ret;
@@ -4872,7 +4892,7 @@ err_cleanup:
 	if (hash)
 		BIO_free_all(hash);
 	if (outdata)
-		unlink(outfile);
+		unlink(options.outfile);
 	fprintf(stderr, "\nFailed\n");
 	cleanup_lib_state();
 	return -1;
