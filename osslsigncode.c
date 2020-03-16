@@ -207,7 +207,9 @@ typedef struct {
 	time_t signing_time;
 #ifdef ENABLE_CURL
 	char *turl[MAX_TS_SERVERS];
+	int nturl;
 	char *tsurl[MAX_TS_SERVERS];
+	int ntsurl;
 	char *proxy;
 	int noverifypeer;
 #endif
@@ -804,7 +806,7 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	if (c) {
 		BIO_free_all(bin);
 		if (verbose)
-			fprintf(stderr, "CURL failure: %s\n", curl_easy_strerror(c));
+			fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(c), url);
 	} else {
 		(void)BIO_flush(bin);
 
@@ -905,23 +907,23 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	return (int)c;
 }
 
-static int add_timestamp_authenticode(PKCS7 *sig, int nurls, GLOBAL_OPTIONS *options)
+static int add_timestamp_authenticode(PKCS7 *sig, GLOBAL_OPTIONS *options)
 {
 	int i;
-	for (i=0; i<nurls; i++) {
+	for (i=0; i<options->nturl; i++) {
 		int res = add_timestamp(sig, options->turl[i], options->proxy, 0, NULL,
-				options->verbose || nurls == 1, options->noverifypeer);
+				options->verbose || options->nturl == 1, options->noverifypeer);
 		if (!res) return 0;
 	}
 	return -1;
 }
 
-static int add_timestamp_rfc3161(PKCS7 *sig, int nurls, GLOBAL_OPTIONS *options)
+static int add_timestamp_rfc3161(PKCS7 *sig, GLOBAL_OPTIONS *options)
 {
 	int i;
-	for (i=0; i<nurls; i++) {
+	for (i=0; i<options->ntsurl; i++) {
 		int res = add_timestamp(sig, options->tsurl[i], options->proxy, 1, options->md,
-				options->verbose || nurls == 1, options->noverifypeer);
+				options->verbose || options->ntsurl == 1, options->noverifypeer);
 		if (!res) return 0;
 	}
 	return -1;
@@ -4263,8 +4265,7 @@ static cmd_type_t get_command(char **argv)
 	return CMD_SIGN;
 }
 
-static void main_configure(int argc, char **argv, cmd_type_t *cmd,
-			GLOBAL_OPTIONS *options, int *nturl, int *ntsurl)
+static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS *options)
 {
 	int i;
 	char *failarg = NULL;
@@ -4364,12 +4365,10 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd,
 #ifdef ENABLE_CURL
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD) && !strcmp(*argv, "-t")) {
 			if (--argc < 1) usage(argv0, "all");
-			options->turl[*nturl] = *(++argv);
-			*nturl += 1;
+			options->turl[options->nturl++] = *(++argv);
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD) && !strcmp(*argv, "-ts")) {
 			if (--argc < 1) usage(argv0, "all");
-			options->tsurl[*ntsurl] = *(++argv);
-			*ntsurl += 1;
+			options->tsurl[options->ntsurl++] = *(++argv);
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD) && !strcmp(*argv, "-p")) {
 			if (--argc < 1) usage(argv0, "all");
 			options->proxy = *(++argv);
@@ -4469,7 +4468,7 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd,
 		}
 	}
 
-	if (argc > 0 || (*nturl && *ntsurl) || !options->infile ||
+	if (argc > 0 || (options->nturl && options->ntsurl) || !options->infile ||
 		(*cmd != CMD_VERIFY && !options->outfile) ||
 		(*cmd == CMD_SIGN && !((options->certfile && options->keyfile) ||
 			options->pkcs12file || options->p11module))) {
@@ -4493,7 +4492,6 @@ int main(int argc, char **argv)
 
 	static char buf[64*1024];
 	char *indata, *outdataverify, *pvkfile = NULL;
-	int nturl = 0, ntsurl = 0;
 	u_char *p = NULL;
 	int ret = 0, len = 0;
 	size_t padlen = 0;
@@ -4523,7 +4521,7 @@ int main(int argc, char **argv)
 		!OBJ_create(SPC_NESTED_SIGNATURE_OBJID, NULL, NULL))
 		DO_EXIT_0("Failed to add objects\n");
 
-	main_configure(argc, argv, &cmd, &options, &nturl, &ntsurl);
+	main_configure(argc, argv, &cmd, &options);
 
 	if (!read_password(&options))
 		goto err_cleanup;
@@ -4737,9 +4735,9 @@ add_only:
 
 #ifdef ENABLE_CURL
 	/* add counter-signature/timestamp */
-	if (nturl && add_timestamp_authenticode(sig, nturl, &options))
+	if (options.nturl && add_timestamp_authenticode(sig, &options))
 		DO_EXIT_0("Authenticode timestamping failed\n");
-	if (ntsurl && add_timestamp_rfc3161(sig, ntsurl, &options))
+	if (options.ntsurl && add_timestamp_rfc3161(sig, &options))
 		DO_EXIT_0("RFC 3161 timestamping failed\n");
 #endif
 
