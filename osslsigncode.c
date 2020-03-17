@@ -192,6 +192,7 @@ typedef struct {
 	char *certfile;
 	char *xcertfile;
 	char *keyfile;
+	char *pvkfile;
 	char *pkcs12file;
 	int output_pkcs7;
 	char *p11engine;
@@ -237,6 +238,13 @@ typedef struct {
 	size_t fileend;
 	size_t flags;
 } FILE_HEADER;
+
+typedef struct {
+	EVP_PKEY *pkey;
+	X509 *cert;
+	STACK_OF(X509) *certs;
+	STACK_OF(X509) *xcerts;
+} CRYPTO_PARAMS;
 
 /*
   ASN.1 definitions (more or less from official MS Authenticode docs)
@@ -3750,8 +3758,8 @@ static int add_opus_attribute(PKCS7_SIGNER_INFO *si, char *desc, char *url)
 	return 1; /* OK */
 }
 
-static int create_new_signature(PKCS7 *sig, STACK_OF(X509) *certs, STACK_OF(X509) *xcerts,
-			X509 *cert, EVP_PKEY *pkey, file_type_t type, GLOBAL_OPTIONS *options)
+static int create_new_signature(PKCS7 *sig, file_type_t type,
+			GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 {
 	int i;
 	PKCS7_SIGNER_INFO *si;
@@ -3759,16 +3767,16 @@ static int create_new_signature(PKCS7 *sig, STACK_OF(X509) *certs, STACK_OF(X509
 
 	PKCS7_set_type(sig, NID_pkcs7_signed);
 	si = NULL;
-	if (cert != NULL)
-		si = PKCS7_add_signature(sig, cert, pkey, options->md);
+	if (cparams->cert != NULL)
+		si = PKCS7_add_signature(sig, cparams->cert, cparams->pkey, options->md);
 
-	for (i=0; si == NULL && i<sk_X509_num(certs); i++) {
-		signcert = sk_X509_value(certs, i);
+	for (i=0; si == NULL && i<sk_X509_num(cparams->certs); i++) {
+		signcert = sk_X509_value(cparams->certs, i);
 		/* X509_print_fp(stdout, signcert); */
-		si = PKCS7_add_signature(sig, signcert, pkey, options->md);
+		si = PKCS7_add_signature(sig, signcert, cparams->pkey, options->md);
 	}
-	EVP_PKEY_free(pkey);
-	pkey = NULL;
+	EVP_PKEY_free(cparams->pkey);
+	cparams->pkey = NULL;
 
 	if (si == NULL) {
 		fprintf(stderr, "PKCS7_add_signature failed\n");
@@ -3792,25 +3800,25 @@ static int create_new_signature(PKCS7 *sig, STACK_OF(X509) *certs, STACK_OF(X509
 
 	PKCS7_content_new(sig, NID_pkcs7_data);
 
-	if (cert != NULL) {
-		PKCS7_add_certificate(sig, cert);
-		X509_free(cert);
-		cert = NULL;
+	if (cparams->cert != NULL) {
+		PKCS7_add_certificate(sig, cparams->cert);
+		X509_free(cparams->cert);
+		cparams->cert = NULL;
 	}
-	if (xcerts) {
-		for(i = sk_X509_num(xcerts)-1; i>=0; i--)
-			PKCS7_add_certificate(sig, sk_X509_value(xcerts, i));
+	if (cparams->xcerts) {
+		for(i = sk_X509_num(cparams->xcerts)-1; i>=0; i--)
+			PKCS7_add_certificate(sig, sk_X509_value(cparams->xcerts, i));
 	}
-	for (i = sk_X509_num(certs)-1; i>=0; i--)
-		PKCS7_add_certificate(sig, sk_X509_value(certs, i));
+	for (i = sk_X509_num(cparams->certs)-1; i>=0; i--)
+		PKCS7_add_certificate(sig, sk_X509_value(cparams->certs, i));
 
-	if (certs) {
-		sk_X509_free(certs);
-		certs = NULL;
+	if (cparams->certs) {
+		sk_X509_free(cparams->certs);
+		cparams->certs = NULL;
 	}
-	if (xcerts) {
-		sk_X509_free(xcerts);
-		xcerts = NULL;
+	if (cparams->xcerts) {
+		sk_X509_free(cparams->xcerts);
+		cparams->xcerts = NULL;
 	}
 
 	return 1; /* OK */
@@ -4016,8 +4024,7 @@ static char *read_key(GLOBAL_OPTIONS *options)
 		return NULL;
 }
 
-static int read_certificate(GLOBAL_OPTIONS *options, char *pvkfile, EVP_PKEY **pkey,
-			X509 **cert, STACK_OF(X509) **certs, STACK_OF(X509) **xcerts)
+static int read_crypto_params(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 {
 	PKCS12 *p12;
 	PKCS7 *p7 = NULL, *p7x = NULL;
@@ -4026,6 +4033,10 @@ static int read_certificate(GLOBAL_OPTIONS *options, char *pvkfile, EVP_PKEY **p
 	ENGINE *dyn, *pkcs11;
 	int ret = 1;
 
+	/* reset crypto */
+	memset(cparams, 0, sizeof(CRYPTO_PARAMS));
+
+	options->pvkfile = read_key(options);
 	if (options->pkcs12file != NULL) {
 		if ((btmp = BIO_new_file(options->pkcs12file, "rb")) == NULL ||
 				(p12 = d2i_PKCS12_bio(btmp, NULL)) == NULL) {
@@ -4033,24 +4044,24 @@ static int read_certificate(GLOBAL_OPTIONS *options, char *pvkfile, EVP_PKEY **p
 			ret = 0; /* FAILED */
 		}
 		BIO_free(btmp);
-		if (!PKCS12_parse(p12, options->pass ? options->pass : "", pkey, cert, certs)) {
+		if (!PKCS12_parse(p12, options->pass ? options->pass : "", &cparams->pkey, &cparams->cert, &cparams->certs)) {
 			fprintf(stderr, "Failed to parse PKCS#12 file: %s (Wrong password?)\n", options->pkcs12file);
 			ret = 0; /* FAILED */
 		}
 		PKCS12_free(p12);
-	} else if (pvkfile != NULL) {
+	} else if (options->pvkfile != NULL) {
 		if ((btmp = BIO_new_file(options->certfile, "rb")) == NULL ||
 				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
-				(*certs = PEM_read_certs(btmp, "")) == NULL)) {
+				(cparams->certs = PEM_read_certs(btmp, "")) == NULL)) {
 			fprintf(stderr, "Failed to read certificate file: %s\n", options->certfile);
 			ret = 0; /* FAILED */
 		}
 		BIO_free(btmp);
-		if ((btmp = BIO_new_file(pvkfile, "rb")) == NULL ||
-				((*pkey = b2i_PVK_bio(btmp, NULL, options->pass ? options->pass : "")) == NULL &&
+		if ((btmp = BIO_new_file(options->pvkfile, "rb")) == NULL ||
+				((cparams->pkey = b2i_PVK_bio(btmp, NULL, options->pass ? options->pass : "")) == NULL &&
 				(BIO_seek(btmp, 0) == 0) &&
-				(*pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL)) {
-			fprintf(stderr, "Failed to read PVK file: %s\n", pvkfile);
+				(cparams->pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL)) {
+			fprintf(stderr, "Failed to read PVK file: %s\n", options->pvkfile);
 			ret = 0; /* FAILED */
 		}
 		BIO_free(btmp);
@@ -4098,14 +4109,14 @@ static int read_certificate(GLOBAL_OPTIONS *options, char *pvkfile, EVP_PKEY **p
 			fprintf(stderr, "Failed to initialized pkcs11 engine\n");
 			ret = 0; /* FAILED */
 		}
-		*pkey = ENGINE_load_private_key(pkcs11, options->keyfile, NULL, NULL);
-		if (*pkey == NULL) {
+		cparams->pkey = ENGINE_load_private_key(pkcs11, options->keyfile, NULL, NULL);
+		if (cparams->pkey == NULL) {
 			fprintf(stderr, "Failed to load private key %s\n", options->keyfile);
 			ret = 0; /* FAILED */
 		}
 		if ((btmp = BIO_new_file(options->certfile, "rb")) == NULL ||
 				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
-				(*certs = PEM_read_certs(btmp, "")) == NULL)) {
+				(cparams->certs = PEM_read_certs(btmp, "")) == NULL)) {
 			fprintf(stderr, "Failed to read certificate file: %s\n", options->certfile);
 			ret = 0; /* FAILED */
 		}
@@ -4113,30 +4124,30 @@ static int read_certificate(GLOBAL_OPTIONS *options, char *pvkfile, EVP_PKEY **p
 	} else {
 		if ((btmp = BIO_new_file(options->certfile, "rb")) == NULL ||
 				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
-				(*certs = PEM_read_certs(btmp, "")) == NULL)) {
+				(cparams->certs = PEM_read_certs(btmp, "")) == NULL)) {
 			fprintf(stderr, "Failed to read certificate file: %s\n", options->certfile);
 			ret = 0; /* FAILED */
 		}
 		BIO_free(btmp);
 		if ((btmp = BIO_new_file(options->keyfile, "rb")) == NULL ||
-				((*pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
+				((cparams->pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
 				(BIO_seek(btmp, 0) == 0) &&
-				(*pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, options->pass ? options->pass : "")) == NULL &&
+				(cparams->pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, options->pass ? options->pass : "")) == NULL &&
 				(BIO_seek(btmp, 0) == 0) &&
-				(*pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL)) {
+				(cparams->pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL)) {
 			fprintf(stderr, "Failed to read private key file: %s (Wrong password?)\n", options->keyfile);
 			ret = 0; /* FAILED */
 		}
 		BIO_free(btmp);
 	}
 
-	if (*certs == NULL && p7 != NULL)
-		*certs = sk_X509_dup(p7->d.sign->cert);
+	if (cparams->certs == NULL && p7 != NULL)
+		cparams->certs = sk_X509_dup(p7->d.sign->cert);
 
 	if (options->xcertfile) {
 		if ((btmp = BIO_new_file(options->xcertfile, "rb")) == NULL ||
 				((p7x = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
-				(*xcerts = PEM_read_certs(btmp, "")) == NULL)) {
+				(cparams->xcerts = PEM_read_certs(btmp, "")) == NULL)) {
 			fprintf(stderr, "Failed to read cross certificate file: %s\n", options->xcertfile);
 			ret = 0; /* FAILED */
 		}
@@ -4151,6 +4162,18 @@ static int read_certificate(GLOBAL_OPTIONS *options, char *pvkfile, EVP_PKEY **p
 	}
 
 	return ret; /* OK */
+}
+
+static void free_crypto_params(CRYPTO_PARAMS *cparams)
+{
+	if (cparams->pkey)
+		EVP_PKEY_free(cparams->pkey);
+	if (cparams->cert)
+		X509_free(cparams->cert);
+	if (cparams->certs)
+		sk_X509_free(cparams->certs);
+	if (cparams->xcerts)
+		sk_X509_free(cparams->xcerts);
 }
 
 static char *get_cafile(void)
@@ -4482,20 +4505,14 @@ int main(int argc, char **argv)
 {
 	GLOBAL_OPTIONS options;
 	FILE_HEADER header;
-
-	BIO *hash = NULL;
-	BIO *outdata = NULL;
+	CRYPTO_PARAMS cparams;
+	BIO *hash = NULL, *outdata = NULL;
 	PKCS7 *cursig = NULL, *outsig = NULL, *sig = NULL;
-	X509 *cert = NULL;
-	STACK_OF(X509) *certs = NULL, *xcerts = NULL;
-	EVP_PKEY *pkey = NULL;
-
 	static char buf[64*1024];
-	char *indata, *outdataverify, *pvkfile = NULL;
+	char *indata, *outdataverify;
 	u_char *p = NULL;
 	int ret = 0, len = 0;
-	size_t padlen = 0;
-	size_t filesize, outdatasize;
+	size_t padlen = 0, filesize, outdatasize;
 	file_type_t type;
 	cmd_type_t cmd;
 
@@ -4521,28 +4538,22 @@ int main(int argc, char **argv)
 		!OBJ_create(SPC_NESTED_SIGNATURE_OBJID, NULL, NULL))
 		DO_EXIT_0("Failed to add objects\n");
 
+	/* commands and options initialization */
 	main_configure(argc, argv, &cmd, &options);
-
 	if (!read_password(&options))
 		goto err_cleanup;
+	/* read key and certificates */
+	if (cmd == CMD_SIGN && !read_crypto_params(&options, &cparams))
+		goto err_cleanup;
 
-	if (cmd == CMD_SIGN) {
-		/* Read certificate and key */
-		pvkfile = read_key(&options);
-		if (!read_certificate(&options, pvkfile, &pkey, &cert, &certs, &xcerts))
-			goto err_cleanup;
-	}
-
-	/* Check if indata is cab or pe */
+	/* check if indata is cab or pe */
 	filesize = get_file_size(options.infile);
 	if (filesize == 0)
 		goto err_cleanup;
-
 	indata = map_file(options.infile, filesize);
 	if (indata == NULL)
 		DO_EXIT_1("Failed to open file: %s\n", options.infile);
-
-	/* reset header */
+	/* reset file header */
 	memset(&header, 0, sizeof(FILE_HEADER));
 	header.fileend = filesize;
 
@@ -4719,7 +4730,7 @@ int main(int argc, char **argv)
 		goto skip_signing;
 
 	sig = PKCS7_new();
-	if (!create_new_signature(sig, certs, xcerts, cert, pkey, type, &options))
+	if (!create_new_signature(sig, type, &options, &cparams))
 		DO_EXIT_0("Creating a new signature failed\n");
 
 	get_indirect_data_blob(&p, &len, options.md, type, options.pagehash, indata,
@@ -4885,14 +4896,7 @@ skip_signing:
 
 err_cleanup:
 	ERR_print_errors_fp(stderr);
-	if (certs)
-		sk_X509_free(certs);
-	if (xcerts)
-		sk_X509_free(xcerts);
-	if (cert)
-		X509_free(cert);
-	if (pkey)
-		EVP_PKEY_free(pkey);
+	free_crypto_params(&cparams);
 	if (hash)
 		BIO_free_all(hash);
 	if (outdata)
