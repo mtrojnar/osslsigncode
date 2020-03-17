@@ -3934,6 +3934,29 @@ static char *map_file(const char *infile, const off_t size)
 #endif
 	return indata;
 }
+static int get_file_type(char *indata, char *infile, file_type_t *type)
+{
+	static u_char msi_signature[] = {
+		0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1
+	};
+
+	if (!memcmp(indata, "MSCF", 4)) {
+		*type = FILE_TYPE_CAB;
+	} else if (!memcmp(indata, "MZ", 2)) {
+		*type = FILE_TYPE_PE;
+	} else if (!memcmp(indata, msi_signature, sizeof(msi_signature))) {
+		*type = FILE_TYPE_MSI;
+	#ifdef WITH_GSF
+		gsf_init();
+		gsf_initialized = 1;
+	#endif
+	} else {
+		printf("Unrecognized file type: %s\n", infile);
+		return 0; /* FAILED */
+	}
+
+	return 1; /* OK */
+}
 
 #ifdef PROVIDE_ASKPASS
 static char *getpassword(const char *prompt)
@@ -4516,10 +4539,6 @@ int main(int argc, char **argv)
 	file_type_t type;
 	cmd_type_t cmd;
 
-	static u_char msi_signature[] = {
-		0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1
-	};
-
 #ifdef WITH_GSF
 	GsfOutfile *outole = NULL;
 	GsfOutput *sink = NULL;
@@ -4557,19 +4576,8 @@ int main(int argc, char **argv)
 	memset(&header, 0, sizeof(FILE_HEADER));
 	header.fileend = filesize;
 
-	if (!memcmp(indata, "MSCF", 4)) {
-		type = FILE_TYPE_CAB;
-	} else if (!memcmp(indata, "MZ", 2)) {
-		type = FILE_TYPE_PE;
-	} else if (!memcmp(indata, msi_signature, sizeof(msi_signature))) {
-		type = FILE_TYPE_MSI;
-#ifdef WITH_GSF
-		gsf_init();
-		gsf_initialized = 1;
-#endif
-	} else {
-		DO_EXIT_1("Unrecognized file type: %s\n", options.infile);
-	}
+	if (!get_file_type(indata, options.infile, &type))
+		goto err_cleanup;
 
 	hash = BIO_new(BIO_f_md());
 	BIO_set_md(hash, options.md);
