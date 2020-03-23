@@ -1547,25 +1547,24 @@ static int print_cert(X509 *cert, int i)
 	return 1; /* OK */
 }
 
-static int find_signers(PKCS7 *p7, char *leafhash, int *leafok)
+static int find_signer(PKCS7 *p7, char *leafhash, int *leafok)
 {
 	STACK_OF(X509) *signers;
 	X509 *cert;
-	int i, count;
 
-	/* retrieve the signer's certificates from p7 */
+	/*
+	 * retrieve the signer's certificate from p7,
+	 * search only internal certificates if it was requested
+	 */
 	signers = PKCS7_get0_signers(p7, NULL, 0);
-	if (signers == NULL)
+	if (!signers || sk_X509_num(signers) != 1)
 		return 0; /* FAILED */
-	count = sk_X509_num(signers);
-	printf("Number of signers: %d\n", count);
-	for (i=0; i<count; i++) {
-		cert = sk_X509_value(signers, i);
-		if ((cert == NULL) || (!print_cert(cert, i)))
-			return 0; /* FAILED */
-		if (leafhash != NULL && *leafok == 0) {
-			*leafok = verify_leaf_hash(cert, leafhash) == 0;
-		}
+	printf("Signer's certificate:\n");
+	cert = sk_X509_value(signers, 0);
+	if ((cert == NULL) || (!print_cert(cert, 0)))
+		return 0; /* FAILED */
+	if (leafhash != NULL && *leafok == 0) {
+		*leafok = verify_leaf_hash(cert, leafhash) == 0;
 	}
 	sk_X509_free(signers);
 	return 1; /* OK */
@@ -1941,7 +1940,7 @@ static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, char *untrusted)
 		ret = 1; /* FAILED */
 	}
 	if (!ret)
-		verok = PKCS7_verify(tmstamp_p7, tmstamp_p7->d.sign->cert, store, 0, NULL, 0);
+		verok = PKCS7_verify(tmstamp_p7, NULL, store, 0, NULL, 0);
 	printf("\nTimestamp Server Signature verification: %s\n", verok ? "ok" : "failed");
 	if (!verok) {
 		ERR_print_errors_fp(stdout);
@@ -1962,7 +1961,7 @@ static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, char *untrusted)
 static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, char *cafile, char *crlfile)
 {
 	X509_STORE *store = NULL;
-	int ret = 0, verok = 0, i;
+	int ret = 0, verok = 0;
 	size_t seqhdrlen;
 	BIO *bio = NULL;
 	int day, sec;
@@ -1988,28 +1987,25 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, char *ca
 			ret = 1; /* FAILED */
 		}
 	}
-	if (!ret)
-		verok = PKCS7_verify(p7, p7->d.sign->cert, store, bio, NULL, 0);
 
 	/* check extended key usage flag XKU_CODE_SIGN */
 	signers = PKCS7_get0_signers(p7, NULL, 0);
-	for (i=0; i<sk_X509_num(signers); i++)
-		if (!(X509_get_extension_flags(sk_X509_value(signers, i)) && XKU_CODE_SIGN)) {
-			verok = 0;
-			ret = 1; /* FAILED */
-		}
-
-	if (crlfile) {
-		if (!load_crlfile_lookup(store, crlfile)) {
-			fprintf(stderr, "Failed to add store lookup file\n");
-			ret = 1; /* FAILED */
-		}
-		if (!ret)
-			verok = PKCS7_verify(p7, p7->d.sign->cert, store, bio, NULL, 0);
-		printf("CRL verification: %s\n", verok ? "ok" : "failed");
-		if (!verok) {
-			ERR_print_errors_fp(stdout);
-			ret = 1; /* FAILED */
+	if (!signers || sk_X509_num(signers) != 1)
+		ret = 1; /* FAILED */
+	if (!(X509_get_extension_flags(sk_X509_value(signers, 0)) && XKU_CODE_SIGN)) {
+		fprintf(stderr, "Unsupported Signer's certificate purpose\n");
+		ret = 1; /* FAILED */
+	}
+	if (!ret) {
+		verok = PKCS7_verify(p7, NULL, store, bio, NULL, 0);
+		if (crlfile) {
+			if (!load_crlfile_lookup(store, crlfile)) {
+				fprintf(stderr, "Failed to add store lookup file\n");
+				ret = 1; /* FAILED */
+			}
+			if (!ret)
+				verok = PKCS7_verify(p7, NULL, store, bio, NULL, 0);
+			printf("CRL verification: %s\n", verok ? "ok" : "failed");
 		}
 	}
 	printf("Signature verification: %s\n", verok ? "ok" : "failed");
@@ -2017,6 +2013,7 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, char *ca
 		ERR_print_errors_fp(stdout);
 		ret = 1; /* FAILED */
 	}
+
 	BIO_free(bio);
 	X509_STORE_free(store);
 
@@ -2029,7 +2026,7 @@ static int verify_pkcs7(PKCS7 *p7, char *leafhash, char *cafile, char *crlfile, 
 	ASN1_UTCTIME *timestamp_time = NULL;
 	int ret = 0, leafok = 0;
 
-	if (!find_signers(p7, leafhash, &leafok))
+	if (!find_signer(p7, leafhash, &leafok))
 		printf("Find signers error"); /* FAILED */
 	if (!print_certs(p7))
 		printf("Print certs error"); /* FAILED */
