@@ -1931,27 +1931,27 @@ static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, char *untrusted)
 {
 	X509_STORE *store = NULL;
 	PKCS7_SIGNER_INFO *si;
-	int ret = 0, verok = 0;
+	int ret = 1, verok = 0;
 
 	printf("TSA's certificates file: %s\n", untrusted);
 	store = X509_STORE_new();
 	if (!load_file_lookup(store, untrusted, X509_PURPOSE_TIMESTAMP_SIGN)) {
 		printf("\nUse the \"-untrusted\" option to add the CA cert bundle to verify timestamp server.\n");
-		ret = 1; /* FAILED */
+		ret = 0; /* FAILED */
 	}
-	if (!ret)
+	if (ret)
 		verok = PKCS7_verify(tmstamp_p7, NULL, store, 0, NULL, 0);
 	printf("\nTimestamp Server Signature verification: %s\n", verok ? "ok" : "failed");
 	if (!verok) {
 		ERR_print_errors_fp(stdout);
-		ret = 1; /* FAILED */
+		ret = 0; /* FAILED */
 	}
 	/* verify the hash provided from the trusted timestamp */
 	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
 	verok = TST_verify(tmstamp_p7, si);
 	if (!verok) {
 		ERR_print_errors_fp(stdout);
-		ret = 1; /* FAILED */
+		ret = 0; /* FAILED */
 	}
 	X509_STORE_free(store);
 
@@ -2040,12 +2040,11 @@ static int verify_pkcs7(PKCS7 *p7, char *leafhash, char *cafile, char *crlfile, 
 	printf("\nCAfile: %s\n", cafile);
 	if (crlfile)
 		printf("CRLfile: %s\n", crlfile);
-	if (tmstamp_p7)
-		ret |= verify_timestamp(p7, tmstamp_p7, untrusted);
-	else
+	if (!tmstamp_p7)
 		printf("\nFile is not timestamped\n");
-	if (ret == 1)
+	else if (!verify_timestamp(p7, tmstamp_p7, untrusted))
 		timestamp_time = NULL;
+
 	ret |= verify_authenticode(p7, timestamp_time, cafile, crlfile);
 
 	if (tmstamp_p7) {
@@ -2438,7 +2437,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile,
 		if (p7nest) {
 			printf("\n");
 			int nest_ret = msi_verify_pkcs7(p7nest, infile, exdata, exlen, leafhash, 0, cafile, crlfile, untrusted);
-			if (ret == 0)
+			if (ret)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
 		} else if (!p7nest && has_sig) {
@@ -2826,7 +2825,7 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, size_t peheader,
 		if (p7nest) {
 			printf("\n");
 			int nest_ret = verify_pe_pkcs7(p7nest, indata, peheader, pe32plus, sigpos, siglen, leafhash, 0, cafile, crlfile, untrusted);
-			if (ret == 0)
+			if (ret)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
 		} else if (!p7nest && has_sig) {
