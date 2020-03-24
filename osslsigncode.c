@@ -1338,23 +1338,26 @@ static unsigned char *calc_page_hash(char *indata, size_t header_size,
 	return res;
 }
 
-static SpcLink *get_page_hash_link(int phtype, char *indata,
-	size_t header_size, int pe32plus, size_t sigpos)
+static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header)
 {
-	unsigned char *p, *tmp;
-	size_t l;
+	unsigned char *ph, *p, *tmp;
+	size_t l, phlen;
+	char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	ASN1_TYPE *tostr;
+	SpcAttributeTypeAndOptionalValue *aval;
+	ASN1_TYPE *taval;
+	SpcSerializedObject *so;
+	SpcLink *link;
 
-	size_t phlen;
-	unsigned char *ph = calc_page_hash(indata, header_size, pe32plus, sigpos, phtype, &phlen);
+	ph = calc_page_hash(indata, header->header_size, header->pe32plus, header->fileend, phtype, &phlen);
 	if (!ph) {
 		fprintf(stderr, "Failed to calculate page hash\n");
 		exit(-1);
 	}
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
 	printf("Calculated page hash            : %s ...\n", hexbuf);
 
-	ASN1_TYPE *tostr = ASN1_TYPE_new();
+	tostr = ASN1_TYPE_new();
 	tostr->type = V_ASN1_OCTET_STRING;
 	tostr->value.octet_string = ASN1_OCTET_STRING_new();
 	ASN1_OCTET_STRING_set(tostr->value.octet_string, ph, phlen);
@@ -1368,7 +1371,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata,
 	ASN1_TYPE_free(tostr);
 	sk_ASN1_TYPE_free(oset);
 
-	SpcAttributeTypeAndOptionalValue *aval = SpcAttributeTypeAndOptionalValue_new();
+	aval = SpcAttributeTypeAndOptionalValue_new();
 	aval->type = OBJ_txt2obj((phtype == NID_sha1) ? SPC_PE_IMAGE_PAGE_HASHES_V1 : SPC_PE_IMAGE_PAGE_HASHES_V2, 1);
 	aval->value = ASN1_TYPE_new();
 	aval->value->type = V_ASN1_SET;
@@ -1380,7 +1383,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata,
 	i2d_SpcAttributeTypeAndOptionalValue(aval, &tmp);
 	SpcAttributeTypeAndOptionalValue_free(aval);
 
-	ASN1_TYPE *taval = ASN1_TYPE_new();
+	taval = ASN1_TYPE_new();
 	taval->type = V_ASN1_SEQUENCE;
 	taval->value.sequence = ASN1_STRING_new();
 	ASN1_STRING_set(taval->value.sequence, p, l);
@@ -1394,36 +1397,39 @@ static SpcLink *get_page_hash_link(int phtype, char *indata,
 	ASN1_TYPE_free(taval);
 	sk_ASN1_TYPE_free(aset);
 
-	SpcSerializedObject *so = SpcSerializedObject_new();
+	so = SpcSerializedObject_new();
 	ASN1_OCTET_STRING_set(so->classId, classid_page_hash, sizeof(classid_page_hash));
 	ASN1_OCTET_STRING_set(so->serializedData, p, l);
 	OPENSSL_free(p);
 
-	SpcLink *link = SpcLink_new();
+	link = SpcLink_new();
 	link->type = 1;
 	link->value.moniker = so;
 	return link;
 }
 
-static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md,
-	file_type_t type, int pagehash, char *indata, size_t header_size,
-	int pe32plus, size_t sigpos)
+static void get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *options,
+			FILE_HEADER *header, file_type_t type, char *indata)
 {
+	u_char *p;
+	int hashlen, l, phtype;
+	void *hash;
+	ASN1_OBJECT *dtype;
+	SpcIndirectDataContent *idc;
+	SpcLink *link;
+	SpcPeImageData *pid;
+	SpcSipInfo *si;
 	static const unsigned char msistr[] = {
 		0xf1, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46
 	};
 
-	u_char *p;
-	int hashlen, l;
-	void *hash;
-	ASN1_OBJECT *dtype;
-	SpcIndirectDataContent *idc = SpcIndirectDataContent_new();
+	idc = SpcIndirectDataContent_new();
 	idc->data->value = ASN1_TYPE_new();
 	idc->data->value->type = V_ASN1_SEQUENCE;
 	idc->data->value->value.sequence = ASN1_STRING_new();
 	if (type == FILE_TYPE_CAB) {
-		SpcLink *link = get_obsolete_link();
+		link = get_obsolete_link();
 		l = i2d_SpcLink(link, NULL);
 		p = OPENSSL_malloc(l);
 		i2d_SpcLink(link, &p);
@@ -1431,13 +1437,13 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md,
 		dtype = OBJ_txt2obj(SPC_CAB_DATA_OBJID, 1);
 		SpcLink_free(link);
 	} else if (type == FILE_TYPE_PE) {
-		SpcPeImageData *pid = SpcPeImageData_new();
+		pid = SpcPeImageData_new();
 		ASN1_BIT_STRING_set(pid->flags, (unsigned char*)"0", 0);
-		if (pagehash) {
-			int phtype = NID_sha1;
-			if (EVP_MD_size(md) > EVP_MD_size(EVP_sha1()))
+		if (options->pagehash) {
+			phtype = NID_sha1;
+			if (EVP_MD_size(options->md) > EVP_MD_size(EVP_sha1()))
 				phtype = NID_sha256;
-			pid->file = get_page_hash_link(phtype, indata, header_size, pe32plus, sigpos);
+			pid->file = get_page_hash_link(phtype, indata, header);
 		} else {
 			pid->file = get_obsolete_link();
 		}
@@ -1448,7 +1454,7 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md,
 		dtype = OBJ_txt2obj(SPC_PE_IMAGE_DATA_OBJID, 1);
 		SpcPeImageData_free(pid);
 	} else if (type == FILE_TYPE_MSI) {
-		SpcSipInfo *si = SpcSipInfo_new();
+		si = SpcSipInfo_new();
 		ASN1_INTEGER_set(si->a, 1);
 		ASN1_INTEGER_set(si->b, 0);
 		ASN1_INTEGER_set(si->c, 0);
@@ -1470,11 +1476,11 @@ static void get_indirect_data_blob(u_char **blob, int *len, const EVP_MD *md,
 	idc->data->type = dtype;
 	idc->data->value->value.sequence->data = p;
 	idc->data->value->value.sequence->length = l;
-	idc->messageDigest->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(md));
+	idc->messageDigest->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(options->md));
 	idc->messageDigest->digestAlgorithm->parameters = ASN1_TYPE_new();
 	idc->messageDigest->digestAlgorithm->parameters->type = V_ASN1_NULL;
 
-	hashlen = EVP_MD_size(md);
+	hashlen = EVP_MD_size(options->md);
 	hash = OPENSSL_malloc(hashlen);
 	memset(hash, 0, hashlen);
 	ASN1_OCTET_STRING_set(idc->messageDigest->digest, hash, hashlen);
@@ -4741,8 +4747,7 @@ int main(int argc, char **argv)
 	if (!create_new_signature(sig, type, &options, &cparams))
 		DO_EXIT_0("Creating a new signature failed\n");
 
-	get_indirect_data_blob(&p, &len, options.md, type, options.pagehash, indata,
-				header.header_size, header.pe32plus, header.fileend);
+	get_indirect_data_blob(&p, &len, &options, &header, type, indata);
 	len -= EVP_MD_size(options.md);
 	memcpy(buf, p, len);
 	OPENSSL_free(p);
