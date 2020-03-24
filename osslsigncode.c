@@ -2990,10 +2990,11 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 		tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
 		printf("Page hash            : %s ...\n", hexbuf);
 		size_t cphlen = 0;
-		unsigned char *cph = calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &phlen);
+		unsigned char *cph = calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &cphlen);
 		tohex(cph, hexbuf, (cphlen < 32) ? cphlen : 32);
-		printf("Calculated page hash : %s ...%s\n\n", hexbuf,
-			((phlen != cphlen) || memcmp(ph, cph, phlen)) ? "    MISMATCH!!!":"");
+		mdok = (phlen != cphlen) || memcmp(ph, cph, phlen);
+		if (mdok) ret = 1;
+		printf("Calculated page hash : %s ...%s\n\n", hexbuf, mdok ? "    MISMATCH!!!":"");
 		OPENSSL_free(ph);
 		OPENSSL_free(cph);
 	}
