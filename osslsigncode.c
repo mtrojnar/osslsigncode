@@ -1491,6 +1491,67 @@ static void get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *opti
 	p = *blob;
 	i2d_SpcIndirectDataContent(idc, &p);
 	SpcIndirectDataContent_free(idc);
+	*len -= EVP_MD_size(options->md);
+}
+
+static int set_signing_blob(PKCS7 *sig, BIO *hash, char *buf, int len)
+{
+	unsigned char mdbuf[EVP_MAX_MD_SIZE];
+	int mdlen;
+	size_t seqhdrlen;
+	BIO *sigbio;
+	PKCS7 *td7;
+
+	mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
+	memcpy(buf+len, mdbuf, mdlen);
+	seqhdrlen = asn1_simple_hdr_len((unsigned char*)buf, len);
+
+	if ((sigbio = PKCS7_dataInit(sig, NULL)) == NULL) {
+		fprintf(stderr, "PKCS7_dataInit failed\n");
+		return 0; /* FAILED */
+	}
+	BIO_write(sigbio, buf+seqhdrlen, len-seqhdrlen+mdlen);
+	(void)BIO_flush(sigbio);
+
+	if (!PKCS7_dataFinal(sig, sigbio)) {
+		fprintf(stderr, "PKCS7_dataFinal failed\n");
+		return 0; /* FAILED */
+	}
+	BIO_free_all(sigbio);
+
+	/*
+	   replace the data part with the MS Authenticode
+	   spcIndirectDataContext blob
+	 */
+	td7 = PKCS7_new();
+	td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+	td7->d.other = ASN1_TYPE_new();
+	td7->d.other->type = V_ASN1_SEQUENCE;
+	td7->d.other->value.sequence = ASN1_STRING_new();
+	ASN1_STRING_set(td7->d.other->value.sequence, buf, len+mdlen);
+	if (!PKCS7_set_content(sig, td7)) {
+		PKCS7_free(td7);
+		fprintf(stderr, "PKCS7_set_content failed\n");
+		return 0; /* FAILED */
+	}
+	return 1; /* OK */
+}
+
+static int set_indirect_data_blob(PKCS7 *sig, BIO *hash, file_type_t type,
+				char *indata, GLOBAL_OPTIONS *options, FILE_HEADER *header)
+{
+	static char buf[64*1024];
+	u_char *p = NULL;
+	int len = 0;
+
+	get_indirect_data_blob(&p, &len, options, header, type, indata);
+	memcpy(buf, p, len);
+	OPENSSL_free(p);
+
+	if (!set_signing_blob(sig, hash, buf, len))
+		return 0; /* FAILED */
+
+	return 1; /* OK */
 }
 
 static unsigned int calc_pe_checksum(BIO *bio, FILE_HEADER *header)
@@ -3831,49 +3892,6 @@ static int create_new_signature(PKCS7 *sig, file_type_t type,
 	return 1; /* OK */
 }
 
-static int set_signing_bob(PKCS7 *sig, BIO *hash, char *buf, int len)
-{
-	unsigned char mdbuf[EVP_MAX_MD_SIZE];
-	int mdlen;
-	size_t seqhdrlen;
-	BIO *sigbio;
-	PKCS7 *td7;
-
-	mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
-	memcpy(buf+len, mdbuf, mdlen);
-	seqhdrlen = asn1_simple_hdr_len((unsigned char*)buf, len);
-
-	if ((sigbio = PKCS7_dataInit(sig, NULL)) == NULL) {
-		fprintf(stderr, "PKCS7_dataInit failed\n");
-		return 0; /* FAILED */
-	}
-	BIO_write(sigbio, buf+seqhdrlen, len-seqhdrlen+mdlen);
-	(void)BIO_flush(sigbio);
-
-	if (!PKCS7_dataFinal(sig, sigbio)) {
-		fprintf(stderr, "PKCS7_dataFinal failed\n");
-		return 0; /* FAILED */
-	}
-	BIO_free_all(sigbio);
-
-	/*
-	   replace the data part with the MS Authenticode
-	   spcIndirectDataContext blob
-	 */
-	td7 = PKCS7_new();
-	td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
-	td7->d.other = ASN1_TYPE_new();
-	td7->d.other->type = V_ASN1_SEQUENCE;
-	td7->d.other->value.sequence = ASN1_STRING_new();
-	ASN1_STRING_set(td7->d.other->value.sequence, buf, len+mdlen);
-	if (!PKCS7_set_content(sig, td7)) {
-		PKCS7_free(td7);
-		fprintf(stderr, "PKCS7_set_content failed\n");
-		return 0; /* FAILED */
-	}
-	return 1; /* OK */
-}
-
 static STACK_OF(X509) *PEM_read_certs_with_pass(BIO *bin, char *certpass)
 {
 	STACK_OF(X509) *certs = sk_X509_new_null();
@@ -4733,27 +4751,19 @@ int main(int argc, char **argv)
 
 	if (cmd == CMD_ADD)
 		goto add_only;
-
 	if (cmd == CMD_ATTACH) {
 		sig = attach_sigfile(options.sigfile, type);
 		if (!sig)
 			DO_EXIT_0("Unable to extract valid signature\n");
 		goto add_only;
 	}
-
 	if (cmd != CMD_SIGN)
 		goto skip_signing;
 
 	sig = PKCS7_new();
 	if (!create_new_signature(sig, type, &options, &cparams))
 		DO_EXIT_0("Creating a new signature failed\n");
-
-	get_indirect_data_blob(&p, &len, &options, &header, type, indata);
-	len -= EVP_MD_size(options.md);
-	memcpy(buf, p, len);
-	OPENSSL_free(p);
-
-	if (!set_signing_bob(sig, hash, buf, len))
+	if (!set_indirect_data_blob(sig, hash, type, indata, &options, &header))
 		DO_EXIT_0("Signing failed\n");
 
 add_only:
