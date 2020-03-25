@@ -622,33 +622,6 @@ static void tohex(const unsigned char *v, char *b, int len)
 		sprintf(b+i*2, "%02X", v[i]);
 }
 
-static int add_unauthenticated_blob(PKCS7 *sig)
-{
-	u_char *p = NULL;
-	int len = 1024+4;
-	char prefix[] = "\x0c\x82\x04\x00---BEGIN_BLOB---"; /* Length data for ASN1 attribute plus prefix */
-	char postfix[] = "---END_BLOB---";
-
-	PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(sig->d.sign->signer_info, 0);
-
-	p = OPENSSL_malloc(len);
-	memset(p, 0, len);
-	memcpy(p, prefix, sizeof(prefix));
-	memcpy(p+len-sizeof(postfix), postfix, sizeof(postfix));
-
-	ASN1_STRING *astr = ASN1_STRING_new();
-	ASN1_STRING_set(astr, p, len);
-
-	int nid = OBJ_create(SPC_UNAUTHENTICATED_DATA_BLOB_OBJID,
-		"unauthenticatedData", "unauthenticatedData");
-
-	PKCS7_add_attribute (si, nid, V_ASN1_SEQUENCE, astr);
-
-	OPENSSL_free(p);
-
-	return 0;
-}
-
 #ifdef ENABLE_CURL
 
 static int blob_has_nl = 0;
@@ -3892,6 +3865,102 @@ static int create_new_signature(PKCS7 *sig, file_type_t type,
 	return 1; /* OK */
 }
 
+static int add_unauthenticated_blob(PKCS7 *sig)
+{
+	PKCS7_SIGNER_INFO *si;
+	ASN1_STRING *astr;
+	u_char *p = NULL;
+	int nid, len = 1024+4;
+	/* Length data for ASN1 attribute plus prefix */
+	char prefix[] = "\x0c\x82\x04\x00---BEGIN_BLOB---";
+	char postfix[] = "---END_BLOB---";
+
+	si = sk_PKCS7_SIGNER_INFO_value(sig->d.sign->signer_info, 0);
+	if ((p = OPENSSL_malloc(len)) == NULL)
+		return 1; /* FAILED */
+	memset(p, 0, len);
+	memcpy(p, prefix, sizeof(prefix));
+	memcpy(p+len-sizeof(postfix), postfix, sizeof(postfix));
+	astr = ASN1_STRING_new();
+	ASN1_STRING_set(astr, p, len);
+	nid = OBJ_create(SPC_UNAUTHENTICATED_DATA_BLOB_OBJID,
+		"unauthenticatedData", "unauthenticatedData");
+	PKCS7_add_attribute (si, nid, V_ASN1_SEQUENCE, astr);
+	OPENSSL_free(p);
+
+	return 0; /* OK */
+}
+
+#ifdef WITH_GSF
+static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_type_t *cmd,
+			GLOBAL_OPTIONS *options, size_t *padlen, int *len, BIO *outdata,
+			GsfOutfile *outole,  u_char *p_msiex, int len_msiex)
+#else
+static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_type_t *cmd,
+			GLOBAL_OPTIONS *options, size_t *padlen, int *len, BIO *outdata)
+#endif
+{
+	u_char *p = NULL;
+	static char buf[64*1024];
+	PKCS7 *outsig = NULL;
+
+	if (options->nest) {
+		if (cursig == NULL) {
+			fprintf(stderr, "Internal error: No 'cursig' was extracted\n");
+			return 0; /* FAILED */
+		}
+		if (pkcs7_set_nested_signature(cursig, sig, options->signing_time) == 0) {
+			fprintf(stderr, "Unable to append the nested signature to the current signature\n");
+			return 0; /* FAILED */
+		}
+		outsig = cursig;
+	} else {
+		outsig = sig;
+	}
+
+	/* Append signature to outfile */
+	if (((*len = i2d_PKCS7(outsig, NULL)) <= 0) || (p = OPENSSL_malloc(*len)) == NULL) {
+		fprintf(stderr, "i2d_PKCS memory allocation failed: %d\n", *len);
+		return 0; /* FAILED */
+	}
+	i2d_PKCS7(outsig, &p);
+	p -= *len;
+	*padlen = (8 - *len%8) % 8;
+
+	if (type == FILE_TYPE_PE) {
+		PUT_UINT32_LE(*len + 8 + *padlen, buf);
+		PUT_UINT16_LE(WIN_CERT_REVISION_2, buf + 4);
+		PUT_UINT16_LE(WIN_CERT_TYPE_PKCS_SIGNED_DATA, buf + 6);
+		BIO_write(outdata, buf, 8);
+	}
+
+	if (type == FILE_TYPE_PE || type == FILE_TYPE_CAB) {
+		BIO_write(outdata, p, *len);
+		/* pad (with 0's) asn1 blob to 8 byte boundary */
+		if (*padlen > 0) {
+			memset(p, 0, *padlen);
+			BIO_write(outdata, p, *padlen);
+		}
+	#ifdef WITH_GSF
+	} else if (type == FILE_TYPE_MSI) {
+		/* Only output signatures if we're signing */
+		if (*cmd == CMD_SIGN || *cmd == CMD_ADD || *cmd == CMD_ATTACH) {
+			if (!msi_add_DigitalSignature(outole, p, *len)) {
+				fprintf(stderr, "Failed to write MSI 'DigitalSignature' signature to %s\n", options->infile);
+				return 0; /* FAILED */
+			}
+			if (p_msiex != NULL && !msi_add_MsiDigitalSignatureEx(outole, p_msiex, len_msiex)) {
+				fprintf(stderr, "Failed to write MSI 'MsiDigitalSignatureEx' signature to %s\n", options->infile);
+				return 0; /* FAILED */
+			}
+		}
+	#endif
+	}
+	OPENSSL_free(p);
+
+	return 1; /* OK */
+}
+
 static STACK_OF(X509) *PEM_read_certs_with_pass(BIO *bin, char *certpass)
 {
 	STACK_OF(X509) *certs = sk_X509_new_null();
@@ -4555,10 +4624,9 @@ int main(int argc, char **argv)
 	FILE_HEADER header;
 	CRYPTO_PARAMS cparams;
 	BIO *hash = NULL, *outdata = NULL;
-	PKCS7 *cursig = NULL, *outsig = NULL, *sig = NULL;
+	PKCS7 *cursig = NULL, *sig = NULL;
 	static char buf[64*1024];
 	char *indata, *outdataverify;
-	u_char *p = NULL;
 	int ret = 0, len = 0;
 	size_t padlen = 0, filesize, outdatasize;
 	file_type_t type;
@@ -4784,54 +4852,20 @@ add_only:
 		DO_EXIT_0("PKCS7 output failed\n");
 #endif
 
-	if (options.nest) {
-		if (cursig == NULL)
-			DO_EXIT_0("Internal error: No 'cursig' was extracted\n")
-		if (pkcs7_set_nested_signature(cursig, sig, options.signing_time) == 0)
-			DO_EXIT_0("Unable to append the nested signature to the current signature\n");
-		outsig = cursig;
-	} else {
-		outsig = sig;
-	}
-
-	/* Append signature to outfile */
-	if (((len = i2d_PKCS7(outsig, NULL)) <= 0) ||
-		(p = OPENSSL_malloc(len)) == NULL)
-		DO_EXIT_1("i2d_PKCS memory allocation failed: %d\n", len);
-	i2d_PKCS7(outsig, &p);
-	p -= len;
-	padlen = (8 - len%8) % 8;
-
-	if (type == FILE_TYPE_PE) {
-		PUT_UINT32_LE(len+8+padlen, buf);
-		PUT_UINT16_LE(WIN_CERT_REVISION_2, buf + 4);
-		PUT_UINT16_LE(WIN_CERT_TYPE_PKCS_SIGNED_DATA, buf + 6);
-		BIO_write(outdata, buf, 8);
-	}
-
-	if (type == FILE_TYPE_PE || type == FILE_TYPE_CAB) {
-		BIO_write(outdata, p, len);
-		/* pad (with 0's) asn1 blob to 8 byte boundary */
-		if (padlen > 0) {
-			memset(p, 0, padlen);
-			BIO_write(outdata, p, padlen);
-		}
 #ifdef WITH_GSF
-	} else if (type == FILE_TYPE_MSI) {
-		/* Only output signatures if we're signing. */
-		if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
-			if (!msi_add_DigitalSignature(outole, p, len))
-				DO_EXIT_1("Failed to write MSI 'DigitalSignature' signature to %s\n", options.infile);
-			if (p_msiex != NULL && !msi_add_MsiDigitalSignatureEx(outole, p_msiex, len_msiex))
-				DO_EXIT_1("Failed to write MSI 'MsiDigitalSignatureEx' signature to %s\n", options.infile);
-			gsf_output_close(GSF_OUTPUT(outole));
-			g_object_unref(sink);
-		}
-#endif
+	if (!append_signature(sig, cursig, type, &cmd, &options, &padlen, &len, outdata,
+			outole, p_msiex, len_msiex))
+		DO_EXIT_0("Append signature to outfile failed\n");
+	if (type == FILE_TYPE_MSI) {
+		gsf_output_close(GSF_OUTPUT(outole));
+		g_object_unref(sink);
 	}
+#else
+	if (!append_signature(sig, cursig, type, &cmd, &options, &padlen, &len, outdata))
+		DO_EXIT_0("Append signature to outfile failed\n");
+#endif
 
 	PKCS7_free(sig);
-	OPENSSL_free(p);
 
 skip_signing:
 
