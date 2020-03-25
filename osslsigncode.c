@@ -3892,11 +3892,11 @@ static int add_unauthenticated_blob(PKCS7 *sig)
 }
 
 #ifdef WITH_GSF
-static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_type_t *cmd,
+static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_type_t cmd,
 			GLOBAL_OPTIONS *options, size_t *padlen, int *len, BIO *outdata,
 			GsfOutfile *outole,  u_char *p_msiex, int len_msiex)
 #else
-static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_type_t *cmd,
+static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_type_t cmd,
 			GLOBAL_OPTIONS *options, size_t *padlen, int *len, BIO *outdata)
 #endif
 {
@@ -3944,7 +3944,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_typ
 	#ifdef WITH_GSF
 	} else if (type == FILE_TYPE_MSI) {
 		/* Only output signatures if we're signing */
-		if (*cmd == CMD_SIGN || *cmd == CMD_ADD || *cmd == CMD_ATTACH) {
+		if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
 			if (!msi_add_DigitalSignature(outole, p, *len)) {
 				fprintf(stderr, "Failed to write MSI 'DigitalSignature' signature to %s\n", options->infile);
 				return 0; /* FAILED */
@@ -3959,6 +3959,34 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_typ
 	OPENSSL_free(p);
 
 	return 1; /* OK */
+}
+
+static void update_data_size(file_type_t type, cmd_type_t cmd, FILE_HEADER *header,
+		size_t padlen, int len, BIO *outdata)
+{
+	static char buf[64*1024];
+
+	if (type == FILE_TYPE_PE) {
+		if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
+			/* Update signature position and size */
+			(void)BIO_seek(outdata, header->header_size + 152 + header->pe32plus * 16);
+			PUT_UINT32_LE(header->fileend, buf); /* Previous file end = signature table start */
+			BIO_write(outdata, buf, 4);
+			PUT_UINT32_LE(len+8+padlen, buf);
+			BIO_write(outdata, buf, 4);
+		}
+		if (cmd == CMD_SIGN || cmd == CMD_REMOVE || cmd == CMD_ADD || cmd == CMD_ATTACH)
+			recalc_pe_checksum(outdata, header);
+	} else if (type == FILE_TYPE_CAB && (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH)) {
+		/*
+		 * Update additional data size.
+		 * Additional data size is located at offset 0x30 (from file beginning)
+		 * and consist of 4 bytes (little-endian order).
+		 */
+		(void)BIO_seek(outdata, 0x30);
+		PUT_UINT32_LE(len+padlen, buf);
+		BIO_write(outdata, buf, 4);
+	}
 }
 
 static STACK_OF(X509) *PEM_read_certs_with_pass(BIO *bin, char *certpass)
@@ -4625,7 +4653,6 @@ int main(int argc, char **argv)
 	CRYPTO_PARAMS cparams;
 	BIO *hash = NULL, *outdata = NULL;
 	PKCS7 *cursig = NULL, *sig = NULL;
-	static char buf[64*1024];
 	char *indata, *outdataverify;
 	int ret = 0, len = 0;
 	size_t padlen = 0, filesize, outdatasize;
@@ -4853,7 +4880,7 @@ add_only:
 #endif
 
 #ifdef WITH_GSF
-	if (!append_signature(sig, cursig, type, &cmd, &options, &padlen, &len, outdata,
+	if (!append_signature(sig, cursig, type, cmd, &options, &padlen, &len, outdata,
 			outole, p_msiex, len_msiex))
 		DO_EXIT_0("Append signature to outfile failed\n");
 	if (type == FILE_TYPE_MSI) {
@@ -4861,7 +4888,7 @@ add_only:
 		g_object_unref(sink);
 	}
 #else
-	if (!append_signature(sig, cursig, type, &cmd, &options, &padlen, &len, outdata))
+	if (!append_signature(sig, cursig, type, cmd, &options, &padlen, &len, outdata))
 		DO_EXIT_0("Append signature to outfile failed\n");
 #endif
 
@@ -4869,27 +4896,7 @@ add_only:
 
 skip_signing:
 
-	if (type == FILE_TYPE_PE) {
-		if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
-			/* Update signature position and size */
-			(void)BIO_seek(outdata, header.header_size + 152 + header.pe32plus * 16);
-			PUT_UINT32_LE(header.fileend, buf); /* Previous file end = signature table start */
-			BIO_write(outdata, buf, 4);
-			PUT_UINT32_LE(len+8+padlen, buf);
-			BIO_write(outdata, buf, 4);
-		}
-		if (cmd == CMD_SIGN || cmd == CMD_REMOVE || cmd == CMD_ADD || cmd == CMD_ATTACH)
-			recalc_pe_checksum(outdata, &header);
-	} else if (type == FILE_TYPE_CAB && (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH)) {
-		/*
-		 * Update additional data size.
-		 * Additional data size is located at offset 0x30 (from file beginning)
-		 * and consist of 4 bytes (little-endian order).
-		 */
-		(void)BIO_seek(outdata, 0x30);
-		PUT_UINT32_LE(len+padlen, buf);
-		BIO_write(outdata, buf, 4);
-	}
+	update_data_size(type, cmd, &header, padlen, len, outdata);
 
 	BIO_free_all(hash);
 	hash = outdata = NULL;
