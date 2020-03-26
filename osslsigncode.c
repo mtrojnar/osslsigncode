@@ -4057,6 +4057,46 @@ static char *map_file(const char *infile, const off_t size)
 	return indata;
 }
 
+static int input_validation(file_type_t type, GLOBAL_OPTIONS *options, FILE_HEADER *header,
+			char *indata, size_t filesize)
+{
+	if (type == FILE_TYPE_CAB) {
+		if (options->pagehash == 1)
+			fprintf(stderr, "Warning: -ph option is only valid for PE files\n");
+#ifdef WITH_GSF
+		if (options->add_msi_dse == 1)
+			fprintf(stderr, "Warning: -add-msi-dse option is only valid for MSI files\n");
+#endif
+		if (!verify_cab_header(indata, options->infile, filesize, header)) {
+			fprintf(stderr, "Corrupt CAB file\n");
+			return 0; /* FAILED */
+		}
+	} else if (type == FILE_TYPE_PE) {
+		if (options->jp >= 0)
+			fprintf(stderr, "Warning: -jp option is only valid for CAB files\n");
+#ifdef WITH_GSF
+		if (options->add_msi_dse == 1)
+			fprintf(stderr, "Warning: -add-msi-dse option is only valid for MSI files\n");
+#endif
+		if (!verify_pe_header(indata, options->infile, filesize, header)) {
+			fprintf(stderr, "Corrupt PE file\n");
+			return 0; /* FAILED */
+		}
+
+	} else if (type == FILE_TYPE_MSI) {
+		if (options->pagehash == 1)
+			fprintf(stderr, "Warning: -ph option is only valid for PE files\n");
+		if (options->jp >= 0)
+			fprintf(stderr, "Warning: -jp option is only valid for CAB files\n");
+#ifndef WITH_GSF
+		fprintf(stderr, "libgsf is not available, msi support is disabled: %s\n", options->infile);
+		return 0; /* FAILED */
+#endif
+	}
+
+	return 1; /* OK */
+}
+
 static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPTIONS *options)
 {
 	size_t filesize;
@@ -4777,33 +4817,11 @@ int main(int argc, char **argv)
 	hash = BIO_new(BIO_f_md());
 	BIO_set_md(hash, options.md);
 
-	if (type == FILE_TYPE_CAB) {
-		if (options.pagehash == 1)
-			fprintf(stderr, "Warning: -ph option is only valid for PE files\n");
-#ifdef WITH_GSF
-		if (options.add_msi_dse == 1)
-			fprintf(stderr, "Warning: -add-msi-dse option is only valid for MSI files\n");
-#endif
-		if (!verify_cab_header(indata, options.infile, filesize, &header))
-			goto err_cleanup;
-
-	} else if (type == FILE_TYPE_PE) {
-		if (options.jp >= 0)
-			fprintf(stderr, "Warning: -jp option is only valid for CAB files\n");
-#ifdef WITH_GSF
-		if (options.add_msi_dse == 1)
-			fprintf(stderr, "Warning: -add-msi-dse option is only valid for MSI files\n");
-#endif
-		if (!verify_pe_header(indata, options.infile, filesize, &header))
-			goto err_cleanup;
-
-	} else if (type == FILE_TYPE_MSI) {
-		if (options.pagehash == 1)
-			fprintf(stderr, "Warning: -ph option is only valid for PE files\n");
-		if (options.jp >= 0)
-			fprintf(stderr, "Warning: -jp option is only valid for CAB files\n");
+	if (!input_validation(type, &options, &header, indata, filesize))
+		goto err_cleanup;
 
 #ifdef WITH_GSF
+	if (type == FILE_TYPE_MSI) {
 		GsfInput *src;
 		GsfInfile *ole;
 
@@ -4849,10 +4867,8 @@ int main(int argc, char **argv)
 			gsf_output_close(GSF_OUTPUT(outole));
 			g_object_unref(sink);
 		}
-#else
-		DO_EXIT_1("libgsf is not available, msi support is disabled: %s\n", options.infile);
-#endif
 	}
+#endif
 
 	if ((type == FILE_TYPE_CAB || type == FILE_TYPE_PE) && (cmd != CMD_VERIFY)) {
 		/* Create outdata file */
