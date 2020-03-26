@@ -4056,6 +4056,81 @@ static char *map_file(const char *infile, const off_t size)
 #endif
 	return indata;
 }
+
+static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPTIONS *options)
+{
+	size_t filesize;
+	char *outdata;
+
+	if (type == FILE_TYPE_PE) {
+		filesize = get_file_size(options->outfile);
+		if (!filesize) {
+			fprintf(stderr, "Error verifying result\n");
+			return 0; /* FAILED */
+		}
+		outdata = map_file(options->outfile, filesize);
+		if (!outdata) {
+			fprintf(stderr, "Error verifying result\n");
+			return 0; /* FAILED */
+		}
+		if (!verify_pe_header(outdata, options->outfile, filesize, header)) {
+			fprintf(stderr, "Corrupt PE file\n");
+			return 0; /* FAILED */
+		}
+		if (verify_pe_file(outdata, header, options)) {
+			fprintf(stderr, "Signature mismatch\n");
+			return 0; /* FAILED */
+		}
+	} else if (type == FILE_TYPE_CAB) {
+		filesize = get_file_size(options->outfile);
+		if (!filesize) {
+			fprintf(stderr, "Error verifying result\n");
+			return 0; /* FAILED */
+		}
+		outdata = map_file(options->outfile, filesize);
+		if (!outdata) {
+			fprintf(stderr, "Error verifying result\n");
+			return 0; /* FAILED */
+		}
+		if (!verify_cab_header(outdata, options->outfile, filesize, header)) {
+			fprintf(stderr, "Corrupt CAB file\n");
+			return 0; /* FAILED */
+		}
+		if (verify_cab_file(outdata, header, options)) {
+			fprintf(stderr, "Signature mismatch\n");
+			return 0; /* FAILED */
+		}
+	} else if (type == FILE_TYPE_MSI) {
+#ifdef WITH_GSF
+		GsfInput *src;
+		GsfInfile *ole;
+		int ret;
+
+		src = gsf_input_stdio_new(options->outfile, NULL);
+		if (!src) {
+			fprintf(stderr, "Error opening file %s\n", options->outfile);
+			return 0; /* FAILED */
+		}
+		ole = gsf_infile_msole_new(src, NULL);
+		g_object_unref(src);
+		ret = msi_verify_file(ole, options);
+		g_object_unref(ole);
+		if (ret) {
+			fprintf(stderr, "Signature mismatch\n");
+			return 0; /* FAILED */
+		}
+#else
+		fprintf(stderr, "libgsf is not available, msi support is disabled: %s\n", options->infile);
+		return 0; /* FAILED */
+#endif
+	} else {
+		fprintf(stderr, "Unknown input type for file: %s\n", options->infile);
+		return 0; /* FAILED */
+		}
+
+	return 1; /* OK */
+}
+
 static int get_file_type(char *indata, char *infile, file_type_t *type)
 {
 	static u_char msi_signature[] = {
@@ -4653,9 +4728,9 @@ int main(int argc, char **argv)
 	CRYPTO_PARAMS cparams;
 	BIO *hash = NULL, *outdata = NULL;
 	PKCS7 *cursig = NULL, *sig = NULL;
-	char *indata, *outdataverify;
+	char *indata;
 	int ret = 0, len = 0;
-	size_t padlen = 0, filesize, outdatasize;
+	size_t padlen = 0, filesize;
 	file_type_t type;
 	cmd_type_t cmd;
 
@@ -4902,54 +4977,12 @@ skip_signing:
 	hash = outdata = NULL;
 
 	if (cmd == CMD_ATTACH) {
-		if (type == FILE_TYPE_PE) {
-			outdatasize = get_file_size(options.outfile);
-			if (!outdatasize)
-				DO_EXIT_0("Error verifying result\n");
-			outdataverify = map_file(options.outfile, outdatasize);
-			if (!outdataverify)
-				DO_EXIT_0("Error verifying result\n");
-			if (!verify_pe_header(outdataverify, options.outfile, outdatasize, &header))
-				goto err_cleanup;
-			ret = verify_pe_file(outdataverify, &header, &options);
-			if (ret)
-				DO_EXIT_0("Signature mismatch\n");
-		} else if (type == FILE_TYPE_CAB) {
-			outdatasize = get_file_size(options.outfile);
-			if (!outdatasize)
-				DO_EXIT_0("Error verifying result\n");
-			outdataverify = map_file(options.outfile, outdatasize);
-			if (!outdataverify)
-				DO_EXIT_0("Error verifying result\n");
-			if (!verify_cab_header(outdataverify, options.outfile, outdatasize, &header))
-				goto err_cleanup;
-			ret = verify_cab_file(outdataverify, &header, &options);
-			if (ret)
-				DO_EXIT_0("Signature mismatch\n");
-		} else if (type == FILE_TYPE_MSI) {
-#ifdef WITH_GSF
-			GsfInput *src;
-			GsfInfile *ole;
-
-			src = gsf_input_stdio_new(options.outfile, NULL);
-			if (!src)
-				DO_EXIT_1("Error opening file %s\n", options.outfile);
-			ole = gsf_infile_msole_new(src, NULL);
-			g_object_unref(src);
-			ret = msi_verify_file(ole, &options);
-			g_object_unref(ole);
-			if (ret)
-				DO_EXIT_0("Signature mismatch\n");
-#else
-			DO_EXIT_1("libgsf is not available, msi support is disabled: %s\n", options.infile);
-#endif
-		} else {
-			DO_EXIT_1("Unknown input type for file: %s\n", options.infile);
-		}
-		printf("Signature successfully attached\n");
-	} else {
+		if (check_attached_data(type, &header, &options))
+			printf("Signature successfully attached\n");
+		else
+			goto err_cleanup;
+	} else
 		printf(ret ? "Failed\n" : "Succeeded\n");
-	}
 
 	OPENSSL_free(options.cafile);
 	OPENSSL_free(options.untrusted);
@@ -4960,6 +4993,7 @@ skip_signing:
 	return ret;
 
 err_cleanup:
+
 	ERR_print_errors_fp(stderr);
 	free_crypto_params(&cparams);
 	if (hash)
