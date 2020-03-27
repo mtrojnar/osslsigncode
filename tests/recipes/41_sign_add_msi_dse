@@ -25,9 +25,8 @@ if test -s "sample.msi"
         -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/keyp.pem" \
         -pass passme \
         -in "sample.msi" -out "test_411.msi"
-#"MsiDigitalSignatureEx 4d00730069004400690067006900740061006c005300690067006e0061007400750072006500450078"
     verify_signature "$?" "411" "msi" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "HEX" "4d00730069004400690067006900740061006c005300690067006e0061007400750072006500450078" "UNUSED_PATTERN"
+	"UNUSED_PATTERN" "HEX" "MsiDigitalSignatureEx" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"

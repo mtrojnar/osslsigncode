@@ -106,7 +106,7 @@ typedef unsigned char u_char;
 #include <openssl/objects.h>
 #include <openssl/evp.h>
 #include <openssl/x509.h>
-#include <openssl/x509v3.h> /* X509_PURPOSE_CRL_SIGN */
+#include <openssl/x509v3.h> /* X509_PURPOSE */
 #include <openssl/pkcs7.h>
 #include <openssl/pkcs12.h>
 #include <openssl/pem.h>
@@ -125,6 +125,7 @@ typedef unsigned char u_char;
 #include <curl/curl.h>
 
 #define MAX_TS_SERVERS 256
+#define GSF_CAN_READ_MSI_METADATA
 
 #endif
 
@@ -136,24 +137,25 @@ typedef unsigned char u_char;
 #define TRUE 1
 #endif
 
+
 #if defined (HAVE_TERMIOS_H) || defined (HAVE_GETPASS)
 #define PROVIDE_ASKPASS 1
 #endif
 
 /* MS Authenticode object ids */
-#define SPC_INDIRECT_DATA_OBJID     "1.3.6.1.4.1.311.2.1.4"
-#define SPC_STATEMENT_TYPE_OBJID    "1.3.6.1.4.1.311.2.1.11"
-#define SPC_SP_OPUS_INFO_OBJID      "1.3.6.1.4.1.311.2.1.12"
-#define SPC_MS_JAVA_SOMETHING       "1.3.6.1.4.1.311.15.1"
-#define SPC_PE_IMAGE_DATA_OBJID     "1.3.6.1.4.1.311.2.1.15"
-#define SPC_CAB_DATA_OBJID          "1.3.6.1.4.1.311.2.1.25"
+#define SPC_INDIRECT_DATA_OBJID      "1.3.6.1.4.1.311.2.1.4"
+#define SPC_STATEMENT_TYPE_OBJID     "1.3.6.1.4.1.311.2.1.11"
+#define SPC_SP_OPUS_INFO_OBJID       "1.3.6.1.4.1.311.2.1.12"
+#define SPC_MS_JAVA_SOMETHING        "1.3.6.1.4.1.311.15.1"
+#define SPC_PE_IMAGE_DATA_OBJID      "1.3.6.1.4.1.311.2.1.15"
+#define SPC_CAB_DATA_OBJID           "1.3.6.1.4.1.311.2.1.25"
 #define SPC_TIME_STAMP_REQUEST_OBJID "1.3.6.1.4.1.311.3.2.1"
-#define SPC_SIPINFO_OBJID           "1.3.6.1.4.1.311.2.1.30"
+#define SPC_SIPINFO_OBJID            "1.3.6.1.4.1.311.2.1.30"
 
-#define SPC_PE_IMAGE_PAGE_HASHES_V1 "1.3.6.1.4.1.311.2.3.1" /* Page hash using SHA1 */
-#define SPC_PE_IMAGE_PAGE_HASHES_V2 "1.3.6.1.4.1.311.2.3.2" /* Page hash using SHA256 */
+#define SPC_PE_IMAGE_PAGE_HASHES_V1  "1.3.6.1.4.1.311.2.3.1" /* Page hash using SHA1 */
+#define SPC_PE_IMAGE_PAGE_HASHES_V2  "1.3.6.1.4.1.311.2.3.2" /* Page hash using SHA256 */
 
-#define SPC_NESTED_SIGNATURE_OBJID  "1.3.6.1.4.1.311.2.4.1"
+#define SPC_NESTED_SIGNATURE_OBJID   "1.3.6.1.4.1.311.2.4.1"
 
 #define SPC_RFC3161_OBJID                        "1.3.6.1.4.1.311.3.3.1"
 #define SPC_AUTHENTICODE_COUNTER_SIGNATURE_OBJID "1.2.840.113549.1.9.6"
@@ -184,6 +186,8 @@ typedef unsigned char u_char;
  * fields are present in this CFHEADER.
  */
 #define FLAG_RESERVE_PRESENT 0x0004
+
+#define INVALID_TIME ((time_t)-1)
 
 typedef struct {
 	char *infile;
@@ -254,8 +258,6 @@ typedef struct {
 	int len_msiex;
 } GSF_PARAMS;
 #endif
-
-#define INVALID_TIME ((time_t)-1)
 
 
 /*
@@ -2549,7 +2551,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 #ifdef GSF_CAN_READ_MSI_METADATA
 	if (exdata) {
 		tohex(cexmdbuf, hexbuf, EVP_MD_size(md));
-		int exok = !memcmp(exdata, cexmdbuf, MIN(EVP_MD_size(md), exlen));
+		int exok = !memcmp(exdata, cexmdbuf, MIN((size_t)EVP_MD_size(md), exlen));
 		if (!exok) ret = 1;
 		printf("Calculated MsiDigitalSignatureEx : %s", hexbuf);
 		if (exok) {
@@ -2918,13 +2920,13 @@ static int msi_add_DigitalSignature(GsfOutfile *outole, u_char *p, int len)
 	return ret;
 }
 
-static int msi_add_MsiDigitalSignatureEx(GsfOutfile *outole, u_char *p_msiex, int len_msiex)
+static int msi_add_MsiDigitalSignatureEx(GsfOutfile *outole, GSF_PARAMS *gsfparams)
 {
 	GsfOutput *child;
 	int ret = 1;
 
 	child = gsf_outfile_new_child(outole, "\05MsiDigitalSignatureEx", FALSE);
-	if (!gsf_output_write(child, len_msiex, p_msiex))
+	if (!gsf_output_write(child, gsfparams->len_msiex, gsfparams->p_msiex))
 		ret = 0;
 	gsf_output_close(child);
 
@@ -4003,7 +4005,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_typ
 				return 0; /* FAILED */
 			}
 			if (gsfparams->p_msiex != NULL &&
-					!msi_add_MsiDigitalSignatureEx(gsfparams->outole, gsfparams->p_msiex, gsfparams->len_msiex)) {
+					!msi_add_MsiDigitalSignatureEx(gsfparams->outole, gsfparams)) {
 				fprintf(stderr, "Failed to write MSI 'MsiDigitalSignatureEx' signature to %s\n", options->infile);
 				return 0; /* FAILED */
 			}
