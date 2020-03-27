@@ -2843,7 +2843,7 @@ static int msi_check_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md)
  */
 
 static int msi_calc_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md,
-			BIO *hash, u_char *p_msiex, int *len_msiex)
+			BIO *hash, GSF_PARAMS *gsfparams)
 {
 	BIO *prehash;
 
@@ -2855,8 +2855,8 @@ static int msi_calc_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md,
 		fprintf(stderr, "Unable to calculate MSI pre-hash ('metadata') hash\n");
 		return 0; /* FAILED */
 	}
-	*len_msiex = BIO_gets(prehash, (char*)p_msiex, EVP_MAX_MD_SIZE);
-	BIO_write(hash, p_msiex, *len_msiex);
+	gsfparams->len_msiex = BIO_gets(prehash, (char*)gsfparams->p_msiex, EVP_MAX_MD_SIZE);
+	BIO_write(hash, gsfparams->p_msiex, gsfparams->len_msiex);
 
 	return 1; /* OK */
 }
@@ -4587,7 +4587,7 @@ static PKCS7 *presign_msi_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 	BIO_push(hash, BIO_new(BIO_s_null()));
 	if (options->add_msi_dse) {
 		gsfparams->p_msiex = malloc(EVP_MAX_MD_SIZE);
-		if (!msi_calc_MsiDigitalSignatureEx(ole, options->md, hash, gsfparams->p_msiex, &gsfparams->len_msiex))
+		if (!msi_calc_MsiDigitalSignatureEx(ole, options->md, hash, gsfparams))
 			return NULL; /* FAILED */
 	}
 	if (!msi_handle_dir(ole, gsfparams->outole, hash)) {
