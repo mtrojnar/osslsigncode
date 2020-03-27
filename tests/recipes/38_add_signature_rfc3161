@@ -1,5 +1,5 @@
 #!/bin/sh
-# Add an RFC 3161 timestamp to signed PE/MSI file.
+# Add an RFC 3161 timestamp to signed PE/CAB/MSI file.
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
@@ -24,21 +24,37 @@ if test -s "test.exe" && ! grep -q "no libcurl available" "results.log"
   fi
 
 # CAB file
-# Command is not supported for non-PE/non-MSI files
+test_name="382. Add RFC 3161 timestamp to signed CAB file"
+printf "\n%s\n" "$test_name"
+if test -s "test.ex_" && ! grep -q "no libcurl available" "results.log"
+  then
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "test.ex_" -out "test_382_signed.ex_"
+    ../../osslsigncode add \
+        -ts http://time.certum.pl/ \
+        -in "test_382_signed.ex_" -out "test_382.ex_"
+    verify_signature "$?" "382" "ex_" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "Unizeto" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
 
 # MSI file
-test_name="382. Add RFC 3161 timestamp to signed MSI file"
+test_name="383. Add RFC 3161 timestamp to signed MSI file"
 printf "\n%s\n" "$test_name"
 if test -s "sample.msi" && ! grep -q "no libcurl available" "results.log"
   then
     ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
         -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "sample.msi" -out "test_382_signed.msi"
+        -in "sample.msi" -out "test_383_signed.msi"
     ../../osslsigncode add \
         -ts http://time.certum.pl/ \
-        -in "test_382_signed.msi" -out "test_382.msi"
-    verify_signature "$?" "382" "msi" "success" "@2019-09-01 12:00:00" \
+        -in "test_383_signed.msi" -out "test_383.msi"
+    verify_signature "$?" "383" "msi" "success" "@2019-09-01 12:00:00" \
 	"UNUSED_PATTERN" "ASCII" "Unizeto" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else

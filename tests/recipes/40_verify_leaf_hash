@@ -1,5 +1,5 @@
 #!/bin/sh
-# Compare the leaf certificate hash against specified SHA256 message digest for the PE/MSI file
+# Compare the leaf certificate hash against specified SHA256 message digest for the PE/CAB/MSI file
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
@@ -20,7 +20,19 @@ if test -s "test.exe"
   fi
 
 # CAB file
-# Command is not supported for non-PE/non-MSI files
+test_name="402. Compare the leaf certificate hash against specified SHA256 message digest for the CAB file"
+printf "\n%s\n" "$test_name"
+if test -s "test.ex_"
+  then
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.der" \
+        -in "test.ex_" -out "test_402.ex_"
+    verify_leaf_hash "$?" "402" "ex_" "@2019-05-01 00:00:00"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
 
 # MSI file
 test_name="403. Compare the leaf certificate hash against specified SHA256 message digest for the MSI file"

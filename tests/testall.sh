@@ -54,20 +54,22 @@ if test "$result" -ne 0
     exit $result
   fi
 
-# PE and CAB files support
+# PE files support
 if test -n "$(command -v x86_64-w64-mingw32-gcc)"
   then
-    x86_64-w64-mingw32-gcc "../myapp.c" -o "test.exe" 2>> "results.log" 1>&2
-    if test -n "$(command -v gcab)"
-      then
-        gcab -c "test.ex_" "test.exe" 2>> "results.log" 1>&2
-      else
-        printf "%s\n" "gcab not found in \$PATH"
-        printf "%s\n" "tests for CAB files skipped, please install gcab package"
-      fi
+    x86_64-w64-mingw32-gcc "../sources/myapp.c" -o "test.exe" 2>> "results.log" 1>&2
   else
     printf "%s\n" "x86_64-w64-mingw32-gcc not found in \$PATH"
     printf "%s\n" "tests for PE files skipped, please install mingw64-gcc package"
+  fi
+
+# CAB files support
+if test -n "$(command -v gcab)"
+  then
+    gcab -c "test.ex_" "../sources/a" "../sources/b" "../sources/c" 2>> "results.log" 1>&2
+  else
+    printf "%s\n" "gcab not found in \$PATH"
+    printf "%s\n" "tests for CAB files skipped, please install gcab package"
   fi
 
 # MSI files support
@@ -78,7 +80,7 @@ if grep -q "no libgsf available" "results.log"
     if test -n "$(command -v wixl)"
       then
         touch FoobarAppl10.exe
-        cp "../sample.wxs" "sample.wxs" 2>> "results.log" 1>&2
+        cp "../sources/sample.wxs" "sample.wxs" 2>> "results.log" 1>&2
         wixl -v "sample.wxs" 2>> "results.log" 1>&2
       else
         printf "%s\n" "wixl not found in \$PATH"
@@ -100,7 +102,7 @@ if test -n "$(command -v faketime)"
         make_tests
         result=$?
         rm -f "test.exe" "test.ex_" "sample.msi" "sample.wxs" "FoobarAppl10.exe"
-        rm -f "sign_pe.pem" "sign_msi.pem" "verify.log"
+        rm -f "sign_pe.pem" "sign_cab.pem" "sign_msi.pem" "verify.log"
       else
         printf "%s\n" "xxd not found in \$PATH"
         printf "%s\n" "tests skipped, please install vim-common package"

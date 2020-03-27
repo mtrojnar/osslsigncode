@@ -74,13 +74,8 @@ search_pattern() {
       printf "Failed: $4 not found\n"
     elif test "$5" = "MODIFY"
       then
-        if test "$2" != "ex_"
-         then
-           modify_blob "$1" "$2" "$4"
-           result=$?
-         else
-           printf "MODIFY is not supported for CAB files\n"
-         fi
+        modify_blob "$1" "$2" "$4"
+        result=$?
       fi
 
   return "$result"
@@ -101,21 +96,16 @@ verify_signature() {
   printf "" > "verify.log"
   if test "$1" -eq 0
     then
-      if test "$3" != "ex_"
-        then
-          cp "test_$2.$3" "test_tmp.tmp"
-          TZ=GMT faketime -f "$5" /bin/bash -c '
-              printf "Verify time: " >> "verify.log" && date >> "verify.log" && printf "\n" >> "verify.log"
-              script_path=$(pwd)
-              ../../osslsigncode verify \
-                  -CAfile "${script_path}/../certs/CACert.pem" \
-                  -CRLfile "${script_path}/../certs/CACertCRL.pem" \
-                  -in "test_tmp.tmp" 2>> "verify.log" 1>&2'
-          result=$?
-          rm -f "test_tmp.tmp"
-        else
-           printf "VERIFY is not supported for CAB files\n"
-        fi
+      cp "test_$2.$3" "test_tmp.tmp"
+      TZ=GMT faketime -f "$5" /bin/bash -c '
+          printf "Verify time: " >> "verify.log" && date >> "verify.log" && printf "\n" >> "verify.log"
+          script_path=$(pwd)
+          ../../osslsigncode verify \
+              -CAfile "${script_path}/../certs/CACert.pem" \
+              -CRLfile "${script_path}/../certs/CACertCRL.pem" \
+              -in "test_tmp.tmp" 2>> "verify.log" 1>&2'
+      result=$?
+      rm -f "test_tmp.tmp"
       if test "$result" -eq 0 -a "$7" != "UNUSED_PATTERN" -a "$8" != "UNUSED_PATTERN"
         then
           search_pattern "$2" "$3" "$7" "$8" "$9"
@@ -159,22 +149,17 @@ verify_leaf_hash() {
   printf "" > "verify.log"
   if test "$1" -eq 0
     then
-      if test "$3" != "ex_"
-        then
-          cp "test_$2.$3" "test_tmp.tmp"
-          TZ=GMT faketime -f "$4" /bin/bash -c '
-              printf "Verify time: " >> "verify.log" && date >> "verify.log" && printf "\n" >> "verify.log"
-              script_path=$(pwd)
-              ../../osslsigncode verify \
-                  -CAfile "${script_path}/../certs/CACert.pem" \
-                  -CRLfile "${script_path}/../certs/CACertCRL.pem" \
-                  -require-leaf-hash SHA256:$(sha256sum "${script_path}/../certs/cert.der" | cut -d" " -f1) \
-                  -in "test_tmp.tmp" 2>> "verify.log" 1>&2'
-          result=$?
-          rm -f "test_tmp.tmp"
-        else
-           printf "VERIFY is not supported for CAB files\n"
-        fi
+      cp "test_$2.$3" "test_tmp.tmp"
+      TZ=GMT faketime -f "$4" /bin/bash -c '
+          printf "Verify time: " >> "verify.log" && date >> "verify.log" && printf "\n" >> "verify.log"
+          script_path=$(pwd)
+          ../../osslsigncode verify \
+              -CAfile "${script_path}/../certs/CACert.pem" \
+              -CRLfile "${script_path}/../certs/CACertCRL.pem" \
+              -require-leaf-hash SHA256:$(sha256sum "${script_path}/../certs/cert.der" | cut -d" " -f1) \
+              -in "test_tmp.tmp" 2>> "verify.log" 1>&2'
+      result=$?
+      rm -f "test_tmp.tmp"
       if test "$result" -eq 0
         then
           rm -f "test_$2.$3"

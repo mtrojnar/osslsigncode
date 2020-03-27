@@ -166,7 +166,27 @@ typedef unsigned char u_char;
 #define WIN_CERT_REVISION_2             0x0200
 #define WIN_CERT_TYPE_PKCS_SIGNED_DATA  0x0002
 
+/*
+ * FLAG_PREV_CABINET is set if the cabinet file is not the first in a set
+ * of cabinet files. When this bit is set, the szCabinetPrev and szDiskPrev
+ * fields are present in this CFHEADER.
+ */
+#define FLAG_PREV_CABINET 0x0001
+/*
+ * FLAG_NEXT_CABINET is set if the cabinet file is not the last in a set of
+ * cabinet files. When this bit is set, the szCabinetNext and szDiskNext
+* fields are present in this CFHEADER.
+*/
+#define FLAG_NEXT_CABINET 0x0002
+/*
+ * FLAG_RESERVE_PRESENT is set if the cabinet file contains any reserved
+ * fields. When this bit is set, the cbCFHeader, cbCFFolder, and cbCFData
+ * fields are present in this CFHEADER.
+ */
+#define FLAG_RESERVE_PRESENT 0x0004
+
 #define INVALID_TIME ((time_t)-1)
+
 
 /*
   ASN.1 definitions (more or less from official MS Authenticode docs)
@@ -452,9 +472,9 @@ typedef struct {
 DECLARE_ASN1_FUNCTIONS(TimeStampAccuracy)
 
 ASN1_SEQUENCE(TimeStampAccuracy) = {
-        ASN1_OPT(TimeStampAccuracy, seconds, ASN1_INTEGER),
-        ASN1_IMP_OPT(TimeStampAccuracy, millis, ASN1_INTEGER, 0),
-        ASN1_IMP_OPT(TimeStampAccuracy, micros, ASN1_INTEGER, 1)
+	ASN1_OPT(TimeStampAccuracy, seconds, ASN1_INTEGER),
+	ASN1_IMP_OPT(TimeStampAccuracy, millis, ASN1_INTEGER, 0),
+	ASN1_IMP_OPT(TimeStampAccuracy, micros, ASN1_INTEGER, 1)
 } ASN1_SEQUENCE_END(TimeStampAccuracy)
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampAccuracy)
@@ -466,11 +486,11 @@ typedef struct {
 	MessageImprint *messageImprint;
 	ASN1_INTEGER *serial;
 	ASN1_GENERALIZEDTIME *time;
-    TimeStampAccuracy *accuracy;
-    ASN1_BOOLEAN ordering;
-    ASN1_INTEGER *nonce;
-    GENERAL_NAME *tsa;
-    STACK_OF(X509_EXTENSION) *extensions;
+	TimeStampAccuracy *accuracy;
+	ASN1_BOOLEAN ordering;
+	ASN1_INTEGER *nonce;
+	GENERAL_NAME *tsa;
+	STACK_OF(X509_EXTENSION) *extensions;
 } TimeStampToken;
 
 DECLARE_ASN1_FUNCTIONS(TimeStampToken)
@@ -885,22 +905,22 @@ static void cleanup_lib_state(void)
 }
 
 static bool on_list(const char *txt, const char *list[]) {
-    while (*list)
-        if (!strcmp(txt, *list++))
-            return true;
-    return false;
+	while (*list)
+		if (!strcmp(txt, *list++))
+			return true;
+	return false;
 }
 
 static void usage(const char *argv0, const char *cmd)
 {
 	printf("\nUsage: %s", argv0);
-    const char *cmds_all[] = {"all", NULL};
-    if (on_list(cmd, cmds_all)) {
+	const char *cmds_all[] = {"all", NULL};
+	if (on_list(cmd, cmds_all)) {
 		printf("\n\n%1s[ --version | -v ]\n", "");
 		printf("%1s[ --help ]\n\n", "");
 	}
-    const char *cmds_sign[] = {"all", "sign", NULL};
-    if (on_list(cmd, cmds_sign)) {
+	const char *cmds_sign[] = {"all", "sign", NULL};
+	if (on_list(cmd, cmds_sign)) {
 		printf("%1s[ sign ] ( -certs <certfile> -key <keyfile> | -pkcs12 <pkcs12file> |\n", "");
 		printf("%12s  [ -pkcs11engine <engine> ] -pkcs11module <module> -certs <certfile> -key <pkcs11 key id>)\n", "");
 		printf("%12s[ -pass <password>", "");
@@ -925,8 +945,8 @@ static void usage(const char *argv0, const char *cmd)
 #endif
 		printf("%12s[ -in ] <infile> [-out ] <outfile>\n\n", "");
 	}
-    const char *cmds_add[] = {"all", "add", NULL};
-    if (on_list(cmd, cmds_add)) {
+	const char *cmds_add[] = {"all", "add", NULL};
+	if (on_list(cmd, cmds_add)) {
 		printf("%1sadd [-addUnauthenticatedBlob]\n", "");
 #ifdef ENABLE_CURL
 		printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
@@ -934,8 +954,8 @@ static void usage(const char *argv0, const char *cmd)
 #endif
 		printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
 	}
-    const char *cmds_attach[] = {"all", "attach-signature", NULL};
-    if (on_list(cmd, cmds_attach)) {
+	const char *cmds_attach[] = {"all", "attach-signature", NULL};
+	if (on_list(cmd, cmds_attach)) {
 		printf("%1sattach-signature [ -sigin ] <sigfile>\n", "");
 		printf("%12s[ -CAfile <infile> ]\n", "");
 		printf("%12s[ -CRLfile <infile> ]\n", "");
@@ -943,17 +963,17 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -nest ]\n", "");
 		printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
 	}
-    const char *cmds_extract[] = {"all", "extract-signature", NULL};
-    if (on_list(cmd, cmds_extract)) {
+	const char *cmds_extract[] = {"all", "extract-signature", NULL};
+	if (on_list(cmd, cmds_extract)) {
 		printf("%1sextract-signature [ -pem ]\n", "");
 		printf("%12s[ -in ] <infile> [ -out ] <sigfile>\n\n", "");
 	}
-    const char *cmds_remove[] = {"all", "remove-signature", NULL};
-    if (on_list(cmd, cmds_remove))
+	const char *cmds_remove[] = {"all", "remove-signature", NULL};
+	if (on_list(cmd, cmds_remove))
 		printf("%1sremove-signature [ -in ] <infile> [ -out ] <outfile>\n\n", "");
 
-    const char *cmds_verify[] = {"all", "verify", NULL};
-    if (on_list(cmd, cmds_verify)) {
+	const char *cmds_verify[] = {"all", "verify", NULL};
+	if (on_list(cmd, cmds_verify)) {
 		printf("%1sverify [ -in ] <infile>\n", "");
 		printf("%12s[ -CAfile <infile> ]\n", "");
 		printf("%12s[ -CRLfile <infile> ]\n", "");
@@ -967,8 +987,8 @@ static void usage(const char *argv0, const char *cmd)
 
 static void help_for(const char *argv0, const char *cmd) {
 
-    const char *cmds_all[] = {"all", NULL};
-    if (on_list(cmd, cmds_all)) {
+	const char *cmds_all[] = {"all", NULL};
+	if (on_list(cmd, cmds_all)) {
 		printf("osslsigncode is a small tool that implements part of the functionality of the Microsoft\n");
 		printf("tool signtool.exe - more exactly the Authenticode signing and timestamping.\n");
 		printf("It can sign and timestamp PE (EXE/SYS/DLL/etc), CAB and MSI files,\n");
@@ -985,39 +1005,39 @@ static void help_for(const char *argv0, const char *cmd) {
 		printf("%-22s = verifies the digital signature of a file\n\n", "verify");
 		printf("For help on a specific command, enter %s <command> --help\n", argv0);
 	}
-    const char *cmds_add[] = {"add", NULL};
-    if (on_list(cmd, cmds_add)) {
+	const char *cmds_add[] = {"add", NULL};
+	if (on_list(cmd, cmds_add)) {
 		printf("\nUse the \"add\" command to add an unauthenticated blob or a timestamp to a previously-signed file.\n\n");
 		printf("Options:\n");
 	}
-    const char *cmds_attach[] = {"attach-signature", NULL};
-    if (on_list(cmd, cmds_attach)) {
+	const char *cmds_attach[] = {"attach-signature", NULL};
+	if (on_list(cmd, cmds_attach)) {
 		printf("\nUse the \"attach-signature\" command to attach the signature stored in the \"sigin\" file.\n");
 		printf("In order to verify this signature you should specify how to find needed CA or TSA\n");
 		printf("certificates, if appropriate.\n\n");
 		printf("Options:\n");
 	}
-    const char *cmds_extract[] = {"extract-signature", NULL};
-    if (on_list(cmd, cmds_extract)) {
+	const char *cmds_extract[] = {"extract-signature", NULL};
+	if (on_list(cmd, cmds_extract)) {
 		printf("\nUse the \"extract-signature\" command to extract the embedded signature from a previously-signed file.\n");
 		printf("DER is the default format of the output file, but can be changed to PEM.\n\n");
 		printf("Options:\n");
 	}
-    const char *cmds_remove[] = {"remove-signature", NULL};
-    if (on_list(cmd, cmds_remove)) {
+	const char *cmds_remove[] = {"remove-signature", NULL};
+	if (on_list(cmd, cmds_remove)) {
 		printf("\nUse the \"remove-signature\" command to remove sections of the embedded signature on a file.\n\n");
 		printf("Options:\n");
 	}
-    const char *cmds_sign[] = {"sign", NULL};
-    if (on_list(cmd, cmds_sign)) {
+	const char *cmds_sign[] = {"sign", NULL};
+	if (on_list(cmd, cmds_sign)) {
 		printf("\nUse the \"sign\" command to sign files using embedded signatures.\n");
 		printf("Signing  protects a file from tampering, and allows users to verify the signer\n");
 		printf("based on a signing certificate. The options below allow you to specify signing\n");
 		printf("parameters and to select the signing certificate you wish to use.\n\n");
 		printf("Options:\n");
 	}
-    const char *cmds_verify[] = {"verify", NULL};
-    if (on_list(cmd, cmds_verify)) {
+	const char *cmds_verify[] = {"verify", NULL};
+	if (on_list(cmd, cmds_verify)) {
 		printf("\nUse the \"verify\" command to verify embedded signatures.\n");
 		printf("Verification determines if the signing certificate was issued by a trusted party,\n");
 		printf("whether that certificate has been revoked, and whether the certificate is valid\n");
@@ -1025,128 +1045,128 @@ static void help_for(const char *argv0, const char *cmd) {
 		printf("and to specify how to find needed CA or TSA certificates, if appropriate.\n\n");
 		printf("Options:\n");
 	}
-    const char *cmds_ac[] = {"sign", NULL};
-    if (on_list(cmd, cmds_ac))
-        printf("%-24s= an additional certificate to be added to the signature block\n", "-ac");
+	const char *cmds_ac[] = {"sign", NULL};
+	if (on_list(cmd, cmds_ac))
+	printf("%-24s= an additional certificate to be added to the signature block\n", "-ac");
 #ifdef WITH_GSF
-    const char *cmds_add_msi_dse[] = {"sign", NULL};
-    if (on_list(cmd, cmds_add_msi_dse))
-        printf("%-24s= sign a MSI file with the add-msi-dse option\n", "-add-msi-dse");
+	const char *cmds_add_msi_dse[] = {"sign", NULL};
+	if (on_list(cmd, cmds_add_msi_dse))
+		printf("%-24s= sign a MSI file with the add-msi-dse option\n", "-add-msi-dse");
 #endif
-    const char *cmds_addUnauthenticatedBlob[] = {"sign", "add", NULL};
-    if (on_list(cmd, cmds_addUnauthenticatedBlob))
-        printf("%-24s= add an unauthenticated blob to the PE/MSI file\n", "-addUnauthenticatedBlob");
+	const char *cmds_addUnauthenticatedBlob[] = {"sign", "add", NULL};
+	if (on_list(cmd, cmds_addUnauthenticatedBlob))
+		printf("%-24s= add an unauthenticated blob to the PE/MSI file\n", "-addUnauthenticatedBlob");
 #ifdef PROVIDE_ASKPASS
-    const char *cmds_askpass[] = {"sign", NULL};
-    if (on_list(cmd, cmds_askpass))
-        printf("%-24s= ask for the private key password\n", "-askpass");
+	const char *cmds_askpass[] = {"sign", NULL};
+	if (on_list(cmd, cmds_askpass))
+		printf("%-24s= ask for the private key password\n", "-askpass");
 #endif
-    const char *cmds_CAfile[] = {"attach-signature", "verify", NULL};
-    if (on_list(cmd, cmds_CAfile))
-        printf("%-24s= the file containing one or more trusted certificates in PEM format\n", "-CAfile");
-    const char *cmds_certs[] = {"sign", NULL};
-    if (on_list(cmd, cmds_certs))
-        printf("%-24s= the signing certificate to use\n", "-certs");
-    const char *cmds_comm[] = {"sign", NULL};
-    if (on_list(cmd, cmds_comm))
-        printf("%-24s= set commercial purpose (default: individual purpose)\n", "-comm");
-    const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
-    if (on_list(cmd, cmds_CRLfile))
-        printf("%-24s= the file containing one or more CRLs in PEM format\n", "-CRLfile");
-    const char *cmds_h[] = {"sign", NULL};
-    if (on_list(cmd, cmds_h)) {
-        printf("%-24s= {md5|sha1|sha2(56)|sha384|sha512}\n", "-h");
+	const char *cmds_CAfile[] = {"attach-signature", "verify", NULL};
+	if (on_list(cmd, cmds_CAfile))
+		printf("%-24s= the file containing one or more trusted certificates in PEM format\n", "-CAfile");
+	const char *cmds_certs[] = {"sign", NULL};
+	if (on_list(cmd, cmds_certs))
+		printf("%-24s= the signing certificate to use\n", "-certs");
+	const char *cmds_comm[] = {"sign", NULL};
+	if (on_list(cmd, cmds_comm))
+		printf("%-24s= set commercial purpose (default: individual purpose)\n", "-comm");
+	const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
+	if (on_list(cmd, cmds_CRLfile))
+		printf("%-24s= the file containing one or more CRLs in PEM format\n", "-CRLfile");
+	const char *cmds_h[] = {"sign", NULL};
+	if (on_list(cmd, cmds_h)) {
+		printf("%-24s= {md5|sha1|sha2(56)|sha384|sha512}\n", "-h");
 		printf("%26sset of cryptographic hash functions\n", "");
 	}
-    const char *cmds_i[] = {"sign", NULL};
-    if (on_list(cmd, cmds_i))
-        printf("%-24s= specifies a URL for expanded description of the signed content\n", "-i");
-    const char *cmds_in[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", "verify", NULL};
-    if (on_list(cmd, cmds_in))
-        printf("%-24s= input file\n", "-in");
-    const char *cmds_jp[] = {"sign", NULL};
-    if (on_list(cmd, cmds_jp)) {
-        printf("%-24s= low | medium | high\n", "-jp");
+	const char *cmds_i[] = {"sign", NULL};
+	if (on_list(cmd, cmds_i))
+		printf("%-24s= specifies a URL for expanded description of the signed content\n", "-i");
+	const char *cmds_in[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", "verify", NULL};
+	if (on_list(cmd, cmds_in))
+		printf("%-24s= input file\n", "-in");
+	const char *cmds_jp[] = {"sign", NULL};
+	if (on_list(cmd, cmds_jp)) {
+		printf("%-24s= low | medium | high\n", "-jp");
 		printf("%26slevels of permissions in Microsoft Internet Explorer 4.x for CAB files\n", "");
 		printf("%26sonly \"low\" level is now supported\n", "");
 	}
-    const char *cmds_key[] = {"sign", NULL};
-    if (on_list(cmd, cmds_key))
-        printf("%-24s= the private key to use\n", "-key");
-    const char *cmds_n[] = {"sign", NULL};
-    if (on_list(cmd, cmds_n))
-        printf("%-24s= specifies a description of the signed content\n", "-n");
-    const char *cmds_nest[] = {"attach-signature", "sign", NULL};
-    if (on_list(cmd, cmds_nest))
-        printf("%-24s= add the new nested signature instead of replacing the first one\n", "-nest");
+	const char *cmds_key[] = {"sign", NULL};
+	if (on_list(cmd, cmds_key))
+		printf("%-24s= the private key to use\n", "-key");
+	const char *cmds_n[] = {"sign", NULL};
+	if (on_list(cmd, cmds_n))
+		printf("%-24s= specifies a description of the signed content\n", "-n");
+	const char *cmds_nest[] = {"attach-signature", "sign", NULL};
+	if (on_list(cmd, cmds_nest))
+		printf("%-24s= add the new nested signature instead of replacing the first one\n", "-nest");
 #ifdef ENABLE_CURL
-    const char *cmds_noverifypeer[] = {"add", "sign", NULL};
-    if (on_list(cmd, cmds_noverifypeer))
-        printf("%-24s= do not verify the Time-Stamp Authority's SSL certificate\n", "-noverifypeer");
+	const char *cmds_noverifypeer[] = {"add", "sign", NULL};
+	if (on_list(cmd, cmds_noverifypeer))
+		printf("%-24s= do not verify the Time-Stamp Authority's SSL certificate\n", "-noverifypeer");
 #endif
-    const char *cmds_out[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", NULL};
-    if (on_list(cmd, cmds_out))
-        printf("%-24s= output file\n", "-out");
+	const char *cmds_out[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", NULL};
+	if (on_list(cmd, cmds_out))
+		printf("%-24s= output file\n", "-out");
 #ifdef ENABLE_CURL
-    const char *cmds_p[] = {"add", "sign", NULL};
-    if (on_list(cmd, cmds_p))
-        printf("%-24s= proxy to connect to the desired Time-Stamp Authority server\n", "-p");
+	const char *cmds_p[] = {"add", "sign", NULL};
+	if (on_list(cmd, cmds_p))
+		printf("%-24s= proxy to connect to the desired Time-Stamp Authority server\n", "-p");
 #endif
-    const char *cmds_pass[] = {"sign", NULL};
-    if (on_list(cmd, cmds_pass))
-        printf("%-24s= the private key password\n", "-pass");
-    const char *cmds_pem[] = {"extract-signature", NULL};
-    if (on_list(cmd, cmds_pem))
-        printf("%-24s= output data format PEM to use (default: DER)\n", "-pem");
-    const char *cmds_ph[] = {"sign", NULL};
-    if (on_list(cmd, cmds_ph))
-        printf("%-24s= generate page hashes for executable files\n", "-ph");
-    const char *cmds_pkcs11engine[] = {"sign", NULL};
-    if (on_list(cmd, cmds_pkcs11engine))
-        printf("%-24s= PKCS11 engine\n", "-pkcs11engine");
-    const char *cmds_pkcs11module[] = {"sign", NULL};
-    if (on_list(cmd, cmds_pkcs11module))
-        printf("%-24s= PKCS11 module\n", "-pkcs11module");
-    const char *cmds_pkcs12[] = {"sign", NULL};
-    if (on_list(cmd, cmds_pkcs12))
-        printf("%-24s= PKCS#12 container with the certificate and the private key\n", "-pkcs12");
-    const char *cmds_readpass[] = {"sign", NULL};
-    if (on_list(cmd, cmds_readpass))
-        printf("%-24s= the private key password source\n", "-readpass");
-    const char *cmds_require_leaf_hash[] = {"verify", NULL};
-    if (on_list(cmd, cmds_require_leaf_hash)) {
-        printf("%-24s= {md5|sha1|sha2(56)|sha384|sha512}:XXXXXXXXXXXX...\n", "-require-leaf-hash");
+	const char *cmds_pass[] = {"sign", NULL};
+	if (on_list(cmd, cmds_pass))
+		printf("%-24s= the private key password\n", "-pass");
+	const char *cmds_pem[] = {"extract-signature", NULL};
+	if (on_list(cmd, cmds_pem))
+		printf("%-24s= output data format PEM to use (default: DER)\n", "-pem");
+	const char *cmds_ph[] = {"sign", NULL};
+	if (on_list(cmd, cmds_ph))
+		printf("%-24s= generate page hashes for executable files\n", "-ph");
+	const char *cmds_pkcs11engine[] = {"sign", NULL};
+	if (on_list(cmd, cmds_pkcs11engine))
+		printf("%-24s= PKCS11 engine\n", "-pkcs11engine");
+	const char *cmds_pkcs11module[] = {"sign", NULL};
+	if (on_list(cmd, cmds_pkcs11module))
+		printf("%-24s= PKCS11 module\n", "-pkcs11module");
+	const char *cmds_pkcs12[] = {"sign", NULL};
+	if (on_list(cmd, cmds_pkcs12))
+		printf("%-24s= PKCS#12 container with the certificate and the private key\n", "-pkcs12");
+	const char *cmds_readpass[] = {"sign", NULL};
+	if (on_list(cmd, cmds_readpass))
+		printf("%-24s= the private key password source\n", "-readpass");
+	const char *cmds_require_leaf_hash[] = {"verify", NULL};
+	if (on_list(cmd, cmds_require_leaf_hash)) {
+		printf("%-24s= {md5|sha1|sha2(56)|sha384|sha512}:XXXXXXXXXXXX...\n", "-require-leaf-hash");
 		printf("%26sspecifies an optional hash algorithm to use when computing\n", "");
 		printf("%26sthe leaf certificate (in DER form) hash and compares\n", "");
 		printf("%26sthe provided hash against the computed hash\n", "");
 	}
-    const char *cmds_sigin[] = {"attach-signature", NULL};
-    if (on_list(cmd, cmds_sigin))
-        printf("%-24s= a file containing the signature to be attached\n", "-sigin");
-    const char *cmds_st[] = {"sign", NULL};
-    if (on_list(cmd, cmds_st))
-        printf("%-24s= the unix-time to set the signing time\n", "-st");
+	const char *cmds_sigin[] = {"attach-signature", NULL};
+	if (on_list(cmd, cmds_sigin))
+		printf("%-24s= a file containing the signature to be attached\n", "-sigin");
+	const char *cmds_st[] = {"sign", NULL};
+	if (on_list(cmd, cmds_st))
+		printf("%-24s= the unix-time to set the signing time\n", "-st");
 #ifdef ENABLE_CURL
-    const char *cmds_t[] = {"add", "sign", NULL};
-    if (on_list(cmd, cmds_t)) {
-        printf("%-24s= specifies that the digital signature will be timestamped\n", "-t");
+	const char *cmds_t[] = {"add", "sign", NULL};
+	if (on_list(cmd, cmds_t)) {
+		printf("%-24s= specifies that the digital signature will be timestamped\n", "-t");
 		printf("%26sby the Time-Stamp Authority (TSA) indicated by the URL\n", "");
 		printf("%26sthis option cannot be used with the -ts option\n", "");
 	}
-    const char *cmds_ts[] = {"add", "sign", NULL};
-    if (on_list(cmd, cmds_ts)) {
-        printf("%-24s= specifies the URL of the RFC 3161 Time-Stamp Authority server\n", "-ts");
+	const char *cmds_ts[] = {"add", "sign", NULL};
+	if (on_list(cmd, cmds_ts)) {
+		printf("%-24s= specifies the URL of the RFC 3161 Time-Stamp Authority server\n", "-ts");
 		printf("%26sthis option cannot be used with the -t option\n", "");
 	}
 #endif
-    const char *cmds_untrusted[] = {"attach-signature", "verify", NULL};
-    if (on_list(cmd, cmds_untrusted)) {
-        printf("%-24s= set of additional untrusted certificates which may be needed\n", "-untrusted");
+	const char *cmds_untrusted[] = {"attach-signature", "verify", NULL};
+	if (on_list(cmd, cmds_untrusted)) {
+		printf("%-24s= set of additional untrusted certificates which may be needed\n", "-untrusted");
 		printf("%26sthe file should contain one or more certificates in PEM format\n", "");
 	}
-    const char *cmds_verbose[] = {"sign", "verify", NULL};
-    if (on_list(cmd, cmds_verbose)) {
-        printf("%-24s= include additional output in the log\n", "-verbose");
+	const char *cmds_verbose[] = {"sign", "verify", NULL};
+	if (on_list(cmd, cmds_verbose)) {
+		printf("%-24s= include additional output in the log\n", "-verbose");
 	}
 	usage(argv0, cmd);
 }
@@ -1154,6 +1174,8 @@ static void help_for(const char *argv0, const char *cmd) {
 #define DO_EXIT_0(x)	{ fprintf(stderr, x); goto err_cleanup; }
 #define DO_EXIT_1(x, y) { fprintf(stderr, x, y); goto err_cleanup; }
 #define DO_EXIT_2(x, y, z) { fprintf(stderr, x, y, z); goto err_cleanup; }
+
+#define GET_UINT8_LE(p) ((u_char*)(p))[0]
 
 #define GET_UINT16_LE(p) (((u_char*)(p))[0] | (((u_char*)(p))[1]<<8))
 
@@ -2056,6 +2078,9 @@ static int verify_pkcs7(PKCS7 *p7, char *leafhash, char *cafile, char *crlfile, 
 }
 
 #ifdef WITH_GSF
+/*
+ * MSI file support
+*/
 static gint msi_base64_decode(gint x)
 {
 	if (x < 10)
@@ -2430,24 +2455,19 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile,
 #endif
 	printf("\n");
 	ret |= verify_pkcs7(p7, leafhash, cafile, crlfile, untrusted);
-
+	printf("\n");
 	if (allownest) {
 		int has_sig = 0;
 		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
 		if (p7nest) {
-			printf("\n");
 			int nest_ret = msi_verify_pkcs7(p7nest, infile, exdata, exlen, leafhash, 0, cafile, crlfile, untrusted);
 			if (ret)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
 		} else if (!p7nest && has_sig) {
-			printf("\nFailed to decode nested signature!\n");
+			printf("Failed to decode nested signature!\n");
 			ret = 1;
-		} else {
-			printf("\n");
 		}
-	} else {
-		printf("\n");
 	}
 out:
 	return ret;
@@ -2665,6 +2685,9 @@ out:
 
 #endif
 
+/*
+ * PE file support
+*/
 static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf,
 	size_t peheader, int pe32plus, size_t fileend)
 {
@@ -2818,24 +2841,19 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, size_t peheader,
 	}
 
 	ret |= verify_pkcs7(p7, leafhash, cafile, crlfile, untrusted);
-
+	printf("\n");
 	if (allownest) {
 		int has_sig = 0;
 		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
 		if (p7nest) {
-			printf("\n");
 			int nest_ret = verify_pe_pkcs7(p7nest, indata, peheader, pe32plus, sigpos, siglen, leafhash, 0, cafile, crlfile, untrusted);
 			if (ret)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
 		} else if (!p7nest && has_sig) {
-			printf("\nFailed to decode nested signature!\n");
+			printf("Failed to decode nested signature!\n");
 			ret = 1;
-		} else {
-			printf("\n");
 		}
-	} else {
-		printf("\n");
 	}
 
 	return ret;
@@ -2895,8 +2913,584 @@ static int verify_pe_file(char *indata, size_t peheader, int pe32plus,
 
 	ret = verify_pe_pkcs7(p7, indata, peheader, pe32plus, sigpos, siglen, leafhash, 1, cafile, crlfile, untrusted);
 	PKCS7_free(p7);
+
 	return ret;
 }
+
+static int extract_pe_file(char *indata, size_t sigpos, size_t siglen, BIO *outdata, int output_pkcs7)
+{
+	int ret = 0;
+	PKCS7 *sig;
+
+	(void)BIO_reset(outdata);
+	if (output_pkcs7) {
+		sig = extract_existing_pe_pkcs7(indata, sigpos, siglen);
+		if (!sig) {
+			fprintf(stderr, "Unable to extract existing signature\n");
+			return 1; /* FAILED */
+		}
+		ret = !PEM_write_bio_PKCS7(outdata, sig);
+		} else {
+			ret = !BIO_write(outdata, indata + sigpos, siglen);
+	}
+
+	return ret;
+}
+
+static void sign_pe_file(char *indata, size_t i , int pe32plus, size_t *fileend, BIO *hash, BIO *outdata)
+{
+	int len = 0;
+	static char buf[64*1024];
+
+	BIO_write(hash, indata, i);
+	memset(buf, 0, 4);
+	BIO_write(outdata, buf, 4); /* zero out checksum */
+	i += 4;
+	BIO_write(hash, indata + i, 60+pe32plus*16);
+	i += 60+pe32plus*16;
+	memset(buf, 0, 8);
+	BIO_write(outdata, buf, 8); /* zero out sigtable offset + pos */
+	i += 8;
+	BIO_write(hash, indata + i, *fileend - i);
+
+	/* pad (with 0's) pe file to 8 byte boundary */
+	len = 8 - *fileend % 8;
+	if (len > 0 && len != 8) {
+		memset(buf, 0, len);
+		BIO_write(hash, buf, len);
+		*fileend += len;
+	}
+}
+
+
+/*
+ * CAB file support
+ * https://www.file-recovery.com/cab-signature-format.htm
+ */
+
+static int verify_cab_header(char *indata, char *infile, cmd_type_t cmd,
+			size_t filesize, size_t *header_size, size_t *sigpos, size_t *siglen)
+{
+	int ret = 1;
+	size_t reserved, flags = 0;
+
+	if (filesize < 44)	{
+		printf("Corrupt cab file - too short: %s\n", infile);
+		ret = 0; /* FAILED */
+	}
+	reserved = GET_UINT32_LE(indata + 4);
+	if (reserved) {
+		printf("Reserved1: 0x%08lX\n", reserved);
+		ret = 0; /* FAILED */
+	}
+	/* flags specify bit-mapped values that indicate the presence of optional data */
+	flags = GET_UINT16_LE(indata + 30);
+#if 1
+	if (flags & FLAG_PREV_CABINET) {
+			/* FLAG_NEXT_CABINET works */
+			printf("Multivolume cabinet file is unsupported: flags 0x%04lX\n", flags);
+			ret = 0; /* FAILED */
+	}
+#endif
+	if (!(flags & FLAG_RESERVE_PRESENT) &&
+			(cmd == CMD_REMOVE || cmd == CMD_EXTRACT)) {
+		printf("CAB file does not have any signature: %s\n", infile);
+		ret = 0; /* FAILED */
+	}
+
+	if (flags & FLAG_RESERVE_PRESENT) {
+		/*
+		* Additional headers is located at offset 36 (cbCFHeader, cbCFFolder, cbCFData);
+		* size of header (4 bytes, little-endian order) must be 20 (checkpoint).
+		*/
+		*header_size = GET_UINT32_LE(indata + 36);
+		if (*header_size != 20) {
+			printf("Additional header size: 0x%08lX\n", *header_size);
+			ret = 0; /* FAILED */
+		}
+		reserved = GET_UINT32_LE(indata + 40);
+		if (reserved != 0x00100000) {
+			printf("abReserved: 0x%08lX\n", reserved);
+			ret = 0; /* FAILED */
+		}
+		/*
+		* File size is defined at offset 8, however if additional header exists, this size is not valid.
+		* sigpos - additional data offset is located at offset 44 (from file beginning)
+		* and consist of 4 bytes (little-endian order)
+		* siglen - additional data size is located at offset 48 (from file beginning)
+		* and consist of 4 bytes (little-endian order)
+		* If there are additional headers, size of the CAB archive file is calcualted
+		* as additional data offset plus additional data size.
+		*/
+		*sigpos = GET_UINT32_LE(indata + 44);
+		*siglen = GET_UINT32_LE(indata + 48);
+		if (*sigpos < filesize && *sigpos + *siglen != filesize) {
+			printf("Additional data offset:\t%lu bytes\nAdditional data size:\t%lu bytes\n", *sigpos, *siglen);
+			printf("File size:\t\t%lu bytes\n", filesize);
+			ret = 0; /* FAILED */
+		}
+	}
+	return ret;
+}
+
+static int calc_cab_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, size_t offset)
+{
+	size_t coffFiles, nfolders, flags;
+	static unsigned char bfb[16*1024*1024];
+	EVP_MD_CTX *mdctx;
+	mdctx = EVP_MD_CTX_new();
+	EVP_DigestInit(mdctx, md);
+
+	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
+	(void)BIO_seek(bio, 0);
+
+	/* u1 signature[4] 4643534D MSCF: 0-3 */
+	BIO_read(bio, bfb, 4);
+	EVP_DigestUpdate(mdctx, bfb, 4);
+	/* u4 reserved1 00000000: 4-7 */
+	BIO_read(bio, bfb, 4);
+	/*
+	 * u4 cbCabinet - size of this cabinet file in bytes: 8-11
+	 * u4 reserved2 00000000: 12-15
+	 */
+	BIO_read(bio, bfb, 8);
+	EVP_DigestUpdate(mdctx, bfb, 8);
+	 /* u4 coffFiles - offset of the first CFFILE entry: 16-19 */
+	BIO_read(bio, bfb, 4);
+	coffFiles = GET_UINT32_LE(bfb);
+	EVP_DigestUpdate(mdctx, bfb, 4);
+	/*
+	 * u4 reserved3 00000000: 20-23
+	 * u1 versionMinor 03: 24
+	 * u1 versionMajor 01: 25
+	 */
+	BIO_read(bio, bfb, 6);
+	EVP_DigestUpdate(mdctx, bfb, 6);
+	/* u2 cFolders - number of CFFOLDER entries in this cabinet: 26-27 */
+	BIO_read(bio, bfb, 2);
+	nfolders = GET_UINT16_LE(bfb);
+	EVP_DigestUpdate(mdctx, bfb, 2);
+	/* u2 cFiles - number of CFFILE entries in this cabinet: 28-29 */
+	BIO_read(bio, bfb, 2);
+	EVP_DigestUpdate(mdctx, bfb, 2);
+	/* u2 flags: 30-31 */
+	BIO_read(bio, bfb, 2);
+	flags = GET_UINT16_LE(bfb);
+	EVP_DigestUpdate(mdctx, bfb, 2);
+	/* u2 setID must be the same for all cabinets in a set: 32-33 */
+	BIO_read(bio, bfb, 2);
+	EVP_DigestUpdate(mdctx, bfb, 2);
+	/*
+	* u2 iCabinet - number of this cabinet file in a set: 34-35
+	* u2 cbCFHeader: 36-37
+	* u1 cbCFFolder: 38
+	* u1 cbCFData: 39
+	* u22 abReserve: 40-55
+	* - Additional data offset: 44-47
+	* - Additional data size: 48-51
+	*/
+	BIO_read(bio, bfb, 22);
+	/* u22 abReserve: 56-59 */
+	BIO_read(bio, bfb, 4);
+	EVP_DigestUpdate(mdctx, bfb, 4);
+
+	/* TODO */
+	if (flags & FLAG_PREV_CABINET) {
+		/* szCabinetPrev */
+		do {
+			BIO_read(bio, bfb, 1);
+			EVP_DigestUpdate(mdctx, bfb, 1);
+		} while (bfb[0]);
+		/* szDiskPrev */
+		do {
+			BIO_read(bio, bfb, 1);
+			EVP_DigestUpdate(mdctx, bfb, 1);
+		} while (bfb[0]);
+	}
+	if (flags & FLAG_NEXT_CABINET) {
+		/* szCabinetNext */
+		do {
+			BIO_read(bio, bfb, 1);
+			EVP_DigestUpdate(mdctx, bfb, 1);
+		} while (bfb[0]);
+		/* szDiskNext */
+		do {
+			BIO_read(bio, bfb, 1);
+			EVP_DigestUpdate(mdctx, bfb, 1);
+		} while (bfb[0]);
+	}
+	/*
+	 * (u8 * cFolders) CFFOLDER - structure contains information about
+	 * one of the folders or partial folders stored in this cabinet file
+	 */
+	while (nfolders) {
+		BIO_read(bio, bfb, 8);
+		EVP_DigestUpdate(mdctx, bfb, 8);
+		nfolders--;
+	}
+	/* (variable) ab - the compressed data bytes */
+	while (coffFiles < offset) {
+		size_t want = offset - coffFiles;
+		if (want > sizeof(bfb))
+			want = sizeof(bfb);
+		int l = BIO_read(bio, bfb, want);
+		if (l <= 0)
+			break;
+		EVP_DigestUpdate(mdctx, bfb, l);
+		coffFiles += l;
+	}
+
+	EVP_DigestFinal(mdctx, mdbuf, NULL);
+	EVP_MD_CTX_free(mdctx);
+
+	return 0; /* OK */
+}
+
+static int verify_cab_pkcs7(PKCS7 *p7, char *indata, size_t sigpos, char *leafhash,
+		int allownest, char *cafile, char *crlfile, char *untrusted)
+{
+	int ret = 0;
+	int mdtype = -1, phtype = -1;
+	unsigned char mdbuf[EVP_MAX_MD_SIZE];
+	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
+	char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	unsigned char *ph = NULL;
+	size_t phlen = 0;
+	BIO *bio = NULL;
+
+	ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+	if (PKCS7_type_is_signed(p7) &&
+		!OBJ_cmp(p7->d.sign->contents->type, indir_objid) &&
+		p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
+		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
+		const unsigned char *p = astr->data;
+		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
+		if (idc) {
+			extract_page_hash(idc->data, &ph, &phlen, &phtype);
+			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
+				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
+				memcpy(mdbuf, idc->messageDigest->digest->data, idc->messageDigest->digest->length);
+			}
+			SpcIndirectDataContent_free(idc);
+		}
+	}
+	ASN1_OBJECT_free(indir_objid);
+	if (mdtype == -1) {
+		printf("Failed to extract current message digest\n\n");
+		return -1; /* FAILED */
+	}
+	printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
+
+	const EVP_MD *md = EVP_get_digestbynid(mdtype);
+	tohex(mdbuf, hexbuf, EVP_MD_size(md));
+	printf("Current message digest    : %s\n", hexbuf);
+
+	bio = BIO_new_mem_buf(indata, sigpos);
+	ret |= calc_cab_digest(bio, md, cmdbuf, sigpos);
+	BIO_free(bio);
+
+	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
+	int mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
+	if (!mdok)
+		ret = 1; /* FAILED */
+	printf("Calculated message digest : %s%s\n\n", hexbuf, mdok?"":"    MISMATCH!!!");
+
+	ret |= verify_pkcs7(p7, leafhash, cafile, crlfile, untrusted);
+	printf("\n");
+	if (allownest) {
+		int has_sig = 0;
+		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
+		if (p7nest) {
+			int nest_ret = verify_cab_pkcs7(p7nest, indata, sigpos, leafhash, 0, cafile, crlfile, untrusted);
+			if (ret == 0)
+				ret = nest_ret;
+			PKCS7_free(p7nest);
+		} else if (!p7nest && has_sig) {
+			printf("Failed to decode nested signature!\n");
+			ret = 1;
+		}
+	}
+
+	return ret;
+}
+
+static PKCS7 *extract_existing_cab_pkcs7(char *indata, size_t sigpos, size_t siglen)
+{
+	PKCS7 *p7 = NULL;
+	const unsigned char *blob;
+
+	blob = (unsigned char*)indata + sigpos;
+	p7 = d2i_PKCS7(NULL, &blob, siglen);
+
+	return p7;
+}
+
+static int verify_cab_file(char *indata, size_t header_size, size_t sigpos, size_t siglen,
+			char *leafhash, char *cafile, char *crlfile, char *untrusted)
+{
+	PKCS7 *p7;
+	int ret = 0;
+
+	if (header_size != 20) {
+		printf("No signature found\n\n");
+		return 1; /* FAILED */
+	}
+	p7 = extract_existing_cab_pkcs7(indata, sigpos, siglen);
+	if (p7 == NULL) {
+		printf("Failed to extract PKCS7 data\n\n");
+		return -1; /* FAILED */
+	}
+
+	ret |= verify_cab_pkcs7(p7, indata, sigpos, leafhash, 1, cafile, crlfile, untrusted);
+	PKCS7_free(p7);
+
+	return ret;
+}
+
+static int extract_cab_file(char *indata, size_t sigpos, size_t siglen, BIO *outdata, int output_pkcs7)
+{
+	int ret = 0;
+	PKCS7 *sig;
+
+	(void)BIO_reset(outdata);
+	if (output_pkcs7) {
+		sig = extract_existing_cab_pkcs7(indata, sigpos, siglen);
+		if (!sig) {
+			fprintf(stderr, "Unable to extract existing signature\n");
+			return 1; /* FAILED */
+		}
+		ret = !PEM_write_bio_PKCS7(outdata, sig);
+	} else {
+		ret = !BIO_write(outdata, indata + sigpos, siglen);
+	}
+
+	return ret;
+}
+
+static void write_optional_names(size_t flags, char *indata, BIO *outdata, int *len)
+{
+	int i;
+
+	i = *len;
+	/* TODO */
+	if (flags & FLAG_PREV_CABINET) {
+		/* szCabinetPrev */
+		while (GET_UINT8_LE(indata+i)) {
+			BIO_write(outdata, indata+i, 1);
+			i++;
+		}
+		BIO_write(outdata, indata+i, 1);
+		i++;
+		/* szDiskPrev */
+		while (GET_UINT8_LE(indata+i)) {
+			BIO_write(outdata, indata+i, 1);
+			i++;
+		}
+		BIO_write(outdata, indata+i, 1);
+		i++;
+	}
+	if (flags & FLAG_NEXT_CABINET) {
+		/* szCabinetNext */
+		while (GET_UINT8_LE(indata+i)) {
+			BIO_write(outdata, indata+i, 1);
+			i++;
+		}
+		BIO_write(outdata, indata+i, 1);
+		i++;
+		/* szDiskNext */
+		while (GET_UINT8_LE(indata+i)) {
+			BIO_write(outdata, indata+i, 1);
+			i++;
+		}
+		BIO_write(outdata, indata+i, 1);
+		i++;
+	}
+	*len = i;
+}
+
+static void remove_cab_file(char *indata, size_t siglen, size_t filesize, BIO *outdata)
+{
+	int i;
+	unsigned short nfolders;
+	size_t tmp, flags;
+	static char buf[64*1024];
+
+	/*
+	 * u1 signature[4] 4643534D MSCF: 0-3
+	 * u4 reserved1 00000000: 4-7
+	 */
+	BIO_write(outdata, indata, 8);
+	/* u4 cbCabinet - size of this cabinet file in bytes: 8-11 */
+	tmp = GET_UINT32_LE(indata+8) - 24;
+	PUT_UINT32_LE(tmp, buf);
+	BIO_write(outdata, buf, 4);
+	/* u4 reserved2 00000000: 12-15 */
+	BIO_write(outdata, indata+12, 4);
+	/* u4 coffFiles - offset of the first CFFILE entry: 16-19 */
+	tmp = GET_UINT32_LE(indata+16) - 24;
+	PUT_UINT32_LE(tmp, buf);
+	BIO_write(outdata, buf, 4);
+	/*
+	 * u4 reserved3 00000000: 20-23
+	 * u1 versionMinor 03: 24
+	 * u1 versionMajor 01: 25
+	 * u2 cFolders - number of CFFOLDER entries in this cabinet: 26-27
+	 * u2 cFiles - number of CFFILE entries in this cabinet: 28-29
+	 */
+	BIO_write(outdata, indata+20, 10);
+	/* u2 flags: 30-31 */
+	flags = GET_UINT16_LE(indata+30);
+	PUT_UINT32_LE(flags & (FLAG_PREV_CABINET | FLAG_NEXT_CABINET), buf);
+	BIO_write(outdata, buf, 2);
+	/*
+	 * u2 setID must be the same for all cabinets in a set: 32-33
+	 * u2 iCabinet - number of this cabinet file in a set: 34-35
+	 */
+	BIO_write(outdata, indata+32, 4);
+	i = 60;
+	write_optional_names(flags, indata, outdata, &i);
+	/*
+	 * (u8 * cFolders) CFFOLDER - structure contains information about
+	 * one of the folders or partial folders stored in this cabinet file
+	 */
+	nfolders = GET_UINT16_LE(indata + 26);
+	while (nfolders) {
+		tmp = GET_UINT32_LE(indata+i);
+		tmp -= 24;
+		PUT_UINT32_LE(tmp, buf);
+		BIO_write(outdata, buf, 4);
+		BIO_write(outdata, indata+i+4, 4);
+		i+=8;
+		nfolders--;
+	}
+	/* Write what's left - the compressed data bytes */
+	BIO_write(outdata, indata+i, filesize-siglen-i);
+}
+
+static void modify_cab_header(char *indata, size_t fileend, BIO *hash, BIO *outdata)
+{
+	int i;
+	unsigned short nfolders;
+	size_t flags;
+	static char buf[64*1024];
+
+	/* u1 signature[4] 4643534D MSCF: 0-3 */
+	BIO_write(hash, indata, 4);
+	/* u4 reserved1 00000000: 4-7 */
+	BIO_write(outdata, indata+4, 4);
+	/*
+	 * u4 cbCabinet - size of this cabinet file in bytes: 8-11
+	 * u4 reserved2 00000000: 12-15
+	 * u4 coffFiles - offset of the first CFFILE entry: 16-19
+	 * u4 reserved3 00000000: 20-23
+	 * u1 versionMinor 03: 24
+	 * u1 versionMajor 01: 25
+	 * u2 cFolders - number of CFFOLDER entries in this cabinet: 26-27
+	 * u2 cFiles - number of CFFILE entries in this cabinet: 28-29
+	 */
+	BIO_write(hash, indata+8, 22);
+	/* u2 flags: 30-31 */
+	flags = GET_UINT16_LE(indata+30);
+	PUT_UINT32_LE(flags, buf);
+	BIO_write(hash, buf, 2);
+	/* u2 setID must be the same for all cabinets in a set: 32-33 */
+	BIO_write(hash, indata+32, 2);
+	/*
+	 * u2 iCabinet - number of this cabinet file in a set: 34-35
+	 * u2 cbCFHeader: 36-37
+	 * u1 cbCFFolder: 38
+	 * u1 cbCFData: 39
+	 * u22 abReserve: 40-43
+	 * - Additional data offset: 44-47
+	 * - Additional data size: 48-51
+	 */
+	BIO_write(outdata, indata+34, 22);
+	/* u24 abReserve: 52-59 */
+	BIO_write(hash, indata+56, 4);
+
+	i = 60;
+	write_optional_names(flags, indata, hash, &i);
+	/*
+	 * (u8 * cFolders) CFFOLDER - structure contains information about
+	 * one of the folders or partial folders stored in this cabinet file
+	 */
+	nfolders = GET_UINT16_LE(indata + 26);
+	while (nfolders) {
+		BIO_write(hash, indata+i, 8);
+		i+=8;
+		nfolders--;
+	}
+	/* Write what's left - the compressed data bytes */
+	BIO_write(hash, indata+i, fileend-i);
+}
+
+static void add_cab_header(char *indata, size_t fileend, BIO *hash, BIO *outdata)
+{
+	int i;
+	unsigned short nfolders;
+	size_t tmp, flags;
+	static char buf[64*1024];
+	u_char cabsigned[] = {
+		0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
+		0xde, 0xad, 0xbe, 0xef, /* size of cab file */
+		0xde, 0xad, 0xbe, 0xef, /* size of asn1 blob */
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+	};
+
+	/* u1 signature[4] 4643534D MSCF: 0-3 */
+	BIO_write(hash, indata, 4);
+	/* u4 reserved1 00000000: 4-7 */
+	BIO_write(outdata, indata+4, 4);
+	/* u4 cbCabinet - size of this cabinet file in bytes: 8-11 */
+	tmp = GET_UINT32_LE(indata+8) + 24;
+	PUT_UINT32_LE(tmp, buf);
+	BIO_write(hash, buf, 4);
+	/* u4 reserved2 00000000: 12-15 */
+	BIO_write(hash, indata+12, 4);
+	/* u4 coffFiles - offset of the first CFFILE entry: 16-19 */
+	tmp = GET_UINT32_LE(indata+16) + 24;
+	PUT_UINT32_LE(tmp, buf+4);
+	BIO_write(hash, buf+4, 4);
+	/*
+	 * u4 reserved3 00000000: 20-23
+	 * u1 versionMinor 03: 24
+	 * u1 versionMajor 01: 25
+	 * u2 cFolders - number of CFFOLDER entries in this cabinet: 26-27
+	 * u2 cFiles - number of CFFILE entries in this cabinet: 28-29
+	 */
+	memcpy(buf+4, indata+20, 10);
+	flags = GET_UINT16_LE(indata+30);
+	buf[4+10] = flags | FLAG_RESERVE_PRESENT;
+	/* u2 setID must be the same for all cabinets in a set: 32-33 */
+	memcpy(buf+16, indata+32, 2);
+
+	BIO_write(hash, buf+4, 14);
+	/* u2 iCabinet - number of this cabinet file in a set: 34-35 */
+	BIO_write(outdata, indata+34, 2);
+	memcpy(cabsigned+8, buf, 4);
+	BIO_write(outdata, cabsigned, 20);
+	BIO_write(hash, cabsigned+20, 4);
+
+	i = 36;
+	write_optional_names(flags, indata, hash, &i);
+	/*
+	 * (u8 * cFolders) CFFOLDER - structure contains information about
+	 * one of the folders or partial folders stored in this cabinet file
+	 */
+	nfolders = GET_UINT16_LE(indata + 26);
+	while (nfolders) {
+		tmp = GET_UINT32_LE(indata+i);
+		tmp += 24;
+		PUT_UINT32_LE(tmp, buf);
+		BIO_write(hash, buf, 4);
+		BIO_write(hash, indata+i+4, 4);
+		i+=8;
+		nfolders--;
+	}
+	/* Write what's left - the compressed data bytes */
+	BIO_write(hash, indata+i, fileend-i);
+}
+
 
 static STACK_OF(X509) *PEM_read_certs_with_pass(BIO *bin, char *certpass)
 {
@@ -2943,7 +3537,7 @@ static off_t get_file_size(const char *infile)
 	return st.st_size;
 }
 
-static char* map_file(const char *infile, const off_t size)
+static char *map_file(const char *infile, const off_t size)
 {
 	char *indata = NULL;
 #ifdef WIN32
@@ -3073,6 +3667,7 @@ int main(int argc, char **argv) {
 	file_type_t type;
 	cmd_type_t cmd = CMD_SIGN;
 	char *failarg = NULL;
+	size_t header_size = 0, sigpos = 0, siglen = 0;
 
 	static u_char purpose_ind[] = {
 		0x30, 0x0c,
@@ -3495,9 +4090,6 @@ int main(int argc, char **argv) {
 		DO_EXIT_1("Unrecognized file type: %s\n", infile);
 	}
 
-	if (cmd != CMD_SIGN && !(type == FILE_TYPE_PE || type == FILE_TYPE_MSI))
-		DO_EXIT_1("Command is not supported for non-PE/non-MSI files: %s\n", infile);
-
 	hash = BIO_new(BIO_f_md());
 	BIO_set_md(hash, md);
 
@@ -3508,12 +4100,9 @@ int main(int argc, char **argv) {
 		if (add_msi_dse == 1)
 			fprintf(stderr, "Warning: -add-msi-dse option is only valid for MSI files\n");
 #endif
-		if (nest == 1)
-			fprintf(stderr, "Error: -nest option is only valid for PE/MSI files\n");
-		if (filesize < 44)
-			DO_EXIT_1("Corrupt cab file - too short: %s\n", infile);
-		if (indata[0x1e] != 0x00 || indata[0x1f] != 0x00)
-			DO_EXIT_0("Cannot sign CAB files with flag bits set!\n"); /* FLAG_RESERVE_PRESENT */
+		if (!verify_cab_header(indata, infile, cmd, filesize, &header_size, &sigpos, &siglen))
+			goto err_cleanup;
+
 	} else if (type == FILE_TYPE_PE) {
 		if (filesize < 64)
 			DO_EXIT_1("Corrupt DOS file - too short: %s\n", infile);
@@ -3673,55 +4262,31 @@ int main(int argc, char **argv) {
 	}
 
 	if (type == FILE_TYPE_CAB) {
-		unsigned short nfolders;
-		size_t tmp;
-
-		u_char cabsigned[] = {
-			0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
-			0xde, 0xad, 0xbe, 0xef, /* size of cab file */
-			0xde, 0xad, 0xbe, 0xef, /* size of asn1 blob */
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-		};
-
-		BIO_write(hash, indata, 4);
-		BIO_write(outdata, indata+4, 4);
-
-		tmp = GET_UINT32_LE(indata+8) + 24;
-		PUT_UINT32_LE(tmp, buf);
-		BIO_write(hash, buf, 4);
-
-		BIO_write(hash, indata+12, 4);
-
-		tmp = GET_UINT32_LE(indata+16) + 24;
-		PUT_UINT32_LE(tmp, buf+4);
-		BIO_write(hash, buf+4, 4);
-
-        /*
-         * FLAG_RESERVE_PRESENT is set if this cabinet file contains any reserved fields.
-         * When this bit is set, the cbCFHeader, cbCFFolder, and cbCFData fields are present in the CFHEADER.
-         * https://www.file-recovery.com/cab-signature-format.htm
-         */
-		memcpy(buf+4, indata+20, 14);
-		buf[4+10] = 0x04; /* FLAG_RESERVE_PRESENT */
-
-		BIO_write(hash, buf+4, 14);
-		BIO_write(outdata, indata+34, 2);
-
-		memcpy(cabsigned+8, buf, 4);
-		BIO_write(outdata, cabsigned, 20);
-		BIO_write(hash, cabsigned+20, 4); /* ??? or possibly the previous 4 bytes instead? */
-
-		nfolders = indata[26] | (indata[27] << 8);
-		for (i = 36; nfolders; nfolders--, i+=8) {
-			tmp = GET_UINT32_LE(indata+i);
-			tmp += 24;
-			PUT_UINT32_LE(tmp, buf);
-			BIO_write(hash, buf, 4);
-			BIO_write(hash, indata+i+4, 4);
+		if (cmd == CMD_EXTRACT) {
+			ret = extract_cab_file(indata, sigpos, siglen, outdata, output_pkcs7);
+			goto skip_signing;
 		}
+		if (cmd == CMD_REMOVE) {
+			remove_cab_file(indata, siglen, filesize, outdata);
+			goto skip_signing;
+		}
+		if (cmd == CMD_VERIFY) {
+			ret = verify_cab_file(indata, header_size, sigpos, siglen, leafhash, cafile, crlfile, untrusted);
+			goto skip_signing;
+		}
+		if ((cmd == CMD_SIGN && nest) || (cmd == CMD_ATTACH && nest) || cmd == CMD_ADD) {
+			cursig = extract_existing_cab_pkcs7(indata, sigpos, siglen);
+			if (!cursig)
+				DO_EXIT_0("Unable to extract existing signature\n");
+			if (cmd == CMD_ADD)
+				sig = cursig;
+		}
+		if (header_size == 20)
+			/* Strip current signature and modify header */
+			modify_cab_header(indata, sigpos, hash, outdata);
+		else
+			add_cab_header(indata, fileend, hash, outdata);
 
-		/* Write what's left */
-		BIO_write(hash, indata+i, filesize-i);
 	} else if (type == FILE_TYPE_PE) {
 		size_t sigpos, siglen;
 		unsigned int nrvas;
@@ -3751,30 +4316,21 @@ int main(int argc, char **argv) {
 
 		/* Since fix for MS Bulletin MS12-024 we can really assume
 		   that signature should be last part of file */
-		if (sigpos > 0 && sigpos + siglen != filesize)
+		if (sigpos > 0 && sigpos < filesize && sigpos + siglen != filesize)
 			DO_EXIT_1("Corrupt PE file - current signature not at end of file: %s\n", infile);
 
 		if ((cmd == CMD_REMOVE || cmd == CMD_EXTRACT) && sigpos == 0)
 			DO_EXIT_1("PE file does not have any signature: %s\n", infile);
 
 		if (cmd == CMD_EXTRACT) {
-			/* A lil' bit of ugliness. Reset stream, write signature and skip forward */
-			(void)BIO_reset(outdata);
-			if (output_pkcs7) {
-				sig = extract_existing_pe_pkcs7(indata, sigpos ? sigpos : fileend, siglen);
-				if (!sig)
-					DO_EXIT_0("Unable to extract existing signature\n");
-				PEM_write_bio_PKCS7(outdata, sig);
-			} else {
-				BIO_write(outdata, indata + sigpos, siglen);
-			}
+			ret = extract_pe_file(indata, sigpos ? sigpos : fileend, siglen, outdata, output_pkcs7);
 			goto skip_signing;
 		}
 
 		if ((cmd == CMD_SIGN && nest) || (cmd == CMD_ATTACH && nest) || cmd == CMD_ADD) {
 			cursig = extract_existing_pe_pkcs7(indata, sigpos ? sigpos : fileend, siglen);
 			if (cursig == NULL) {
-				DO_EXIT_0("Unable to extract existing signature in -nest mode\n");
+				DO_EXIT_0("Unable to extract existing signature\n");
 			}
 			if (cmd == CMD_ADD) {
 				sig = cursig;
@@ -3790,26 +4346,7 @@ int main(int argc, char **argv) {
 			fileend = sigpos;
 		}
 
-		BIO_write(hash, indata, peheader + 88);
-		i = peheader + 88;
-		memset(buf, 0, 4);
-		BIO_write(outdata, buf, 4); /* zero out checksum */
-		i += 4;
-		BIO_write(hash, indata + i, 60+pe32plus*16);
-		i += 60+pe32plus*16;
-		memset(buf, 0, 8);
-		BIO_write(outdata, buf, 8); /* zero out sigtable offset + pos */
-		i += 8;
-
-		BIO_write(hash, indata + i, fileend - i);
-
-		/* pad (with 0's) pe file to 8 byte boundary */
-		len = 8 - fileend % 8;
-		if (len > 0 && len != 8) {
-			memset(buf, 0, len);
-			BIO_write(hash, buf, len);
-			fileend += len;
-		}
+		sign_pe_file(indata, peheader + 88, pe32plus, &fileend, hash, outdata);
 	}
 
 	if (cmd == CMD_ADD)
@@ -3831,6 +4368,8 @@ int main(int argc, char **argv) {
 		} else {
 			if (type == FILE_TYPE_PE) {
 				sig = extract_existing_pe_pkcs7(insigdata, 0, sigfilesize);
+			} else if (type == FILE_TYPE_CAB) {
+				sig = extract_existing_cab_pkcs7(insigdata, 0, sigfilesize);
 			} else if (type == FILE_TYPE_MSI) {
 #ifdef WITH_GSF
 				const unsigned char *p = (unsigned char*)insigdata;
@@ -3994,7 +4533,6 @@ add_only:
 	if (addBlob && add_unauthenticated_blob(sig))
 		DO_EXIT_0("Adding unauthenticated blob failed\n");
 
-
 #if 0
 	if (!PEM_write_PKCS7(stdout, sig))
 		DO_EXIT_0("PKCS7 output failed\n");
@@ -4072,7 +4610,12 @@ skip_signing:
 		}
 		if (cmd == CMD_SIGN || cmd == CMD_REMOVE || cmd == CMD_ADD || cmd == CMD_ATTACH)
 			recalc_pe_checksum(outdata, peheader);
-	} else if (type == FILE_TYPE_CAB) {
+	} else if (type == FILE_TYPE_CAB && (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH)) {
+		/*
+		 * Update additional data size.
+		 * Additional data size is located at offset 0x30 (from file beginning)
+		 * and consist of 4 bytes (little-endian order).
+		 */
 		(void)BIO_seek(outdata, 0x30);
 		PUT_UINT32_LE(len+padlen, buf);
 		BIO_write(outdata, buf, 4);
@@ -4092,6 +4635,19 @@ skip_signing:
 			int sigpos = GET_UINT32_LE(outdataverify + peheader + 152 + pe32plus*16);
 			int siglen = GET_UINT32_LE(outdataverify + peheader + 152 + pe32plus*16 + 4);
 			ret = verify_pe_file(outdataverify, peheader, pe32plus, sigpos, siglen, leafhash, cafile, crlfile, untrusted);
+			if (ret) {
+				DO_EXIT_0("Signature mismatch\n");
+			}
+		} else if (type == FILE_TYPE_CAB) {
+			outdatasize = get_file_size(outfile);
+			if (!outdatasize)
+				DO_EXIT_0("Error verifying result\n");
+			outdataverify = map_file(outfile, outdatasize);
+			if (!outdataverify)
+				DO_EXIT_0("Error verifying result\n");
+			if (!verify_cab_header(outdataverify, outfile, cmd, outdatasize, &header_size, &sigpos, &siglen))
+				goto err_cleanup;
+			ret = verify_cab_file(outdataverify, header_size, sigpos, siglen, leafhash, cafile, crlfile, untrusted);
 			if (ret) {
 				DO_EXIT_0("Signature mismatch\n");
 			}
