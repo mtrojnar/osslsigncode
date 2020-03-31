@@ -36,15 +36,15 @@
 
    * Peter Gutmann's analysis of Authenticode:
 
-	 http://www.cs.auckland.ac.nz/~pgut001/pubs/authenticode.txt
+	 https://www.cs.auckland.ac.nz/~pgut001/pubs/authenticode.txt
 
    * MS CAB SDK documentation
 
-	 http://msdn.microsoft.com/library/default.asp?url=/library/en-us/dncabsdk/html/cabdl.asp
+	 https://docs.microsoft.com/en-us/previous-versions/ms974336(v=msdn.10)
 
    * MS PE/COFF documentation
 
-	 http://www.microsoft.com/whdc/system/platform/firmware/PECOFF.mspx
+	 https://docs.microsoft.com/en-us/windows/win32/debug/pe-format
 
    * MS Windows Authenticode PE Signature Format
 
@@ -60,21 +60,21 @@
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
-#endif
+#endif /* HAVE_CONFIG_H */
 
 #ifdef HAVE_WINDOWS_H
 #define NOCRYPT
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 typedef unsigned char u_char;
-#endif
+#endif /* HAVE_WINDOWS_H */
 
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #ifndef _WIN32
 #include <unistd.h>
-#endif
+#endif /* _WIN32 */
 #include <string.h>
 #include <time.h>
 #include <ctype.h>
@@ -85,12 +85,12 @@ typedef unsigned char u_char;
 #ifndef _WIN32
 #ifdef HAVE_SYS_MMAN_H
 #include <sys/mman.h>
-#endif
+#endif /* HAVE_SYS_MMAN_H */
 
 #ifdef HAVE_TERMIOS_H
 #include <termios.h>
-#endif
-#endif
+#endif /* HAVE_TERMIOS_H */
+#endif /* _WIN32 */
 
 #ifdef WITH_GSF
 #include <gsf/gsf-infile-msole.h>
@@ -100,7 +100,7 @@ typedef unsigned char u_char;
 #include <gsf/gsf-outfile.h>
 #include <gsf/gsf-output-stdio.h>
 #include <gsf/gsf-utils.h>
-#endif
+#endif /* WITH_GSF */
 
 #include <openssl/err.h>
 #include <openssl/objects.h>
@@ -114,20 +114,18 @@ typedef unsigned char u_char;
 #include <openssl/conf.h>
 #ifndef OPENSSL_NO_ENGINE
 #include <openssl/engine.h>
-#endif
+#endif /* OPENSSL_NO_ENGINE */
 
 #ifdef ENABLE_CURL
 #ifdef __CYGWIN__
 #ifndef SOCKET
 #define SOCKET UINT_PTR
-#endif
-#endif
+#endif /* SOCKET */
+#endif /* __CYGWIN__ */
 #include <curl/curl.h>
 
 #define MAX_TS_SERVERS 256
-#define GSF_CAN_READ_MSI_METADATA
-
-#endif
+#endif /* ENABLE_CURL */
 
 #ifndef FALSE
 #define FALSE 0
@@ -137,6 +135,7 @@ typedef unsigned char u_char;
 #define TRUE 1
 #endif
 
+#define GSF_CAN_READ_MSI_METADATA
 
 #if defined (HAVE_TERMIOS_H) || defined (HAVE_GETPASS)
 #define PROVIDE_ASKPASS 1
@@ -217,13 +216,13 @@ typedef struct {
 	int ntsurl;
 	char *proxy;
 	int noverifypeer;
-#endif
+#endif /* ENABLE_CURL */
 	int addBlob;
 	int nest;
 	int verbose;
 #ifdef WITH_GSF
 	int add_msi_dse;
-#endif
+#endif /* WITH_GSF */
 	char *cafile;
 	char *crlfile;
 	char *untrusted;
@@ -257,11 +256,11 @@ typedef struct {
 	u_char *p_msiex;
 	int len_msiex;
 } GSF_PARAMS;
-#endif
+#endif /* WITH_GSF */
 
 
 /*
-  ASN.1 definitions (more or less from official MS Authenticode docs)
+ * ASN.1 definitions (more or less from official MS Authenticode docs)
 */
 
 typedef struct {
@@ -275,8 +274,8 @@ typedef struct {
 DECLARE_ASN1_FUNCTIONS(SpcString)
 
 ASN1_CHOICE(SpcString) = {
-	ASN1_IMP_OPT(SpcString, value.unicode, ASN1_BMPSTRING , 0),
-	ASN1_IMP_OPT(SpcString, value.ascii,   ASN1_IA5STRING,	1)
+	ASN1_IMP_OPT(SpcString, value.unicode, ASN1_BMPSTRING, 0),
+	ASN1_IMP_OPT(SpcString, value.ascii, ASN1_IA5STRING, 1)
 } ASN1_CHOICE_END(SpcString)
 
 IMPLEMENT_ASN1_FUNCTIONS(SpcString)
@@ -309,9 +308,9 @@ typedef struct {
 DECLARE_ASN1_FUNCTIONS(SpcLink)
 
 ASN1_CHOICE(SpcLink) = {
-	ASN1_IMP_OPT(SpcLink, value.url,	 ASN1_IA5STRING,	  0),
+	ASN1_IMP_OPT(SpcLink, value.url, ASN1_IA5STRING, 0),
 	ASN1_IMP_OPT(SpcLink, value.moniker, SpcSerializedObject, 1),
-	ASN1_EXP_OPT(SpcLink, value.file,	 SpcString,			  2)
+	ASN1_EXP_OPT(SpcLink, value.file, SpcString, 2)
 } ASN1_CHOICE_END(SpcLink)
 
 IMPLEMENT_ASN1_FUNCTIONS(SpcLink)
@@ -594,7 +593,6 @@ static SpcSpOpusInfo* createOpus(const char *desc, const char *url)
 		ASN1_STRING_set((ASN1_STRING *)info->programName->value.ascii,
 						(const unsigned char*)desc, strlen(desc));
 	}
-
 	if (url) {
 		info->moreInfo = SpcLink_new();
 		info->moreInfo->type = 0;
@@ -602,7 +600,6 @@ static SpcSpOpusInfo* createOpus(const char *desc, const char *url)
 		ASN1_STRING_set((ASN1_STRING *)info->moreInfo->value.url,
 						(const unsigned char*)url, strlen(url));
 	}
-
 	return info;
 }
 
@@ -658,7 +655,6 @@ static void print_timestamp_error(const char *url, long http_code)
 		fprintf(stderr, "Failed to convert timestamp reply from %s; "
 				"no HTTP status available", url);
 	}
-
 	ERR_print_errors_fp(stderr);
 }
 
@@ -755,7 +751,6 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 		p = OPENSSL_malloc(len);
 		len = i2d_TimeStampReq(req, &p);
 		p -= len;
-
 		TimeStampReq_free(req);
 	} else {
 		TimeStampRequest *req = TimeStampRequest_new();
@@ -771,7 +766,6 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 		req->blob->signature = NULL;
 		TimeStampRequest_free(req);
 	}
-
 	bout = BIO_new(BIO_s_mem());
 	if (!rfc3161) {
 		b64 = BIO_new(BIO_f_base64());
@@ -815,7 +809,6 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 		 *     char *resp_body = NULL;
 		 *     long resp_body_len = BIO_get_mem_data(bin, &resp_body);
 		 */
-
 		if (rfc3161) {
 			TimeStampResp *reply;
 			(void)BIO_flush(bin);
@@ -832,7 +825,6 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 				TimeStampResp_free(reply);
 				return -1;
 			}
-
 			if (((len = i2d_PKCS7(reply->token, NULL)) <= 0) ||
 				(p = OPENSSL_malloc(len)) == NULL) {
 				if (verbose) {
@@ -869,7 +861,6 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 					print_timestamp_error(url, http_code);
 				return -1;
 			}
-
 			BIO_free_all(b64_bin);
 			for(i = sk_X509_num(p7->d.sign->cert)-1; i>=0; i--)
 				PKCS7_add_certificate(sig, sk_X509_value(p7->d.sign->cert, i));
@@ -891,14 +882,11 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 			OPENSSL_free(p);
 			PKCS7_add_attribute(si, NID_pkcs9_countersignature,
 				V_ASN1_SEQUENCE, astr);
-
 			PKCS7_free(p7);
 		}
 	}
-
 	curl_easy_cleanup(curl);
 	curl_global_cleanup();
-
 	return (int)c;
 }
 
@@ -928,7 +916,7 @@ static int add_timestamp_rfc3161(PKCS7 *sig, GLOBAL_OPTIONS *options)
 
 #ifdef WITH_GSF
 static int gsf_initialized = 0;
-#endif
+#endif /* WITH_GSF */
 
 static void cleanup_lib_state(void)
 {
@@ -946,7 +934,8 @@ static void cleanup_lib_state(void)
 	ERR_free_strings();
 }
 
-static bool on_list(const char *txt, const char *list[]) {
+static bool on_list(const char *txt, const char *list[])
+{
 	while (*list)
 		if (!strcmp(txt, *list++))
 			return true;
@@ -977,14 +966,14 @@ static void usage(const char *argv0, const char *cmd)
 #ifdef ENABLE_CURL
 		printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
 		printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
-#endif
+#endif /* ENABLE_CURL */
 		printf("%12s[ -st <unix-time> ]\n", "");
 		printf("%12s[ -addUnauthenticatedBlob ]\n", "");
 		printf("%12s[ -nest ]\n", "");
 		printf("%12s[ -verbose ]\n", "");
 #ifdef WITH_GSF
 		printf("%12s[ -add-msi-dse ]\n", "");
-#endif
+#endif /* WITH_GSF */
 		printf("%12s[ -in ] <infile> [-out ] <outfile>\n\n", "");
 	}
 	const char *cmds_add[] = {"all", "add", NULL};
@@ -993,7 +982,7 @@ static void usage(const char *argv0, const char *cmd)
 #ifdef ENABLE_CURL
 		printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
 		printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
-#endif
+#endif /* ENABLE_CURL */
 		printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
 	}
 	const char *cmds_attach[] = {"all", "attach-signature", NULL};
@@ -1027,8 +1016,8 @@ static void usage(const char *argv0, const char *cmd)
 	exit(-1);
 }
 
-static void help_for(const char *argv0, const char *cmd) {
-
+static void help_for(const char *argv0, const char *cmd)
+{
 	const char *cmds_all[] = {"all", NULL};
 	if (on_list(cmd, cmds_all)) {
 		printf("osslsigncode is a small tool that implements part of the functionality of the Microsoft\n");
@@ -1094,7 +1083,7 @@ static void help_for(const char *argv0, const char *cmd) {
 	const char *cmds_add_msi_dse[] = {"sign", NULL};
 	if (on_list(cmd, cmds_add_msi_dse))
 		printf("%-24s= sign a MSI file with the add-msi-dse option\n", "-add-msi-dse");
-#endif
+#endif /* WITH_GSF */
 	const char *cmds_addUnauthenticatedBlob[] = {"sign", "add", NULL};
 	if (on_list(cmd, cmds_addUnauthenticatedBlob))
 		printf("%-24s= add an unauthenticated blob to the PE/MSI file\n", "-addUnauthenticatedBlob");
@@ -1102,7 +1091,7 @@ static void help_for(const char *argv0, const char *cmd) {
 	const char *cmds_askpass[] = {"sign", NULL};
 	if (on_list(cmd, cmds_askpass))
 		printf("%-24s= ask for the private key password\n", "-askpass");
-#endif
+#endif /* PROVIDE_ASKPASS */
 	const char *cmds_CAfile[] = {"attach-signature", "verify", NULL};
 	if (on_list(cmd, cmds_CAfile))
 		printf("%-24s= the file containing one or more trusted certificates in PEM format\n", "-CAfile");
@@ -1145,7 +1134,7 @@ static void help_for(const char *argv0, const char *cmd) {
 	const char *cmds_noverifypeer[] = {"add", "sign", NULL};
 	if (on_list(cmd, cmds_noverifypeer))
 		printf("%-24s= do not verify the Time-Stamp Authority's SSL certificate\n", "-noverifypeer");
-#endif
+#endif /* ENABLE_CURL */
 	const char *cmds_out[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", NULL};
 	if (on_list(cmd, cmds_out))
 		printf("%-24s= output file\n", "-out");
@@ -1153,7 +1142,7 @@ static void help_for(const char *argv0, const char *cmd) {
 	const char *cmds_p[] = {"add", "sign", NULL};
 	if (on_list(cmd, cmds_p))
 		printf("%-24s= proxy to connect to the desired Time-Stamp Authority server\n", "-p");
-#endif
+#endif /* ENABLE_CURL */
 	const char *cmds_pass[] = {"sign", NULL};
 	if (on_list(cmd, cmds_pass))
 		printf("%-24s= the private key password\n", "-pass");
@@ -1200,7 +1189,7 @@ static void help_for(const char *argv0, const char *cmd) {
 		printf("%-24s= specifies the URL of the RFC 3161 Time-Stamp Authority server\n", "-ts");
 		printf("%26sthis option cannot be used with the -t option\n", "");
 	}
-#endif
+#endif /* ENABLE_CURL */
 	const char *cmds_untrusted[] = {"attach-signature", "verify", NULL};
 	if (on_list(cmd, cmds_untrusted)) {
 		printf("%-24s= set of additional untrusted certificates which may be needed\n", "-untrusted");
@@ -1213,7 +1202,7 @@ static void help_for(const char *argv0, const char *cmd) {
 	usage(argv0, cmd);
 }
 
-#define DO_EXIT_0(x)	{ fprintf(stderr, x); goto err_cleanup; }
+#define DO_EXIT_0(x) { fprintf(stderr, x); goto err_cleanup; }
 #define DO_EXIT_1(x, y) { fprintf(stderr, x, y); goto err_cleanup; }
 #define DO_EXIT_2(x, y, z) { fprintf(stderr, x, y, z); goto err_cleanup; }
 
@@ -1221,17 +1210,17 @@ static void help_for(const char *argv0, const char *cmd) {
 
 #define GET_UINT16_LE(p) (((u_char*)(p))[0] | (((u_char*)(p))[1]<<8))
 
-#define GET_UINT32_LE(p) (((u_char*)(p))[0] | (((u_char*)(p))[1]<<8) |	\
-						  (((u_char*)(p))[2]<<16) | (((u_char*)(p))[3]<<24))
+#define GET_UINT32_LE(p) (((u_char*)(p))[0] | (((u_char*)(p))[1]<<8) | \
+			(((u_char*)(p))[2]<<16) | (((u_char*)(p))[3]<<24))
 
-#define PUT_UINT16_LE(i,p)						\
-	((u_char*)(p))[0] = (i) & 0xff;				\
+#define PUT_UINT16_LE(i,p) \
+	((u_char*)(p))[0] = (i) & 0xff; \
 	((u_char*)(p))[1] = ((i)>>8) & 0xff
 
-#define PUT_UINT32_LE(i,p)						\
-	((u_char*)(p))[0] = (i) & 0xff;				\
-	((u_char*)(p))[1] = ((i)>>8) & 0xff;		\
-	((u_char*)(p))[2] = ((i)>>16) & 0xff;		\
+#define PUT_UINT32_LE(i,p) \
+	((u_char*)(p))[0] = (i) & 0xff; \
+	((u_char*)(p))[1] = ((i)>>8) & 0xff; \
+	((u_char*)(p))[2] = ((i)>>16) & 0xff; \
 	((u_char*)(p))[3] = ((i)>>24) & 0xff
 
 
@@ -1272,7 +1261,7 @@ static const unsigned char classid_page_hash[] = {
 	0xAE, 0x05, 0xA2, 0x17, 0xDA, 0x8E, 0x60, 0xD6
 };
 
-static unsigned char *calc_page_hash(char *indata, size_t header_size,
+static unsigned char *pe_calc_page_hash(char *indata, size_t header_size,
 	int pe32plus, size_t sigpos, int phtype, size_t *rphlen)
 {
 	unsigned short nsections = GET_UINT16_LE(indata + header_size + 6);
@@ -1336,7 +1325,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 	SpcSerializedObject *so;
 	SpcLink *link;
 
-	ph = calc_page_hash(indata, header->header_size, header->pe32plus, header->fileend, phtype, &phlen);
+	ph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, header->fileend, phtype, &phlen);
 	if (!ph) {
 		fprintf(stderr, "Failed to calculate page hash\n");
 		exit(-1);
@@ -1505,7 +1494,6 @@ static int set_signing_blob(PKCS7 *sig, BIO *hash, char *buf, int len)
 		return 0; /* FAILED */
 	}
 	BIO_free_all(sigbio);
-
 	/*
 	   replace the data part with the MS Authenticode
 	   spcIndirectDataContext blob
@@ -1534,14 +1522,12 @@ static int set_indirect_data_blob(PKCS7 *sig, BIO *hash, file_type_t type,
 	get_indirect_data_blob(&p, &len, options, header, type, indata);
 	memcpy(buf, p, len);
 	OPENSSL_free(p);
-
 	if (!set_signing_blob(sig, hash, buf, len))
 		return 0; /* FAILED */
-
 	return 1; /* OK */
 }
 
-static unsigned int calc_pe_checksum(BIO *bio, FILE_HEADER *header)
+static unsigned int pe_calc_checksum(BIO *bio, FILE_HEADER *header)
 {
 	unsigned int checkSum = 0;
 	unsigned short val;
@@ -1551,7 +1537,6 @@ static unsigned int calc_pe_checksum(BIO *bio, FILE_HEADER *header)
 
 	/* recalculate the checksum */
 	buf = OPENSSL_malloc(sizeof(unsigned short)*32768);
-
 	(void)BIO_seek(bio, 0);
 	while ((nread = BIO_read(bio, buf, sizeof(unsigned short)*32768)) > 0) {
 		int i;
@@ -1564,18 +1549,15 @@ static unsigned int calc_pe_checksum(BIO *bio, FILE_HEADER *header)
 			size += 2;
 		}
 	}
-
 	OPENSSL_free(buf);
-
 	checkSum = 0xffff & (checkSum + (checkSum >> 0x10));
 	checkSum += size;
-
 	return checkSum;
 }
 
-static void recalc_pe_checksum(BIO *bio, FILE_HEADER *header)
+static void pe_recalc_checksum(BIO *bio, FILE_HEADER *header)
 {
-	unsigned int checkSum = calc_pe_checksum(bio, header);
+	unsigned int checkSum = pe_calc_checksum(bio, header);
 	char buf[4];
 
 	/* write back checksum */
@@ -1612,7 +1594,6 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 		ret = 1;
 		goto out;
 	}
-
 	/* compute the leaf certificate hash */
 	EVP_MD_CTX *ctx = EVP_MD_CTX_create();
 	EVP_DigestInit_ex(ctx, md, NULL);
@@ -1764,7 +1745,6 @@ static int load_crlfile_lookup(X509_STORE *store, char *crl)
 		return 0; /* FAILED */
 	if (!X509_STORE_set1_param(store, param))
 		return 0; /* FAILED */
-
 	return 1; /* OK */
 }
 
@@ -1787,7 +1767,6 @@ static int load_file_lookup(X509_STORE *store, char *certs, int purpose)
 		return 0; /* FAILED */
 	if (!X509_STORE_set1_param(store, param))
 		return 0; /* FAILED */
-
 	return 1; /* OK */
 }
 
@@ -1804,7 +1783,6 @@ static int set_store_time(X509_STORE *store, time_t time)
 		return 0; /* FAILED */
 	}
 	X509_VERIFY_PARAM_free(param);
-
 	return 1; /* OK */
 }
 
@@ -1825,7 +1803,6 @@ static ASN1_UTCTIME *print_timestamp(PKCS7_SIGNER_INFO *si)
 	issuer = X509_NAME_oneline(si->issuer_and_serial->issuer, NULL, 0);
 	serial = BN_bn2hex(ASN1_INTEGER_to_BN(si->issuer_and_serial->serial, NULL));
 	printf("Timestamp Verified by:\n\t\tIssuer : %s\n\t\tSerial : %s\n", issuer, serial);
-
 	return timestamp_time; /* OK */
 }
 
@@ -1839,7 +1816,6 @@ static PKCS7 *find_countersignature(PKCS7_SIGNED *p7_signed, const unsigned char
 	si = sk_PKCS7_SIGNER_INFO_value(p7_signed->signer_info, 0);
 	if (si == NULL)
 		return NULL; /* FAILED */
-
 	/* Create new signed PKCS7 timestamp structure. */
 	p7 = PKCS7_new();
 	if (!PKCS7_set_type(p7, NID_pkcs7_signed)) {
@@ -1873,7 +1849,6 @@ static PKCS7 *find_countersignature(PKCS7_SIGNED *p7_signed, const unsigned char
 		return NULL; /* FAILED */
 	}
 	*timestamp_time = print_timestamp(countersignature);
-
 	return p7; /* OK */
 }
 
@@ -1889,7 +1864,6 @@ static PKCS7 *find_rfc3161(const unsigned char *data, int length, ASN1_UTCTIME *
 	if (si == NULL)
 		return NULL; /* FAILED */
 	*timestamp_time = print_timestamp(si);
-
 	return p7; /* OK */
 }
 
@@ -1955,7 +1929,6 @@ static int pkcs7_print_attributes(PKCS7_SIGNED *p7_signed, PKCS7 **tmstamp_p7,
 				printf("\nPolicy OID: %s\n", object_txt);
 		}
 	/* else there is no unauthorized attribute */
-
 	return 1; /* OK */
 }
 
@@ -2044,7 +2017,6 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 	if (((len = i2d_PKCS7(p7nest, NULL)) <= 0) ||
 		(p = OPENSSL_malloc(len)) == NULL)
 		return 0;
-
 	i2d_PKCS7(p7nest, &p);
 	p -= len;
 	ASN1_STRING *astr = ASN1_STRING_new();
@@ -2055,7 +2027,6 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 	pkcs7_add_signing_time(si, signing_time);
 	if (PKCS7_add_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID), V_ASN1_SEQUENCE, astr) == 0)
 		return 0;
-
 	return 1;
 }
 
@@ -2086,7 +2057,6 @@ static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, GLOBAL_OPTIONS *option
 		ret = 0; /* FAILED */
 	}
 	X509_STORE_free(store);
-
 	return ret;
 }
 
@@ -2119,7 +2089,6 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, GLOBAL_O
 			ret = 1; /* FAILED */
 		}
 	}
-
 	/* check extended key usage flag XKU_CODE_SIGN */
 	signers = PKCS7_get0_signers(p7, NULL, 0);
 	if (!signers || sk_X509_num(signers) != 1)
@@ -2145,10 +2114,8 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, GLOBAL_O
 		ERR_print_errors_fp(stdout);
 		ret = 1; /* FAILED */
 	}
-
 	BIO_free(bio);
 	X509_STORE_free(store);
-
 	return ret;
 }
 
@@ -2178,12 +2145,10 @@ static int verify_pkcs7(PKCS7 *p7, GLOBAL_OPTIONS *options)
 		timestamp_time = NULL;
 
 	ret |= verify_authenticode(p7, timestamp_time, options);
-
 	if (tmstamp_p7) {
 		PKCS7_free(tmstamp_p7);
 		tmstamp_p7 = NULL;
 	}
-
 	return ret;
 }
 
@@ -2257,7 +2222,6 @@ static gint msi_cmp(gpointer a, gpointer b)
 		return 2*anc > 2*bnc ? 1 : -1;
 	g_free(pa);
 	g_free(pb);
-
 	return diff;
 }
 
@@ -2283,10 +2247,8 @@ static GSList *msi_sorted_infile_children(GsfInfile *infile)
 			continue;
 		if (!g_strcmp0(decoded, "\05MsiDigitalSignatureEx"))
 			continue;
-
 		sorted = g_slist_insert_sorted(sorted, (gpointer)name, (GCompareFunc)msi_cmp);
 	}
-
 	return sorted;
 }
 
@@ -2304,11 +2266,8 @@ static gboolean msi_prehash_utf16_name(gchar *name, BIO *hash)
 	if (u16name == NULL) {
 		return FALSE;
 	}
-
 	BIO_write(hash, u16name, 2*chars_written);
-
 	g_free(u16name);
-
 	return TRUE;
 }
 
@@ -2327,17 +2286,14 @@ static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
 	guint8 zeroes[8];
 
 	memset(&zeroes, 0, sizeof(zeroes));
-
 	gsf_infile_msole_get_class_id(GSF_INFILE_MSOLE(infile), classid);
 
 	if (dirname != NULL) {
 		if (!msi_prehash_utf16_name(dirname, hash))
 			return FALSE;
 	}
-
 	BIO_write(hash, classid, sizeof(classid));
 	BIO_write(hash, zeroes, 4);
-
 	if (dirname != NULL) {
 		/*
 		 * Creation time and modification time for the root directory.
@@ -2347,15 +2303,12 @@ static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
 		BIO_write(hash, zeroes, 8); /* ctime as Windows FILETIME */
 		BIO_write(hash, zeroes, 8); /* mtime as Windows FILETIME */
 	}
-
 	sorted = msi_sorted_infile_children(infile);
-
 	for (; sorted; sorted = sorted->next) {
 		gchar *name = (gchar*)sorted->data;
 		GsfInput *child =  gsf_infile_child_by_name(infile, name);
 		if (child == NULL)
 			continue;
-
 		gboolean is_dir = GSF_IS_INFILE(child) && gsf_infile_num_children(GSF_INFILE(child)) > 0;
 		if (is_dir) {
 			if (!msi_prehash(GSF_INFILE(child), name, hash))
@@ -2363,20 +2316,17 @@ static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
 		} else {
 			if (!msi_prehash_utf16_name(name, hash))
 				return FALSE;
-
 			/*
 			 * File size.
 			 */
 			gsf_off_t size = gsf_input_remaining(child);
 			guint32 sizebuf = GUINT32_TO_LE((guint32)size);
 			BIO_write(hash, &sizebuf, sizeof(sizebuf));
-
 			/*
 			 * Reserved - must be 0. Corresponds to
 			 * offset 0x7c..0x7f in the CDFv2 file.
 			 */
 			BIO_write(hash, zeroes, 4);
-
 			/*
 			 * Creation time and modification time
 			 * as Windows FILETIMEs. We keep them
@@ -2387,9 +2337,7 @@ static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
 			BIO_write(hash, zeroes, 8); /* mtime as Windows FILETIME */
 		}
 	}
-
 	g_slist_free(sorted);
-
 	return TRUE;
 }
 
@@ -2412,13 +2360,11 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 		gsf_outfile_msole_set_class_id(GSF_OUTFILE_MSOLE(outole), classid);
 
 	sorted = msi_sorted_infile_children(infile);
-
 	for (; sorted; sorted = sorted->next) {
 		gchar *name = (gchar*)sorted->data;
 		GsfInput *child =  gsf_infile_child_by_name(infile, name);
 		if (child == NULL)
 			continue;
-
 		gboolean is_dir = GSF_IS_INFILE(child) && gsf_infile_num_children(GSF_INFILE(child)) > 0;
 		GsfOutput *outchild = NULL;
 		if (outole != NULL)
@@ -2437,17 +2383,13 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 				}
 			}
 		}
-
 		if (outchild != NULL) {
 			gsf_output_close(outchild);
 			g_object_unref(outchild);
 		}
 	}
-
 	BIO_write(hash, classid, sizeof(classid));
-
 	g_slist_free(sorted);
-
 	return TRUE;
 }
 
@@ -2481,26 +2423,21 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 		}
 		ASN1_OBJECT_free(indir_objid);
 	}
-
 	if (mdtype == -1) {
 		printf("Failed to extract current message digest\n\n");
 		ret = 1;
 		goto out;
 	}
-
 	if (p7 == NULL) {
 		printf("Failed to read PKCS7 signature from DigitalSignature section\n\n");
 		ret = 1;
 		goto out;
 	}
-
 	printf("Message digest algorithm         : %s\n", OBJ_nid2sn(mdtype));
-
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
 	BIO *hash = BIO_new(BIO_f_md());
 	BIO_set_md(hash, md);
 	BIO_push(hash, BIO_new(BIO_s_null()));
-
 	if (exdata) {
 		/*
 		 * Until libgsf can read more MSI metadata, we can't
@@ -2523,19 +2460,16 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 			ret = 1;
 			goto out;
 		}
-
 		BIO_gets(prehash, (char*)cexmdbuf, EVP_MAX_MD_SIZE);
 		BIO_write(hash, (char*)cexmdbuf, EVP_MD_size(md));
 #else
 		BIO_write(hash, (char *)exdata, EVP_MD_size(md));
 #endif
 	}
-
 	if (!msi_handle_dir(infile, NULL, hash)) {
 		ret = 1;
 		goto out;
 	}
-
 	BIO_gets(hash, (char*)cmdbuf, EVP_MAX_MD_SIZE);
 	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
 	int mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
@@ -2609,14 +2543,12 @@ static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 		ret = 1;
 		goto out;
 	}
-
 	unsigned long inlen = (unsigned long) gsf_input_remaining(sig);
 	indata = OPENSSL_malloc(inlen);
 	if (gsf_input_read(sig, inlen, indata) == NULL) {
 		ret = 1;
 		goto out;
 	}
-
 	unsigned long exlen = 0;
 	if (exsig != NULL) {
 		exlen = (unsigned long) gsf_input_remaining(exsig);
@@ -2626,19 +2558,15 @@ static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 			goto out;
 		}
 	}
-
 	const unsigned char *blob = (unsigned char *)indata;
 	p7 = d2i_PKCS7(NULL, &blob, inlen);
-
 	ret = msi_verify_pkcs7(p7, infile, exdata, exlen, 1, options);
 
 out:
 	OPENSSL_free(indata);
 	OPENSSL_free(exdata);
-
 	if (p7)
 		PKCS7_free(p7);
-
 	return ret;
 }
 
@@ -2662,17 +2590,13 @@ static int msi_extract_dse(GsfInfile *infile, unsigned char **dsebuf,
 		ret = 1;
 		goto out;
 	}
-
 	if (has_dse != NULL) {
 		*has_dse = 1;
 	}
-
 	size = gsf_input_remaining(exsig);
-
 	if (dselen != NULL) {
 		*dselen = (unsigned long) size;
 	}
-
 	if (dsebuf != NULL) {
 		buf = OPENSSL_malloc(size);
 		if (gsf_input_read(exsig, size, buf) == NULL) {
@@ -2715,7 +2639,6 @@ static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
 		ret = 1;
 		goto out;
 	}
-
 	/* Create outdata file */
 	outdata = BIO_new_file(outfile, "w+bx");
 	if (outdata == NULL) {
@@ -2723,13 +2646,11 @@ static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
 		ret = 1;
 		goto out;
 	}
-
 	while (gsf_input_remaining(sig) > 0) {
 		gsf_off_t size = MIN(gsf_input_remaining(sig), 4096);
 		guint8 const *data = gsf_input_read(sig, size, NULL);
 		BIO_write(outdata, data, size);
 	}
-
 	if (exsig != NULL) {
 		exlen = (unsigned long) gsf_input_remaining(exsig);
 		if (exlen > EVP_MAX_MD_SIZE) {
@@ -2737,14 +2658,12 @@ static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
 			ret = 1;
 			goto out;
 		}
-
 		exdata = OPENSSL_malloc(exlen);
 		if (gsf_input_read(exsig, exlen, exdata) == NULL) {
 			printf("Unable to read MsiDigitalSignatureEx\n");
 			ret = 1;
 			goto out;
 		}
-
 		tohex(exdata, hexbuf, exlen);
 		printf("Note: MSI includes a MsiDigitalSignatureEx section\n");
 		printf("MsiDigitalSignatureEx pre-hash: %s\n", hexbuf);
@@ -2774,16 +2693,12 @@ static PKCS7 *msi_extract_signature_to_pkcs7(GsfInfile *infile)
 		if (!g_strcmp0(decoded, "\05DigitalSignature"))
 			sig = child;
 	}
-	if (sig == NULL) {
+	if (sig == NULL)
 		goto out;
-	}
-
 	size = gsf_input_remaining(sig);
 	buf = OPENSSL_malloc(size);
-	if (gsf_input_read(sig, size, buf) == NULL) {
+	if (gsf_input_read(sig, size, buf) == NULL)
 		goto out;
-	}
-
 	const unsigned char *p7buf = buf;
 	p7 = d2i_PKCS7(NULL, &p7buf, size);
 
@@ -2842,7 +2757,6 @@ static int msi_check_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md)
 				return 0; /* FAILED */
 		}
 	}
-
 	return 1; /* OK */
 }
 
@@ -2902,7 +2816,6 @@ static int msi_calc_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md,
 	}
 	gsfparams->len_msiex = BIO_gets(prehash, (char*)gsfparams->p_msiex, EVP_MAX_MD_SIZE);
 	BIO_write(hash, gsfparams->p_msiex, gsfparams->len_msiex);
-
 	return 1; /* OK */
 }
 #endif
@@ -2916,7 +2829,6 @@ static int msi_add_DigitalSignature(GsfOutfile *outole, u_char *p, int len)
 	if (!gsf_output_write(child, len, p))
 		ret = 0;
 	gsf_output_close(child);
-
 	return ret;
 }
 
@@ -2929,14 +2841,13 @@ static int msi_add_MsiDigitalSignatureEx(GsfOutfile *outole, GSF_PARAMS *gsfpara
 	if (!gsf_output_write(child, gsfparams->len_msiex, gsfparams->p_msiex))
 		ret = 0;
 	gsf_output_close(child);
-
 	return ret;
 }
 
 /*
  * PE file support
 */
-static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, FILE_HEADER *header)
+static void pe_calc_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, FILE_HEADER *header)
 {
 	static unsigned char bfb[16*1024*1024];
 	EVP_MD_CTX *mdctx;
@@ -2965,12 +2876,11 @@ static void calc_pe_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, FIL
 		EVP_DigestUpdate(mdctx, bfb, l);
 		n += l;
 	}
-
 	EVP_DigestFinal(mdctx, mdbuf, NULL);
 	EVP_MD_CTX_free(mdctx);
 }
 
-static void extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
+static void pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	unsigned char **ph, size_t *phlen, int *phtype)
 {
 	*phlen = 0;
@@ -2979,19 +2889,16 @@ static void extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	SpcPeImageData *id = d2i_SpcPeImageData(NULL, &blob, obj->value->value.sequence->length);
 	if (id == NULL)
 		return;
-
 	if (id->file->type != 1) {
 		SpcPeImageData_free(id);
 		return;
 	}
-
 	SpcSerializedObject *so = id->file->value.moniker;
 	if (so->classId->length != sizeof(classid_page_hash) ||
 		memcmp(so->classId->data, classid_page_hash, sizeof (classid_page_hash))) {
 		SpcPeImageData_free(id);
 		return;
 	}
-
 	/* skip ASN.1 SET hdr */
 	size_t l = asn1_simple_hdr_len(so->serializedData->data, so->serializedData->length);
 	blob = so->serializedData->data + l;
@@ -3012,7 +2919,6 @@ static void extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 		SpcAttributeTypeAndOptionalValue_free(obj);
 		return;
 	}
-
 	/* Skip ASN.1 SET hdr */
 	size_t l2 = asn1_simple_hdr_len(obj->value->value.sequence->data, obj->value->value.sequence->length);
 	/* Skip ASN.1 OCTET STRING hdr */
@@ -3024,7 +2930,7 @@ static void extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	SpcAttributeTypeAndOptionalValue_free(obj);
 }
 
-static int verify_pe_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
+static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 			int allownest, GLOBAL_OPTIONS *options)
 {
 	int ret = 0;
@@ -3044,7 +2950,7 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 		const unsigned char *p = astr->data;
 		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
 		if (idc) {
-			extract_page_hash(idc->data, &ph, &phlen, &phtype);
+			pe_extract_page_hash(idc->data, &ph, &phlen, &phtype);
 			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
 				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
 				memcpy(mdbuf, idc->messageDigest->digest->data, idc->messageDigest->digest->length);
@@ -3053,12 +2959,10 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 		}
 	}
 	ASN1_OBJECT_free(indir_objid);
-
 	if (mdtype == -1) {
 		printf("Failed to extract current message digest\n\n");
 		return -1;
 	}
-
 	printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
 
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
@@ -3066,7 +2970,7 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	printf("Current message digest    : %s\n", hexbuf);
 
 	bio = BIO_new_mem_buf(indata, header->sigpos + header->siglen);
-	calc_pe_digest(bio, md, cmdbuf, header);
+	pe_calc_digest(bio, md, cmdbuf, header);
 	BIO_free(bio);
 	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
 	int mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
@@ -3078,7 +2982,7 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 		tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
 		printf("Page hash            : %s ...\n", hexbuf);
 		size_t cphlen = 0;
-		unsigned char *cph = calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &cphlen);
+		unsigned char *cph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &cphlen);
 		tohex(cph, hexbuf, (cphlen < 32) ? cphlen : 32);
 		mdok = (phlen != cphlen) || memcmp(ph, cph, phlen);
 		if (mdok) ret = 1;
@@ -3093,7 +2997,7 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 		int has_sig = 0;
 		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
 		if (p7nest) {
-			int nest_ret = verify_pe_pkcs7(p7nest, indata, header, 0, options);
+			int nest_ret = pe_verify_pkcs7(p7nest, indata, header, 0, options);
 			if (ret)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
@@ -3102,15 +3006,14 @@ static int verify_pe_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 			ret = 1;
 		}
 	}
-
 	return ret;
 }
 
 /*
- * extract_existing_pe_pkcs7 retrieves a decoded PKCS7 struct
+ * pe_extract_existing_pkcs7 retrieves a decoded PKCS7 struct
  * corresponding to the existing signature of the PE file.
  */
-static PKCS7 *extract_existing_pe_pkcs7(char *indata, FILE_HEADER *header)
+static PKCS7 *pe_extract_existing_pkcs7(char *indata, FILE_HEADER *header)
 {
 	size_t pos = 0;
 	PKCS7 *p7 = NULL;
@@ -3127,11 +3030,10 @@ static PKCS7 *extract_existing_pe_pkcs7(char *indata, FILE_HEADER *header)
 			l += (8 - l%8);
 		pos += l;
 	}
-
 	return p7;
 }
 
-static int verify_pe_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *options)
+static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *options)
 {
 	int ret = 0;
 
@@ -3140,7 +3042,7 @@ static int verify_pe_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 
 	printf("Current PE checksum   : %08X\n", header->pe_checksum);
 	BIO *bio = BIO_new_mem_buf(indata, header->sigpos + header->siglen);
-	unsigned int real_pe_checksum = calc_pe_checksum(bio, header);
+	unsigned int real_pe_checksum = pe_calc_checksum(bio, header);
 	BIO_free(bio);
 	if (header->pe_checksum && header->pe_checksum != real_pe_checksum)
 		ret = 1;
@@ -3150,27 +3052,24 @@ static int verify_pe_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 		printf("No signature found\n\n");
 		return 1;
 	}
-
-	PKCS7 *p7 = extract_existing_pe_pkcs7(indata, header);
+	PKCS7 *p7 = pe_extract_existing_pkcs7(indata, header);
 	if (!p7) {
 		printf("Failed to extract PKCS7 data\n\n");
 		return -1;
 	}
-
-	ret = verify_pe_pkcs7(p7, indata, header, 1, options);
+	ret = pe_verify_pkcs7(p7, indata, header, 1, options);
 	PKCS7_free(p7);
-
 	return ret;
 }
 
-static int extract_pe_file(char *indata, FILE_HEADER *header, BIO *outdata, int output_pkcs7)
+static int pe_extract_file(char *indata, FILE_HEADER *header, BIO *outdata, int output_pkcs7)
 {
 	int ret = 0;
 	PKCS7 *sig;
 
 	(void)BIO_reset(outdata);
 	if (output_pkcs7) {
-		sig = extract_existing_pe_pkcs7(indata, header);
+		sig = pe_extract_existing_pkcs7(indata, header);
 		if (!sig) {
 			fprintf(stderr, "Unable to extract existing signature\n");
 			return 1; /* FAILED */
@@ -3179,11 +3078,10 @@ static int extract_pe_file(char *indata, FILE_HEADER *header, BIO *outdata, int 
 		} else {
 			ret = !BIO_write(outdata, indata + header->sigpos, header->siglen);
 	}
-
 	return ret;
 }
 
-static int verify_pe_header(char *indata, char *infile, size_t filesize, FILE_HEADER *header)
+static int pe_verify_header(char *indata, char *infile, size_t filesize, FILE_HEADER *header)
 {
 	int ret = 1;
 
@@ -3224,11 +3122,10 @@ static int verify_pe_header(char *indata, char *infile, size_t filesize, FILE_HE
 		printf("Corrupt PE file - current signature not at end of file: %s\n", infile);
 		ret = 0; /* FAILED */
 	}
-
 	return ret;
 }
 
-static void modify_pe_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
+static void pe_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
 {
 	int len = 0, i;
 	static char buf[64*1024];
@@ -3259,7 +3156,7 @@ static void modify_pe_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *
  * https://www.file-recovery.com/cab-signature-format.htm
  */
 
-static int verify_cab_header(char *indata, char *infile, size_t filesize, FILE_HEADER *header)
+static int cab_verify_header(char *indata, char *infile, size_t filesize, FILE_HEADER *header)
 {
 	int ret = 1;
 	size_t reserved;
@@ -3315,11 +3212,10 @@ static int verify_cab_header(char *indata, char *infile, size_t filesize, FILE_H
 			ret = 0; /* FAILED */
 		}
 	}
-
 	return ret;
 }
 
-static int calc_cab_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, size_t offset)
+static int cab_calc_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, size_t offset)
 {
 	size_t coffFiles, nfolders, flags;
 	static unsigned char bfb[16*1024*1024];
@@ -3428,11 +3324,10 @@ static int calc_cab_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, siz
 
 	EVP_DigestFinal(mdctx, mdbuf, NULL);
 	EVP_MD_CTX_free(mdctx);
-
 	return 0; /* OK */
 }
 
-static int verify_cab_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
+static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 			int allownest, GLOBAL_OPTIONS *options)
 {
 	int ret = 0;
@@ -3452,7 +3347,7 @@ static int verify_cab_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 		const unsigned char *p = astr->data;
 		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
 		if (idc) {
-			extract_page_hash(idc->data, &ph, &phlen, &phtype);
+			pe_extract_page_hash(idc->data, &ph, &phlen, &phtype);
 			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
 				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
 				memcpy(mdbuf, idc->messageDigest->digest->data, idc->messageDigest->digest->length);
@@ -3472,7 +3367,7 @@ static int verify_cab_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	printf("Current message digest    : %s\n", hexbuf);
 
 	bio = BIO_new_mem_buf(indata, header->sigpos);
-	ret |= calc_cab_digest(bio, md, cmdbuf, header->sigpos);
+	ret |= cab_calc_digest(bio, md, cmdbuf, header->sigpos);
 	BIO_free(bio);
 
 	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
@@ -3487,7 +3382,7 @@ static int verify_cab_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 		int has_sig = 0;
 		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
 		if (p7nest) {
-			int nest_ret = verify_cab_pkcs7(p7nest, indata, header, 0, options);
+			int nest_ret = cab_verify_pkcs7(p7nest, indata, header, 0, options);
 			if (ret)
 				ret = nest_ret;
 			PKCS7_free(p7nest);
@@ -3496,22 +3391,20 @@ static int verify_cab_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 			ret = 1;
 		}
 	}
-
 	return ret;
 }
 
-static PKCS7 *extract_existing_cab_pkcs7(char *indata, FILE_HEADER *header)
+static PKCS7 *cab_extract_existing_pkcs7(char *indata, FILE_HEADER *header)
 {
 	PKCS7 *p7 = NULL;
 	const unsigned char *blob;
 
 	blob = (unsigned char*)indata + header->sigpos;
 	p7 = d2i_PKCS7(NULL, &blob, header->siglen);
-
 	return p7;
 }
 
-static int verify_cab_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *options)
+static int cab_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *options)
 {
 	PKCS7 *p7;
 	int ret = 0;
@@ -3520,26 +3413,24 @@ static int verify_cab_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *op
 		printf("No signature found\n\n");
 		return 1; /* FAILED */
 	}
-	p7 = extract_existing_cab_pkcs7(indata, header);
+	p7 = cab_extract_existing_pkcs7(indata, header);
 	if (!p7) {
 		printf("Failed to extract PKCS7 data\n\n");
 		return -1; /* FAILED */
 	}
-
-	ret |= verify_cab_pkcs7(p7, indata, header, 1, options);
+	ret |= cab_verify_pkcs7(p7, indata, header, 1, options);
 	PKCS7_free(p7);
-
 	return ret;
 }
 
-static int extract_cab_file(char *indata, FILE_HEADER *header, BIO *outdata, int output_pkcs7)
+static int cab_extract_file(char *indata, FILE_HEADER *header, BIO *outdata, int output_pkcs7)
 {
 	int ret = 0;
 	PKCS7 *sig;
 
 	(void)BIO_reset(outdata);
 	if (output_pkcs7) {
-		sig = extract_existing_cab_pkcs7(indata, header);
+		sig = cab_extract_existing_pkcs7(indata, header);
 		if (!sig) {
 			fprintf(stderr, "Unable to extract existing signature\n");
 			return 1; /* FAILED */
@@ -3548,11 +3439,10 @@ static int extract_cab_file(char *indata, FILE_HEADER *header, BIO *outdata, int
 	} else {
 		ret = !BIO_write(outdata, indata + header->sigpos, header->siglen);
 	}
-
 	return ret;
 }
 
-static void write_optional_names(size_t flags, char *indata, BIO *outdata, int *len)
+static void cab_optional_names(size_t flags, char *indata, BIO *outdata, int *len)
 {
 	int i;
 
@@ -3593,7 +3483,7 @@ static void write_optional_names(size_t flags, char *indata, BIO *outdata, int *
 	*len = i;
 }
 
-static void remove_cab_file(char *indata, FILE_HEADER *header, size_t filesize, BIO *outdata)
+static void cab_remove_file(char *indata, FILE_HEADER *header, size_t filesize, BIO *outdata)
 {
 	int i;
 	unsigned short nfolders;
@@ -3633,7 +3523,7 @@ static void remove_cab_file(char *indata, FILE_HEADER *header, size_t filesize, 
 	 */
 	BIO_write(outdata, indata+32, 4);
 	i = 60;
-	write_optional_names(flags, indata, outdata, &i);
+	cab_optional_names(flags, indata, outdata, &i);
 	/*
 	 * (u8 * cFolders) CFFOLDER - structure contains information about
 	 * one of the folders or partial folders stored in this cabinet file
@@ -3652,7 +3542,7 @@ static void remove_cab_file(char *indata, FILE_HEADER *header, size_t filesize, 
 	BIO_write(outdata, indata + i, filesize - header->siglen - i);
 }
 
-static void modify_cab_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
+static void cab_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
 {
 	int i;
 	unsigned short nfolders;
@@ -3694,7 +3584,7 @@ static void modify_cab_header(char *indata, FILE_HEADER *header, BIO *hash, BIO 
 	BIO_write(hash, indata+56, 4);
 
 	i = 60;
-	write_optional_names(flags, indata, hash, &i);
+	cab_optional_names(flags, indata, hash, &i);
 	/*
 	 * (u8 * cFolders) CFFOLDER - structure contains information about
 	 * one of the folders or partial folders stored in this cabinet file
@@ -3709,7 +3599,7 @@ static void modify_cab_header(char *indata, FILE_HEADER *header, BIO *hash, BIO 
 	BIO_write(hash, indata + i, header->sigpos - i);
 }
 
-static void add_cab_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
+static void cab_add_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
 {
 	int i;
 	unsigned short nfolders;
@@ -3756,7 +3646,7 @@ static void add_cab_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *ou
 	BIO_write(hash, cabsigned+20, 4);
 
 	i = 36;
-	write_optional_names(flags, indata, hash, &i);
+	cab_optional_names(flags, indata, hash, &i);
 	/*
 	 * (u8 * cFolders) CFFOLDER - structure contains information about
 	 * one of the folders or partial folders stored in this cabinet file
@@ -3796,7 +3686,6 @@ static void add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp)
 		default:
 			break;
 		}
-
 	if (attrs) {
 		astr = ASN1_STRING_new();
 		ASN1_STRING_set(astr, attrs, len);
@@ -3849,7 +3738,6 @@ static int add_opus_attribute(PKCS7_SIGNER_INFO *si, char *desc, char *url)
 			V_ASN1_SEQUENCE, astr);
 
 	SpcSpOpusInfo_free(opus);
-
 	return 1; /* OK */
 }
 
@@ -3879,7 +3767,6 @@ static PKCS7 *create_new_signature(file_type_t type,
 		fprintf(stderr, "PKCS7_add_signature failed\n");
 		return NULL; /* FAILED */
 	}
-
 	pkcs7_add_signing_time(si, options->signing_time);
 	PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
 		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1));
@@ -3894,7 +3781,6 @@ static PKCS7 *create_new_signature(file_type_t type,
 		fprintf(stderr, "Couldn't allocate memory for opus info\n");
 		return NULL; /* FAILED */
 	}
-
 	PKCS7_content_new(sig, NID_pkcs7_data);
 
 	if (cparams->cert != NULL) {
@@ -3917,7 +3803,6 @@ static PKCS7 *create_new_signature(file_type_t type,
 		sk_X509_free(cparams->xcerts);
 		cparams->xcerts = NULL;
 	}
-
 	return sig; /* OK */
 }
 
@@ -3943,10 +3828,12 @@ static int add_unauthenticated_blob(PKCS7 *sig)
 		"unauthenticatedData", "unauthenticatedData");
 	PKCS7_add_attribute (si, nid, V_ASN1_SEQUENCE, astr);
 	OPENSSL_free(p);
-
 	return 0; /* OK */
 }
 
+/*
+ * Append signature to the outfile
+ */
 #ifdef WITH_GSF
 static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_type_t cmd,
 			GLOBAL_OPTIONS *options, size_t *padlen, int *len, BIO *outdata, GSF_PARAMS *gsfparams)
@@ -3972,7 +3859,6 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_typ
 	} else {
 		outsig = sig;
 	}
-
 	/* Append signature to outfile */
 	if (((*len = i2d_PKCS7(outsig, NULL)) <= 0) || (p = OPENSSL_malloc(*len)) == NULL) {
 		fprintf(stderr, "i2d_PKCS memory allocation failed: %d\n", *len);
@@ -3988,7 +3874,6 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_typ
 		PUT_UINT16_LE(WIN_CERT_TYPE_PKCS_SIGNED_DATA, buf + 6);
 		BIO_write(outdata, buf, 8);
 	}
-
 	if (type == FILE_TYPE_PE || type == FILE_TYPE_CAB) {
 		BIO_write(outdata, p, *len);
 		/* pad (with 0's) asn1 blob to 8 byte boundary */
@@ -4013,7 +3898,6 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_typ
 	#endif
 	}
 	OPENSSL_free(p);
-
 	return 1; /* OK */
 }
 
@@ -4032,7 +3916,7 @@ static void update_data_size(file_type_t type, cmd_type_t cmd, FILE_HEADER *head
 			BIO_write(outdata, buf, 4);
 		}
 		if (cmd == CMD_SIGN || cmd == CMD_REMOVE || cmd == CMD_ADD || cmd == CMD_ATTACH)
-			recalc_pe_checksum(outdata, header);
+			pe_recalc_checksum(outdata, header);
 	} else if (type == FILE_TYPE_CAB && (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH)) {
 		/*
 		 * Update additional data size.
@@ -4123,7 +4007,7 @@ static int input_validation(file_type_t type, GLOBAL_OPTIONS *options, FILE_HEAD
 		if (options->add_msi_dse == 1)
 			fprintf(stderr, "Warning: -add-msi-dse option is only valid for MSI files\n");
 #endif
-		if (!verify_cab_header(indata, options->infile, filesize, header)) {
+		if (!cab_verify_header(indata, options->infile, filesize, header)) {
 			fprintf(stderr, "Corrupt CAB file\n");
 			return 0; /* FAILED */
 		}
@@ -4134,7 +4018,7 @@ static int input_validation(file_type_t type, GLOBAL_OPTIONS *options, FILE_HEAD
 		if (options->add_msi_dse == 1)
 			fprintf(stderr, "Warning: -add-msi-dse option is only valid for MSI files\n");
 #endif
-		if (!verify_pe_header(indata, options->infile, filesize, header)) {
+		if (!pe_verify_header(indata, options->infile, filesize, header)) {
 			fprintf(stderr, "Corrupt PE file\n");
 			return 0; /* FAILED */
 		}
@@ -4149,7 +4033,6 @@ static int input_validation(file_type_t type, GLOBAL_OPTIONS *options, FILE_HEAD
 		return 0; /* FAILED */
 #endif
 	}
-
 	return 1; /* OK */
 }
 
@@ -4169,11 +4052,11 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 			fprintf(stderr, "Error verifying result\n");
 			return 0; /* FAILED */
 		}
-		if (!verify_pe_header(outdata, options->outfile, filesize, header)) {
+		if (!pe_verify_header(outdata, options->outfile, filesize, header)) {
 			fprintf(stderr, "Corrupt PE file\n");
 			return 0; /* FAILED */
 		}
-		if (verify_pe_file(outdata, header, options)) {
+		if (pe_verify_file(outdata, header, options)) {
 			fprintf(stderr, "Signature mismatch\n");
 			return 0; /* FAILED */
 		}
@@ -4188,11 +4071,11 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 			fprintf(stderr, "Error verifying result\n");
 			return 0; /* FAILED */
 		}
-		if (!verify_cab_header(outdata, options->outfile, filesize, header)) {
+		if (!cab_verify_header(outdata, options->outfile, filesize, header)) {
 			fprintf(stderr, "Corrupt CAB file\n");
 			return 0; /* FAILED */
 		}
-		if (verify_cab_file(outdata, header, options)) {
+		if (cab_verify_file(outdata, header, options)) {
 			fprintf(stderr, "Signature mismatch\n");
 			return 0; /* FAILED */
 		}
@@ -4223,7 +4106,6 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 		fprintf(stderr, "Unknown input type for file: %s\n", options->infile);
 		return 0; /* FAILED */
 		}
-
 	return 1; /* OK */
 }
 
@@ -4247,7 +4129,6 @@ static int get_file_type(char *indata, char *infile, file_type_t *type)
 		printf("Unrecognized file type: %s\n", infile);
 		return 0; /* FAILED */
 	}
-
 	return 1; /* OK */
 }
 
@@ -4269,17 +4150,13 @@ static char *getpassword(const char *prompt)
 		fprintf(stderr, "Failed to set terminal attributes\n");
 		return NULL;
 	}
-
 	p = fgets(passbuf, sizeof(passbuf), stdin);
-
 	if (tcsetattr(fileno(stdin), TCSANOW, &ofl) != 0)
 		fprintf(stderr, "Failed to restore terminal attributes\n");
-
 	if (!p) {
 		fprintf(stderr, "Failed to read password\n");
 		return NULL;
 	}
-
 	passbuf[strlen(passbuf)-1] = 0x00;
 	char *pass = strdup(passbuf);
 	memset(passbuf, 0, sizeof(passbuf));
@@ -4315,7 +4192,6 @@ static int read_password(GLOBAL_OPTIONS *options)
 		options->pass = getpassword("Password: ");
 #endif
 	}
-
 	return 1; /* OK */
 }
 
@@ -4456,10 +4332,8 @@ static int read_crypto_params(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 		}
 		BIO_free(btmp);
 	}
-
 	if (cparams->certs == NULL && p7 != NULL)
 		cparams->certs = sk_X509_dup(p7->d.sign->cert);
-
 	if (options->xcertfile) {
 		if ((btmp = BIO_new_file(options->xcertfile, "rb")) == NULL ||
 				((p7x = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
@@ -4471,12 +4345,10 @@ static int read_crypto_params(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 		PKCS7_free(p7x);
 		p7x = NULL;
 	}
-
 	if (options->pass) {
 		memset(options->pass, 0, strlen(options->pass));
 		options->pass = NULL;
 	}
-
 	return ret; /* OK */
 }
 
@@ -4510,7 +4382,6 @@ static char *get_cafile(void)
 	} else {
 		openssl_dir = OPENSSL_strdup("/etc");
 	}
-
 	cafile = OPENSSL_malloc(strlen(sslpart1) + strlen(sslpart2) + 1);
 	strcpy(cafile, openssl_dir);
 	strcat(cafile, sslpart2);
@@ -4519,7 +4390,7 @@ static char *get_cafile(void)
 	return cafile;
 }
 
-static PKCS7 *attach_sigfile(char *sigfile, file_type_t type)
+static PKCS7 *get_sigfile(char *sigfile, file_type_t type)
 {
 	PKCS7 *sig = NULL;
 	size_t sigfilesize;
@@ -4538,28 +4409,26 @@ static PKCS7 *attach_sigfile(char *sigfile, file_type_t type)
 		fprintf(stderr, "Failed to open file: %s\n", sigfile);
 		return NULL; /* FAILED */
 	}
-
-	/* reset header */
-	memset(&header, 0, sizeof(FILE_HEADER));
-	header.fileend = sigfilesize;
-
 	if (sigfilesize >= sizeof(pemhdr) && !memcmp(insigdata, pemhdr, sizeof(pemhdr)-1)) {
 		sigbio = BIO_new_mem_buf(insigdata, sigfilesize);
 		sig = PEM_read_bio_PKCS7(sigbio, NULL, NULL, NULL);
 		BIO_free_all(sigbio);
 	} else {
+		/* reset header */
+		memset(&header, 0, sizeof(FILE_HEADER));
+		header.fileend = sigfilesize;
 		if (type == FILE_TYPE_PE) {
-			if (!verify_pe_header(insigdata, sigfile, sigfilesize, &header))
+			if (!pe_verify_header(insigdata, sigfile, sigfilesize, &header))
 				return NULL; /* FAILED */
-			sig = extract_existing_pe_pkcs7(insigdata, &header);
+			sig = pe_extract_existing_pkcs7(insigdata, &header);
 			if (!sig) {
 				fprintf(stderr, "Failed to extract PKCS7 data: %s\n", sigfile);
 				return NULL; /* FAILED */
 			}
 		} else if (type == FILE_TYPE_CAB) {
-			if (!verify_cab_header(insigdata, sigfile, sigfilesize, &header))
+			if (!cab_verify_header(insigdata, sigfile, sigfilesize, &header))
 				return NULL; /* FAILED */
-			sig = extract_existing_cab_pkcs7(insigdata, &header);
+			sig = cab_extract_existing_pkcs7(insigdata, &header);
 			if (!sig) {
 				fprintf(stderr, "Failed to extract PKCS7 data: %s\n", sigfile);
 				return NULL; /* FAILED */
@@ -4577,13 +4446,16 @@ static PKCS7 *attach_sigfile(char *sigfile, file_type_t type)
 	return sig; /* OK */
 }
 
+/*
+ * Obtain an existing signature or create a new one
+ */
 static PKCS7 *get_pkcs7(cmd_type_t cmd, BIO *hash, file_type_t type, char *indata,
 			GLOBAL_OPTIONS *options, FILE_HEADER *header, CRYPTO_PARAMS *cparams)
 {
 	PKCS7 *sig = NULL;
 
 	if (cmd == CMD_ATTACH) {
-		sig = attach_sigfile(options->sigfile, type);
+		sig = get_sigfile(options->sigfile, type);
 		if (!sig) {
 			fprintf(stderr, "Unable to extract valid signature\n");
 			return NULL; /* FAILED */
@@ -4599,12 +4471,14 @@ static PKCS7 *get_pkcs7(cmd_type_t cmd, BIO *hash, file_type_t type, char *indat
 			return NULL; /* FAILED */
 		}
 	}
-
 	return sig;
 }
 
+/*
+ * Prepare the output file for signing
+ */
 #ifdef WITH_GSF
-static PKCS7 *presign_msi_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *header,
+static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *header,
 			GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams, char *indata,
 			BIO *hash, GsfInfile *ole, GSF_PARAMS *gsfparams, PKCS7 **cursig)
 {
@@ -4641,12 +4515,11 @@ static PKCS7 *presign_msi_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 	}
 	if ((cmd == CMD_ATTACH) || (cmd == CMD_SIGN))
 		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams);
-
 	return sig; /* OK */
 }
 #endif
 
-static PKCS7 *presign_pe_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *header,
+static PKCS7 *pe_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *header,
 			GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams, char *indata,
 			BIO *hash, BIO *outdata, PKCS7 **cursig)
 {
@@ -4654,7 +4527,7 @@ static PKCS7 *presign_pe_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *hea
 
 	if ((cmd == CMD_SIGN && options->nest) ||
 			(cmd == CMD_ATTACH && options->nest) || cmd == CMD_ADD) {
-		*cursig = extract_existing_pe_pkcs7(indata, header);
+		*cursig = pe_extract_existing_pkcs7(indata, header);
 		if (!*cursig) {
 			fprintf(stderr, "Unable to extract existing signature\n");
 			return NULL; /* FAILED */
@@ -4666,15 +4539,13 @@ static PKCS7 *presign_pe_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *hea
 		/* Strip current signature */
 		header->fileend = header->sigpos;
 	}
-	modify_pe_header(indata, header, hash, outdata);
-
+	pe_modify_header(indata, header, hash, outdata);
 	if ((cmd == CMD_ATTACH) || (cmd == CMD_SIGN))
 		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams);
-
 	return sig; /* OK */
 }
 
-static PKCS7 *presign_cab_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *header,
+static PKCS7 *cab_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *header,
 			GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams, char *indata,
 			BIO *hash, BIO *outdata, PKCS7 **cursig)
 {
@@ -4682,7 +4553,7 @@ static PKCS7 *presign_cab_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 
 	if ((cmd == CMD_SIGN && options->nest) ||
 			(cmd == CMD_ATTACH && options->nest) || cmd == CMD_ADD) {
-		*cursig = extract_existing_cab_pkcs7(indata, header);
+		*cursig = cab_extract_existing_pkcs7(indata, header);
 		if (!*cursig) {
 			fprintf(stderr, "Unable to extract existing signature\n");
 			return NULL; /* FAILED */
@@ -4692,13 +4563,11 @@ static PKCS7 *presign_cab_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 	}
 	if (header->header_size == 20)
 		/* Strip current signature and modify header */
-		modify_cab_header(indata, header, hash, outdata);
+		cab_modify_header(indata, header, hash, outdata);
 	else
-		add_cab_header(indata, header, hash, outdata);
-
+		cab_add_header(indata, header, hash, outdata);
 	if ((cmd == CMD_ATTACH) || (cmd == CMD_SIGN))
 		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams);
-
 	return sig; /* OK */
 }
 
@@ -4741,7 +4610,6 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 		argv++;
 		argc--;
 	}
-
 	/* reset options */
 	memset(options, 0, sizeof(GLOBAL_OPTIONS));
 	options->md = EVP_sha1();
@@ -4752,7 +4620,6 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 		options->cafile = get_cafile();
 		options->untrusted = get_cafile();
 	}
-
 	for (argc--,argv++; argc >= 1; argc--,argv++) {
 		if (!strcmp(*argv, "-in")) {
 			if (--argc < 1) usage(argv0, "all");
@@ -4915,12 +4782,10 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 			break;
 		}
 	}
-
 	if (!options->infile && argc > 0) {
 		options->infile = *(argv++);
 		argc--;
 	}
-
 	if (*cmd != CMD_VERIFY && (!options->outfile && argc > 0)) {
 		if (!strcmp(*argv, "-out")) {
 			argv++;
@@ -4931,7 +4796,6 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 			argc--;
 		}
 	}
-
 	if (argc > 0 || (options->nturl && options->ntsurl) || !options->infile ||
 		(*cmd != CMD_VERIFY && !options->outfile) ||
 		(*cmd == CMD_SIGN && !((options->certfile && options->keyfile) ||
@@ -4991,7 +4855,7 @@ int main(int argc, char **argv)
 #ifdef WITH_GSF
 	/* reset Gsf parameters */
 	memset(&gsfparams, 0, sizeof(GSF_PARAMS));
-#endif
+#endif /* WITH_GSF */
 
 	if (!get_file_type(indata, options.infile, &type))
 		goto err_cleanup;
@@ -5019,7 +4883,7 @@ int main(int argc, char **argv)
 			ret = msi_verify_file(ole, &options);
 			goto skip_signing;
 		} else {
-			sig = presign_msi_file(type, cmd, &header, &options, &cparams, indata,
+			sig = msi_presign_file(type, cmd, &header, &options, &cparams, indata,
 				hash, ole, &gsfparams, &cursig);
 			if (cmd == CMD_REMOVE) {
 				gsf_output_close(GSF_OUTPUT(gsfparams.outole));
@@ -5029,7 +4893,7 @@ int main(int argc, char **argv)
 				goto err_cleanup;
 		}
 	}
-#endif
+#endif /* WITH_GSF */
 
 	if ((type == FILE_TYPE_CAB || type == FILE_TYPE_PE) && (cmd != CMD_VERIFY)) {
 		/* Create outdata file */
@@ -5044,16 +4908,16 @@ int main(int argc, char **argv)
 				(cmd == CMD_REMOVE || cmd == CMD_EXTRACT)) {
 			DO_EXIT_1("CAB file does not have any signature: %s\n", options.infile);
 		} else if (cmd == CMD_EXTRACT) {
-			ret = extract_cab_file(indata, &header, outdata, options.output_pkcs7);
+			ret = cab_extract_file(indata, &header, outdata, options.output_pkcs7);
 			goto skip_signing;
 		} else if (cmd == CMD_REMOVE) {
-			remove_cab_file(indata, &header, filesize, outdata);
+			cab_remove_file(indata, &header, filesize, outdata);
 			goto skip_signing;
 		} else if (cmd == CMD_VERIFY) {
-			ret = verify_cab_file(indata, &header, &options);
+			ret = cab_verify_file(indata, &header, &options);
 			goto skip_signing;
 		} else {
-			sig = presign_cab_file(type, cmd, &header, &options, &cparams, indata,
+			sig = cab_presign_file(type, cmd, &header, &options, &cparams, indata,
 				hash, outdata, &cursig);
 			if (!sig)
 				goto err_cleanup;
@@ -5062,13 +4926,13 @@ int main(int argc, char **argv)
 		if ((cmd == CMD_REMOVE || cmd == CMD_EXTRACT) && header.sigpos == 0) {
 			DO_EXIT_1("PE file does not have any signature: %s\n", options.infile);
 		} else if (cmd == CMD_EXTRACT) {
-			ret = extract_pe_file(indata, &header, outdata, options.output_pkcs7);
+			ret = pe_extract_file(indata, &header, outdata, options.output_pkcs7);
 			goto skip_signing;
 		} else if (cmd == CMD_VERIFY) {
-			ret = verify_pe_file(indata, &header, &options);
+			ret = pe_verify_file(indata, &header, &options);
 			goto skip_signing;
 		} else {
-			sig = presign_pe_file(type, cmd, &header, &options, &cparams, indata,
+			sig = pe_presign_file(type, cmd, &header, &options, &cparams, indata,
 				hash, outdata, &cursig);
 			if (cmd == CMD_REMOVE)
 				goto skip_signing;
@@ -5083,7 +4947,7 @@ int main(int argc, char **argv)
 		DO_EXIT_0("Authenticode timestamping failed\n");
 	if (options.ntsurl && add_timestamp_rfc3161(sig, &options))
 		DO_EXIT_0("RFC 3161 timestamping failed\n");
-#endif
+#endif /* ENABLE_CURL */
 
 	if (options.addBlob && add_unauthenticated_blob(sig))
 		DO_EXIT_0("Adding unauthenticated blob failed\n");
@@ -5104,7 +4968,7 @@ int main(int argc, char **argv)
 #else
 	if (!append_signature(sig, cursig, type, cmd, &options, &padlen, &len, outdata))
 		DO_EXIT_0("Append signature to outfile failed\n");
-#endif
+#endif /* WITH_GSF */
 
 	PKCS7_free(sig);
 
