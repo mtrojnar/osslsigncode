@@ -633,6 +633,19 @@ static void tohex(const unsigned char *v, char *b, int len)
 		sprintf(b+i*2, "%02X", v[i]);
 }
 
+static int is_indirect_data_signature(PKCS7 *p7)
+{
+	ASN1_OBJECT *indir_objid;
+	int retval;
+
+	indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+	retval = p7 && PKCS7_type_is_signed(p7) &&
+		!OBJ_cmp(p7->d.sign->contents->type, indir_objid) &&
+		p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE;
+	ASN1_OBJECT_free(indir_objid);
+	return retval;
+}
+
 #ifdef ENABLE_CURL
 
 static int blob_has_nl = 0;
@@ -2409,8 +2422,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 #endif
 	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 
-	ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
-	if (p7 && PKCS7_type_is_signed(p7) && !OBJ_cmp(p7->d.sign->contents->type, indir_objid) && p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
+	if (is_indirect_data_signature(p7)) {
 		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
 		const unsigned char *p = astr->data;
 		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
@@ -2421,7 +2433,6 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 			}
 			SpcIndirectDataContent_free(idc);
 		}
-		ASN1_OBJECT_free(indir_objid);
 	}
 	if (mdtype == -1) {
 		printf("Failed to extract current message digest\n\n");
@@ -2942,10 +2953,7 @@ static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	size_t phlen = 0;
 	BIO *bio = NULL;
 
-	ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
-	if (PKCS7_type_is_signed(p7) &&
-		!OBJ_cmp(p7->d.sign->contents->type, indir_objid) &&
-		p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
+	if (is_indirect_data_signature(p7)) {
 		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
 		const unsigned char *p = astr->data;
 		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
@@ -2958,7 +2966,6 @@ static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 			SpcIndirectDataContent_free(idc);
 		}
 	}
-	ASN1_OBJECT_free(indir_objid);
 	if (mdtype == -1) {
 		printf("Failed to extract current message digest\n\n");
 		return -1;
@@ -3339,10 +3346,7 @@ static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	size_t phlen = 0;
 	BIO *bio = NULL;
 
-	ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
-	if (PKCS7_type_is_signed(p7) &&
-		!OBJ_cmp(p7->d.sign->contents->type, indir_objid) &&
-		p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
+	if (is_indirect_data_signature(p7)) {
 		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
 		const unsigned char *p = astr->data;
 		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
@@ -3355,7 +3359,6 @@ static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 			SpcIndirectDataContent_free(idc);
 		}
 	}
-	ASN1_OBJECT_free(indir_objid);
 	if (mdtype == -1) {
 		printf("Failed to extract current message digest\n\n");
 		return -1; /* FAILED */
