@@ -582,7 +582,7 @@ ASN1_SEQUENCE(TimeStampToken) = {
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampToken)
 
 
-static SpcSpOpusInfo* createOpus(const char *desc, const char *url)
+static SpcSpOpusInfo *createOpus(const char *desc, const char *url)
 {
 	SpcSpOpusInfo *info = SpcSpOpusInfo_new();
 
@@ -591,14 +591,14 @@ static SpcSpOpusInfo* createOpus(const char *desc, const char *url)
 		info->programName->type = 1;
 		info->programName->value.ascii = ASN1_IA5STRING_new();
 		ASN1_STRING_set((ASN1_STRING *)info->programName->value.ascii,
-						(const unsigned char*)desc, strlen(desc));
+				(const unsigned char*)desc, strlen(desc));
 	}
 	if (url) {
 		info->moreInfo = SpcLink_new();
 		info->moreInfo->type = 0;
 		info->moreInfo->value.url = ASN1_IA5STRING_new();
 		ASN1_STRING_set((ASN1_STRING *)info->moreInfo->value.url,
-						(const unsigned char*)url, strlen(url));
+				(const unsigned char*)url, strlen(url));
 	}
 	return info;
 }
@@ -709,14 +709,12 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	BIO *bout, *bin, *b64;
 	u_char *p = NULL;
 	int len = 0;
-	PKCS7_SIGNER_INFO *si =
-		sk_PKCS7_SIGNER_INFO_value
-		(sig->d.sign->signer_info, 0);
+	PKCS7_SIGNER_INFO *si;
 
-	if (!url) return -1;
-
+	if (!url)
+		return -1;
+	si = sk_PKCS7_SIGNER_INFO_value(sig->d.sign->signer_info, 0);
 	curl = curl_easy_init();
-
 	if (proxy) {
 		curl_easy_setopt(curl, CURLOPT_PROXY, proxy);
 		if (!strncmp("http:", proxy, 5))
@@ -724,10 +722,8 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 		if (!strncmp("socks:", proxy, 6))
 			curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5);
 	}
-
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	/* curl_easy_setopt(curl, CURLOPT_VERBOSE, 42);	*/
-
 	if (noverifypeer)
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, FALSE);
 
@@ -745,6 +741,7 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	if (rfc3161) {
 		unsigned char mdbuf[EVP_MAX_MD_SIZE];
 		EVP_MD_CTX *mdctx;
+		TimeStampReq *req = TimeStampReq_new();
 
 		mdctx = EVP_MD_CTX_new();
 		EVP_DigestInit(mdctx, md);
@@ -752,7 +749,6 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 		EVP_DigestFinal(mdctx, mdbuf, NULL);
 		EVP_MD_CTX_free(mdctx);
 
-		TimeStampReq *req = TimeStampReq_new();
 		ASN1_INTEGER_set(req->version, 1);
 		req->messageImprint->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(md));
 		req->messageImprint->digestAlgorithm->parameters = ASN1_TYPE_new();
@@ -788,7 +784,6 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	(void)BIO_flush(bout);
 	OPENSSL_free(p);
 	p = NULL;
-
 	len = BIO_get_mem_data(bout, &p);
 
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, len);
@@ -801,20 +796,16 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write);
 
 	c = curl_easy_perform(curl);
-
 	curl_slist_free_all(slist);
 	BIO_free_all(bout);
-
 	if (c) {
 		BIO_free_all(bin);
 		if (verbose)
 			fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(c), url);
 	} else {
-		(void)BIO_flush(bin);
-
 		long http_code = -1;
+		(void)BIO_flush(bin);
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-
 		/*
 		 * At this point we could also look at the response body (and perhaps
 		 * log it if we fail to decode the response):
@@ -824,6 +815,8 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 		 */
 		if (rfc3161) {
 			TimeStampResp *reply;
+			STACK_OF(X509_ATTRIBUTE) *attrs = sk_X509_ATTRIBUTE_new_null();
+
 			(void)BIO_flush(bin);
 			reply = ASN1_item_d2i_bio(ASN1_ITEM_rptr(TimeStampResp), bin, NULL);
 			BIO_free_all(bin);
@@ -851,9 +844,7 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 			p -= len;
 			TimeStampResp_free(reply);
 
-			STACK_OF(X509_ATTRIBUTE) *attrs = sk_X509_ATTRIBUTE_new_null();
-			attrs = X509at_add1_attr_by_txt
-				(&attrs, SPC_RFC3161_OBJID, V_ASN1_SET, p, len);
+			attrs = X509at_add1_attr_by_txt(&attrs, SPC_RFC3161_OBJID, V_ASN1_SET, p, len);
 			OPENSSL_free(p);
 			PKCS7_set_attributes(si, attrs);
 			sk_X509_ATTRIBUTE_pop_free(attrs, X509_ATTRIBUTE_free);
@@ -863,6 +854,7 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 			PKCS7_SIGNER_INFO *info;
 			ASN1_STRING *astr;
 			BIO* b64_bin;
+
 			b64 = BIO_new(BIO_f_base64());
 			if (!blob_has_nl)
 				BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
@@ -957,20 +949,26 @@ static bool on_list(const char *txt, const char *list[])
 
 static void usage(const char *argv0, const char *cmd)
 {
-	printf("\nUsage: %s", argv0);
 	const char *cmds_all[] = {"all", NULL};
+	const char *cmds_sign[] = {"all", "sign", NULL};
+	const char *cmds_add[] = {"all", "add", NULL};
+	const char *cmds_attach[] = {"all", "attach-signature", NULL};
+	const char *cmds_extract[] = {"all", "extract-signature", NULL};
+	const char *cmds_remove[] = {"all", "remove-signature", NULL};
+	const char *cmds_verify[] = {"all", "verify", NULL};
+
+	printf("\nUsage: %s", argv0);
 	if (on_list(cmd, cmds_all)) {
 		printf("\n\n%1s[ --version | -v ]\n", "");
 		printf("%1s[ --help ]\n\n", "");
 	}
-	const char *cmds_sign[] = {"all", "sign", NULL};
 	if (on_list(cmd, cmds_sign)) {
 		printf("%1s[ sign ] ( -certs <certfile> -key <keyfile> | -pkcs12 <pkcs12file> |\n", "");
 		printf("%12s  [ -pkcs11engine <engine> ] -pkcs11module <module> -certs <certfile> -key <pkcs11 key id>)\n", "");
 		printf("%12s[ -pass <password>", "");
 #ifdef PROVIDE_ASKPASS
 		printf("%1s [ -askpass ]", "");
-#endif
+#endif /* PROVIDE_ASKPASS */
 		printf("%1s[ -readpass <file> ]\n", "");
 		printf("%12s[ -ac <crosscertfile> ]\n", "");
 		printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
@@ -989,7 +987,6 @@ static void usage(const char *argv0, const char *cmd)
 #endif /* WITH_GSF */
 		printf("%12s[ -in ] <infile> [-out ] <outfile>\n\n", "");
 	}
-	const char *cmds_add[] = {"all", "add", NULL};
 	if (on_list(cmd, cmds_add)) {
 		printf("%1sadd [-addUnauthenticatedBlob]\n", "");
 #ifdef ENABLE_CURL
@@ -998,7 +995,6 @@ static void usage(const char *argv0, const char *cmd)
 #endif /* ENABLE_CURL */
 		printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
 	}
-	const char *cmds_attach[] = {"all", "attach-signature", NULL};
 	if (on_list(cmd, cmds_attach)) {
 		printf("%1sattach-signature [ -sigin ] <sigfile>\n", "");
 		printf("%12s[ -CAfile <infile> ]\n", "");
@@ -1007,16 +1003,12 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -nest ]\n", "");
 		printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
 	}
-	const char *cmds_extract[] = {"all", "extract-signature", NULL};
 	if (on_list(cmd, cmds_extract)) {
 		printf("%1sextract-signature [ -pem ]\n", "");
 		printf("%12s[ -in ] <infile> [ -out ] <sigfile>\n\n", "");
 	}
-	const char *cmds_remove[] = {"all", "remove-signature", NULL};
 	if (on_list(cmd, cmds_remove))
 		printf("%1sremove-signature [ -in ] <infile> [ -out ] <outfile>\n\n", "");
-
-	const char *cmds_verify[] = {"all", "verify", NULL};
 	if (on_list(cmd, cmds_verify)) {
 		printf("%1sverify [ -in ] <infile>\n", "");
 		printf("%12s[ -CAfile <infile> ]\n", "");
@@ -1032,6 +1024,55 @@ static void usage(const char *argv0, const char *cmd)
 static void help_for(const char *argv0, const char *cmd)
 {
 	const char *cmds_all[] = {"all", NULL};
+	const char *cmds_add[] = {"add", NULL};
+	const char *cmds_attach[] = {"attach-signature", NULL};
+	const char *cmds_extract[] = {"extract-signature", NULL};
+	const char *cmds_remove[] = {"remove-signature", NULL};
+	const char *cmds_sign[] = {"sign", NULL};
+	const char *cmds_verify[] = {"verify", NULL};
+	const char *cmds_ac[] = {"sign", NULL};
+#ifdef WITH_GSF
+	const char *cmds_add_msi_dse[] = {"sign", NULL};
+#endif /* WITH_GSF */
+	const char *cmds_addUnauthenticatedBlob[] = {"sign", "add", NULL};
+#ifdef PROVIDE_ASKPASS
+	const char *cmds_askpass[] = {"sign", NULL};
+#endif /* PROVIDE_ASKPASS */
+	const char *cmds_CAfile[] = {"attach-signature", "verify", NULL};
+	const char *cmds_certs[] = {"sign", NULL};
+	const char *cmds_comm[] = {"sign", NULL};
+	const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
+	const char *cmds_h[] = {"sign", NULL};
+	const char *cmds_i[] = {"sign", NULL};
+	const char *cmds_in[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", "verify", NULL};
+	const char *cmds_jp[] = {"sign", NULL};
+	const char *cmds_key[] = {"sign", NULL};
+	const char *cmds_n[] = {"sign", NULL};
+	const char *cmds_nest[] = {"attach-signature", "sign", NULL};
+#ifdef ENABLE_CURL
+	const char *cmds_noverifypeer[] = {"add", "sign", NULL};
+#endif /* ENABLE_CURL */
+	const char *cmds_out[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", NULL};
+#ifdef ENABLE_CURL
+	const char *cmds_p[] = {"add", "sign", NULL};
+#endif /* ENABLE_CURL */
+	const char *cmds_pass[] = {"sign", NULL};
+	const char *cmds_pem[] = {"extract-signature", NULL};
+	const char *cmds_ph[] = {"sign", NULL};
+	const char *cmds_pkcs11engine[] = {"sign", NULL};
+	const char *cmds_pkcs11module[] = {"sign", NULL};
+	const char *cmds_pkcs12[] = {"sign", NULL};
+	const char *cmds_readpass[] = {"sign", NULL};
+	const char *cmds_require_leaf_hash[] = {"verify", NULL};
+	const char *cmds_sigin[] = {"attach-signature", NULL};
+	const char *cmds_st[] = {"sign", NULL};
+#ifdef ENABLE_CURL
+	const char *cmds_t[] = {"add", "sign", NULL};
+	const char *cmds_ts[] = {"add", "sign", NULL};
+#endif /* ENABLE_CURL */
+	const char *cmds_untrusted[] = {"attach-signature", "verify", NULL};
+	const char *cmds_verbose[] = {"sign", "verify", NULL};
+
 	if (on_list(cmd, cmds_all)) {
 		printf("osslsigncode is a small tool that implements part of the functionality of the Microsoft\n");
 		printf("tool signtool.exe - more exactly the Authenticode signing and timestamping.\n");
@@ -1049,30 +1090,25 @@ static void help_for(const char *argv0, const char *cmd)
 		printf("%-22s = verifies the digital signature of a file\n\n", "verify");
 		printf("For help on a specific command, enter %s <command> --help\n", argv0);
 	}
-	const char *cmds_add[] = {"add", NULL};
 	if (on_list(cmd, cmds_add)) {
 		printf("\nUse the \"add\" command to add an unauthenticated blob or a timestamp to a previously-signed file.\n\n");
 		printf("Options:\n");
 	}
-	const char *cmds_attach[] = {"attach-signature", NULL};
 	if (on_list(cmd, cmds_attach)) {
 		printf("\nUse the \"attach-signature\" command to attach the signature stored in the \"sigin\" file.\n");
 		printf("In order to verify this signature you should specify how to find needed CA or TSA\n");
 		printf("certificates, if appropriate.\n\n");
 		printf("Options:\n");
 	}
-	const char *cmds_extract[] = {"extract-signature", NULL};
 	if (on_list(cmd, cmds_extract)) {
 		printf("\nUse the \"extract-signature\" command to extract the embedded signature from a previously-signed file.\n");
 		printf("DER is the default format of the output file, but can be changed to PEM.\n\n");
 		printf("Options:\n");
 	}
-	const char *cmds_remove[] = {"remove-signature", NULL};
 	if (on_list(cmd, cmds_remove)) {
 		printf("\nUse the \"remove-signature\" command to remove sections of the embedded signature on a file.\n\n");
 		printf("Options:\n");
 	}
-	const char *cmds_sign[] = {"sign", NULL};
 	if (on_list(cmd, cmds_sign)) {
 		printf("\nUse the \"sign\" command to sign files using embedded signatures.\n");
 		printf("Signing  protects a file from tampering, and allows users to verify the signer\n");
@@ -1080,7 +1116,6 @@ static void help_for(const char *argv0, const char *cmd)
 		printf("parameters and to select the signing certificate you wish to use.\n\n");
 		printf("Options:\n");
 	}
-	const char *cmds_verify[] = {"verify", NULL};
 	if (on_list(cmd, cmds_verify)) {
 		printf("\nUse the \"verify\" command to verify embedded signatures.\n");
 		printf("Verification determines if the signing certificate was issued by a trusted party,\n");
@@ -1089,126 +1124,94 @@ static void help_for(const char *argv0, const char *cmd)
 		printf("and to specify how to find needed CA or TSA certificates, if appropriate.\n\n");
 		printf("Options:\n");
 	}
-	const char *cmds_ac[] = {"sign", NULL};
 	if (on_list(cmd, cmds_ac))
 	printf("%-24s= an additional certificate to be added to the signature block\n", "-ac");
 #ifdef WITH_GSF
-	const char *cmds_add_msi_dse[] = {"sign", NULL};
 	if (on_list(cmd, cmds_add_msi_dse))
 		printf("%-24s= sign a MSI file with the add-msi-dse option\n", "-add-msi-dse");
 #endif /* WITH_GSF */
-	const char *cmds_addUnauthenticatedBlob[] = {"sign", "add", NULL};
 	if (on_list(cmd, cmds_addUnauthenticatedBlob))
 		printf("%-24s= add an unauthenticated blob to the PE/MSI file\n", "-addUnauthenticatedBlob");
 #ifdef PROVIDE_ASKPASS
-	const char *cmds_askpass[] = {"sign", NULL};
 	if (on_list(cmd, cmds_askpass))
 		printf("%-24s= ask for the private key password\n", "-askpass");
 #endif /* PROVIDE_ASKPASS */
-	const char *cmds_CAfile[] = {"attach-signature", "verify", NULL};
 	if (on_list(cmd, cmds_CAfile))
 		printf("%-24s= the file containing one or more trusted certificates in PEM format\n", "-CAfile");
-	const char *cmds_certs[] = {"sign", NULL};
 	if (on_list(cmd, cmds_certs))
 		printf("%-24s= the signing certificate to use\n", "-certs");
-	const char *cmds_comm[] = {"sign", NULL};
 	if (on_list(cmd, cmds_comm))
 		printf("%-24s= set commercial purpose (default: individual purpose)\n", "-comm");
-	const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
 	if (on_list(cmd, cmds_CRLfile))
 		printf("%-24s= the file containing one or more CRLs in PEM format\n", "-CRLfile");
-	const char *cmds_h[] = {"sign", NULL};
 	if (on_list(cmd, cmds_h)) {
 		printf("%-24s= {md5|sha1|sha2(56)|sha384|sha512}\n", "-h");
 		printf("%26sset of cryptographic hash functions\n", "");
 	}
-	const char *cmds_i[] = {"sign", NULL};
 	if (on_list(cmd, cmds_i))
 		printf("%-24s= specifies a URL for expanded description of the signed content\n", "-i");
-	const char *cmds_in[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", "verify", NULL};
 	if (on_list(cmd, cmds_in))
 		printf("%-24s= input file\n", "-in");
-	const char *cmds_jp[] = {"sign", NULL};
 	if (on_list(cmd, cmds_jp)) {
 		printf("%-24s= low | medium | high\n", "-jp");
 		printf("%26slevels of permissions in Microsoft Internet Explorer 4.x for CAB files\n", "");
 		printf("%26sonly \"low\" level is now supported\n", "");
 	}
-	const char *cmds_key[] = {"sign", NULL};
 	if (on_list(cmd, cmds_key))
 		printf("%-24s= the private key to use\n", "-key");
-	const char *cmds_n[] = {"sign", NULL};
 	if (on_list(cmd, cmds_n))
 		printf("%-24s= specifies a description of the signed content\n", "-n");
-	const char *cmds_nest[] = {"attach-signature", "sign", NULL};
 	if (on_list(cmd, cmds_nest))
 		printf("%-24s= add the new nested signature instead of replacing the first one\n", "-nest");
 #ifdef ENABLE_CURL
-	const char *cmds_noverifypeer[] = {"add", "sign", NULL};
 	if (on_list(cmd, cmds_noverifypeer))
 		printf("%-24s= do not verify the Time-Stamp Authority's SSL certificate\n", "-noverifypeer");
 #endif /* ENABLE_CURL */
-	const char *cmds_out[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", NULL};
 	if (on_list(cmd, cmds_out))
 		printf("%-24s= output file\n", "-out");
 #ifdef ENABLE_CURL
-	const char *cmds_p[] = {"add", "sign", NULL};
 	if (on_list(cmd, cmds_p))
 		printf("%-24s= proxy to connect to the desired Time-Stamp Authority server\n", "-p");
 #endif /* ENABLE_CURL */
-	const char *cmds_pass[] = {"sign", NULL};
 	if (on_list(cmd, cmds_pass))
 		printf("%-24s= the private key password\n", "-pass");
-	const char *cmds_pem[] = {"extract-signature", NULL};
 	if (on_list(cmd, cmds_pem))
 		printf("%-24s= output data format PEM to use (default: DER)\n", "-pem");
-	const char *cmds_ph[] = {"sign", NULL};
 	if (on_list(cmd, cmds_ph))
 		printf("%-24s= generate page hashes for executable files\n", "-ph");
-	const char *cmds_pkcs11engine[] = {"sign", NULL};
 	if (on_list(cmd, cmds_pkcs11engine))
 		printf("%-24s= PKCS11 engine\n", "-pkcs11engine");
-	const char *cmds_pkcs11module[] = {"sign", NULL};
 	if (on_list(cmd, cmds_pkcs11module))
 		printf("%-24s= PKCS11 module\n", "-pkcs11module");
-	const char *cmds_pkcs12[] = {"sign", NULL};
 	if (on_list(cmd, cmds_pkcs12))
 		printf("%-24s= PKCS#12 container with the certificate and the private key\n", "-pkcs12");
-	const char *cmds_readpass[] = {"sign", NULL};
 	if (on_list(cmd, cmds_readpass))
 		printf("%-24s= the private key password source\n", "-readpass");
-	const char *cmds_require_leaf_hash[] = {"verify", NULL};
 	if (on_list(cmd, cmds_require_leaf_hash)) {
 		printf("%-24s= {md5|sha1|sha2(56)|sha384|sha512}:XXXXXXXXXXXX...\n", "-require-leaf-hash");
 		printf("%26sspecifies an optional hash algorithm to use when computing\n", "");
 		printf("%26sthe leaf certificate (in DER form) hash and compares\n", "");
 		printf("%26sthe provided hash against the computed hash\n", "");
 	}
-	const char *cmds_sigin[] = {"attach-signature", NULL};
 	if (on_list(cmd, cmds_sigin))
 		printf("%-24s= a file containing the signature to be attached\n", "-sigin");
-	const char *cmds_st[] = {"sign", NULL};
 	if (on_list(cmd, cmds_st))
 		printf("%-24s= the unix-time to set the signing time\n", "-st");
 #ifdef ENABLE_CURL
-	const char *cmds_t[] = {"add", "sign", NULL};
 	if (on_list(cmd, cmds_t)) {
 		printf("%-24s= specifies that the digital signature will be timestamped\n", "-t");
 		printf("%26sby the Time-Stamp Authority (TSA) indicated by the URL\n", "");
 		printf("%26sthis option cannot be used with the -ts option\n", "");
 	}
-	const char *cmds_ts[] = {"add", "sign", NULL};
 	if (on_list(cmd, cmds_ts)) {
 		printf("%-24s= specifies the URL of the RFC 3161 Time-Stamp Authority server\n", "-ts");
 		printf("%26sthis option cannot be used with the -t option\n", "");
 	}
 #endif /* ENABLE_CURL */
-	const char *cmds_untrusted[] = {"attach-signature", "verify", NULL};
 	if (on_list(cmd, cmds_untrusted)) {
 		printf("%-24s= set of additional untrusted certificates which may be needed\n", "-untrusted");
 		printf("%26sthe file should contain one or more certificates in PEM format\n", "");
 	}
-	const char *cmds_verbose[] = {"sign", "verify", NULL};
 	if (on_list(cmd, cmds_verbose)) {
 		printf("%-24s= include additional output in the log\n", "-verbose");
 	}
@@ -1240,7 +1243,7 @@ static void help_for(const char *argv0, const char *cmd)
 typedef enum {
 	FILE_TYPE_CAB,
 	FILE_TYPE_PE,
-	FILE_TYPE_MSI,
+	FILE_TYPE_MSI
 } file_type_t;
 
 typedef enum {
@@ -1249,7 +1252,7 @@ typedef enum {
 	CMD_REMOVE,
 	CMD_VERIFY,
 	CMD_ADD,
-	CMD_ATTACH,
+	CMD_ATTACH
 } cmd_type_t;
 
 
@@ -1277,33 +1280,40 @@ static const unsigned char classid_page_hash[] = {
 static unsigned char *pe_calc_page_hash(char *indata, size_t header_size,
 	int pe32plus, size_t sigpos, int phtype, size_t *rphlen)
 {
-	unsigned short nsections = GET_UINT16_LE(indata + header_size + 6);
-	size_t pagesize = GET_UINT32_LE(indata + header_size + 56);
-	size_t hdrsize = GET_UINT32_LE(indata + header_size + 84);
-	const EVP_MD *md = EVP_get_digestbynid(phtype);
-	int pphlen = 4 + EVP_MD_size(md);
-	int phlen = pphlen * (3 + nsections + sigpos / pagesize);
-	unsigned char *res = OPENSSL_malloc(phlen);
-	unsigned char *zeroes = OPENSSL_zalloc(pagesize);
+	unsigned short nsections, sizeofopthdr;
+	size_t pagesize, hdrsize;
+	size_t rs, ro, l, lastpos = 0;
+	int pphlen, phlen, i, pi = 1;
+	unsigned char *res, *zeroes;
+	char *sections;
+	const EVP_MD *md;
 	EVP_MD_CTX *mdctx;
+
+	nsections = GET_UINT16_LE(indata + header_size + 6);
+	pagesize = GET_UINT32_LE(indata + header_size + 56);
+	hdrsize = GET_UINT32_LE(indata + header_size + 84);
+	md = EVP_get_digestbynid(phtype);
+	pphlen = 4 + EVP_MD_size(md);
+	phlen = pphlen * (3 + nsections + sigpos / pagesize);
+
+	res = OPENSSL_malloc(phlen);
+	zeroes = OPENSSL_zalloc(pagesize);
 
 	mdctx = EVP_MD_CTX_new();
 	EVP_DigestInit(mdctx, md);
 	EVP_DigestUpdate(mdctx, indata, header_size + 88);
 	EVP_DigestUpdate(mdctx, indata + header_size + 92, 60 + pe32plus*16);
-	EVP_DigestUpdate(mdctx, indata + header_size + 160 + pe32plus*16, hdrsize - (header_size + 160 + pe32plus*16));
+	EVP_DigestUpdate(mdctx, indata + header_size + 160 + pe32plus*16,
+			hdrsize - (header_size + 160 + pe32plus*16));
 	EVP_DigestUpdate(mdctx, zeroes, pagesize - hdrsize);
 	memset(res, 0, 4);
 	EVP_DigestFinal(mdctx, res + 4, NULL);
 
-	unsigned short sizeofopthdr = GET_UINT16_LE(indata + header_size + 20);
-	char *sections = indata + header_size + 24 + sizeofopthdr;
-	int i, pi = 1;
-	size_t lastpos = 0;
+	sizeofopthdr = GET_UINT16_LE(indata + header_size + 20);
+	sections = indata + header_size + 24 + sizeofopthdr;
 	for (i=0; i<nsections; i++) {
-		size_t rs = GET_UINT32_LE(sections + 16);
-		size_t ro = GET_UINT32_LE(sections + 20);
-		size_t l;
+		rs = GET_UINT32_LE(sections + 16);
+		ro = GET_UINT32_LE(sections + 20);
 		for (l=0; l < rs; l+=pagesize, pi++) {
 			PUT_UINT32_LE(ro + l, res + pi*pphlen);
 			EVP_DigestInit(mdctx, md);
@@ -1337,8 +1347,10 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 	ASN1_TYPE *taval;
 	SpcSerializedObject *so;
 	SpcLink *link;
+	STACK_OF(ASN1_TYPE) *oset, *aset;
 
-	ph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, header->fileend, phtype, &phlen);
+	ph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, \
+			header->fileend, phtype, &phlen);
 	if (!ph) {
 		fprintf(stderr, "Failed to calculate page hash\n");
 		exit(-1);
@@ -1352,7 +1364,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 	ASN1_OCTET_STRING_set(tostr->value.octet_string, ph, phlen);
 	OPENSSL_free(ph);
 
-	STACK_OF(ASN1_TYPE) *oset = sk_ASN1_TYPE_new_null();
+	oset = sk_ASN1_TYPE_new_null();
 	sk_ASN1_TYPE_push(oset, tostr);
 	l = i2d_ASN1_SET_ANY(oset, NULL);
 	tmp = p = OPENSSL_malloc(l);
@@ -1361,7 +1373,8 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 	sk_ASN1_TYPE_free(oset);
 
 	aval = SpcAttributeTypeAndOptionalValue_new();
-	aval->type = OBJ_txt2obj((phtype == NID_sha1) ? SPC_PE_IMAGE_PAGE_HASHES_V1 : SPC_PE_IMAGE_PAGE_HASHES_V2, 1);
+	aval->type = OBJ_txt2obj((phtype == NID_sha1) ? \
+			SPC_PE_IMAGE_PAGE_HASHES_V1 : SPC_PE_IMAGE_PAGE_HASHES_V2, 1);
 	aval->value = ASN1_TYPE_new();
 	aval->value->type = V_ASN1_SET;
 	aval->value->value.set = ASN1_STRING_new();
@@ -1378,7 +1391,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 	ASN1_STRING_set(taval->value.sequence, p, l);
 	OPENSSL_free(p);
 
-	STACK_OF(ASN1_TYPE) *aset = sk_ASN1_TYPE_new_null();
+	aset = sk_ASN1_TYPE_new_null();
 	sk_ASN1_TYPE_push(aset, taval);
 	l = i2d_ASN1_SET_ANY(aset, NULL);
 	tmp = p = OPENSSL_malloc(l);
@@ -1405,9 +1418,6 @@ static void get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *opti
 	void *hash;
 	ASN1_OBJECT *dtype;
 	SpcIndirectDataContent *idc;
-	SpcLink *link;
-	SpcPeImageData *pid;
-	SpcSipInfo *si;
 	static const unsigned char msistr[] = {
 		0xf1, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46
@@ -1418,7 +1428,7 @@ static void get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *opti
 	idc->data->value->type = V_ASN1_SEQUENCE;
 	idc->data->value->value.sequence = ASN1_STRING_new();
 	if (type == FILE_TYPE_CAB) {
-		link = get_obsolete_link();
+		SpcLink *link = get_obsolete_link();
 		l = i2d_SpcLink(link, NULL);
 		p = OPENSSL_malloc(l);
 		i2d_SpcLink(link, &p);
@@ -1426,7 +1436,7 @@ static void get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *opti
 		dtype = OBJ_txt2obj(SPC_CAB_DATA_OBJID, 1);
 		SpcLink_free(link);
 	} else if (type == FILE_TYPE_PE) {
-		pid = SpcPeImageData_new();
+		SpcPeImageData *pid = SpcPeImageData_new();
 		ASN1_BIT_STRING_set(pid->flags, (unsigned char*)"0", 0);
 		if (options->pagehash) {
 			phtype = NID_sha1;
@@ -1443,7 +1453,7 @@ static void get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *opti
 		dtype = OBJ_txt2obj(SPC_PE_IMAGE_DATA_OBJID, 1);
 		SpcPeImageData_free(pid);
 	} else if (type == FILE_TYPE_MSI) {
-		si = SpcSipInfo_new();
+		SpcSipInfo *si = SpcSipInfo_new();
 		ASN1_INTEGER_set(si->a, 1);
 		ASN1_INTEGER_set(si->b, 0);
 		ASN1_INTEGER_set(si->c, 0);
@@ -1582,7 +1592,13 @@ static void pe_recalc_checksum(BIO *bio, FILE_HEADER *header)
 static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 {
 	int ret = 0;
-	unsigned char *mdbuf = NULL;
+	unsigned char *mdbuf = NULL, *certbuf, *tmp;
+	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
+	char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	const EVP_MD *md;
+	long mdlen = 0;
+	EVP_MD_CTX *ctx;
+	size_t certlen;
 
 	/* decode the provided hash */
 	char *mdid = OPENSSL_strdup(leafhash);
@@ -1593,13 +1609,12 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 		goto out;
 	}
 	*hash++ = '\0';
-	const EVP_MD *md = EVP_get_digestbyname(mdid);
+	md = EVP_get_digestbyname(mdid);
 	if (md == NULL) {
 		printf("Unable to lookup digest by name '%s'\n", mdid);
 		ret = 1;
 		goto out;
 	}
-	long mdlen = 0;
 	mdbuf = OPENSSL_hexstr2buf(hash, &mdlen);
 	if (mdlen != EVP_MD_size(md)) {
 		printf("Hash length mismatch: '%s' digest must be %d bytes long (got %ld bytes)\n",
@@ -1608,21 +1623,19 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 		goto out;
 	}
 	/* compute the leaf certificate hash */
-	EVP_MD_CTX *ctx = EVP_MD_CTX_create();
+	ctx = EVP_MD_CTX_create();
 	EVP_DigestInit_ex(ctx, md, NULL);
-	size_t certlen = i2d_X509(leaf, NULL);
-	unsigned char *certbuf = OPENSSL_malloc(certlen);
-	unsigned char *tmp = certbuf;
+	certlen = i2d_X509(leaf, NULL);
+	certbuf = OPENSSL_malloc(certlen);
+	tmp = certbuf;
 	i2d_X509(leaf, &tmp);
 	EVP_DigestUpdate(ctx, certbuf, certlen);
 	OPENSSL_free(certbuf);
-	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
 	EVP_DigestFinal_ex(ctx, cmdbuf, NULL);
 	EVP_MD_CTX_destroy(ctx);
 
 	/* compare the provided hash against the computed hash */
 	if (memcmp(mdbuf, cmdbuf, EVP_MD_size(md))) {
-		char hexbuf[EVP_MAX_MD_SIZE*2+1];
 		tohex(cmdbuf, hexbuf, EVP_MD_size(md));
 		printf("Hash value mismatch: %s computed\n", hexbuf);
 		ret = 1;
@@ -1699,6 +1712,7 @@ static int print_certs(PKCS7 *p7)
 {
 	X509 *cert;
 	int i, count;
+
 	count = sk_X509_num(p7->d.sign->cert);
 	printf("\nNumber of certificates: %d\n", count);
 	for (i=0; i<count; i++) {
@@ -1822,8 +1836,7 @@ static ASN1_UTCTIME *print_timestamp(PKCS7_SIGNER_INFO *si)
 static PKCS7 *find_countersignature(PKCS7_SIGNED *p7_signed, const unsigned char *data, int length, ASN1_UTCTIME **timestamp_time)
 {
 	PKCS7_SIGNER_INFO *si, *countersignature;
-	PKCS7 *p7 = NULL;
-	PKCS7 *content = NULL;
+	PKCS7 *p7 = NULL, *content = NULL;
 	int i;
 
 	si = sk_PKCS7_SIGNER_INFO_value(p7_signed->signer_info, 0);
@@ -2006,11 +2019,16 @@ static int TST_verify(PKCS7 *tmstamp_p7, PKCS7_SIGNER_INFO *si)
 static PKCS7 *pkcs7_get_nested_signature(PKCS7 *p7, int *has_sig)
 {
 	PKCS7 *ret = NULL;
-	PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-	ASN1_TYPE *nestedSignature = PKCS7_get_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID));
+	PKCS7_SIGNER_INFO *si;
+	ASN1_TYPE *nestedSignature;
+	ASN1_STRING *astr;
+	const unsigned char *p;
+
+	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+	nestedSignature = PKCS7_get_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID));
 	if (nestedSignature) {
-		ASN1_STRING *astr = nestedSignature->value.sequence;
-		const unsigned char *p = astr->data;
+		astr = nestedSignature->value.sequence;
+		p = astr->data;
 		ret = d2i_PKCS7(NULL, &p, astr->length);
 	}
 	if (has_sig)
@@ -2026,17 +2044,19 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 {
 	u_char *p = NULL;
 	int len = 0;
+	ASN1_STRING *astr;
+	PKCS7_SIGNER_INFO *si;
 
 	if (((len = i2d_PKCS7(p7nest, NULL)) <= 0) ||
 		(p = OPENSSL_malloc(len)) == NULL)
 		return 0;
 	i2d_PKCS7(p7nest, &p);
 	p -= len;
-	ASN1_STRING *astr = ASN1_STRING_new();
+	astr = ASN1_STRING_new();
 	ASN1_STRING_set(astr, p, len);
 	OPENSSL_free(p);
 
-	PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
 	pkcs7_add_signing_time(si, signing_time);
 	if (PKCS7_add_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID), V_ASN1_SEQUENCE, astr) == 0)
 		return 0;
@@ -2295,8 +2315,12 @@ static gboolean msi_prehash_utf16_name(gchar *name, BIO *hash)
 static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
 {
 	GSList *sorted = NULL;
-	guint8 classid[16];
-	guint8 zeroes[8];
+	guint8 classid[16], zeroes[8];
+	gchar *name;
+	GsfInput *child;
+	gboolean is_dir;
+	gsf_off_t size;
+	guint32 sizebuf;
 
 	memset(&zeroes, 0, sizeof(zeroes));
 	gsf_infile_msole_get_class_id(GSF_INFILE_MSOLE(infile), classid);
@@ -2318,11 +2342,11 @@ static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
 	}
 	sorted = msi_sorted_infile_children(infile);
 	for (; sorted; sorted = sorted->next) {
-		gchar *name = (gchar*)sorted->data;
-		GsfInput *child =  gsf_infile_child_by_name(infile, name);
+		name = (gchar*)sorted->data;
+		child =  gsf_infile_child_by_name(infile, name);
 		if (child == NULL)
 			continue;
-		gboolean is_dir = GSF_IS_INFILE(child) && gsf_infile_num_children(GSF_INFILE(child)) > 0;
+		is_dir = GSF_IS_INFILE(child) && gsf_infile_num_children(GSF_INFILE(child)) > 0;
 		if (is_dir) {
 			if (!msi_prehash(GSF_INFILE(child), name, hash))
 				return FALSE;
@@ -2332,8 +2356,8 @@ static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
 			/*
 			 * File size.
 			 */
-			gsf_off_t size = gsf_input_remaining(child);
-			guint32 sizebuf = GUINT32_TO_LE((guint32)size);
+			size = gsf_input_remaining(child);
+			sizebuf = GUINT32_TO_LE((guint32)size);
 			BIO_write(hash, &sizebuf, sizeof(sizebuf));
 			/*
 			 * Reserved - must be 0. Corresponds to
@@ -2367,6 +2391,12 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 {
 	guint8 classid[16];
 	GSList *sorted = NULL;
+	gchar *name;
+	GsfInput *child;
+	GsfOutput *outchild = NULL;
+	gboolean is_dir;
+	gsf_off_t size;
+	guint8 const *data;
 
 	gsf_infile_msole_get_class_id(GSF_INFILE_MSOLE(infile), classid);
 	if (outole != NULL)
@@ -2374,12 +2404,11 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 
 	sorted = msi_sorted_infile_children(infile);
 	for (; sorted; sorted = sorted->next) {
-		gchar *name = (gchar*)sorted->data;
-		GsfInput *child =  gsf_infile_child_by_name(infile, name);
+		name = (gchar*)sorted->data;
+		child =  gsf_infile_child_by_name(infile, name);
 		if (child == NULL)
 			continue;
-		gboolean is_dir = GSF_IS_INFILE(child) && gsf_infile_num_children(GSF_INFILE(child)) > 0;
-		GsfOutput *outchild = NULL;
+		is_dir = GSF_IS_INFILE(child) && gsf_infile_num_children(GSF_INFILE(child)) > 0;
 		if (outole != NULL)
 			outchild = gsf_outfile_new_child(outole, name, is_dir);
 		if (is_dir) {
@@ -2388,8 +2417,8 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 			}
 		} else {
 			while (gsf_input_remaining(child) > 0) {
-				gsf_off_t size = MIN(gsf_input_remaining(child), 4096);
-				guint8 const *data = gsf_input_read(child, size, NULL);
+				size = MIN(gsf_input_remaining(child), 4096);
+				data = gsf_input_read(child, size, NULL);
 				BIO_write(hash, data, size);
 				if (outchild != NULL && !gsf_output_write(outchild, size, data)) {
 					return FALSE;
@@ -2413,7 +2442,7 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 		size_t exlen, int allownest, GLOBAL_OPTIONS *options)
 {
-	int ret = 0;
+	int ret = 0, mdok, exok;
 	int mdtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
@@ -2421,6 +2450,8 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 	unsigned char cexmdbuf[EVP_MAX_MD_SIZE];
 #endif
 	char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	const EVP_MD *md;
+	BIO *hash, *prehash;
 
 	if (is_indirect_data_signature(p7)) {
 		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
@@ -2445,8 +2476,8 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 		goto out;
 	}
 	printf("Message digest algorithm         : %s\n", OBJ_nid2sn(mdtype));
-	const EVP_MD *md = EVP_get_digestbynid(mdtype);
-	BIO *hash = BIO_new(BIO_f_md());
+	md = EVP_get_digestbynid(mdtype);
+	hash = BIO_new(BIO_f_md());
 	BIO_set_md(hash, md);
 	BIO_push(hash, BIO_new(BIO_s_null()));
 	if (exdata) {
@@ -2463,7 +2494,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 		 * file content hashes ourselves.
 		 */
 #ifdef GSF_CAN_READ_MSI_METADATA
-		BIO *prehash = BIO_new(BIO_f_md());
+		prehash = BIO_new(BIO_f_md());
 		BIO_set_md(prehash, md);
 		BIO_push(prehash, BIO_new(BIO_s_null()));
 
@@ -2483,8 +2514,9 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 	}
 	BIO_gets(hash, (char*)cmdbuf, EVP_MAX_MD_SIZE);
 	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
-	int mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
-	if (!mdok) ret = 1;
+	mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
+	if (!mdok)
+		ret = 1; /* FAILED */
 	printf("Calculated DigitalSignature      : %s", hexbuf);
 	if (mdok) {
 		printf("\n");
@@ -2496,8 +2528,9 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 #ifdef GSF_CAN_READ_MSI_METADATA
 	if (exdata) {
 		tohex(cexmdbuf, hexbuf, EVP_MD_size(md));
-		int exok = !memcmp(exdata, cexmdbuf, MIN((size_t)EVP_MD_size(md), exlen));
-		if (!exok) ret = 1;
+		exok = !memcmp(exdata, cexmdbuf, MIN((size_t)EVP_MD_size(md), exlen));
+		if (!exok)
+			ret = 1; /* FAILED */
 		printf("Calculated MsiDigitalSignatureEx : %s", hexbuf);
 		if (exok) {
 			printf("\n");
@@ -2532,17 +2565,19 @@ out:
  */
 static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 {
-	GsfInput *sig = NULL;
-	GsfInput *exsig = NULL;
+	GsfInput *child, *sig = NULL, *exsig = NULL;
 	unsigned char *exdata = NULL;
 	unsigned char *indata = NULL;
 	gchar decoded[0x40];
 	int i, ret = 0;
 	PKCS7 *p7 = NULL;
+	const guint8 *name;
+	unsigned long inlen, exlen = 0;
+	const unsigned char *blob;
 
 	for (i = 0; i < gsf_infile_num_children(infile); i++) {
-		GsfInput *child = gsf_infile_child_by_index(infile, i);
-		const guint8 *name = (const guint8*)gsf_input_name(child);
+		child = gsf_infile_child_by_index(infile, i);
+		name = (const guint8*)gsf_input_name(child);
 		msi_decode(name, decoded);
 		if (!g_strcmp0(decoded, "\05DigitalSignature"))
 			sig = child;
@@ -2554,13 +2589,12 @@ static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 		ret = 1;
 		goto out;
 	}
-	unsigned long inlen = (unsigned long) gsf_input_remaining(sig);
+	inlen = (unsigned long) gsf_input_remaining(sig);
 	indata = OPENSSL_malloc(inlen);
 	if (gsf_input_read(sig, inlen, indata) == NULL) {
 		ret = 1;
 		goto out;
 	}
-	unsigned long exlen = 0;
 	if (exsig != NULL) {
 		exlen = (unsigned long) gsf_input_remaining(exsig);
 		exdata = OPENSSL_malloc(exlen);
@@ -2569,7 +2603,7 @@ static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 			goto out;
 		}
 	}
-	const unsigned char *blob = (unsigned char *)indata;
+	blob = (unsigned char *)indata;
 	p7 = d2i_PKCS7(NULL, &blob, inlen);
 	ret = msi_verify_pkcs7(p7, infile, exdata, exlen, 1, options);
 
@@ -2690,16 +2724,18 @@ out:
 
 static PKCS7 *msi_extract_signature_to_pkcs7(GsfInfile *infile)
 {
-	GsfInput *sig = NULL;
+	GsfInput *sig = NULL, *child;
+	const guint8 *name;
 	gchar decoded[0x40];
 	PKCS7 *p7 = NULL;
 	u_char *buf = NULL;
 	gsf_off_t size = 0;
 	int i = 0;
+	const unsigned char *p7buf;
 
 	for (i = 0; i < gsf_infile_num_children(infile); i++) {
-		GsfInput *child = gsf_infile_child_by_index(infile, i);
-		const guint8 *name = (const guint8*)gsf_input_name(child);
+		child = gsf_infile_child_by_index(infile, i);
+		name = (const guint8*)gsf_input_name(child);
 		msi_decode(name, decoded);
 		if (!g_strcmp0(decoded, "\05DigitalSignature"))
 			sig = child;
@@ -2710,7 +2746,7 @@ static PKCS7 *msi_extract_signature_to_pkcs7(GsfInfile *infile)
 	buf = OPENSSL_malloc(size);
 	if (gsf_input_read(sig, size, buf) == NULL)
 		goto out;
-	const unsigned char *p7buf = buf;
+	p7buf = buf;
 	p7 = d2i_PKCS7(NULL, &p7buf, size);
 
 out:
@@ -2862,6 +2898,8 @@ static void pe_calc_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, FIL
 {
 	static unsigned char bfb[16*1024*1024];
 	EVP_MD_CTX *mdctx;
+	size_t n;
+	int l;
 
 	mdctx = EVP_MD_CTX_new();
 	EVP_DigestInit(mdctx, md);
@@ -2876,12 +2914,12 @@ static void pe_calc_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, FIL
 	EVP_DigestUpdate(mdctx, bfb, 60 + header->pe32plus * 16);
 	BIO_read(bio, bfb, 8);
 
-	size_t n = header->header_size + 88 + 4 + 60 + header->pe32plus * 16 + 8;
+	n = header->header_size + 88 + 4 + 60 + header->pe32plus * 16 + 8;
 	while (n < header->sigpos) {
 		size_t want = header->sigpos - n;
 		if (want > sizeof(bfb))
 			want = sizeof(bfb);
-		int l = BIO_read(bio, bfb, want);
+		l = BIO_read(bio, bfb, want);
 		if (l <= 0)
 			break;
 		EVP_DigestUpdate(mdctx, bfb, l);
@@ -2894,31 +2932,35 @@ static void pe_calc_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, FIL
 static void pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	unsigned char **ph, size_t *phlen, int *phtype)
 {
-	*phlen = 0;
+	const unsigned char *blob;
+	SpcPeImageData *id;
+	SpcSerializedObject *so;
+	size_t l, l2;
+	char buf[128];
 
-	const unsigned char *blob = obj->value->value.sequence->data;
-	SpcPeImageData *id = d2i_SpcPeImageData(NULL, &blob, obj->value->value.sequence->length);
+	*phlen = 0;
+	blob = obj->value->value.sequence->data;
+	id = d2i_SpcPeImageData(NULL, &blob, obj->value->value.sequence->length);
 	if (id == NULL)
 		return;
 	if (id->file->type != 1) {
 		SpcPeImageData_free(id);
 		return;
 	}
-	SpcSerializedObject *so = id->file->value.moniker;
+	so = id->file->value.moniker;
 	if (so->classId->length != sizeof(classid_page_hash) ||
 		memcmp(so->classId->data, classid_page_hash, sizeof (classid_page_hash))) {
 		SpcPeImageData_free(id);
 		return;
 	}
 	/* skip ASN.1 SET hdr */
-	size_t l = asn1_simple_hdr_len(so->serializedData->data, so->serializedData->length);
+	l = asn1_simple_hdr_len(so->serializedData->data, so->serializedData->length);
 	blob = so->serializedData->data + l;
 	obj = d2i_SpcAttributeTypeAndOptionalValue(NULL, &blob, so->serializedData->length - l);
 	SpcPeImageData_free(id);
 	if (!obj)
 		return;
 
-	char buf[128];
 	*phtype = 0;
 	buf[0] = 0x00;
 	OBJ_obj2txt(buf, sizeof(buf), obj->type, 1);
@@ -2931,7 +2973,7 @@ static void pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 		return;
 	}
 	/* Skip ASN.1 SET hdr */
-	size_t l2 = asn1_simple_hdr_len(obj->value->value.sequence->data, obj->value->value.sequence->length);
+	l2 = asn1_simple_hdr_len(obj->value->value.sequence->data, obj->value->value.sequence->length);
 	/* Skip ASN.1 OCTET STRING hdr */
 	l = asn1_simple_hdr_len(obj->value->value.sequence->data + l2, obj->value->value.sequence->length - l2);
 	l += l2;
@@ -2944,7 +2986,7 @@ static void pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 			int allownest, GLOBAL_OPTIONS *options)
 {
-	int ret = 0;
+	int ret = 0, mdok;
 	int mdtype = -1, phtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
@@ -2952,6 +2994,7 @@ static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	unsigned char *ph = NULL;
 	size_t phlen = 0;
 	BIO *bio = NULL;
+	const EVP_MD *md;
 
 	if (is_indirect_data_signature(p7)) {
 		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
@@ -2972,7 +3015,7 @@ static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	}
 	printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
 
-	const EVP_MD *md = EVP_get_digestbynid(mdtype);
+	md = EVP_get_digestbynid(mdtype);
 	tohex(mdbuf, hexbuf, EVP_MD_size(md));
 	printf("Current message digest    : %s\n", hexbuf);
 
@@ -2980,19 +3023,23 @@ static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	pe_calc_digest(bio, md, cmdbuf, header);
 	BIO_free(bio);
 	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
-	int mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
-	if (!mdok) ret = 1;
+	mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
+	if (!mdok)
+		ret = 1; /* FAILED */
 	printf("Calculated message digest : %s%s\n\n", hexbuf, mdok?"":"    MISMATCH!!!");
 
 	if (phlen > 0) {
+		size_t cphlen = 0;
+		unsigned char *cph;
+
 		printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
 		tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
 		printf("Page hash            : %s ...\n", hexbuf);
-		size_t cphlen = 0;
-		unsigned char *cph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &cphlen);
+		cph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &cphlen);
 		tohex(cph, hexbuf, (cphlen < 32) ? cphlen : 32);
 		mdok = (phlen != cphlen) || memcmp(ph, cph, phlen);
-		if (mdok) ret = 1;
+		if (mdok)
+			ret = 1; /* FAILED */
 		printf("Calculated page hash : %s ...%s\n\n", hexbuf, mdok ? "    MISMATCH!!!":"");
 		OPENSSL_free(ph);
 		OPENSSL_free(cph);
@@ -3043,13 +3090,16 @@ static PKCS7 *pe_extract_existing_pkcs7(char *indata, FILE_HEADER *header)
 static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *options)
 {
 	int ret = 0;
+	BIO *bio;
+	unsigned int real_pe_checksum;
+	PKCS7 *p7;
 
 	if (header->siglen == 0)
 		header->siglen = header->fileend;
 
 	printf("Current PE checksum   : %08X\n", header->pe_checksum);
-	BIO *bio = BIO_new_mem_buf(indata, header->sigpos + header->siglen);
-	unsigned int real_pe_checksum = pe_calc_checksum(bio, header);
+	bio = BIO_new_mem_buf(indata, header->sigpos + header->siglen);
+	real_pe_checksum = pe_calc_checksum(bio, header);
 	BIO_free(bio);
 	if (header->pe_checksum && header->pe_checksum != real_pe_checksum)
 		ret = 1;
@@ -3059,7 +3109,7 @@ static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 		printf("No signature found\n\n");
 		return 1;
 	}
-	PKCS7 *p7 = pe_extract_existing_pkcs7(indata, header);
+	p7 = pe_extract_existing_pkcs7(indata, header);
 	if (!p7) {
 		printf("Failed to extract PKCS7 data\n\n");
 		return -1;
@@ -3227,9 +3277,10 @@ static int cab_calc_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, siz
 	size_t coffFiles, nfolders, flags;
 	static unsigned char bfb[16*1024*1024];
 	EVP_MD_CTX *mdctx;
+	int l;
+
 	mdctx = EVP_MD_CTX_new();
 	EVP_DigestInit(mdctx, md);
-
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 	(void)BIO_seek(bio, 0);
 
@@ -3322,7 +3373,7 @@ static int cab_calc_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, siz
 		size_t want = offset - coffFiles;
 		if (want > sizeof(bfb))
 			want = sizeof(bfb);
-		int l = BIO_read(bio, bfb, want);
+		l = BIO_read(bio, bfb, want);
 		if (l <= 0)
 			break;
 		EVP_DigestUpdate(mdctx, bfb, l);
@@ -3337,7 +3388,7 @@ static int cab_calc_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, siz
 static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 			int allownest, GLOBAL_OPTIONS *options)
 {
-	int ret = 0;
+	int ret = 0, mdok;
 	int mdtype = -1, phtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
@@ -3345,6 +3396,7 @@ static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	unsigned char *ph = NULL;
 	size_t phlen = 0;
 	BIO *bio = NULL;
+	const EVP_MD *md;
 
 	if (is_indirect_data_signature(p7)) {
 		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
@@ -3365,7 +3417,7 @@ static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	}
 	printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
 
-	const EVP_MD *md = EVP_get_digestbynid(mdtype);
+	md = EVP_get_digestbynid(mdtype);
 	tohex(mdbuf, hexbuf, EVP_MD_size(md));
 	printf("Current message digest    : %s\n", hexbuf);
 
@@ -3374,7 +3426,7 @@ static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	BIO_free(bio);
 
 	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
-	int mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
+	mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
 	if (!mdok)
 		ret = 1; /* FAILED */
 	printf("Calculated message digest : %s%s\n\n", hexbuf, mdok?"":"    MISMATCH!!!");
@@ -3409,8 +3461,8 @@ static PKCS7 *cab_extract_existing_pkcs7(char *indata, FILE_HEADER *header)
 
 static int cab_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *options)
 {
-	PKCS7 *p7;
 	int ret = 0;
+	PKCS7 *p7;
 
 	if (header->header_size != 20) {
 		printf("No signature found\n\n");
@@ -4140,7 +4192,7 @@ static char *getpassword(const char *prompt)
 {
 #ifdef HAVE_TERMIOS_H
 	struct termios ofl, nfl;
-	char *p, passbuf[1024];
+	char *p, passbuf[1024], *pass;
 
 	fputs(prompt, stdout);
 
@@ -4161,7 +4213,7 @@ static char *getpassword(const char *prompt)
 		return NULL;
 	}
 	passbuf[strlen(passbuf)-1] = 0x00;
-	char *pass = strdup(passbuf);
+	pass = strdup(passbuf);
 	memset(passbuf, 0, sizeof(passbuf));
 	return pass;
 #else
@@ -4740,7 +4792,7 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 				curl_version()
 #else
 				"no libcurl available"
-#endif
+#endif /* ENABLE_CURL */
 				);
 			printf(
 #ifdef WITH_GSF
@@ -4750,7 +4802,7 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 				libgsf_micro_version
 #else
 				"\tno libgsf available\n"
-#endif
+#endif /* WITH_GSF */
 				);
 			printf("\nPlease send bug-reports to "
 				PACKAGE_BUGREPORT
@@ -4799,7 +4851,11 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 			argc--;
 		}
 	}
-	if (argc > 0 || (options->nturl && options->ntsurl) || !options->infile ||
+	if (argc > 0 ||
+#ifdef ENABLE_CURL
+		(options->nturl && options->ntsurl) ||
+#endif
+		!options->infile ||
 		(*cmd != CMD_VERIFY && !options->outfile) ||
 		(*cmd == CMD_SIGN && !((options->certfile && options->keyfile) ||
 			options->pkcs12file || options->p11module))) {
