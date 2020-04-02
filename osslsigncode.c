@@ -4638,6 +4638,28 @@ static cmd_type_t get_command(char **argv)
 #endif
 		);
 		help_for(argv[0], "all");
+	} else if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version")) {
+		printf(PACKAGE_STRING ", using:\n\t%s\n\t%s\n",
+			SSLeay_version(SSLEAY_VERSION),
+#ifdef ENABLE_CURL
+			curl_version()
+#else
+			"no libcurl available"
+#endif /* ENABLE_CURL */
+			);
+		printf(
+#ifdef WITH_GSF
+			"\tlibgsf %d.%d.%d\n",
+			libgsf_major_version,
+			libgsf_minor_version,
+			libgsf_micro_version
+#else
+			"\tno libgsf available\n"
+#endif /* WITH_GSF */
+			);
+		printf("\nPlease send bug-reports to "
+			PACKAGE_BUGREPORT
+			"\n");
 	} else if (!strcmp(argv[1], "sign"))
 		return CMD_SIGN;
 	else if (!strcmp(argv[1], "extract-signature"))
@@ -4785,28 +4807,6 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 		} else if ((*cmd == CMD_VERIFY) && !strcmp(*argv, "-require-leaf-hash")) {
 			if (--argc < 1) usage(argv0, "all");
 			options->leafhash = (*++argv);
-		} else if (!strcmp(*argv, "-v") || !strcmp(*argv, "--version")) {
-			printf(PACKAGE_STRING ", using:\n\t%s\n\t%s\n",
-				SSLeay_version(SSLEAY_VERSION),
-#ifdef ENABLE_CURL
-				curl_version()
-#else
-				"no libcurl available"
-#endif /* ENABLE_CURL */
-				);
-			printf(
-#ifdef WITH_GSF
-				"\tlibgsf %d.%d.%d\n",
-				libgsf_major_version,
-				libgsf_minor_version,
-				libgsf_micro_version
-#else
-				"\tno libgsf available\n"
-#endif /* WITH_GSF */
-				);
-			printf("\nPlease send bug-reports to "
-				PACKAGE_BUGREPORT
-				"\n");
 		} else if ((*cmd == CMD_ADD) && !strcmp(*argv, "--help")) {
 			help_for(argv0, "add");
 		} else if ((*cmd == CMD_ATTACH) && !strcmp(*argv, "--help")) {

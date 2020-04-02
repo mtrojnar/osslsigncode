@@ -91,7 +91,7 @@ if grep -q "no libgsf available" "results.log"
 # Timestamping support
 if grep -q "no libcurl available" "results.log"
   then
-    printf "%s\n" "configure --with_curl is required for timestamping support"
+    printf "%s\n" "configure --with-curl is required for timestamping support"
   fi
 
 # Tests requirements
