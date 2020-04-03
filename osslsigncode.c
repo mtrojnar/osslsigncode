@@ -1949,8 +1949,11 @@ static int pkcs7_print_attributes(PKCS7_SIGNED *p7_signed, PKCS7 **tmstamp_p7,
 				value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTF8STRING, NULL);
 				if (value == NULL)
 					return 0; /* FAILED */
-				if (verbose)
-					printf("Data Blob: %s\n", OPENSSL_buf2hexstr(value->data, value->length));
+				if (verbose) {
+					char *data_blob = OPENSSL_buf2hexstr(value->data, value->length);
+					printf("Data Blob: %s\n", data_blob);
+					OPENSSL_free(data_blob);
+				}
 				printf("Data Blob length: %d bytes\n", value->length);
 			} else if (!strcmp(object_txt, SPC_NESTED_SIGNATURE_OBJID)) {
 				/* 1.3.6.1.4.1.311.2.4.1 */
@@ -3930,7 +3933,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 			memset(p, 0, *padlen);
 			BIO_write(outdata, p, *padlen);
 		}
-	#ifdef WITH_GSF
+#ifdef WITH_GSF
 	} else if (type == FILE_TYPE_MSI) {
 		/* Only output signatures if we're signing */
 		if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
@@ -3944,7 +3947,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 				return 1; /* FAILED */
 			}
 		}
-	#endif
+#endif
 	}
 	OPENSSL_free(p);
 	return 0; /* OK */
@@ -4170,10 +4173,10 @@ static int get_file_type(char *indata, char *infile, file_type_t *type)
 		*type = FILE_TYPE_PE;
 	} else if (!memcmp(indata, msi_signature, sizeof(msi_signature))) {
 		*type = FILE_TYPE_MSI;
-	#ifdef WITH_GSF
+#ifdef WITH_GSF
 		gsf_init();
 		gsf_initialized = 1;
-	#endif
+#endif
 	} else {
 		printf("Unrecognized file type: %s\n", infile);
 		return 0; /* FAILED */
@@ -4207,7 +4210,7 @@ static char *getpassword(const char *prompt)
 		return NULL;
 	}
 	passbuf[strlen(passbuf)-1] = 0x00;
-	pass = strdup(passbuf);
+	pass = OPENSSL_strdup(passbuf);
 	memset(passbuf, 0, sizeof(passbuf));
 	return pass;
 #else
@@ -4234,7 +4237,7 @@ static int read_password(GLOBAL_OPTIONS *options)
 			return 0; /* FAILED */
 		}
 		passbuf[passlen] = 0x00;
-		options->pass = strdup(passbuf);
+		options->pass = OPENSSL_strdup(passbuf);
 		memset(passbuf, 0, sizeof(passbuf));
 #ifdef PROVIDE_ASKPASS
 	} else if (options->askpass) {
@@ -4427,6 +4430,8 @@ static void free_options(GLOBAL_OPTIONS *options)
 	OPENSSL_free(options->untrusted);
 	if (options->crlfile)
 		OPENSSL_free(options->crlfile);
+	if (options->pass)
+		OPENSSL_free(options->pass);
 }
 
 static char *get_cafile(void)
@@ -4740,7 +4745,7 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-pass")) {
 			if (options->askpass || options->readpass) usage(argv0, "all");
 			if (--argc < 1) usage(argv0, "all");
-			options->pass = strdup(*(++argv));
+			options->pass = OPENSSL_strdup(*(++argv));
 			memset(*argv, 0, strlen(*argv));
 #ifdef PROVIDE_ASKPASS
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-askpass")) {
