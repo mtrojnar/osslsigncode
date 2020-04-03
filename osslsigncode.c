@@ -2130,7 +2130,7 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, GLOBAL_O
 	signers = PKCS7_get0_signers(p7, NULL, 0);
 	if (!signers || sk_X509_num(signers) != 1)
 		ret = 1; /* FAILED */
-	if (!(X509_get_extension_flags(sk_X509_value(signers, 0)) && XKU_CODE_SIGN)) {
+	if (!(X509_get_extended_key_usage(sk_X509_value(signers, 0)) & XKU_CODE_SIGN)) {
 		fprintf(stderr, "Unsupported Signer's certificate purpose\n");
 		ret = 1; /* FAILED */
 	}
