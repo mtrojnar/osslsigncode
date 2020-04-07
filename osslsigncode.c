@@ -1679,11 +1679,13 @@ static int print_cert(X509 *cert, int i)
 	printf("\tSigner #%d:\n\t\tSubject: %s\n\t\tIssuer : %s\n\t\tSerial : %s\n\t\tCertificate expiration date:\n",
 			i, subject, issuer, serial);
 	printf("\t\t\tnotBefore : ");
-	print_time(X509_getm_notBefore(cert));
+	print_time(X509_get0_notBefore(cert));
 	printf("\t\t\tnotAfter : ");
-	print_time(X509_getm_notAfter(cert));
+	print_time(X509_get0_notAfter(cert));
+
 	OPENSSL_free(subject);
 	OPENSSL_free(issuer);
+	BN_free(serialbn);
 	OPENSSL_free(serial);
 	return 1; /* OK */
 }
@@ -1822,6 +1824,7 @@ static ASN1_UTCTIME *print_timestamp(PKCS7_SIGNER_INFO *si)
 	ASN1_UTCTIME *timestamp_time = NULL;
 	int md_nid;
 	char *issuer, *serial;
+	BIGNUM *serialbn;
 
 	version = si->version;
 	md_nid = OBJ_obj2nid(si->digest_alg->algorithm);
@@ -1831,8 +1834,11 @@ static ASN1_UTCTIME *print_timestamp(PKCS7_SIGNER_INFO *si)
 	timestamp_time = get_signing_time(si);
 	print_time(timestamp_time);
 	issuer = X509_NAME_oneline(si->issuer_and_serial->issuer, NULL, 0);
-	serial = BN_bn2hex(ASN1_INTEGER_to_BN(si->issuer_and_serial->serial, NULL));
+	serialbn = ASN1_INTEGER_to_BN(si->issuer_and_serial->serial, NULL);
+	serial = BN_bn2hex(serialbn);
 	printf("Timestamp Verified by:\n\t\tIssuer : %s\n\t\tSerial : %s\n", issuer, serial);
+	OPENSSL_free(issuer);
+	BN_free(serialbn);
 	OPENSSL_free(serial);
 	return timestamp_time; /* OK */
 }
@@ -2107,7 +2113,6 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, GLOBAL_O
 	size_t seqhdrlen;
 	BIO *bio = NULL;
 	int day, sec;
-	time_t time = INVALID_TIME;
 	STACK_OF(X509) *signers;
 
 	seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
@@ -2121,13 +2126,18 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, GLOBAL_O
 		ret = 1; /* FAILED */
 	}
 	if (timestamp_time) {
-		if (!ASN1_TIME_diff(&day, &sec, ASN1_TIME_set(NULL, 0), timestamp_time))
+		ASN1_TIME *ptime;
+		time_t time = INVALID_TIME;
+
+		ptime = ASN1_TIME_set(NULL, 0);
+		if (!ASN1_TIME_diff(&day, &sec, ptime, timestamp_time))
 			ret = 1; /* FAILED */
 		time = 86400*day+sec;
 		if (!set_store_time(store, time)) {
 			fprintf(stderr, "Failed to set store time\n");
 			ret = 1; /* FAILED */
 		}
+		ASN1_TIME_free(ptime);
 	}
 	/* check extended key usage flag XKU_CODE_SIGN */
 	signers = PKCS7_get0_signers(p7, NULL, 0);
@@ -2154,6 +2164,7 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, GLOBAL_O
 		ERR_print_errors_fp(stdout);
 		ret = 1; /* FAILED */
 	}
+	sk_X509_free(signers);
 	BIO_free(bio);
 	X509_STORE_free(store);
 	return ret;
@@ -4385,7 +4396,9 @@ static int read_crypto_params(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 		BIO_free(btmp);
 	}
 	if (cparams->certs == NULL && p7 != NULL)
-		cparams->certs = sk_X509_dup(p7->d.sign->cert);
+		/* certificate file in the SPC format */
+		cparams->certs = X509_chain_up_ref(p7->d.sign->cert);
+
 	if (options->xcertfile) {
 		if ((btmp = BIO_new_file(options->xcertfile, "rb")) == NULL ||
 				((p7x = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
@@ -4397,16 +4410,16 @@ static int read_crypto_params(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 		PKCS7_free(p7x);
 		p7x = NULL;
 	}
-	if (options->pass) {
+	if (options->pass)
 		memset(options->pass, 0, strlen(options->pass));
-		options->pass = NULL;
-	}
+
+	PKCS7_free(p7);
 	return ret; /* OK */
 }
 
 static void free_crypto_params(CRYPTO_PARAMS *cparams, GLOBAL_OPTIONS *options)
 {
-	if (options->keyfile || options->pkcs12file) {
+	if (options->keyfile || options->pvkfile || options->pkcs12file) {
 		EVP_PKEY_free(cparams->pkey);
 		cparams->pkey = NULL;
 	}
@@ -4414,12 +4427,12 @@ static void free_crypto_params(CRYPTO_PARAMS *cparams, GLOBAL_OPTIONS *options)
 		X509_free(cparams->cert);
 		cparams->cert = NULL;
 	}
-	if (options->certfile) {
-		sk_X509_free(cparams->certs);
+	if (options->certfile || options->pkcs12file) {
+		sk_X509_pop_free(cparams->certs, X509_free);
 		cparams->certs = NULL;
 	}
 	if (options->xcertfile) {
-		sk_X509_free(cparams->xcerts);
+		sk_X509_pop_free(cparams->xcerts, X509_free);
 		cparams->xcerts = NULL;
 	}
 }
@@ -4890,9 +4903,9 @@ int main(int argc, char **argv)
 #endif
 	BIO *hash = NULL, *outdata = NULL;
 	PKCS7 *cursig = NULL, *sig = NULL;
-	char *indata;
+	char *indata = NULL;
 	int ret = -1, len = 0;
-	size_t padlen = 0, filesize;
+	size_t padlen = 0, filesize = 0;
 	file_type_t type;
 	cmd_type_t cmd = CMD_SIGN;
 
@@ -5046,6 +5059,8 @@ int main(int argc, char **argv)
 	if (ret)
 		DO_EXIT_0("Append signature to outfile failed\n");
 
+	if (cmd != CMD_ADD)
+		PKCS7_free(cursig);
 	PKCS7_free(sig);
 
 skip_signing:
@@ -5072,6 +5087,11 @@ err_cleanup:
 		BIO_free_all(hash);
 	if (outdata)
 		unlink(options.outfile);
+#ifdef WIN32
+	UnmapViewOfFile(indata);
+#else
+	munmap(indata, filesize);
+#endif
 	free_crypto_params(&cparams, &options);
 	free_options(&options);
 	if (ret)
