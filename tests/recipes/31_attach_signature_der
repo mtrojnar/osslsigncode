@@ -1,20 +1,20 @@
 #!/bin/sh
-# Attach the signature to the PE/CAB/MSI file.
+# Attach the DER signature to the PE/CAB/MSI file.
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
 
 # PE file
-test_name="321. Attach the signature to the PE file"
+test_name="311. Attach the DER signature to the PE file"
 printf "\n%s\n" "$test_name"
 if test -s "test.exe"
   then
     ../../osslsigncode attach-signature \
-        -sigin "sign_pe.pem" \
+        -sigin "sign_pe.der" \
         -CAfile "${script_path}/../certs/CACert.pem" \
         -CRLfile "${script_path}/../certs/CACertCRL.pem" \
-        -in "test.exe" -out "test_321.exe"
-    verify_signature "$?" "321" "exe" "success" "@2019-09-01 12:00:00" \
+        -in "test.exe" -out "test_311.exe"
+    verify_signature "$?" "311" "exe" "success" "@2019-09-01 12:00:00" \
 	"sha256sum" "ASCII" "SHA512" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
@@ -22,16 +22,16 @@ if test -s "test.exe"
   fi
 
 # CAB file
-test_name="322. Attach the signature to the CAB file"
+test_name="312. Attach the DER signature to the CAB file"
 printf "\n%s\n" "$test_name"
 if [ -s "test.ex_" ]
   then
     ../../osslsigncode attach-signature \
-        -sigin "sign_cab.pem" \
+        -sigin "sign_cab.der" \
         -CAfile "${script_path}/../certs/CACert.pem" \
         -CRLfile "${script_path}/../certs/CACertCRL.pem" \
-        -in "test.ex_" -out "test_322.ex_"
-    verify_signature "$?" "322" "ex_" "success" "@2019-09-01 12:00:00" \
+        -in "test.ex_" -out "test_312.ex_"
+    verify_signature "$?" "312" "ex_" "success" "@2019-09-01 12:00:00" \
 	"sha256sum" "ASCII" "SHA512" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
@@ -39,16 +39,16 @@ if [ -s "test.ex_" ]
   fi
 
 # MSI file
-test_name="323. Attach the signature to the MSI file"
+test_name="313. Attach the DER signature to the MSI file"
 printf "\n%s\n" "$test_name"
 if test -s "sample.msi"
   then
     ../../osslsigncode attach-signature \
-        -sigin "sign_msi.pem" \
+        -sigin "sign_msi.der" \
         -CAfile "${script_path}/../certs/CACert.pem" \
         -CRLfile "${script_path}/../certs/CACertCRL.pem" \
-        -in "sample.msi" -out "test_323.msi"
-    verify_signature "$?" "323" "msi" "success" "@2019-09-01 12:00:00" \
+        -in "sample.msi" -out "test_313.msi"
+    verify_signature "$?" "313" "msi" "success" "@2019-09-01 12:00:00" \
 	"sha256sum" "ASCII" "SHA512" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else

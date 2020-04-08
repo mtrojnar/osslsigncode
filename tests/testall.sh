@@ -102,6 +102,7 @@ if test -n "$(command -v faketime)"
         make_tests
         result=$?
         rm -f "test.exe" "test.ex_" "sample.msi" "sample.wxs" "FoobarAppl10.exe"
+        rm -f "sign_pe.der" "sign_cab.der" "sign_msi.der"
         rm -f "sign_pe.pem" "sign_cab.pem" "sign_msi.pem" "verify.log"
       else
         printf "%s\n" "xxd not found in \$PATH"

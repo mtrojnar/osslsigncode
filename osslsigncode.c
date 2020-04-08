@@ -2791,9 +2791,8 @@ static int msi_extract_file(GsfInfile *ole, GLOBAL_OPTIONS *options)
 		}
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
 		BIO_free_all(outdata);
-	} else {
+	} else
 		ret = msi_extract_signature_to_file(ole, options->outfile);
-	}
 
 	return ret;
 }
@@ -3152,9 +3151,10 @@ static int pe_extract_file(char *indata, FILE_HEADER *header, BIO *outdata, int 
 			return 1; /* FAILED */
 		}
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
-		} else {
-			ret = !BIO_write(outdata, indata + header->sigpos, header->siglen);
-	}
+		PKCS7_free(sig);
+	} else
+		ret = !BIO_write(outdata, indata + header->sigpos, header->siglen);
+
 	return ret;
 }
 
@@ -3511,9 +3511,10 @@ static int cab_extract_file(char *indata, FILE_HEADER *header, BIO *outdata, int
 			return 1; /* FAILED */
 		}
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
-	} else {
+		PKCS7_free(sig);
+	} else
 		ret = !BIO_write(outdata, indata + header->sigpos, header->siglen);
-	}
+
 	return ret;
 }
 
@@ -4499,24 +4500,13 @@ static PKCS7 *get_sigfile(char *sigfile, file_type_t type)
 	} else {
 		/* reset header */
 		memset(&header, 0, sizeof(FILE_HEADER));
-		header.fileend = sigfilesize;
-		if (type == FILE_TYPE_PE) {
-			if (!pe_verify_header(insigdata, sigfile, sigfilesize, &header))
-				return NULL; /* FAILED */
+		header.siglen = sigfilesize;
+		header.sigpos = 0;
+		if (type == FILE_TYPE_PE)
 			sig = pe_extract_existing_pkcs7(insigdata, &header);
-			if (!sig) {
-				fprintf(stderr, "Failed to extract PKCS7 data: %s\n", sigfile);
-				return NULL; /* FAILED */
-			}
-		} else if (type == FILE_TYPE_CAB) {
-			if (!cab_verify_header(insigdata, sigfile, sigfilesize, &header))
-				return NULL; /* FAILED */
+		else if (type == FILE_TYPE_CAB)
 			sig = cab_extract_existing_pkcs7(insigdata, &header);
-			if (!sig) {
-				fprintf(stderr, "Failed to extract PKCS7 data: %s\n", sigfile);
-				return NULL; /* FAILED */
-			}
-		} else if (type == FILE_TYPE_MSI) {
+		else if (type == FILE_TYPE_MSI) {
 #ifdef WITH_GSF
 			const unsigned char *p = (unsigned char*)insigdata;
 			sig = d2i_PKCS7(NULL, &p, sigfilesize);
