@@ -2121,7 +2121,7 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, GLOBAL_O
 		p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
 
 	store = X509_STORE_new();
-	if (!load_file_lookup(store, options->cafile, X509_PURPOSE_CRL_SIGN)) {
+	if (!load_file_lookup(store, options->cafile, X509_PURPOSE_ANY)) {
 		fprintf(stderr, "Failed to add store lookup file\n");
 		ret = 1; /* FAILED */
 	}
