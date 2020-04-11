@@ -1,0 +1,61 @@
+#!/bin/sh
+# Extract the signature in the DER format from the PE/CAB/MSI file.
+
+. $(dirname $0)/../test_library
+script_path=$(pwd)
+
+# PE file
+test_name="271. Extract the DER signature from the PE file"
+printf "\n%s\n" "$test_name"
+if test -s "test.exe"
+  then
+    ../../osslsigncode sign -h sha512 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "test.exe" -out "test_271.exe" && \
+    ../../osslsigncode extract-signature \
+        -in "test_271.exe" -out "sign_pe.der"
+    verify_signature "$?" "271" "exe" "success" "@2019-09-01 12:00:00" \
+	"sha256sum" "ASCII" "SHA512" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAB file
+test_name="272. Extract the DER signature from the CAB file"
+printf "\n%s\n" "$test_name"
+if [ -s "test.ex_" ]
+  then
+    ../../osslsigncode sign -h sha512 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "test.ex_" -out "test_272.ex_" && \
+    ../../osslsigncode extract-signature \
+        -in "test_272.ex_" -out "sign_cab.der"
+    verify_signature "$?" "272" "ex_" "success" "@2019-09-01 12:00:00" \
+	"sha256sum" "ASCII" "SHA512" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# MSI file
+test_name="273. Extract the DER signature from the MSI file"
+printf "\n%s\n" "$test_name"
+if test -s "sample.msi"
+  then
+    ../../osslsigncode sign -h sha512 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "sample.msi" -out "test_273.msi" && \
+    ../../osslsigncode extract-signature \
+        -in "test_273.msi" -out "sign_msi.der"
+    verify_signature "$?" "273" "msi" "success" "@2019-09-01 12:00:00" \
+	"sha256sum" "ASCII" "SHA512" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+exit 0

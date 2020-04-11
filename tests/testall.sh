@@ -91,7 +91,7 @@ if grep -q "no libgsf available" "results.log"
 # Timestamping support
 if grep -q "no libcurl available" "results.log"
   then
-    printf "%s\n" "configure --with_curl is required for timestamping support"
+    printf "%s\n" "configure --with-curl is required for timestamping support"
   fi
 
 # Tests requirements
@@ -102,6 +102,7 @@ if test -n "$(command -v faketime)"
         make_tests
         result=$?
         rm -f "test.exe" "test.ex_" "sample.msi" "sample.wxs" "FoobarAppl10.exe"
+        rm -f "sign_pe.der" "sign_cab.der" "sign_msi.der"
         rm -f "sign_pe.pem" "sign_cab.pem" "sign_msi.pem" "verify.log"
       else
         printf "%s\n" "xxd not found in \$PATH"

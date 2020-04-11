@@ -113,12 +113,7 @@ verify_signature() {
         fi
       if test "$6" = "sha256sum"
         then
-          if test -s "test_$2_signed.$3"
-            then
-              sha256sum "test_$2_signed.$3" 2>> "sha256sum_$3.log" 1>&2
-            else
-              sha256sum "test_$2.$3" 2>> "sha256sum_$3.log" 1>&2
-            fi
+          sha256sum "test_$2.$3" 2>> "sha256sum_$3.log" 1>&2
         fi
       if test "$4" = "success" -a "$result" -eq 0
         then
