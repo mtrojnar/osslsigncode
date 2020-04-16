@@ -141,6 +141,12 @@ typedef unsigned char u_char;
 #define PROVIDE_ASKPASS 1
 #endif
 
+#ifdef _WIN32
+#define FILE_CREATE_MODE "w+x"
+#else
+#define FILE_CREATE_MODE "w+bx"
+#endif
+
 /* MS Authenticode object ids */
 #define SPC_INDIRECT_DATA_OBJID      "1.3.6.1.4.1.311.2.1.4"
 #define SPC_STATEMENT_TYPE_OBJID     "1.3.6.1.4.1.311.2.1.11"
@@ -2703,7 +2709,7 @@ static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
 		goto out;
 	}
 	/* Create outdata file */
-	outdata = BIO_new_file(outfile, "w+bx");
+	outdata = BIO_new_file(outfile, FILE_CREATE_MODE);
 	if (outdata == NULL) {
 		printf("Unable to create %s\n\n", outfile);
 		ret = 1;
@@ -2784,7 +2790,7 @@ static int msi_extract_file(GsfInfile *ole, GLOBAL_OPTIONS *options)
 			fprintf(stderr, "Unable to extract existing signature\n");
 			return 1; /* FAILED */
 		}
-		outdata = BIO_new_file(options->outfile, "w+bx");
+		outdata = BIO_new_file(options->outfile, FILE_CREATE_MODE);
 		if (outdata == NULL) {
 			fprintf(stderr, "Unable to create %s\n", options->outfile);
 			return 1; /* FAILED */
@@ -4975,7 +4981,7 @@ int main(int argc, char **argv)
 
 	if ((type == FILE_TYPE_CAB || type == FILE_TYPE_PE) && (cmd != CMD_VERIFY)) {
 		/* Create outdata file */
-		outdata = BIO_new_file(options.outfile, "w+bx");
+		outdata = BIO_new_file(options.outfile, FILE_CREATE_MODE);
 		if (outdata == NULL)
 			DO_EXIT_1("Failed to create file: %s\n", options.outfile);
 		BIO_push(hash, outdata);
