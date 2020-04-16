@@ -142,7 +142,7 @@ typedef unsigned char u_char;
 #endif
 
 #ifdef _WIN32
-#define FILE_CREATE_MODE "w+x"
+#define FILE_CREATE_MODE "w+b"
 #else
 #define FILE_CREATE_MODE "w+bx"
 #endif
