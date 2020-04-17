@@ -1799,7 +1799,7 @@ static int load_file_lookup(X509_STORE *store, char *certs, int purpose)
 	if (!lookup)
 		return 0; /* FAILED */
 	if (!X509_load_cert_file(lookup, certs, X509_FILETYPE_PEM)) {
-		fprintf(stderr, "Error: no certificate found in %s\n", certs);
+		fprintf(stderr, "\nError: no certificate found\n");
 		return 0; /* FAILED */
 	}
 	param = X509_STORE_get0_param(store);
@@ -2092,10 +2092,11 @@ static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, GLOBAL_OPTIONS *option
 	PKCS7_SIGNER_INFO *si;
 	int ret = 1, verok = 0;
 
-	printf("TSA's certificates file: %s\n", options->untrusted);
 	store = X509_STORE_new();
-	if (!load_file_lookup(store, options->untrusted, X509_PURPOSE_TIMESTAMP_SIGN)) {
-		printf("\nUse the \"-untrusted\" option to add the CA cert bundle to verify timestamp server.\n");
+	if (load_file_lookup(store, options->untrusted, X509_PURPOSE_TIMESTAMP_SIGN))
+		printf("TSA's certificates file: %s\n", options->untrusted);
+	else {
+		printf("Use the \"-untrusted\" option to add the CA cert bundle to verify timestamp server.\n");
 		ret = 0; /* FAILED */
 	}
 	if (ret)
@@ -4725,7 +4726,7 @@ static cmd_type_t get_command(char **argv)
 	return CMD_SIGN;
 }
 
-static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS *options)
+static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS *options)
 {
 	int i;
 	char *failarg = NULL;
@@ -4743,7 +4744,7 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 	options->signing_time = INVALID_TIME;
 	options->jp = -1;
 
-	if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH)) {
+	if (*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) {
 		options->cafile = get_cafile();
 		options->untrusted = get_cafile();
 	}
@@ -4913,6 +4914,13 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 			fprintf(stderr, "Unknown option: %s\n", failarg);
 		usage(argv0, "all");
 	}
+
+	if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && access(options->cafile, R_OK)) {
+		printf("Use the \"-CAfile\" option to add one or more trusted CA certificates to verify the signature.\n");
+		return 0; /* FAILED */
+	}
+
+	return 1;
 }
 
 int main(int argc, char **argv)
@@ -4943,7 +4951,8 @@ int main(int argc, char **argv)
 		DO_EXIT_0("Failed to add objects\n");
 
 	/* commands and options initialization */
-	main_configure(argc, argv, &cmd, &options);
+	if (!main_configure(argc, argv, &cmd, &options))
+		goto err_cleanup;
 	if (!read_password(&options))
 		goto err_cleanup;
 	/* read key and certificates */
