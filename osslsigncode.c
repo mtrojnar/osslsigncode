@@ -58,6 +58,10 @@
 
 */
 
+#ifdef __MINGW32__
+#define HAVE_WINDOWS_H
+#endif /* __MINGW32__ */
+
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif /* HAVE_CONFIG_H */
@@ -2708,10 +2712,18 @@ static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
 		ret = 1;
 		goto out;
 	}
-	/* Create outdata file */
+	/* Create outdata DER file */
+#ifdef WIN32
+	if (!access(options->outfile, R_OK)) {
+		/* outdata file exists */
+		printf("Failed to create file: %s\n", outfile);
+		ret = 1;
+		goto out;
+	}
+#endif
 	outdata = BIO_new_file(outfile, FILE_CREATE_MODE);
 	if (outdata == NULL) {
-		printf("Unable to create %s\n\n", outfile);
+		printf("Failed to create file: %s\n", outfile);
 		ret = 1;
 		goto out;
 	}
@@ -2790,9 +2802,17 @@ static int msi_extract_file(GsfInfile *ole, GLOBAL_OPTIONS *options)
 			fprintf(stderr, "Unable to extract existing signature\n");
 			return 1; /* FAILED */
 		}
+	/* Create outdata PEM file */
+#ifdef WIN32
+	if (!access(options->outfile, R_OK)) {
+		/* outdata file exists */
+		fprintf(stderr, "Failed to create file: %s\n", outfile);
+		return 1; /* FAILED */
+	}
+#endif
 		outdata = BIO_new_file(options->outfile, FILE_CREATE_MODE);
 		if (outdata == NULL) {
-			fprintf(stderr, "Unable to create %s\n", options->outfile);
+			fprintf(stderr, "Failed to create file: %s\n", options->outfile);
 			return 1; /* FAILED */
 		}
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
@@ -4575,9 +4595,15 @@ static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 		if (cmd == CMD_ADD)
 			sig = *cursig;
 	}
+	/* Create outdata MSI file */
+	if (!access(options->outfile, R_OK)) {
+		/* outdata file exists */
+		fprintf(stderr, "Failed to create file: %s\n", options->outfile);
+		return NULL; /* FAILED */
+	}
 	gsfparams->sink = gsf_output_stdio_new(options->outfile, NULL);
 	if (!gsfparams->sink) {
-		fprintf(stderr, "Error opening output file %s\n", options->outfile);
+		fprintf(stderr, "Failed to create file: %s\n", options->outfile);
 		return NULL; /* FAILED */
 	}
 	gsfparams->outole = gsf_outfile_msole_new(gsfparams->sink);
@@ -4981,6 +5007,11 @@ int main(int argc, char **argv)
 
 	if ((type == FILE_TYPE_CAB || type == FILE_TYPE_PE) && (cmd != CMD_VERIFY)) {
 		/* Create outdata file */
+#ifdef WIN32
+		if (!access(options.outfile, R_OK))
+			/* outdata file exists */
+			DO_EXIT_1("Failed to create file: %s\n", options.outfile);
+#endif
 		outdata = BIO_new_file(options.outfile, FILE_CREATE_MODE);
 		if (outdata == NULL)
 			DO_EXIT_1("Failed to create file: %s\n", options.outfile);
