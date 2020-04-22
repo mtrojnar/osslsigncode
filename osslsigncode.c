@@ -2688,7 +2688,7 @@ out:
  * msi_extract_signature_to_file extracts the MSI DigitalSignaure from infile
  * to a file at the path given by outfile.
  */
-static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
+static int msi_extract_signature_to_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 {
 	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	GsfInput *sig = NULL;
@@ -2717,14 +2717,14 @@ static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
 #ifdef WIN32
 	if (!access(options->outfile, R_OK)) {
 		/* outdata file exists */
-		printf("Failed to create file: %s\n", outfile);
+		printf("Failed to create file: %s\n", options->outfile);
 		ret = 1;
 		goto out;
 	}
 #endif
-	outdata = BIO_new_file(outfile, FILE_CREATE_MODE);
+	outdata = BIO_new_file(options->outfile, FILE_CREATE_MODE);
 	if (outdata == NULL) {
-		printf("Failed to create file: %s\n", outfile);
+		printf("Failed to create file: %s\n", options->outfile);
 		ret = 1;
 		goto out;
 	}
@@ -2807,7 +2807,7 @@ static int msi_extract_file(GsfInfile *ole, GLOBAL_OPTIONS *options)
 #ifdef WIN32
 	if (!access(options->outfile, R_OK)) {
 		/* outdata file exists */
-		fprintf(stderr, "Failed to create file: %s\n", outfile);
+		fprintf(stderr, "Failed to create file: %s\n", options->outfile);
 		return 1; /* FAILED */
 	}
 #endif
@@ -2819,7 +2819,7 @@ static int msi_extract_file(GsfInfile *ole, GLOBAL_OPTIONS *options)
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
 		BIO_free_all(outdata);
 	} else
-		ret = msi_extract_signature_to_file(ole, options->outfile);
+		ret = msi_extract_signature_to_file(ole, options);
 
 	return ret;
 }
