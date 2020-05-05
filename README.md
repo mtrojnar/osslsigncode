@@ -93,6 +93,18 @@ To sign a CAB file containing java class files:
 ```
 Only the 'low' parameter is currently supported.
 
+If you want to use PKCS11 token, you should indicate PKCS11 engine and module.
+An example of using osslsigncode with SoftHSM:
+```
+  osslsigncode sign \
+    -pkcs11engine /usr/lib64/engines-1.1/pkcs11.so \
+    -pkcs11module /usr/lib64/pkcs11/libsofthsm2.so \
+    -certs <cert-file> \
+    -key 'pkcs11:token=softhsm-token;object=key' \
+    -in yourapp.exe -out yourapp-signed.exe
+```
+osslsigncode currently does not support reading certificates from engines.
+
 You can check that the signed file is correct by right-clicking
 on it in Windows and choose Properties --> Digital Signatures,
 and then choose the signature from the list, and click on
