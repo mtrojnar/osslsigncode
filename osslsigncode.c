@@ -1001,6 +1001,7 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
 		printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
 #endif /* ENABLE_CURL */
+		printf("%12s[ -verbose ]\n", "");
 		printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
 	}
 	if (on_list(cmd, cmds_attach)) {
@@ -1079,7 +1080,7 @@ static void help_for(const char *argv0, const char *cmd)
 	const char *cmds_ts[] = {"add", "sign", NULL};
 #endif /* ENABLE_CURL */
 	const char *cmds_untrusted[] = {"attach-signature", "verify", NULL};
-	const char *cmds_verbose[] = {"sign", "verify", NULL};
+	const char *cmds_verbose[] = {"add", "sign", "verify", NULL};
 
 	if (on_list(cmd, cmds_all)) {
 		printf("osslsigncode is a small tool that implements part of the functionality of the Microsoft\n");
@@ -1645,7 +1646,7 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 	/* compare the provided hash against the computed hash */
 	if (memcmp(mdbuf, cmdbuf, EVP_MD_size(md))) {
 		tohex(cmdbuf, hexbuf, EVP_MD_size(md));
-		printf("Hash value mismatch: %s computed\n", hexbuf);
+		printf("\nHash value mismatch: %s computed\n", hexbuf);
 		ret = 1;
 		goto out;
 	}
@@ -4811,7 +4812,7 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 			options->addBlob = 1;
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ATTACH) && !strcmp(*argv, "-nest")) {
 			options->nest = 1;
-		} else if ((*cmd == CMD_SIGN || *cmd == CMD_VERIFY) && !strcmp(*argv, "-verbose")) {
+		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD || *cmd == CMD_VERIFY) && !strcmp(*argv, "-verbose")) {
 			options->verbose = 1;
 #ifdef WITH_GSF
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-add-msi-dse")) {
