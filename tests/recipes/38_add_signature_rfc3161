@@ -15,9 +15,11 @@ if test -s "test.exe" && ! grep -q "no libcurl available" "results.log"
         -in "test.exe" -out "test_381_signed.exe"
     ../../osslsigncode add \
         -ts http://time.certum.pl/ \
+        -ts http://timestamp.digicert.com/ \
+        -verbose \
         -in "test_381_signed.exe" -out "test_381.exe"
     verify_signature "$?" "381" "exe" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "Unizeto" "UNUSED_PATTERN"
+	"UNUSED_PATTERN" "ASCII" "Timestamp Server Signature" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -34,9 +36,11 @@ if test -s "test.ex_" && ! grep -q "no libcurl available" "results.log"
         -in "test.ex_" -out "test_382_signed.ex_"
     ../../osslsigncode add \
         -ts http://time.certum.pl/ \
+        -ts http://timestamp.digicert.com/ \
+        -verbose \
         -in "test_382_signed.ex_" -out "test_382.ex_"
     verify_signature "$?" "382" "ex_" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "Unizeto" "UNUSED_PATTERN"
+	"UNUSED_PATTERN" "ASCII" "Timestamp Server Signature" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -53,9 +57,11 @@ if test -s "sample.msi" && ! grep -q "no libcurl available" "results.log"
         -in "sample.msi" -out "test_383_signed.msi"
     ../../osslsigncode add \
         -ts http://time.certum.pl/ \
+        -ts http://timestamp.digicert.com/ \
+        -verbose \
         -in "test_383_signed.msi" -out "test_383.msi"
     verify_signature "$?" "383" "msi" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "Unizeto" "UNUSED_PATTERN"
+	"UNUSED_PATTERN" "ASCII" "Timestamp Server Signature" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
