@@ -1948,8 +1948,11 @@ static int pkcs7_print_attributes(PKCS7_SIGNED *p7_signed, PKCS7 **tmstamp_p7,
 				if (value == NULL)
 					return 0; /* FAILED */
 				*tmstamp_p7 = find_countersignature(p7_signed, value->data, value->length, timestamp_time);
-				if (tmstamp_p7 == NULL)
+				if (*tmstamp_p7 == NULL) {
+					printf("Error: Authenticode Timestamp could not be decoded correctly\n");
+					ERR_print_errors_fp(stdout);
 					return 0; /* FAILED */
+				}
 			} else if (!strcmp(object_txt, SPC_RFC3161_OBJID)) {
 				/* 1.3.6.1.4.1.311.3.3.1 */
 				printf("\nRFC3161 Timestamp\nPolicy OID: %s\n", object_txt);
@@ -1957,8 +1960,11 @@ static int pkcs7_print_attributes(PKCS7_SIGNED *p7_signed, PKCS7 **tmstamp_p7,
 				if (value == NULL)
 					return 0; /* FAILED */
 				*tmstamp_p7 = find_rfc3161(value->data, value->length, timestamp_time);
-				if (tmstamp_p7 == NULL)
+				if (*tmstamp_p7 == NULL) {
+					printf("Error: RFC3161 Timestamp could not be decoded correctly\n");
+					ERR_print_errors_fp(stdout);
 					return 0; /* FAILED */
+				}
 			} else if (!strcmp(object_txt, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
 				/* 1.3.6.1.4.1.42921.1.2.1 */
 				printf("\nUnauthenticated Data Blob\nPolicy OID: %s\n", object_txt);
@@ -2188,11 +2194,11 @@ static int verify_pkcs7(PKCS7 *p7, GLOBAL_OPTIONS *options)
 	int ret = 0, leafok = 0;
 
 	if (!find_signer(p7, options->leafhash, &leafok))
-		printf("Find signers error"); /* FAILED */
+		printf("Find signers error\n");
 	if (!print_certs(p7))
-		printf("Print certs error"); /* FAILED */
+		printf("Print certs error\n");
 	if (!pkcs7_print_attributes(p7->d.sign, &tmstamp_p7, &timestamp_time, options->verbose))
-		ret = 1; /* FAILED */
+		printf("Print attributes error\n");
 	if (options->leafhash != NULL) {
 		printf("Leaf hash match: %s\n", leafok ? "ok" : "failed");
 		if (!leafok)
@@ -2202,7 +2208,7 @@ static int verify_pkcs7(PKCS7 *p7, GLOBAL_OPTIONS *options)
 	if (options->crlfile)
 		printf("CRLfile: %s\n", options->crlfile);
 	if (!tmstamp_p7)
-		printf("\nFile is not timestamped\n");
+		printf("\nTimestamp is not available\n");
 	else if (!verify_timestamp(p7, tmstamp_p7, options))
 		timestamp_time = NULL;
 
