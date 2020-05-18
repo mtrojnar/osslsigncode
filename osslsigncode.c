@@ -58,6 +58,10 @@
 
 */
 
+#ifdef __MINGW32__
+#define HAVE_WINDOWS_H
+#endif /* __MINGW32__ */
+
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif /* HAVE_CONFIG_H */
@@ -1795,7 +1799,7 @@ static int load_file_lookup(X509_STORE *store, char *certs, int purpose)
 	if (!lookup)
 		return 0; /* FAILED */
 	if (!X509_load_cert_file(lookup, certs, X509_FILETYPE_PEM)) {
-		fprintf(stderr, "Error: no certificate found in %s\n", certs);
+		fprintf(stderr, "\nError: no certificate found\n");
 		return 0; /* FAILED */
 	}
 	param = X509_STORE_get0_param(store);
@@ -1944,8 +1948,11 @@ static int pkcs7_print_attributes(PKCS7_SIGNED *p7_signed, PKCS7 **tmstamp_p7,
 				if (value == NULL)
 					return 0; /* FAILED */
 				*tmstamp_p7 = find_countersignature(p7_signed, value->data, value->length, timestamp_time);
-				if (tmstamp_p7 == NULL)
+				if (*tmstamp_p7 == NULL) {
+					printf("Error: Authenticode Timestamp could not be decoded correctly\n");
+					ERR_print_errors_fp(stdout);
 					return 0; /* FAILED */
+				}
 			} else if (!strcmp(object_txt, SPC_RFC3161_OBJID)) {
 				/* 1.3.6.1.4.1.311.3.3.1 */
 				printf("\nRFC3161 Timestamp\nPolicy OID: %s\n", object_txt);
@@ -1953,8 +1960,11 @@ static int pkcs7_print_attributes(PKCS7_SIGNED *p7_signed, PKCS7 **tmstamp_p7,
 				if (value == NULL)
 					return 0; /* FAILED */
 				*tmstamp_p7 = find_rfc3161(value->data, value->length, timestamp_time);
-				if (tmstamp_p7 == NULL)
+				if (*tmstamp_p7 == NULL) {
+					printf("Error: RFC3161 Timestamp could not be decoded correctly\n");
+					ERR_print_errors_fp(stdout);
 					return 0; /* FAILED */
+				}
 			} else if (!strcmp(object_txt, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
 				/* 1.3.6.1.4.1.42921.1.2.1 */
 				printf("\nUnauthenticated Data Blob\nPolicy OID: %s\n", object_txt);
@@ -2088,10 +2098,11 @@ static int verify_timestamp(PKCS7 *p7, PKCS7 *tmstamp_p7, GLOBAL_OPTIONS *option
 	PKCS7_SIGNER_INFO *si;
 	int ret = 1, verok = 0;
 
-	printf("TSA's certificates file: %s\n", options->untrusted);
 	store = X509_STORE_new();
-	if (!load_file_lookup(store, options->untrusted, X509_PURPOSE_TIMESTAMP_SIGN)) {
-		printf("\nUse the \"-untrusted\" option to add the CA cert bundle to verify timestamp server.\n");
+	if (load_file_lookup(store, options->untrusted, X509_PURPOSE_TIMESTAMP_SIGN))
+		printf("TSA's certificates file: %s\n", options->untrusted);
+	else {
+		printf("Use the \"-untrusted\" option to add the CA cert bundle to verify timestamp server.\n");
 		ret = 0; /* FAILED */
 	}
 	if (ret)
@@ -2183,11 +2194,11 @@ static int verify_pkcs7(PKCS7 *p7, GLOBAL_OPTIONS *options)
 	int ret = 0, leafok = 0;
 
 	if (!find_signer(p7, options->leafhash, &leafok))
-		printf("Find signers error"); /* FAILED */
+		printf("Find signers error\n");
 	if (!print_certs(p7))
-		printf("Print certs error"); /* FAILED */
+		printf("Print certs error\n");
 	if (!pkcs7_print_attributes(p7->d.sign, &tmstamp_p7, &timestamp_time, options->verbose))
-		ret = 1; /* FAILED */
+		printf("Print attributes error\n");
 	if (options->leafhash != NULL) {
 		printf("Leaf hash match: %s\n", leafok ? "ok" : "failed");
 		if (!leafok)
@@ -2197,7 +2208,7 @@ static int verify_pkcs7(PKCS7 *p7, GLOBAL_OPTIONS *options)
 	if (options->crlfile)
 		printf("CRLfile: %s\n", options->crlfile);
 	if (!tmstamp_p7)
-		printf("\nFile is not timestamped\n");
+		printf("\nTimestamp is not available\n");
 	else if (!verify_timestamp(p7, tmstamp_p7, options))
 		timestamp_time = NULL;
 
@@ -2683,7 +2694,7 @@ out:
  * msi_extract_signature_to_file extracts the MSI DigitalSignaure from infile
  * to a file at the path given by outfile.
  */
-static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
+static int msi_extract_signature_to_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 {
 	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	GsfInput *sig = NULL;
@@ -2708,10 +2719,18 @@ static int msi_extract_signature_to_file(GsfInfile *infile, char *outfile)
 		ret = 1;
 		goto out;
 	}
-	/* Create outdata file */
-	outdata = BIO_new_file(outfile, FILE_CREATE_MODE);
+	/* Create outdata DER file */
+#ifdef WIN32
+	if (!access(options->outfile, R_OK)) {
+		/* outdata file exists */
+		printf("Failed to create file: %s\n", options->outfile);
+		ret = 1;
+		goto out;
+	}
+#endif
+	outdata = BIO_new_file(options->outfile, FILE_CREATE_MODE);
 	if (outdata == NULL) {
-		printf("Unable to create %s\n\n", outfile);
+		printf("Failed to create file: %s\n", options->outfile);
 		ret = 1;
 		goto out;
 	}
@@ -2790,15 +2809,23 @@ static int msi_extract_file(GsfInfile *ole, GLOBAL_OPTIONS *options)
 			fprintf(stderr, "Unable to extract existing signature\n");
 			return 1; /* FAILED */
 		}
+	/* Create outdata PEM file */
+#ifdef WIN32
+	if (!access(options->outfile, R_OK)) {
+		/* outdata file exists */
+		fprintf(stderr, "Failed to create file: %s\n", options->outfile);
+		return 1; /* FAILED */
+	}
+#endif
 		outdata = BIO_new_file(options->outfile, FILE_CREATE_MODE);
 		if (outdata == NULL) {
-			fprintf(stderr, "Unable to create %s\n", options->outfile);
+			fprintf(stderr, "Failed to create file: %s\n", options->outfile);
 			return 1; /* FAILED */
 		}
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
 		BIO_free_all(outdata);
 	} else
-		ret = msi_extract_signature_to_file(ole, options->outfile);
+		ret = msi_extract_signature_to_file(ole, options);
 
 	return ret;
 }
@@ -4575,9 +4602,15 @@ static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 		if (cmd == CMD_ADD)
 			sig = *cursig;
 	}
+	/* Create outdata MSI file */
+	if (!access(options->outfile, R_OK)) {
+		/* outdata file exists */
+		fprintf(stderr, "Failed to create file: %s\n", options->outfile);
+		return NULL; /* FAILED */
+	}
 	gsfparams->sink = gsf_output_stdio_new(options->outfile, NULL);
 	if (!gsfparams->sink) {
-		fprintf(stderr, "Error opening output file %s\n", options->outfile);
+		fprintf(stderr, "Failed to create file: %s\n", options->outfile);
 		return NULL; /* FAILED */
 	}
 	gsfparams->outole = gsf_outfile_msole_new(gsfparams->sink);
@@ -4699,7 +4732,7 @@ static cmd_type_t get_command(char **argv)
 	return CMD_SIGN;
 }
 
-static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS *options)
+static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS *options)
 {
 	int i;
 	char *failarg = NULL;
@@ -4717,7 +4750,7 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 	options->signing_time = INVALID_TIME;
 	options->jp = -1;
 
-	if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH)) {
+	if (*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) {
 		options->cafile = get_cafile();
 		options->untrusted = get_cafile();
 	}
@@ -4887,6 +4920,13 @@ static void main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTION
 			fprintf(stderr, "Unknown option: %s\n", failarg);
 		usage(argv0, "all");
 	}
+
+	if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && access(options->cafile, R_OK)) {
+		printf("Use the \"-CAfile\" option to add one or more trusted CA certificates to verify the signature.\n");
+		return 0; /* FAILED */
+	}
+
+	return 1;
 }
 
 int main(int argc, char **argv)
@@ -4917,7 +4957,8 @@ int main(int argc, char **argv)
 		DO_EXIT_0("Failed to add objects\n");
 
 	/* commands and options initialization */
-	main_configure(argc, argv, &cmd, &options);
+	if (!main_configure(argc, argv, &cmd, &options))
+		goto err_cleanup;
 	if (!read_password(&options))
 		goto err_cleanup;
 	/* read key and certificates */
@@ -4981,6 +5022,11 @@ int main(int argc, char **argv)
 
 	if ((type == FILE_TYPE_CAB || type == FILE_TYPE_PE) && (cmd != CMD_VERIFY)) {
 		/* Create outdata file */
+#ifdef WIN32
+		if (!access(options.outfile, R_OK))
+			/* outdata file exists */
+			DO_EXIT_1("Failed to create file: %s\n", options.outfile);
+#endif
 		outdata = BIO_new_file(options.outfile, FILE_CREATE_MODE);
 		if (outdata == NULL)
 			DO_EXIT_1("Failed to create file: %s\n", options.outfile);
