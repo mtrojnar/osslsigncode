@@ -14,6 +14,8 @@ if test -s "test.exe" && ! grep -q "no libcurl available" "results.log"
         -st "1556668800" \
         -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
         -ts http://time.certum.pl/ \
+        -ts http://timestamp.digicert.com/ \
+        -verbose \
         -in "test.exe" -out "test_471.exe"
     verify_signature "$?" "471" "exe" "fail" "@2019-09-01 12:00:00" \
 	"UNUSED_PATTERN" "ASCII" "Hello world!" "MODIFY"
