@@ -268,7 +268,6 @@ typedef struct {
 } GSF_PARAMS;
 #endif /* WITH_GSF */
 
-
 /*
  * ASN.1 definitions (more or less from official MS Authenticode docs)
 */
@@ -1915,7 +1914,7 @@ static PKCS7 *find_rfc3161(const unsigned char *data, int length, ASN1_UTCTIME *
 }
 
 static int pkcs7_print_attributes(PKCS7_SIGNED *p7_signed, PKCS7 **tmstamp_p7,
-			ASN1_UTCTIME **timestamp_time, int verbose)
+			ASN1_UTCTIME **timestamp_time, int verbose, int *allownest)
 {
 	PKCS7_SIGNER_INFO *si;
 	STACK_OF(X509_ATTRIBUTE) *unauth_attr;
@@ -1981,6 +1980,7 @@ static int pkcs7_print_attributes(PKCS7_SIGNED *p7_signed, PKCS7 **tmstamp_p7,
 			} else if (!strcmp(object_txt, SPC_NESTED_SIGNATURE_OBJID)) {
 				/* 1.3.6.1.4.1.311.2.4.1 */
 				printf("\nNested Signature\nPolicy OID: %s\n", object_txt);
+				*allownest = 1;
 			} else
 				printf("\nPolicy OID: %s\n", object_txt);
 		}
@@ -2033,37 +2033,6 @@ static int TST_verify(PKCS7 *tmstamp_p7, PKCS7_SIGNER_INFO *si)
 	} /* else Countersignature Timestamp */
 	TimeStampToken_free(token);
 	return 1; /* OK */
-}
-
-/*
- * pkcs7_get_nested_signature extracts a nested signature from p7.
- * The caller is responsible for freeing the returned object.
- *
- * If has_sig is provided, it will be set to either 1 if there is a
- * SPC_NESTED_SIGNATURE attribute in p7 at all or 0 if not.
- * This allows has_sig to be used to distinguish two possible scenarios
- * when the function returns NULL: if has_sig is 1, it means d2i_PKCS7
- * failed to decode the nested signature. However, if has_sig is 0, it
- * simply means the given p7 does not have a nested signature.
- */
-static PKCS7 *pkcs7_get_nested_signature(PKCS7 *p7, int *has_sig)
-{
-	PKCS7 *ret = NULL;
-	PKCS7_SIGNER_INFO *si;
-	ASN1_TYPE *nestedSignature;
-	ASN1_STRING *astr;
-	const unsigned char *p;
-
-	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-	nestedSignature = PKCS7_get_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID));
-	if (nestedSignature) {
-		astr = nestedSignature->value.sequence;
-		p = astr->data;
-		ret = d2i_PKCS7(NULL, &p, astr->length);
-	}
-	if (has_sig)
-		*has_sig = (nestedSignature != NULL);
-	return ret;
 }
 
 /*
@@ -2188,7 +2157,7 @@ static int verify_authenticode(PKCS7 *p7, ASN1_UTCTIME *timestamp_time, GLOBAL_O
 	return ret;
 }
 
-static int verify_pkcs7(PKCS7 *p7, GLOBAL_OPTIONS *options)
+static int verify_pkcs7(PKCS7 *p7, int *allownest, GLOBAL_OPTIONS *options)
 {
 	PKCS7 *tmstamp_p7 = NULL;
 	ASN1_UTCTIME *timestamp_time = NULL;
@@ -2198,7 +2167,7 @@ static int verify_pkcs7(PKCS7 *p7, GLOBAL_OPTIONS *options)
 		printf("Find signers error\n");
 	if (!print_certs(p7))
 		printf("Print certs error\n");
-	if (!pkcs7_print_attributes(p7->d.sign, &tmstamp_p7, &timestamp_time, options->verbose))
+	if (!pkcs7_print_attributes(p7->d.sign, &tmstamp_p7, &timestamp_time, options->verbose, allownest))
 		printf("Print attributes error\n");
 	if (options->leafhash != NULL) {
 		printf("Leaf hash match: %s\n", leafok ? "ok" : "failed");
@@ -2471,14 +2440,58 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 	return TRUE;
 }
 
+static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
+		size_t exlen, GLOBAL_OPTIONS *options);
+
+static int msi_verify_nested_signature(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
+		size_t exlen, GLOBAL_OPTIONS *options)
+{
+	int ret = 0, nest_ret;
+	PKCS7_SIGNER_INFO *si;
+	X509_ATTRIBUTE *attr;
+	ASN1_OBJECT *object;
+	ASN1_STRING *value;
+	const unsigned char *p;
+	PKCS7 *p7nest;
+
+	char object_txt[128];
+	int i, j;
+
+	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+	STACK_OF(X509_ATTRIBUTE) *unauth_attr = PKCS7_get_attributes(si);
+	for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
+		attr = X509at_get_attr(unauth_attr, i);
+		object = X509_ATTRIBUTE_get0_object(attr);
+		object_txt[0] = 0x00;
+		OBJ_obj2txt(object_txt, sizeof(object_txt), object, 1);
+		if (!strcmp(object_txt, SPC_NESTED_SIGNATURE_OBJID)) {
+			/* 1.3.6.1.4.1.311.2.4.1 */
+			for (j=0; j<X509_ATTRIBUTE_count(attr); j++) {
+				value = X509_ATTRIBUTE_get0_data(attr, j, V_ASN1_SEQUENCE, NULL);
+				if (value == NULL)
+					return 0; /* FAILED */
+				printf("\nSignature Index: %d\n", j + 1);
+				p = value->data;
+				p7nest = d2i_PKCS7(NULL, &p, value->length);
+				nest_ret = msi_verify_pkcs7(p7nest, infile, exdata, exlen, options);
+				if (j == 0 || ret)
+					ret = nest_ret;
+				PKCS7_free(p7nest);
+			}
+			printf("Number of verified signatures: %d\n", j+1);
+		}
+	}
+	return ret;
+}
+
 /*
  * msi_verify_pkcs7 is a helper function for msi_verify_file.
  * It exists to make it easier to implement verification of nested signatures.
  */
 static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
-		size_t exlen, int allownest, GLOBAL_OPTIONS *options)
+		size_t exlen, GLOBAL_OPTIONS *options)
 {
-	int ret = 0, mdok, exok;
+	int ret = 0, nest_ret, mdok, exok;
 	int mdtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
@@ -2488,6 +2501,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	const EVP_MD *md;
 	BIO *hash, *prehash;
+	int allownest = 0;
 
 	if (is_indirect_data_signature(p7)) {
 		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
@@ -2576,22 +2590,13 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 		}
 	}
 #endif
-	printf("\n");
-	ret |= verify_pkcs7(p7, options);
-	printf("\n");
+	ret |= verify_pkcs7(p7, &allownest, options);
 	if (allownest) {
-		int has_sig = 0;
-		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
-		if (p7nest) {
-			int nest_ret = msi_verify_pkcs7(p7nest, infile, exdata, exlen, 0, options);
-			if (ret)
-				ret = nest_ret;
-			PKCS7_free(p7nest);
-		} else if (!p7nest && has_sig) {
-			printf("Failed to decode nested signature!\n");
-			ret = 1;
-		}
+		nest_ret = msi_verify_nested_signature(p7, infile, exdata, exlen, options);
+		if (ret)
+			ret = nest_ret;
 	}
+	printf("\n");
 out:
 	return ret;
 }
@@ -2641,7 +2646,8 @@ static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 	}
 	blob = (unsigned char *)indata;
 	p7 = d2i_PKCS7(NULL, &blob, inlen);
-	ret = msi_verify_pkcs7(p7, infile, exdata, exlen, 1, options);
+	printf("\nSignature Index: 0 (Primary Signature)\n");
+	ret = msi_verify_pkcs7(p7, infile, exdata, exlen, options);
 
 out:
 	OPENSSL_free(indata);
@@ -3037,9 +3043,53 @@ static void pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 }
 
 static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
-			int allownest, GLOBAL_OPTIONS *options)
+		GLOBAL_OPTIONS *options);
+
+static int pe_verify_nested_signature(PKCS7 *p7, char *indata, FILE_HEADER *header,
+		GLOBAL_OPTIONS *options)
 {
-	int ret = 0, mdok;
+	int ret = 0, nest_ret;
+	PKCS7_SIGNER_INFO *si;
+	X509_ATTRIBUTE *attr;
+	ASN1_OBJECT *object;
+	ASN1_STRING *value;
+	const unsigned char *p;
+	PKCS7 *p7nest;
+
+	char object_txt[128];
+	int i, j;
+
+	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+	STACK_OF(X509_ATTRIBUTE) *unauth_attr = PKCS7_get_attributes(si);
+	for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
+		attr = X509at_get_attr(unauth_attr, i);
+		object = X509_ATTRIBUTE_get0_object(attr);
+		object_txt[0] = 0x00;
+		OBJ_obj2txt(object_txt, sizeof(object_txt), object, 1);
+		if (!strcmp(object_txt, SPC_NESTED_SIGNATURE_OBJID)) {
+			/* 1.3.6.1.4.1.311.2.4.1 */
+			for (j=0; j<X509_ATTRIBUTE_count(attr); j++) {
+				value = X509_ATTRIBUTE_get0_data(attr, j, V_ASN1_SEQUENCE, NULL);
+				if (value == NULL)
+					return 0; /* FAILED */
+				printf("\nSignature Index: %d\n", j + 1);
+				p = value->data;
+				p7nest = d2i_PKCS7(NULL, &p, value->length);
+				nest_ret = pe_verify_pkcs7(p7nest, indata, header, options);
+				if (j == 0 || ret)
+					ret = nest_ret;
+				PKCS7_free(p7nest);
+			}
+			printf("Number of verified signatures: %d\n", j+1);
+		}
+	}
+	return ret;
+}
+
+static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
+		GLOBAL_OPTIONS *options)
+{
+	int ret = 0, nest_ret, mdok;
 	int mdtype = -1, phtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
@@ -3048,6 +3098,7 @@ static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	size_t phlen = 0;
 	BIO *bio = NULL;
 	const EVP_MD *md;
+	int allownest = 0;
 
 	if (is_indirect_data_signature(p7)) {
 		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
@@ -3098,21 +3149,14 @@ static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 		OPENSSL_free(cph);
 	}
 
-	ret |= verify_pkcs7(p7, options);
-	printf("\n");
+	ret |= verify_pkcs7(p7, &allownest, options);
 	if (allownest) {
-		int has_sig = 0;
-		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
-		if (p7nest) {
-			int nest_ret = pe_verify_pkcs7(p7nest, indata, header, 0, options);
-			if (ret)
-				ret = nest_ret;
-			PKCS7_free(p7nest);
-		} else if (!p7nest && has_sig) {
-			printf("Failed to decode nested signature!\n");
-			ret = 1;
-		}
+		nest_ret = pe_verify_nested_signature(p7, indata, header, options);
+		if (ret)
+			ret = nest_ret;
 	}
+	printf("\n");
+
 	return ret;
 }
 
@@ -3167,7 +3211,8 @@ static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 		printf("Failed to extract PKCS7 data\n\n");
 		return 1;
 	}
-	ret = pe_verify_pkcs7(p7, indata, header, 1, options);
+	printf("\nSignature Index: 0 (Primary Signature)\n");
+	ret = pe_verify_pkcs7(p7, indata, header, options);
 	PKCS7_free(p7);
 	return ret;
 }
@@ -3440,9 +3485,53 @@ static int cab_calc_digest(BIO *bio, const EVP_MD *md, unsigned char *mdbuf, siz
 }
 
 static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
-			int allownest, GLOBAL_OPTIONS *options)
+		GLOBAL_OPTIONS *options);
+
+static int cab_verify_nested_signature(PKCS7 *p7, char *indata, FILE_HEADER *header,
+		GLOBAL_OPTIONS *options)
 {
-	int ret = 0, mdok;
+	int ret = 0, nest_ret;
+	PKCS7_SIGNER_INFO *si;
+	X509_ATTRIBUTE *attr;
+	ASN1_OBJECT *object;
+	ASN1_STRING *value;
+	const unsigned char *p;
+	PKCS7 *p7nest;
+
+	char object_txt[128];
+	int i, j;
+
+	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+	STACK_OF(X509_ATTRIBUTE) *unauth_attr = PKCS7_get_attributes(si);
+	for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
+		attr = X509at_get_attr(unauth_attr, i);
+		object = X509_ATTRIBUTE_get0_object(attr);
+		object_txt[0] = 0x00;
+		OBJ_obj2txt(object_txt, sizeof(object_txt), object, 1);
+		if (!strcmp(object_txt, SPC_NESTED_SIGNATURE_OBJID)) {
+			/* 1.3.6.1.4.1.311.2.4.1 */
+			for (j=0; j<X509_ATTRIBUTE_count(attr); j++) {
+				value = X509_ATTRIBUTE_get0_data(attr, j, V_ASN1_SEQUENCE, NULL);
+				if (value == NULL)
+					return 0; /* FAILED */
+				printf("\nSignature Index: %d\n", j + 1);
+				p = value->data;
+				p7nest = d2i_PKCS7(NULL, &p, value->length);
+				nest_ret = cab_verify_pkcs7(p7nest, indata, header, options);
+				if (j == 0 || ret)
+					ret = nest_ret;
+				PKCS7_free(p7nest);
+			}
+			printf("Number of verified signatures: %d\n", j+1);
+		}
+	}
+	return ret;
+}
+
+static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
+		GLOBAL_OPTIONS *options)
+{
+	int ret = 0, nest_ret, mdok;
 	int mdtype = -1, phtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
@@ -3451,6 +3540,7 @@ static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	size_t phlen = 0;
 	BIO *bio = NULL;
 	const EVP_MD *md;
+	int allownest = 0;
 
 	if (is_indirect_data_signature(p7)) {
 		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
@@ -3485,21 +3575,14 @@ static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 		ret = 1; /* FAILED */
 	printf("Calculated message digest : %s%s\n\n", hexbuf, mdok?"":"    MISMATCH!!!");
 
-	ret |= verify_pkcs7(p7, options);
-	printf("\n");
+	ret |= verify_pkcs7(p7, &allownest, options);
 	if (allownest) {
-		int has_sig = 0;
-		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
-		if (p7nest) {
-			int nest_ret = cab_verify_pkcs7(p7nest, indata, header, 0, options);
-			if (ret)
-				ret = nest_ret;
-			PKCS7_free(p7nest);
-		} else if (!p7nest && has_sig) {
-			printf("Failed to decode nested signature!\n");
-			ret = 1;
-		}
+		nest_ret = cab_verify_nested_signature(p7, indata, header, options);
+		if (ret)
+			ret = nest_ret;
 	}
+	printf("\n");
+
 	return ret;
 }
 
@@ -3527,7 +3610,8 @@ static int cab_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *op
 		printf("Failed to extract PKCS7 data\n\n");
 		return 1; /* FAILED */
 	}
-	ret |= cab_verify_pkcs7(p7, indata, header, 1, options);
+	printf("\nSignature Index: 0 (Primary Signature)\n");
+	ret = cab_verify_pkcs7(p7, indata, header, options);
 	PKCS7_free(p7);
 	return ret;
 }
