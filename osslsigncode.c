@@ -2036,14 +2036,17 @@ static int TST_verify(PKCS7 *tmstamp_p7, PKCS7_SIGNER_INFO *si)
 }
 
 static int append_attribute(STACK_OF(X509_ATTRIBUTE) **unauth_attr, int nid,
-		int atrtype, void *value, u_char *p, int len)
+		int atrtype, u_char *p, int len)
 {
 	X509_ATTRIBUTE *attr = NULL;
+	ASN1_STRING *value;
 
 	if (*unauth_attr == NULL) {
 		if ((*unauth_attr = sk_X509_ATTRIBUTE_new_null()) == NULL)
 			return 0;
 new_attrib:
+		value = ASN1_STRING_new();
+		ASN1_STRING_set(value, p, len);
 		if ((attr = X509_ATTRIBUTE_create(nid, atrtype, value)) == NULL)
 			return 0;
 		if (!sk_X509_ATTRIBUTE_push(*unauth_attr, attr)) {
@@ -2076,7 +2079,6 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 {
 	u_char *p = NULL;
 	int len = 0;
-	ASN1_STRING *astr;
 	PKCS7_SIGNER_INFO *si;
 
 	if (((len = i2d_PKCS7(p7nest, NULL)) <= 0) ||
@@ -2084,14 +2086,14 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 		return 0;
 	i2d_PKCS7(p7nest, &p);
 	p -= len;
-	astr = ASN1_STRING_new();
-	ASN1_STRING_set(astr, p, len);
 
 	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
 	pkcs7_add_signing_time(si, signing_time);
 	if (!append_attribute(&(si->unauth_attr), OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID),
-				V_ASN1_SEQUENCE, astr, p, len))
+				V_ASN1_SEQUENCE, p, len)) {
+		OPENSSL_free(p);
 		return 0;
+	}
 	OPENSSL_free(p);
 
 	return 1;
@@ -2488,12 +2490,12 @@ static int msi_verify_nested_signature(PKCS7 *p7, GsfInfile *infile, unsigned ch
 	ASN1_STRING *value;
 	const unsigned char *p;
 	PKCS7 *p7nest;
-
+	STACK_OF(X509_ATTRIBUTE) *unauth_attr;
 	char object_txt[128];
 	int i, j;
 
 	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-	STACK_OF(X509_ATTRIBUTE) *unauth_attr = PKCS7_get_attributes(si);
+	unauth_attr = PKCS7_get_attributes(si);
 	for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
 		attr = X509at_get_attr(unauth_attr, i);
 		object = X509_ATTRIBUTE_get0_object(attr);
@@ -2588,6 +2590,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 			goto out;
 		}
 		BIO_gets(prehash, (char*)cexmdbuf, EVP_MAX_MD_SIZE);
+		BIO_free_all(prehash);
 		BIO_write(hash, (char*)cexmdbuf, EVP_MD_size(md));
 #else
 		BIO_write(hash, (char *)exdata, EVP_MD_size(md));
@@ -2598,6 +2601,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 		goto out;
 	}
 	BIO_gets(hash, (char*)cmdbuf, EVP_MAX_MD_SIZE);
+	BIO_free_all(hash);
 	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
 	mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
 	if (!mdok)
@@ -2607,7 +2611,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 		printf("\n");
 	} else {
 		tohex(mdbuf, hexbuf, EVP_MD_size(md));
-		printf("    MISMATCH!!! FILE HAS %s\n", hexbuf);
+		printf("    MISMATCH!!!\n\t\t\tFILE HAS : %s\n", hexbuf);
 	}
 
 #ifdef GSF_CAN_READ_MSI_METADATA
@@ -2620,8 +2624,8 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 		if (exok) {
 			printf("\n");
 		} else {
-			tohex(exdata, hexbuf, EVP_MD_size(md));
-			printf("    MISMATCH!!! FILE HAS %s\n", hexbuf);
+			tohex(exdata, hexbuf, MIN((size_t)EVP_MD_size(md), exlen));
+			printf("    MISMATCH!!!\n\t\t\tFILE HAS : %s\n", hexbuf);
 		}
 	}
 #endif
@@ -2951,10 +2955,13 @@ static int msi_calc_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md,
 
 	if (!msi_prehash(ole, NULL, prehash)) {
 		fprintf(stderr, "Unable to calculate MSI pre-hash ('metadata') hash\n");
+		BIO_free_all(prehash);
 		return 0; /* FAILED */
 	}
+	gsfparams->p_msiex = OPENSSL_malloc(EVP_MAX_MD_SIZE);
 	gsfparams->len_msiex = BIO_gets(prehash, (char*)gsfparams->p_msiex, EVP_MAX_MD_SIZE);
 	BIO_write(hash, gsfparams->p_msiex, gsfparams->len_msiex);
+	BIO_free_all(prehash);
 	return 1; /* OK */
 }
 
@@ -2979,6 +2986,7 @@ static int msi_add_MsiDigitalSignatureEx(GsfOutfile *outole, GSF_PARAMS *gsfpara
 	if (!gsf_output_write(child, gsfparams->len_msiex, gsfparams->p_msiex))
 		ret = 0;
 	gsf_output_close(child);
+	OPENSSL_free(gsfparams->p_msiex);
 	return ret;
 }
 
@@ -3090,12 +3098,12 @@ static int pe_verify_nested_signature(PKCS7 *p7, char *indata, FILE_HEADER *head
 	ASN1_STRING *value;
 	const unsigned char *p;
 	PKCS7 *p7nest;
-
+	STACK_OF(X509_ATTRIBUTE) *unauth_attr;
 	char object_txt[128];
 	int i, j;
 
 	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-	STACK_OF(X509_ATTRIBUTE) *unauth_attr = PKCS7_get_attributes(si);
+	unauth_attr = PKCS7_get_attributes(si);
 	for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
 		attr = X509at_get_attr(unauth_attr, i);
 		object = X509_ATTRIBUTE_get0_object(attr);
@@ -3532,12 +3540,12 @@ static int cab_verify_nested_signature(PKCS7 *p7, char *indata, FILE_HEADER *hea
 	ASN1_STRING *value;
 	const unsigned char *p;
 	PKCS7 *p7nest;
-
+	STACK_OF(X509_ATTRIBUTE) *unauth_attr;
 	char object_txt[128];
 	int i, j;
 
 	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-	STACK_OF(X509_ATTRIBUTE) *unauth_attr = PKCS7_get_attributes(si);
+	unauth_attr = PKCS7_get_attributes(si);
 	for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
 		attr = X509at_get_attr(unauth_attr, i);
 		object = X509_ATTRIBUTE_get0_object(attr);
@@ -4737,7 +4745,6 @@ static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 
 	BIO_push(hash, BIO_new(BIO_s_null()));
 	if (options->add_msi_dse) {
-		gsfparams->p_msiex = malloc(EVP_MAX_MD_SIZE);
 		if (!msi_calc_MsiDigitalSignatureEx(ole, options->md, hash, gsfparams))
 			return NULL; /* FAILED */
 	}
@@ -5119,7 +5126,7 @@ int main(int argc, char **argv)
 		if (!src)
 			DO_EXIT_1("Error opening file %s\n", options.infile);
 		ole = gsf_infile_msole_new(src, NULL);
-
+		g_object_unref(src);
 		if (cmd == CMD_EXTRACT) {
 			ret = msi_extract_file(ole, &options);
 			goto skip_signing;
@@ -5137,6 +5144,7 @@ int main(int argc, char **argv)
 			} else if (!sig)
 				goto err_cleanup;
 		}
+		g_object_unref(ole);
 	}
 #endif /* WITH_GSF */
 
