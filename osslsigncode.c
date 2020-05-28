@@ -2035,6 +2035,39 @@ static int TST_verify(PKCS7 *tmstamp_p7, PKCS7_SIGNER_INFO *si)
 	return 1; /* OK */
 }
 
+static int append_attribute(STACK_OF(X509_ATTRIBUTE) **unauth_attr, int nid,
+		int atrtype, void *value, u_char *p, int len)
+{
+	X509_ATTRIBUTE *attr = NULL;
+
+	if (*unauth_attr == NULL) {
+		if ((*unauth_attr = sk_X509_ATTRIBUTE_new_null()) == NULL)
+			return 0;
+new_attrib:
+		if ((attr = X509_ATTRIBUTE_create(nid, atrtype, value)) == NULL)
+			return 0;
+		if (!sk_X509_ATTRIBUTE_push(*unauth_attr, attr)) {
+			X509_ATTRIBUTE_free(attr);
+			return 0;
+		}
+	} else {
+		int i;
+		for (i = 0; i < sk_X509_ATTRIBUTE_num(*unauth_attr); i++) {
+			attr = sk_X509_ATTRIBUTE_value(*unauth_attr, i);
+			if (OBJ_obj2nid(X509_ATTRIBUTE_get0_object(attr)) == nid) {
+				if (!X509_ATTRIBUTE_set1_data(attr, V_ASN1_SEQUENCE, p, len))
+					return 0;
+				if (!sk_X509_ATTRIBUTE_set(*unauth_attr, i, attr))
+					return 0;
+				goto end;
+			}
+		}
+		goto new_attrib;
+	}
+end:
+	return 1;
+}
+
 /*
  * pkcs7_set_nested_signature adds the p7nest signature to p7
  * as a nested signature (SPC_NESTED_SIGNATURE).
@@ -2053,12 +2086,14 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 	p -= len;
 	astr = ASN1_STRING_new();
 	ASN1_STRING_set(astr, p, len);
-	OPENSSL_free(p);
 
 	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
 	pkcs7_add_signing_time(si, signing_time);
-	if (PKCS7_add_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID), V_ASN1_SEQUENCE, astr) == 0)
+	if (!append_attribute(&(si->unauth_attr), OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID),
+				V_ASN1_SEQUENCE, astr, p, len))
 		return 0;
+	OPENSSL_free(p);
+
 	return 1;
 }
 
@@ -2646,7 +2681,7 @@ static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 	}
 	blob = (unsigned char *)indata;
 	p7 = d2i_PKCS7(NULL, &blob, inlen);
-	printf("\nSignature Index: 0 (Primary Signature)\n");
+	printf("Signature Index: 0 (Primary Signature)\n");
 	ret = msi_verify_pkcs7(p7, infile, exdata, exlen, options);
 
 out:
@@ -3211,7 +3246,7 @@ static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 		printf("Failed to extract PKCS7 data\n\n");
 		return 1;
 	}
-	printf("\nSignature Index: 0 (Primary Signature)\n");
+	printf("Signature Index: 0 (Primary Signature)\n");
 	ret = pe_verify_pkcs7(p7, indata, header, options);
 	PKCS7_free(p7);
 	return ret;
@@ -3610,7 +3645,7 @@ static int cab_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *op
 		printf("Failed to extract PKCS7 data\n\n");
 		return 1; /* FAILED */
 	}
-	printf("\nSignature Index: 0 (Primary Signature)\n");
+	printf("Signature Index: 0 (Primary Signature)\n");
 	ret = cab_verify_pkcs7(p7, indata, header, options);
 	PKCS7_free(p7);
 	return ret;
