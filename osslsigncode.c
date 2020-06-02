@@ -257,6 +257,8 @@ typedef struct {
 	X509 *cert;
 	STACK_OF(X509) *certs;
 	STACK_OF(X509) *xcerts;
+	ENGINE *dynamic;
+	ENGINE *pkcs11;
 } CRYPTO_PARAMS;
 
 #ifdef WITH_GSF
@@ -4320,7 +4322,6 @@ static int read_crypto_params(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 	PKCS7 *p7 = NULL, *p7x = NULL;
 	BIO *btmp;
 	const int CMD_MANDATORY = 0;
-	ENGINE *dyn, *pkcs11;
 	int ret = 1;
 
 	/* reset crypto */
@@ -4358,48 +4359,48 @@ static int read_crypto_params(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 	} else if (options->p11module != NULL) {
 		if (options->p11engine != NULL) {
 			ENGINE_load_dynamic();
-			dyn = ENGINE_by_id("dynamic");
-			if (!dyn) {
+			cparams->dynamic = ENGINE_by_id("dynamic");
+			if (!cparams->dynamic) {
 				fprintf(stderr, "Failed to load 'dynamic' engine\n");
 				ret = 0; /* FAILED */
 			}
-			if (1 != ENGINE_ctrl_cmd_string(dyn, "SO_PATH", options->p11engine, CMD_MANDATORY)) {
+			if (1 != ENGINE_ctrl_cmd_string(cparams->dynamic, "SO_PATH", options->p11engine, CMD_MANDATORY)) {
 				fprintf(stderr, "Failed to set dyn SO_PATH to '%s'\n", options->p11engine);
 				ret = 0; /* FAILED */
 			}
-			if (1 != ENGINE_ctrl_cmd_string(dyn, "ID", "pkcs11", CMD_MANDATORY)) {
+			if (1 != ENGINE_ctrl_cmd_string(cparams->dynamic, "ID", "pkcs11", CMD_MANDATORY)) {
 				fprintf(stderr, "Failed to set dyn ID to 'pkcs11'\n");
 				ret = 0; /* FAILED */
 			}
-			if (1 != ENGINE_ctrl_cmd(dyn, "LIST_ADD", 1, NULL, NULL, CMD_MANDATORY)) {
+			if (1 != ENGINE_ctrl_cmd(cparams->dynamic, "LIST_ADD", 1, NULL, NULL, CMD_MANDATORY)) {
 				fprintf(stderr, "Failed to set dyn LIST_ADD to '1'\n");
 				ret = 0; /* FAILED */
 			}
-			if (1 != ENGINE_ctrl_cmd(dyn, "LOAD", 1, NULL, NULL, CMD_MANDATORY)) {
+			if (1 != ENGINE_ctrl_cmd(cparams->dynamic, "LOAD", 1, NULL, NULL, CMD_MANDATORY)) {
 				fprintf(stderr, "Failed to set dyn LOAD to '1'\n");
 				ret = 0; /* FAILED */
 			}
 		} else
 			ENGINE_load_builtin_engines();
-		pkcs11 = ENGINE_by_id("pkcs11");
-		if (!pkcs11) {
+		cparams->pkcs11 = ENGINE_by_id("pkcs11");
+		if (!cparams->pkcs11) {
 			fprintf(stderr, "Failed to find and load pkcs11 engine\n");
 			ret = 0; /* FAILED */
 		}
-		if (1 != ENGINE_ctrl_cmd_string(pkcs11, "MODULE_PATH", options->p11module, CMD_MANDATORY)) {
+		if (1 != ENGINE_ctrl_cmd_string(cparams->pkcs11, "MODULE_PATH", options->p11module, CMD_MANDATORY)) {
 			fprintf(stderr, "Failed to set pkcs11 engine MODULE_PATH to '%s'\n", options->p11module);
 			ret = 0; /* FAILED */
 		}
 		if (options->pass != NULL &&
-				1 != ENGINE_ctrl_cmd_string(pkcs11, "PIN", options->pass, CMD_MANDATORY)) {
+				1 != ENGINE_ctrl_cmd_string(cparams->pkcs11, "PIN", options->pass, CMD_MANDATORY)) {
 			fprintf(stderr, "Failed to set pkcs11 PIN\n");
 			ret = 0; /* FAILED */
 		}
-		if (1 != ENGINE_init(pkcs11)) {
+		if (1 != ENGINE_init(cparams->pkcs11)) {
 			fprintf(stderr, "Failed to initialized pkcs11 engine\n");
 			ret = 0; /* FAILED */
 		}
-		cparams->pkey = ENGINE_load_private_key(pkcs11, options->keyfile, NULL, NULL);
+		cparams->pkey = ENGINE_load_private_key(cparams->pkcs11, options->keyfile, NULL, NULL);
 		if (cparams->pkey == NULL) {
 			fprintf(stderr, "Failed to load private key %s\n", options->keyfile);
 			ret = 0; /* FAILED */
@@ -4469,6 +4470,20 @@ static void free_crypto_params(CRYPTO_PARAMS *cparams, GLOBAL_OPTIONS *options)
 	if (options->xcertfile) {
 		sk_X509_pop_free(cparams->xcerts, X509_free);
 		cparams->xcerts = NULL;
+	}
+
+	if (cparams->pkcs11) {
+		/* Free the functional reference from ENGINE_init. */
+		ENGINE_finish(cparams->pkcs11);
+		/* Free the structural reference from ENGINE_by_id. */
+		ENGINE_free(cparams->pkcs11);
+	}
+	if (cparams->dynamic) {
+		/*
+		 * Free the structural reference from ENGINE_by_id.
+		 * Note: We do not ENGINE_init the dynamic engine, so we are not responsible to ENGINE_finish it.
+		 */
+		ENGINE_free(cparams->dynamic);
 	}
 }
 
