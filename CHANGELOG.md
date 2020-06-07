@@ -1,3 +1,11 @@
+### 2.1 (unreleased)
+- added certificate chain verification
+- added timestamp verification
+- improved CAB signature support
+- added more tests
+- fixed numerous bugs
+- dropped OpenSSL 1.1.0 support
+
 ### 2.0 (2018-12-04)
 
 - orphaned project adopted by Michał Trojnara
