@@ -4476,9 +4476,6 @@ static int read_crypto_params(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 	const int CMD_MANDATORY = 0;
 	int ret = 1;
 
-	/* reset crypto */
-	memset(cparams, 0, sizeof(CRYPTO_PARAMS));
-
 	options->pvkfile = read_key(options);
 	if (options->pkcs12file != NULL) {
 		if ((btmp = BIO_new_file(options->pkcs12file, "rb")) == NULL ||
@@ -5129,6 +5126,9 @@ int main(int argc, char **argv)
 		goto err_cleanup;
 	if (!read_password(&options))
 		goto err_cleanup;
+
+	/* reset crypto */
+	memset(&cparams, 0, sizeof(CRYPTO_PARAMS));
 	/* read key and certificates */
 	if (cmd == CMD_SIGN && !read_crypto_params(&options, &cparams))
 		goto err_cleanup;
