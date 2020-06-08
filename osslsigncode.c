@@ -2693,6 +2693,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 			goto out;
 		}
 		BIO_gets(prehash, (char*)cexmdbuf, EVP_MAX_MD_SIZE);
+		BIO_free_all(prehash);
 		BIO_write(hash, (char*)cexmdbuf, EVP_MD_size(md));
 #else
 		BIO_write(hash, (char *)exdata, EVP_MD_size(md));
@@ -2703,6 +2704,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 		goto out;
 	}
 	BIO_gets(hash, (char*)cmdbuf, EVP_MAX_MD_SIZE);
+	BIO_free_all(hash);
 	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
 	mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
 	if (!mdok)
@@ -2712,7 +2714,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 		printf("\n");
 	} else {
 		tohex(mdbuf, hexbuf, EVP_MD_size(md));
-		printf("    MISMATCH!!! FILE HAS %s\n", hexbuf);
+		printf("    MISMATCH!!!\n\t\t\tFILE HAS : %s\n", hexbuf);
 	}
 
 #ifdef GSF_CAN_READ_MSI_METADATA
@@ -2725,8 +2727,8 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 		if (exok) {
 			printf("\n");
 		} else {
-			tohex(exdata, hexbuf, EVP_MD_size(md));
-			printf("    MISMATCH!!! FILE HAS %s\n", hexbuf);
+			tohex(exdata, hexbuf, MIN((size_t)EVP_MD_size(md), exlen));
+			printf("    MISMATCH!!!\n\t\t\tFILE HAS : %s\n", hexbuf);
 		}
 	}
 #endif
@@ -3064,10 +3066,13 @@ static int msi_calc_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md,
 
 	if (!msi_prehash(ole, NULL, prehash)) {
 		fprintf(stderr, "Unable to calculate MSI pre-hash ('metadata') hash\n");
+		BIO_free_all(prehash);
 		return 0; /* FAILED */
 	}
+	gsfparams->p_msiex = OPENSSL_malloc(EVP_MAX_MD_SIZE);
 	gsfparams->len_msiex = BIO_gets(prehash, (char*)gsfparams->p_msiex, EVP_MAX_MD_SIZE);
 	BIO_write(hash, gsfparams->p_msiex, gsfparams->len_msiex);
+	BIO_free_all(prehash);
 	return 1; /* OK */
 }
 
@@ -3092,6 +3097,7 @@ static int msi_add_MsiDigitalSignatureEx(GsfOutfile *outole, GSF_PARAMS *gsfpara
 	if (!gsf_output_write(child, gsfparams->len_msiex, gsfparams->p_msiex))
 		ret = 0;
 	gsf_output_close(child);
+	OPENSSL_free(gsfparams->p_msiex);
 	return ret;
 }
 
@@ -4749,12 +4755,15 @@ static PKCS7 *get_pkcs7(cmd_type_t cmd, BIO *hash, file_type_t type, char *indat
  * Prepare the output file for signing
  */
 #ifdef WITH_GSF
+
+
 static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *header,
 			GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams, char *indata,
 			BIO *hash, GsfInfile *ole, GSF_PARAMS *gsfparams, PKCS7 **cursig)
 {
 	PKCS7 *sig = NULL;
 
+	/* Obtain a current signature from previously-signed file */
 	if ((cmd == CMD_SIGN && options->nest) ||
 			(cmd == CMD_ATTACH && options->nest) || cmd == CMD_ADD) {
 		if (!msi_check_MsiDigitalSignatureEx(ole, options->md))
@@ -4767,6 +4776,7 @@ static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 		if (cmd == CMD_ADD)
 			sig = *cursig;
 	}
+
 	/* Create outdata MSI file */
 	if (!access(options->outfile, R_OK)) {
 		/* outdata file exists */
@@ -4781,15 +4791,13 @@ static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 	gsfparams->outole = gsf_outfile_msole_new(gsfparams->sink);
 
 	BIO_push(hash, BIO_new(BIO_s_null()));
-	if (options->add_msi_dse) {
-		gsfparams->p_msiex = malloc(EVP_MAX_MD_SIZE);
-		if (!msi_calc_MsiDigitalSignatureEx(ole, options->md, hash, gsfparams))
-			return NULL; /* FAILED */
-	}
+	if (options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ole, options->md, hash, gsfparams))
+		return NULL; /* FAILED */
 	if (!msi_handle_dir(ole, gsfparams->outole, hash)) {
 		fprintf(stderr, "Unable to msi_handle_dir()\n");
 		return NULL; /* FAILED */
 	}
+	/* Obtain an existing signature or create a new one */
 	if ((cmd == CMD_ATTACH) || (cmd == CMD_SIGN))
 		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams);
 	return sig; /* OK */
@@ -4802,6 +4810,7 @@ static PKCS7 *pe_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *hea
 {
 	PKCS7 *sig = NULL;
 
+	/* Obtain a current signature from previously-signed file */
 	if ((cmd == CMD_SIGN && options->nest) ||
 			(cmd == CMD_ATTACH && options->nest) || cmd == CMD_ADD) {
 		*cursig = pe_extract_existing_pkcs7(indata, header);
@@ -4817,6 +4826,7 @@ static PKCS7 *pe_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *hea
 		header->fileend = header->sigpos;
 	}
 	pe_modify_header(indata, header, hash, outdata);
+	/* Obtain an existing signature or create a new one */
 	if ((cmd == CMD_ATTACH) || (cmd == CMD_SIGN))
 		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams);
 	return sig; /* OK */
@@ -4828,6 +4838,7 @@ static PKCS7 *cab_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 {
 	PKCS7 *sig = NULL;
 
+	/* Obtain a current signature from previously-signed file */
 	if ((cmd == CMD_SIGN && options->nest) ||
 			(cmd == CMD_ATTACH && options->nest) || cmd == CMD_ADD) {
 		*cursig = cab_extract_existing_pkcs7(indata, header);
@@ -4843,6 +4854,7 @@ static PKCS7 *cab_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 		cab_modify_header(indata, header, hash, outdata);
 	else
 		cab_add_header(indata, header, hash, outdata);
+	/* Obtain an existing signature or create a new one */
 	if ((cmd == CMD_ATTACH) || (cmd == CMD_SIGN))
 		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams);
 	return sig; /* OK */
@@ -5167,6 +5179,7 @@ int main(int argc, char **argv)
 		if (!src)
 			DO_EXIT_1("Error opening file %s\n", options.infile);
 		ole = gsf_infile_msole_new(src, NULL);
+		g_object_unref(src);
 
 		if (cmd == CMD_EXTRACT) {
 			ret = msi_extract_file(ole, &options);
@@ -5182,9 +5195,13 @@ int main(int argc, char **argv)
 				g_object_unref(gsfparams.sink);
 				ret = 0;
 				goto skip_signing;
-			} else if (!sig)
+			} else if (!sig) {
+				PKCS7_free(cursig);
+				OPENSSL_free(gsfparams.p_msiex);
 				goto err_cleanup;
+			}
 		}
+		g_object_unref(ole);
 	}
 #endif /* WITH_GSF */
 
