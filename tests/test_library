@@ -118,6 +118,7 @@ verify_signature() {
       if test "$4" = "success" -a "$result" -eq 0
         then
           rm -f "test_$2.$3" "test_$2_signed.$3" "test_$2_modifed.$3" "test_$2_changed.$3"
+          rm -f "test_$2_a.$3" "test_$2_b.$3"
           result=0
         elif test "$4" = "fail" -a "$result" -eq 1
           then
