@@ -171,7 +171,6 @@ typedef unsigned char u_char;
 #define SPC_AUTHENTICODE_COUNTER_SIGNATURE_OBJID "1.2.840.113549.1.9.6"
 #define SPC_UNAUTHENTICATED_DATA_BLOB_OBJID      "1.3.6.1.4.1.42921.1.2.1"
 #define SPC_TIMESTAMP_SIGNING_TIME_OBJID         "1.2.840.113549.1.9.5"
-#define SPC_SIGNING_TIME_OBJID                   "1.2.840.113549.1.9.5"
 
 /* 1.3.6.1.4.1.311.4... MS Crypto 2.0 stuff... */
 
@@ -2177,6 +2176,40 @@ static PKCS7 *pkcs7_get_nested_signature(PKCS7 *p7, int *has_sig)
 	return ret;
 }
 
+static int append_attribute(STACK_OF(X509_ATTRIBUTE) **unauth_attr, int nid,
+		int atrtype, u_char *p, int len)
+{
+	X509_ATTRIBUTE *attr = NULL;
+	ASN1_STRING *value;
+
+	if (*unauth_attr == NULL) {
+		if ((*unauth_attr = sk_X509_ATTRIBUTE_new_null()) == NULL)
+			return 0; /* FAILED */
+	} else {
+		int i;
+		for (i = 0; i < sk_X509_ATTRIBUTE_num(*unauth_attr); i++) {
+			attr = sk_X509_ATTRIBUTE_value(*unauth_attr, i);
+			if (OBJ_obj2nid(X509_ATTRIBUTE_get0_object(attr)) == nid) {
+				if (!X509_ATTRIBUTE_set1_data(attr, V_ASN1_SEQUENCE, p, len))
+					return 0; /* FAILED */
+				if (!sk_X509_ATTRIBUTE_set(*unauth_attr, i, attr))
+					return 0; /* FAILED */
+				goto end;
+			}
+		}
+	}
+	value = ASN1_STRING_new();
+	ASN1_STRING_set(value, p, len);
+	if ((attr = X509_ATTRIBUTE_create(nid, atrtype, value)) == NULL)
+		return 0; /* FAILED */
+	if (!sk_X509_ATTRIBUTE_push(*unauth_attr, attr)) {
+		X509_ATTRIBUTE_free(attr);
+		return 0; /* FAILED */
+	}
+end:
+	return 1; /* OK */
+}
+
 /*
  * pkcs7_set_nested_signature adds the p7nest signature to p7
  * as a nested signature (SPC_NESTED_SIGNATURE).
@@ -2185,7 +2218,6 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 {
 	u_char *p = NULL;
 	int len = 0;
-	ASN1_STRING *astr;
 	PKCS7_SIGNER_INFO *si;
 
 	if (((len = i2d_PKCS7(p7nest, NULL)) <= 0) ||
@@ -2193,14 +2225,15 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 		return 0;
 	i2d_PKCS7(p7nest, &p);
 	p -= len;
-	astr = ASN1_STRING_new();
-	ASN1_STRING_set(astr, p, len);
-	OPENSSL_free(p);
 
 	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
 	pkcs7_add_signing_time(si, signing_time);
-	if (PKCS7_add_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID), V_ASN1_SEQUENCE, astr) == 0)
+	if (!append_attribute(&(si->unauth_attr), OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID),
+				V_ASN1_SEQUENCE, p, len)) {
+		OPENSSL_free(p);
 		return 0;
+	}
+	OPENSSL_free(p);
 	return 1;
 }
 
