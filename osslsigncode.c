@@ -198,6 +198,16 @@ typedef unsigned char u_char;
 
 #define INVALID_TIME ((time_t)-1)
 
+typedef struct SIGNATURE_LIST_st {
+	PKCS7 *p7;
+	CMS_ContentInfo *timestamp;
+	time_t time;
+	ASN1_STRING *blob;
+} SIGNATURE_LIST;
+
+DEFINE_STACK_OF(SIGNATURE_LIST)
+DECLARE_ASN1_FUNCTIONS(SIGNATURE_LIST)
+
 typedef struct {
 	char *infile;
 	char *outfile;
@@ -1979,86 +1989,134 @@ out:
 	return cms;
 }
 
-static int pkcs7_print_attributes(PKCS7_SIGNED *p7_signed, CMS_ContentInfo **timestamp,
-		time_t *time, int verbose)
+static int print_attributes(SIGNATURE_LIST *signature, int verbose)
 {
-	PKCS7_SIGNER_INFO *si;
+	if (signature->timestamp)
+		if (!cms_print_timestamp(signature->timestamp, signature->time))
+			return 0; /* FAILED */
+	if (signature->blob) {
+		if (verbose) {
+			char *data_blob;
+			data_blob = OPENSSL_buf2hexstr(signature->blob->data, signature->blob->length);
+			printf("\nUnauthenticated Data Blob:\n%s\n", data_blob);
+			OPENSSL_free(data_blob);
+		}
+		printf("\nUnauthenticated Data Blob length: %d bytes\n",signature->blob->length);
+	}
+	return 1; /* OK */
+}
+
+static int append_signature_list(STACK_OF(SIGNATURE_LIST) **signatures, PKCS7 *p7, int allownest)
+{
+	SIGNATURE_LIST *signature = NULL;
+	PKCS7_SIGNER_INFO *si, *countersi;
 	STACK_OF(X509_ATTRIBUTE) *unauth_attr;
 	X509_ATTRIBUTE *attr;
 	ASN1_OBJECT *object;
 	ASN1_STRING *value;
 	char object_txt[128];
 	const unsigned char *data;
-	PKCS7_SIGNER_INFO *countersi;
-	int i;
+	int i, j;
 
-	si = sk_PKCS7_SIGNER_INFO_value(p7_signed->signer_info, 0);
+	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
 	if (si == NULL)
 		return 0; /* FAILED */
+
+	signature = OPENSSL_malloc(sizeof(SIGNATURE_LIST));
+	signature->p7 = p7;
+	signature->timestamp = NULL;
+	signature->time = INVALID_TIME;
+	signature->blob = NULL;
 
 	unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
 	if (unauth_attr)
 		for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
 			attr = X509at_get_attr(unauth_attr, i);
 			if (attr == NULL)
-				return 0; /* FAILED */
+				continue;
 			object = X509_ATTRIBUTE_get0_object(attr);
 			if (object == NULL)
-				return 0; /* FAILED */
+				continue;
 			object_txt[0] = 0x00;
 			OBJ_obj2txt(object_txt, sizeof(object_txt), object, 1);
 			if (!strcmp(object_txt, SPC_AUTHENTICODE_COUNTER_SIGNATURE_OBJID)) {
 				/* 1.2.840.113549.1.9.6 */
-				printf("\nAuthenticode Timestamp\nPolicy OID: %s\n", object_txt);
+				/* Authenticode Timestamp - Policy OID: 1.2.840.113549.1.9.6 */
+				CMS_ContentInfo *timestamp = NULL;
+				time_t time;
 				value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
 				if (value == NULL)
-					return 0; /* FAILED */
+					continue;
 				data = value->data;
 				countersi = d2i_PKCS7_SIGNER_INFO(NULL, &data, value->length);
 				if (countersi == NULL)
-					return 0; /* FAILED */
-				*time = si_get_time(countersi);
-				*timestamp = cms_get_timestamp(p7_signed, countersi);
-				if (*timestamp == NULL) {
-					printf("Error: Authenticode Timestamp could not be decoded correctly\n");
-					ERR_print_errors_fp(stdout);
-					return 0; /* FAILED */
+					continue;
+				time = si_get_time(countersi);
+				if (time != INVALID_TIME) {
+					timestamp = cms_get_timestamp(p7->d.sign, countersi);
+					if (timestamp) {
+						signature->time = time;
+						signature->timestamp = timestamp;
+					} else {
+						fprintf(stderr, "Error: Authenticode Timestamp could not be decoded correctly\n\n");
+						PKCS7_SIGNER_INFO_free(countersi);
+					}
+				} else {
+					fprintf(stderr, "Error: SPC_TIMESTAMP_SIGNING_TIME_OBJID attribute not found\n\n");
+					PKCS7_SIGNER_INFO_free(countersi);
 				}
-				(void)cms_print_timestamp(*timestamp, *time);
 			} else if (!strcmp(object_txt, SPC_RFC3161_OBJID)) {
-				/* 1.3.6.1.4.1.311.3.3.1 */
-				printf("\nRFC3161 Timestamp\nPolicy OID: %s\n", object_txt);
+				/* RFC3161 Timestamp - Policy OID: 1.3.6.1.4.1.311.3.3.1 */
+				CMS_ContentInfo *timestamp = NULL;
+				time_t time;
 				value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
 				if (value == NULL)
-					return 0; /* FAILED */
+					continue;
 				data = value->data;
-				*timestamp = d2i_CMS_ContentInfo(NULL, &data, value->length);
-				if (*timestamp == NULL) {
-					printf("Error: RFC3161 Timestamp could not be decoded correctly\n");
-					ERR_print_errors_fp(stdout);
-					return 0; /* FAILED */
+				timestamp = d2i_CMS_ContentInfo(NULL, &data, value->length);
+				if (timestamp) {
+					time = cms_get_time(timestamp);
+					if (time != INVALID_TIME) {
+						signature->time = time;
+						signature->timestamp = timestamp;
+					} else {
+						fprintf(stderr, "Error: Corrupt RFC3161 Timestamp embedded content\n\n");
+						ERR_print_errors_fp(stderr);
+					}
+				} else {
+					fprintf(stderr, "Error: RFC3161 Timestamp could not be decoded correctly\n\n");
+					ERR_print_errors_fp(stderr);
 				}
-				*time = cms_get_time(*timestamp);
-				(void)cms_print_timestamp(*timestamp, *time);
+			} else if (allownest && !strcmp(object_txt, SPC_NESTED_SIGNATURE_OBJID)) {
+				/* Nested Signature - Policy OID: 1.3.6.1.4.1.311.2.4.1 */
+				PKCS7 *nested;
+				for (j=0; j<X509_ATTRIBUTE_count(attr); j++) {
+					value = X509_ATTRIBUTE_get0_data(attr, j, V_ASN1_SEQUENCE, NULL);
+					if (value == NULL)
+						continue;
+					data = value->data;
+					nested = d2i_PKCS7(NULL, &data, value->length);
+					if (nested)
+						(void)append_signature_list(signatures, nested, 0);
+				}
 			} else if (!strcmp(object_txt, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
-				/* 1.3.6.1.4.1.42921.1.2.1 */
-				printf("\nUnauthenticated Data Blob\nPolicy OID: %s\n", object_txt);
-				value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTF8STRING, NULL);
-				if (value == NULL)
-					return 0; /* FAILED */
-				if (verbose) {
-					char *data_blob = OPENSSL_buf2hexstr(value->data, value->length);
-					printf("Data Blob: %s\n", data_blob);
-					OPENSSL_free(data_blob);
-				}
-				printf("Data Blob length: %d bytes\n", value->length);
-			} else if (!strcmp(object_txt, SPC_NESTED_SIGNATURE_OBJID)) {
-				/* 1.3.6.1.4.1.311.2.4.1 */
-				printf("\nNested Signature\nPolicy OID: %s\n", object_txt);
+				/* Unauthenticated Data Blob - Policy OID: 1.3.6.1.4.1.42921.1.2.1 */
+				signature->blob = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTF8STRING, NULL);
 			} else
-				printf("\nPolicy OID: %s\n", object_txt);
+				fprintf(stderr, "Unsupported Policy OID: %s\n\n", object_txt);
 		}
-	/* else there is no unauthorized attribute */
+
+	if (!sk_SIGNATURE_LIST_unshift(*signatures, signature)) {
+		if (signature->timestamp) {
+			CMS_ContentInfo_free(signature->timestamp);
+			signature->timestamp = NULL;
+			ERR_clear_error();
+		}
+		PKCS7_free(signature->p7);
+		signature->p7 = NULL;
+		OPENSSL_free(signature);
+		return 0; /* FAILED */
+	}
 	return 1; /* OK */
 }
 
@@ -2106,40 +2164,10 @@ static int cms_TST_verify(CMS_ContentInfo *timestamp, PKCS7_SIGNER_INFO *si)
 				return 0; /* FAILED */
 			} /* else Computed and received message digests matched */
 			TimeStampToken_free(token);
-		}
+		} else
+			ERR_clear_error();
 	}
 	return 1; /* OK */
-}
-
-/*
- * pkcs7_get_nested_signature extracts a nested signature from p7.
- * The caller is responsible for freeing the returned object.
- *
- * If has_sig is provided, it will be set to either 1 if there is a
- * SPC_NESTED_SIGNATURE attribute in p7 at all or 0 if not.
- * This allows has_sig to be used to distinguish two possible scenarios
- * when the function returns NULL: if has_sig is 1, it means d2i_PKCS7
- * failed to decode the nested signature. However, if has_sig is 0, it
- * simply means the given p7 does not have a nested signature.
- */
-static PKCS7 *pkcs7_get_nested_signature(PKCS7 *p7, int *has_sig)
-{
-	PKCS7 *ret = NULL;
-	PKCS7_SIGNER_INFO *si;
-	ASN1_TYPE *nestedSignature;
-	ASN1_STRING *astr;
-	const unsigned char *p;
-
-	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-	nestedSignature = PKCS7_get_attribute(si, OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID));
-	if (nestedSignature) {
-		astr = nestedSignature->value.sequence;
-		p = astr->data;
-		ret = d2i_PKCS7(NULL, &p, astr->length);
-	}
-	if (has_sig)
-		*has_sig = (nestedSignature != NULL);
-	return ret;
 }
 
 static int append_attribute(STACK_OF(X509_ATTRIBUTE) **unauth_attr, int nid,
@@ -2203,7 +2231,7 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 	return 1;
 }
 
-static int verify_timestamp(PKCS7 *p7, CMS_ContentInfo *tmstamp_cms, GLOBAL_OPTIONS *options)
+static int verify_timestamp(SIGNATURE_LIST *signature, GLOBAL_OPTIONS *options)
 {
 	X509_STORE *store;
 	STACK_OF(X509) *signers;
@@ -2221,13 +2249,13 @@ static int verify_timestamp(PKCS7 *p7, CMS_ContentInfo *tmstamp_cms, GLOBAL_OPTI
 	}
 
 	/* verify a CMS SignedData structure */
-	if (!CMS_verify(tmstamp_cms, NULL, store, 0, NULL, 0)) {
+	if (!CMS_verify(signature->timestamp, NULL, store, 0, NULL, 0)) {
 		fprintf(stderr, "\nCMS_verify error\n");
 		goto out;
 	}
 
 	/* check extended key usage flag XKU_TIMESTAMP */
-	signers = CMS_get0_signers(tmstamp_cms);
+	signers = CMS_get0_signers(signature->timestamp);
 	if (!signers) {
 		fprintf(stderr, "\nCMS_get0_signers error\n");
 		goto out;
@@ -2239,8 +2267,8 @@ static int verify_timestamp(PKCS7 *p7, CMS_ContentInfo *tmstamp_cms, GLOBAL_OPTI
 	sk_X509_free(signers);
 
 	/* verify the hash provided from the trusted timestamp */
-	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-	if (!cms_TST_verify(tmstamp_cms, si))
+	si = sk_PKCS7_SIGNER_INFO_value(signature->p7->d.sign->signer_info, 0);
+	if (!cms_TST_verify(signature->timestamp, si))
 		goto out;
 
 	verok = 1; /* OK */
@@ -2252,7 +2280,7 @@ out:
 	return verok;
 }
 
-static int verify_authenticode(PKCS7 *p7, time_t time, GLOBAL_OPTIONS *options)
+static int verify_authenticode(SIGNATURE_LIST *signature, GLOBAL_OPTIONS *options)
 {
 	X509_STORE *store = NULL;
 	size_t seqhdrlen;
@@ -2267,17 +2295,17 @@ static int verify_authenticode(PKCS7 *p7, time_t time, GLOBAL_OPTIONS *options)
 		fprintf(stderr, "Failed to add store lookup file\n");
 		goto out;
 	}
-	if (time != INVALID_TIME && !set_store_time(store, time)) {
+	if (signature->time != INVALID_TIME && !set_store_time(store, signature->time)) {
 		fprintf(stderr, "Failed to set store time\n");
 		goto out;
 	}
 
 	/* verify a PKCS#7 signedData structure */
-	seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
-		p7->d.sign->contents->d.other->value.sequence->length);
-	bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
-		p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
-	if (!PKCS7_verify(p7, NULL, store, bio, NULL, 0)) {
+	seqhdrlen = asn1_simple_hdr_len(signature->p7->d.sign->contents->d.other->value.sequence->data,
+		signature->p7->d.sign->contents->d.other->value.sequence->length);
+	bio = BIO_new_mem_buf(signature->p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
+		signature->p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
+	if (!PKCS7_verify(signature->p7, NULL, store, bio, NULL, 0)) {
 		fprintf(stderr, "\nPKCS7_verify error\n");
 		BIO_free(bio);
 		goto out;
@@ -2290,7 +2318,7 @@ static int verify_authenticode(PKCS7 *p7, time_t time, GLOBAL_OPTIONS *options)
 			BIO_free(bio);
 			goto out;
 		}
-		if (PKCS7_verify(p7, NULL, store, bio, NULL, 0))
+		if (PKCS7_verify(signature->p7, NULL, store, bio, NULL, 0))
 			printf("CRL verification: ok\n");
 		else {
 			printf("CRL verification: failed\n");
@@ -2301,7 +2329,7 @@ static int verify_authenticode(PKCS7 *p7, time_t time, GLOBAL_OPTIONS *options)
 	BIO_free(bio);
 
 	/* check extended key usage flag XKU_CODE_SIGN */
-	signers = PKCS7_get0_signers(p7, NULL, 0);
+	signers = PKCS7_get0_signers(signature->p7, NULL, 0);
 	if (!signers || sk_X509_num(signers) != 1) {
 		fprintf(stderr, "PKCS7_get0_signers error\n");
 		sk_X509_free(signers);
@@ -2323,43 +2351,40 @@ out:
 	return verok;
 }
 
-static int verify_pkcs7(PKCS7 *p7, GLOBAL_OPTIONS *options)
+static int verify_signature(SIGNATURE_LIST *signature, GLOBAL_OPTIONS *options)
 {
-	CMS_ContentInfo *timestamp = NULL;
-	int ret = 0, leafok = 0, verok;
-	time_t time = INVALID_TIME;
+	int leafok = 0, verok;
 
-	if (!find_signer(p7, options->leafhash, &leafok))
+	if (!find_signer(signature->p7, options->leafhash, &leafok))
 		printf("Find signers error\n");
-	if (!print_certs(p7))
+	if (!print_certs(signature->p7))
 		printf("Print certs error\n");
-	if (!pkcs7_print_attributes(p7->d.sign, &timestamp, &time, options->verbose))
+	if (!print_attributes(signature, options->verbose))
 		printf("Print attributes error\n");
 	if (options->leafhash != NULL) {
 		printf("\nLeaf hash match: %s\n", leafok ? "ok" : "failed");
-		if (!leafok)
-			ret = 1; /* FAILED */
+		if (!leafok) {
+			printf("Signature verification: failed\n\n");
+			return 1; /* FAILED */
+		}
 	}
 	printf("\nCAfile: %s\n", options->cafile);
 	if (options->crlfile)
 		printf("CRLfile: %s\n", options->crlfile);
-	if (timestamp) {
-		int timeok = verify_timestamp(p7, timestamp, options);
+	if (signature->timestamp) {
+		int timeok = verify_timestamp(signature, options);
 		printf("\nTimestamp Server Signature verification: %s\n", timeok ? "ok" : "failed");
 		if (!timeok) {
-			time = INVALID_TIME;
+			signature->time = INVALID_TIME;
 		}
 	} else
 		printf("\nTimestamp is not available\n");
-	verok = verify_authenticode(p7, time, options);
+	verok = verify_authenticode(signature, options);
 	printf("Signature verification: %s\n\n", verok ? "ok" : "failed");
 	if (!verok)
-		ret = 1; /* FAILED */
-	if (timestamp) {
-		CMS_ContentInfo_free(timestamp);
-		timestamp = NULL;
-	}
-	return ret;
+		return 1; /* FAILED */
+
+	return 0; /* OK */
 }
 
 #ifdef WITH_GSF
@@ -2616,11 +2641,10 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
  * msi_verify_pkcs7 is a helper function for msi_verify_file.
  * It exists to make it easier to implement verification of nested signatures.
  */
-static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
-		size_t exlen, int allownest, GLOBAL_OPTIONS *options)
+static int msi_verify_pkcs7(SIGNATURE_LIST *signature, GsfInfile *infile, unsigned char *exdata,
+		size_t exlen, GLOBAL_OPTIONS *options)
 {
-	int ret = 0, mdok, exok;
-	int mdtype = -1;
+	int ret = 1, mdtype = -1, mdok, exok;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
 #ifdef GSF_CAN_READ_MSI_METADATA
@@ -2630,8 +2654,8 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 	const EVP_MD *md;
 	BIO *hash, *prehash;
 
-	if (is_indirect_data_signature(p7)) {
-		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
+	if (is_indirect_data_signature(signature->p7)) {
+		ASN1_STRING *astr = signature->p7->d.sign->contents->d.other->value.sequence;
 		const unsigned char *p = astr->data;
 		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
 		if (idc) {
@@ -2644,7 +2668,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 	}
 	if (mdtype == -1) {
 		printf("Failed to extract current message digest\n\n");
-		return 1; /* FAILED */
+		goto out;
 	}
 	printf("Message digest algorithm         : %s\n", OBJ_nid2sn(mdtype));
 	md = EVP_get_digestbynid(mdtype);
@@ -2673,7 +2697,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 			printf("Failed to calculate pre-hash used for MsiDigitalSignatureEx\n\n");
 			BIO_free_all(hash);
 			BIO_free_all(prehash);
-			return 1; /* FAILED */
+			goto out;
 		}
 		BIO_gets(prehash, (char*)cexmdbuf, EVP_MAX_MD_SIZE);
 		BIO_free_all(prehash);
@@ -2685,7 +2709,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 	if (!msi_handle_dir(infile, NULL, hash)) {
 		printf("Failed to write a new output file\n\n");
 		BIO_free_all(hash);
-		return 1; /* FAILED */
+		goto out;
 	}
 	BIO_gets(hash, (char*)cmdbuf, EVP_MAX_MD_SIZE);
 	BIO_free_all(hash);
@@ -2696,7 +2720,7 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 		tohex(mdbuf, hexbuf, EVP_MD_size(md));
 		printf("    MISMATCH!!!\n\t\t\tFILE HAS : %s\n\n", hexbuf);
 		printf("Signature verification: failed\n\n");
-		return 1; /* FAILED */
+		goto out;
 	} else
 		printf("\n");
 
@@ -2709,28 +2733,16 @@ static int msi_verify_pkcs7(PKCS7 *p7, GsfInfile *infile, unsigned char *exdata,
 			tohex(exdata, hexbuf, MIN((size_t)EVP_MD_size(md), exlen));
 			printf("    MISMATCH!!!\n\t\t\tFILE HAS : %s\n\n", hexbuf);
 			printf("Signature verification: failed\n\n");
-			return 1; /* FAILED */
+			goto out;
 		} else
 			printf("\n");
 	}
 #endif
-	printf("\n");
-	ret = verify_pkcs7(p7, options);
-	printf("\n");
-	if (allownest) {
-		int has_sig = 0;
-		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
-		if (p7nest) {
-			int nest_ret = msi_verify_pkcs7(p7nest, infile, exdata, exlen, 0, options);
-			if (ret)
-				ret = nest_ret;
-			PKCS7_free(p7nest);
-		} else if (!p7nest && has_sig) {
-			printf("Failed to decode nested signature!\n");
-			ret = 1;
-		}
-	}
 
+	ret = verify_signature(signature, options);
+out:
+	if (!ret)
+		ERR_print_errors_fp(stderr);
 	return ret;
 }
 
@@ -2748,6 +2760,10 @@ static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 	const guint8 *name;
 	unsigned long inlen, exlen = 0;
 	const unsigned char *blob;
+	STACK_OF(SIGNATURE_LIST) *signatures;
+	SIGNATURE_LIST *signature = NULL;
+
+	signatures = sk_SIGNATURE_LIST_new_null();
 
 	for (i = 0; i < gsf_infile_num_children(infile); i++) {
 		child = gsf_infile_child_by_index(infile, i);
@@ -2780,13 +2796,29 @@ static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 		printf("Failed to extract PKCS7 data\n\n");
 		goto out;
 	}
-	ret = msi_verify_pkcs7(p7, infile, exdata, exlen, 1, options);
 
+	if (!append_signature_list(&signatures, p7, 1)) {
+		printf("Failed to create signature list\n\n");
+		PKCS7_free(p7);
+		goto out;
+	}
+	for (i = 0; i < sk_SIGNATURE_LIST_num(signatures); i++) {
+		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
+		signature = sk_SIGNATURE_LIST_value(signatures, i);
+		ret &= msi_verify_pkcs7(signature, infile, exdata, exlen, options);
+		if (signature->timestamp) {
+			CMS_ContentInfo_free(signature->timestamp);
+			signature->timestamp = NULL;
+			ERR_clear_error();
+		}
+		PKCS7_free(signature->p7);
+		signature->p7 = NULL;
+		OPENSSL_free(signature);
+	}
 out:
+	sk_SIGNATURE_LIST_free(signatures);
 	OPENSSL_free(indata);
 	OPENSSL_free(exdata);
-	if (p7)
-		PKCS7_free(p7);
 	return ret;
 }
 
@@ -3176,11 +3208,10 @@ static void pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	SpcAttributeTypeAndOptionalValue_free(obj);
 }
 
-static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
-			int allownest, GLOBAL_OPTIONS *options)
+static int pe_verify_pkcs7(SIGNATURE_LIST *signature, char *indata, FILE_HEADER *header,
+			GLOBAL_OPTIONS *options)
 {
-	int ret = 0, mdok;
-	int mdtype = -1, phtype = -1;
+	int ret = 1, mdok, mdtype = -1, phtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
 	char hexbuf[EVP_MAX_MD_SIZE*2+1];
@@ -3188,8 +3219,8 @@ static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	size_t phlen = 0;
 	const EVP_MD *md;
 
-	if (is_indirect_data_signature(p7)) {
-		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
+	if (is_indirect_data_signature(signature->p7)) {
+		ASN1_STRING *astr = signature->p7->d.sign->contents->d.other->value.sequence;
 		const unsigned char *p = astr->data;
 		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
 		if (idc) {
@@ -3203,8 +3234,7 @@ static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	}
 	if (mdtype == -1) {
 		printf("Failed to extract current message digest\n\n");
-		OPENSSL_free(ph);
-		return 1; /* FAILED */
+		goto out;
 	}
 	printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
 
@@ -3218,8 +3248,7 @@ static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	printf("Calculated message digest : %s%s\n\n", hexbuf, mdok ? "" : "    MISMATCH!!!");
 	if (!mdok) {
 		printf("Signature verification: failed\n\n");
-		OPENSSL_free(ph);
-		return 1; /* FAILED */
+		goto out;
 	}
 
 	if (phlen > 0) {
@@ -3236,26 +3265,14 @@ static int pe_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 		printf("Calculated page hash : %s ...%s\n\n", hexbuf, mdok ? "" : "    MISMATCH!!!");
 		if (!mdok) {
 			printf("Signature verification: failed\n\n");
-			OPENSSL_free(ph);
-			return 1; /* FAILED */
+			goto out;
 		}
 	}
 
-	ret = verify_pkcs7(p7, options);
-	printf("\n");
-	if (allownest) {
-		int has_sig = 0;
-		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
-		if (p7nest) {
-			int nest_ret = pe_verify_pkcs7(p7nest, indata, header, 0, options);
-			if (ret)
-				ret = nest_ret;
-			PKCS7_free(p7nest);
-		} else if (!p7nest && has_sig) {
-			printf("Failed to decode nested signature!\n");
-			ret = 1;
-		}
-	}
+	ret = verify_signature(signature, options);
+out:
+	if (!ret)
+		ERR_print_errors_fp(stderr);
 	OPENSSL_free(ph);
 	return ret;
 }
@@ -3286,13 +3303,17 @@ static PKCS7 *pe_extract_existing_pkcs7(char *indata, FILE_HEADER *header)
 
 static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *options)
 {
-	int peok = 1, ret = 1;
+	int i, peok = 1, ret = 1;
 	BIO *bio;
 	unsigned int real_pe_checksum;
 	PKCS7 *p7;
+	STACK_OF(SIGNATURE_LIST) *signatures;
+	SIGNATURE_LIST *signature = NULL;
 
 	if (header->siglen == 0)
 		header->siglen = header->fileend;
+
+	signatures = sk_SIGNATURE_LIST_new_null();
 
 	/* check PE checksum */
 	printf("Current PE checksum   : %08X\n", header->pe_checksum);
@@ -3312,9 +3333,27 @@ static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 		printf("Failed to extract PKCS7 data\n\n");
 		goto out;
 	}
-	ret = pe_verify_pkcs7(p7, indata, header, 1, options);
-	PKCS7_free(p7);
+
+	if (!append_signature_list(&signatures, p7, 1)) {
+		printf("Failed to create signature list\n\n");
+		PKCS7_free(p7);
+		goto out;
+	}
+	for (i = 0; i < sk_SIGNATURE_LIST_num(signatures); i++) {
+		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
+		signature = sk_SIGNATURE_LIST_value(signatures, i);
+		ret &= pe_verify_pkcs7(signature, indata, header, options);
+		if (signature->timestamp) {
+			CMS_ContentInfo_free(signature->timestamp);
+			signature->timestamp = NULL;
+			ERR_clear_error();
+		}
+		PKCS7_free(signature->p7);
+		signature->p7 = NULL;
+		OPENSSL_free(signature);
+	}
 out:
+	sk_SIGNATURE_LIST_free(signatures);
 	return ret;
 }
 
@@ -3587,17 +3626,17 @@ static void cab_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf
 	BIO_free(bio);
 }
 
-static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
-			int allownest, GLOBAL_OPTIONS *options)
+static int cab_verify_pkcs7(SIGNATURE_LIST *signature, char *indata, FILE_HEADER *header,
+			GLOBAL_OPTIONS *options)
 {
-	int ret = 0, mdok, mdtype = -1;
+	int ret = 1, mdok, mdtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
 	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	const EVP_MD *md;
 
-	if (is_indirect_data_signature(p7)) {
-		ASN1_STRING *astr = p7->d.sign->contents->d.other->value.sequence;
+	if (is_indirect_data_signature(signature->p7)) {
+		ASN1_STRING *astr = signature->p7->d.sign->contents->d.other->value.sequence;
 		const unsigned char *p = astr->data;
 		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
 		if (idc) {
@@ -3610,7 +3649,7 @@ static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	}
 	if (mdtype == -1) {
 		printf("Failed to extract current message digest\n\n");
-		return 1; /* FAILED */
+		goto out;
 	}
 	printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
 
@@ -3625,24 +3664,13 @@ static int cab_verify_pkcs7(PKCS7 *p7, char *indata, FILE_HEADER *header,
 	printf("Calculated message digest : %s%s\n\n", hexbuf, mdok ? "" : "    MISMATCH!!!");
 	if (!mdok) {
 		printf("Signature verification: failed\n\n");
-		return 1; /* FAILED */
+		goto out;
 	}
 
-	ret = verify_pkcs7(p7, options);
-	printf("\n");
-	if (allownest) {
-		int has_sig = 0;
-		PKCS7 *p7nest = pkcs7_get_nested_signature(p7, &has_sig);
-		if (p7nest) {
-			int nest_ret = cab_verify_pkcs7(p7nest, indata, header, 0, options);
-			if (ret)
-				ret = nest_ret;
-			PKCS7_free(p7nest);
-		} else if (!p7nest && has_sig) {
-			printf("Failed to decode nested signature!\n");
-			ret = 1;
-		}
-	}
+	ret = verify_signature(signature, options);
+out:
+	if (!ret)
+		ERR_print_errors_fp(stderr);
 	return ret;
 }
 
@@ -3658,8 +3686,12 @@ static PKCS7 *cab_extract_existing_pkcs7(char *indata, FILE_HEADER *header)
 
 static int cab_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *options)
 {
-	int ret = 1;
+	int i, ret = 1;
 	PKCS7 *p7;
+	STACK_OF(SIGNATURE_LIST) *signatures;
+	SIGNATURE_LIST *signature = NULL;
+
+	signatures = sk_SIGNATURE_LIST_new_null();
 
 	if (header->header_size != 20) {
 		printf("No signature found\n\n");
@@ -3670,9 +3702,27 @@ static int cab_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *op
 		printf("Failed to extract PKCS7 data\n\n");
 		goto out;
 	}
-	ret = cab_verify_pkcs7(p7, indata, header, 1, options);
-	PKCS7_free(p7);
+
+	if (!append_signature_list(&signatures, p7, 1)) {
+		printf("Failed to create signature list\n\n");
+		PKCS7_free(p7);
+		goto out;
+	}
+	for (i = 0; i < sk_SIGNATURE_LIST_num(signatures); i++) {
+		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
+		signature = sk_SIGNATURE_LIST_value(signatures, i);
+		ret &= cab_verify_pkcs7(signature, indata, header, options);
+		if (signature->timestamp) {
+			CMS_ContentInfo_free(signature->timestamp);
+			signature->timestamp = NULL;
+			ERR_clear_error();
+		}
+		PKCS7_free(signature->p7);
+		signature->p7 = NULL;
+		OPENSSL_free(signature);
+	}
 out:
+	sk_SIGNATURE_LIST_free(signatures);
 	return ret;
 }
 
