@@ -5,6 +5,7 @@
 - added more tests
 - fixed numerous bugs
 - dropped OpenSSL 1.1.0 support
+- multiple nested signatures support
 
 ### 2.0 (2018-12-04)
 
