@@ -4746,20 +4746,6 @@ static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 {
 	PKCS7 *sig = NULL;
 
-	/* Obtain a current signature from previously-signed file */
-	if ((cmd == CMD_SIGN && options->nest) ||
-			(cmd == CMD_ATTACH && options->nest) || cmd == CMD_ADD) {
-		if (!msi_check_MsiDigitalSignatureEx(ole, options->md))
-			return NULL; /* FAILED */
-		*cursig = msi_extract_signature_to_pkcs7(ole);
-		if (*cursig == NULL) {
-			fprintf(stderr, "Unable to extract existing signature in -nest mode\n");
-			return NULL; /* FAILED */
-		}
-		if (cmd == CMD_ADD)
-			sig = *cursig;
-	}
-
 	/* Create outdata MSI file */
 	if (!access(options->outfile, R_OK)) {
 		/* outdata file exists */
@@ -4780,6 +4766,21 @@ static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 		fprintf(stderr, "Unable to msi_handle_dir()\n");
 		return NULL; /* FAILED */
 	}
+
+	/* Obtain a current signature from previously-signed file */
+	if ((cmd == CMD_SIGN && options->nest) ||
+			(cmd == CMD_ATTACH && options->nest) || cmd == CMD_ADD) {
+		if (!msi_check_MsiDigitalSignatureEx(ole, options->md))
+			return NULL; /* FAILED */
+		*cursig = msi_extract_signature_to_pkcs7(ole);
+		if (*cursig == NULL) {
+			fprintf(stderr, "Unable to extract existing signature in -nest mode\n");
+			return NULL; /* FAILED */
+		}
+		if (cmd == CMD_ADD)
+			sig = *cursig;
+	}
+
 	/* Obtain an existing signature or create a new one */
 	if ((cmd == CMD_ATTACH) || (cmd == CMD_SIGN))
 		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams);
