@@ -19,7 +19,7 @@ x509_extensions                 = usr_cert
 private_key                     = $dir/demoCA/CA.key
 certificate                     = $dir/tmp/CACert.pem
 default_startdate               = 180101000000Z
-default_enddate                 = 280101000000Z
+default_enddate                 = 210101000000Z
 
 [ req ]
 encrypt_key                     = no
