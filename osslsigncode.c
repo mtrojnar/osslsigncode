@@ -2262,6 +2262,38 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 	return 1;
 }
 
+static const char *get_clrdp_url(X509 *cert)
+{
+	STACK_OF(DIST_POINT) *crldp;
+	DIST_POINT *dp;
+	GENERAL_NAMES *gens;
+	GENERAL_NAME *gen;
+	int i, j, gtype;
+	ASN1_STRING *uri;
+	const char *url;
+
+	crldp = X509_get_ext_d2i(cert, NID_crl_distribution_points, NULL, NULL);
+	if (!crldp)
+		return NULL;
+
+	for (i = 0; i < sk_DIST_POINT_num(crldp); i++) {
+		dp = sk_DIST_POINT_value(crldp, i);
+		if (!dp->distpoint || dp->distpoint->type != 0)
+			return NULL;
+		gens = dp->distpoint->name.fullname;
+		for (j = 0; j < sk_GENERAL_NAME_num(gens); j++) {
+			gen = sk_GENERAL_NAME_value(gens, j);
+			uri = GENERAL_NAME_get0_value(gen, &gtype);
+			if (gtype == GEN_URI && ASN1_STRING_length(uri) > 6) {
+				url = (const char *)ASN1_STRING_get0_data(uri);
+				if (strncmp(url, "http://", 7) == 0)
+					return url;
+			}
+		}
+	}
+	return NULL;
+}
+
 static int verify_crl(char *ca_file, char *crl_file, X509 *signer, STACK_OF(X509) *chain)
 {
 	X509_STORE *store = NULL;
@@ -2304,6 +2336,7 @@ static int verify_timestamp(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 	STACK_OF(CMS_SignerInfo) *sinfos;
 	CMS_SignerInfo *cmssi;
 	X509 *signer;
+	const char *url;
 	PKCS7_SIGNER_INFO *si;
 	int verok = 0;
 
@@ -2342,6 +2375,11 @@ static int verify_timestamp(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 	sinfos = CMS_get0_SignerInfos(signature->timestamp);
 	cmssi = sk_CMS_SignerInfo_value(sinfos, 0);
 	CMS_SignerInfo_get0_algs(cmssi, NULL, &signer, NULL, NULL);
+
+	url = get_clrdp_url(signer);
+	if (url)
+		printf("TSA's CRL distribution point: %s\n", url);
+	printf("\n");
 
 	/* verify a Certificate Revocation List */
 	if (options->crluntrusted) {
@@ -2433,6 +2471,7 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 {
 	int leafok = 0, verok;
 	X509 *signer;
+	const char *url;
 
 	signer = find_signer(signature->p7, options->leafhash, &leafok);
 	if (!signer) {
@@ -2457,6 +2496,9 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 		printf("TSA's certificates file: %s\n", options->untrusted);
 	if (options->crluntrusted)
 		printf("TSA's CRL file: %s\n", options->crluntrusted);
+	url = get_clrdp_url(signer);
+	if (url)
+		printf("CRL distribution point: %s\n", url);
 
 	if (signature->timestamp) {
 		int timeok = verify_timestamp(signature, options);
