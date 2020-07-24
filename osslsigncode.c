@@ -1752,10 +1752,10 @@ static int print_cert(X509 *cert, int i)
 	return 1; /* OK */
 }
 
-static int find_signer(PKCS7 *p7, char *leafhash, int *leafok)
+static X509 *find_signer(PKCS7 *p7, char *leafhash, int *leafok)
 {
 	STACK_OF(X509) *signers;
-	X509 *cert;
+	X509 *cert = NULL;
 	int ret = 0;
 
 	/*
@@ -1779,7 +1779,7 @@ out:
 	if (!ret)
 		ERR_print_errors_fp(stderr);
 	sk_X509_free(signers);
-	return ret;
+	return cert;
 }
 
 static int print_certs(PKCS7 *p7)
@@ -1846,6 +1846,25 @@ static time_t cms_get_time(CMS_ContentInfo *cms)
 	return posix_time;
 }
 
+static int verify_callback(int ok, X509_STORE_CTX *ctx)
+{
+	int error = X509_STORE_CTX_get_error(ctx);
+	int depth = X509_STORE_CTX_get_error_depth(ctx);
+
+	if (!ok && error == X509_V_ERR_CERT_HAS_EXPIRED) {
+		if (depth == 0) {
+			printf("\nWarning: Ignoring expired signer certificate for CRL validation\n");
+			return 1;
+		} else {
+			X509 *current_cert = X509_STORE_CTX_get_current_cert(ctx);
+			printf("\nErrror: Expired CA certificate:\n");
+			print_cert(current_cert, 0);
+			printf("\n");
+		}
+	}
+	return ok;
+}
+
 static int load_crlfile_lookup(X509_STORE *store, char *certs, char *crl)
 {
 	X509_LOOKUP *lookup;
@@ -1855,28 +1874,24 @@ static int load_crlfile_lookup(X509_STORE *store, char *certs, char *crl)
 	if (!lookup)
 		return 0; /* FAILED */
 	if (!X509_load_cert_file(lookup, certs, X509_FILETYPE_PEM)) {
-		fprintf(stderr, "Error: no certificate found\n");
+		fprintf(stderr, "\nError: no certificate found\n");
 		return 0; /* FAILED */
 	}
 	if (!X509_load_crl_file(lookup, crl, X509_FILETYPE_PEM)) {
-		fprintf(stderr, "Error: no CRL found in %s\n", crl);
+		fprintf(stderr, "\nError: no CRL found in %s\n", crl);
 		return 0; /* FAILED */
 	}
+
 	param = X509_STORE_get0_param(store);
 	if (param == NULL)
 		return 0; /* FAILED */
-	/*
-	 * enable CRL checking for the certificate chain leaf certificate
-	 * and do not check certificate/CRL validity against current time
-	 */
-	/* https://www.openssl.org/docs/man1.1.1/man3/X509_VERIFY_PARAM_set_flags.html */
-
-	if (!X509_VERIFY_PARAM_set_flags(param, X509_V_FLAG_CRL_CHECK | X509_V_FLAG_NO_CHECK_TIME))
-		return 0; /* FAILED */
-	if (!X509_VERIFY_PARAM_set_purpose(param, X509_PURPOSE_CRL_SIGN))
+	/* enable CRL checking for the certificate chain leaf certificate */
+	if (!X509_VERIFY_PARAM_set_flags(param, X509_V_FLAG_CRL_CHECK))
 		return 0; /* FAILED */
 	if (!X509_STORE_set1_param(store, param))
 		return 0; /* FAILED */
+	X509_STORE_set_verify_cb(store, verify_callback);
+
 	return 1; /* OK */
 }
 
@@ -1889,9 +1904,10 @@ static int load_file_lookup(X509_STORE *store, char *certs)
 	if (!lookup)
 		return 0; /* FAILED */
 	if (!X509_load_cert_file(lookup, certs, X509_FILETYPE_PEM)) {
-		fprintf(stderr, "Error: no certificate found\n");
+		fprintf(stderr, "\nError: no certificate found\n");
 		return 0; /* FAILED */
 	}
+
 	param = X509_STORE_get0_param(store);
 	if (param == NULL)
 		return 0; /* FAILED */
@@ -1899,6 +1915,7 @@ static int load_file_lookup(X509_STORE *store, char *certs)
 		return 0; /* FAILED */
 	if (!X509_STORE_set1_param(store, param))
 		return 0; /* FAILED */
+
 	return 1; /* OK */
 }
 
@@ -2245,10 +2262,48 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 	return 1;
 }
 
+static int verify_crl(char *ca_file, char *crl_file, X509 *signer, STACK_OF(X509) *chain)
+{
+	X509_STORE *store = NULL;
+	X509_STORE_CTX *ctx = NULL;
+	int verok = 0;
+
+	ctx = X509_STORE_CTX_new();
+	if (!ctx)
+		goto out;
+	store = X509_STORE_new();
+	if (!store)
+		goto out;
+	if (!load_crlfile_lookup(store, ca_file, crl_file))
+		goto out;
+
+	/* initialise an X509_STORE_CTX structure for subsequent use by X509_verify_cert()*/
+	if (!X509_STORE_CTX_init(ctx, store, signer, chain))
+		goto out;
+
+	if (X509_verify_cert(ctx) <= 0) {
+		int error = X509_STORE_CTX_get_error(ctx);
+		printf("\nX509_verify_cert: certificate verify error: %s\n",
+				X509_verify_cert_error_string(error));
+		goto out;
+	}
+	verok = 1; /* OK */
+
+out:
+	if (!verok)
+		ERR_print_errors_fp(stderr);
+	/* NULL is a valid parameter value for X509_STORE_free() and X509_STORE_CTX_free() */
+	X509_STORE_free(store);
+	X509_STORE_CTX_free(ctx);
+	return verok;
+}
+
 static int verify_timestamp(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 {
-	X509_STORE *store, *crlstore;
-	STACK_OF(X509) *signers;
+	X509_STORE *store;
+	STACK_OF(CMS_SignerInfo) *sinfos;
+	CMS_SignerInfo *cmssi;
+	X509 *signer;
 	PKCS7_SIGNER_INFO *si;
 	int verok = 0;
 
@@ -2263,11 +2318,13 @@ static int verify_timestamp(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 		 * at a later date to renew the trust that exists in the TSA's signature.
 		 * https://tools.ietf.org/html/rfc3161
 		*/
-		if (!options->timestamp_expiration && !set_store_time(store, signature->time)) {
-			fprintf(stderr, "Failed to set store time\n");
-			X509_STORE_free(store);
-			goto out;
-		}
+		if (!options->timestamp_expiration)
+			/* verify timestamp against the time of its creation */
+			if (!set_store_time(store, signature->time)) {
+				fprintf(stderr, "Failed to set store time\n");
+				X509_STORE_free(store);
+				goto out;
+			}
 	} else {
 		printf("Use the \"-untrusted\" option to add the CA cert bundle to verify timestamp server.\n");
 		X509_STORE_free(store);
@@ -2276,43 +2333,32 @@ static int verify_timestamp(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 
 	/* verify a CMS SignedData structure */
 	if (!CMS_verify(signature->timestamp, NULL, store, 0, NULL, 0)) {
-		fprintf(stderr, "CMS_verify error\n");
+		fprintf(stderr, "\nCMS_verify error\n");
 		X509_STORE_free(store);
 		goto out;
 	}
 	X509_STORE_free(store);
 
+	sinfos = CMS_get0_SignerInfos(signature->timestamp);
+	cmssi = sk_CMS_SignerInfo_value(sinfos, 0);
+	CMS_SignerInfo_get0_algs(cmssi, NULL, &signer, NULL, NULL);
+
 	/* verify a Certificate Revocation List */
 	if (options->crluntrusted) {
-		crlstore = X509_STORE_new();
-		if (!load_crlfile_lookup(crlstore, options->untrusted, options->crluntrusted)) {
-			fprintf(stderr, "Failed to add CRL store lookup file\nCRL verification: failed\n");
-			X509_STORE_free(crlstore);
+		STACK_OF(X509) *chain = CMS_get1_certs(signature->timestamp);
+		int crlok = verify_crl(options->untrusted, options->crluntrusted, signer, chain);
+		sk_X509_pop_free(chain, X509_free);
+		printf("Timestamp Server Signature CRL verification: %s\n", crlok ? "ok" : "failed");
+		if (!crlok)
 			goto out;
-		}
-		if (CMS_verify(signature->timestamp, NULL, crlstore, 0, NULL, 0))
-			printf("Timestamp Server Signature CRL verification: ok\n");
-		else {
-			printf("Timestamp Server Signature CRL verification: failed\n");
-			/*  an error also occurs if a suitable CRL cannot be found*/
-			ERR_print_errors_fp(stderr);
-			X509_STORE_free(crlstore);
-			goto out;
-		}
-		X509_STORE_free(crlstore);
-	}
+	} else
+		printf("\n");
 
 	/* check extended key usage flag XKU_TIMESTAMP */
-	signers = CMS_get0_signers(signature->timestamp);
-	if (!signers) {
-		fprintf(stderr, "CMS_get0_signers error\n");
-		goto out;
-	}
-	if (!(X509_get_extended_key_usage(sk_X509_value(signers, 0)) & XKU_TIMESTAMP)) {
+	if (!(X509_get_extended_key_usage(signer) & XKU_TIMESTAMP)) {
 		fprintf(stderr, "Unsupported Signer's certificate purpose XKU_TIMESTAMP\n");
 		goto out;
 	}
-	sk_X509_free(signers);
 
 	/* verify the hash provided from the trusted timestamp */
 	si = sk_PKCS7_SIGNER_INFO_value(signature->p7->d.sign->signer_info, 0);
@@ -2326,12 +2372,11 @@ out:
 	return verok;
 }
 
-static int verify_authenticode(SIGNATURE *signature, GLOBAL_OPTIONS *options)
+static int verify_authenticode(SIGNATURE *signature, GLOBAL_OPTIONS *options, X509 *signer)
 {
-	X509_STORE *store, *crlstore;
+	X509_STORE *store;
 	size_t seqhdrlen;
 	BIO *bio = NULL;
-	STACK_OF(X509) *signers;
 	int verok = 0;
 
 	store = X509_STORE_new();
@@ -2360,41 +2405,22 @@ static int verify_authenticode(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 		goto out;
 	}
 	X509_STORE_free(store);
+	BIO_free(bio);
 
 	/* verify a Certificate Revocation List */
 	if (options->crlfile) {
-		crlstore = X509_STORE_new();
-		if (!load_crlfile_lookup(crlstore, options->cafile, options->crlfile)) {
-			fprintf(stderr, "Failed to add CRL store lookup file\nSignature CRL verification: failed\n");
-			X509_STORE_free(crlstore);
-			BIO_free(bio);
+		STACK_OF(X509) *chain = signature->p7->d.sign->cert;
+		int crlok = verify_crl(options->cafile, options->crlfile, signer, chain);
+		printf("Signature CRL verification: %s\n", crlok ? "ok" : "failed");
+		if (!crlok)
 			goto out;
-		}
-		if (PKCS7_verify(signature->p7, NULL, crlstore, bio, NULL, 0))
-			printf("Signature CRL verification: ok\n");
-		else {
-			printf("Signature CRL verification: failed\n");
-			X509_STORE_free(crlstore);
-			BIO_free(bio);
-			goto out;
-		}
-		X509_STORE_free(crlstore);
 	}
-	BIO_free(bio);
 
 	/* check extended key usage flag XKU_CODE_SIGN */
-	signers = PKCS7_get0_signers(signature->p7, NULL, 0);
-	if (!signers || sk_X509_num(signers) != 1) {
-		fprintf(stderr, "PKCS7_get0_signers error\n");
-		sk_X509_free(signers);
-		goto out;
-	}
-	if (!(X509_get_extended_key_usage(sk_X509_value(signers, 0)) & XKU_CODE_SIGN)) {
+	if (!(X509_get_extended_key_usage(signer) & XKU_CODE_SIGN)) {
 		fprintf(stderr, "Unsupported Signer's certificate purpose XKU_CODE_SIGN\n");
-		sk_X509_free(signers);
 		goto out;
 	}
-	sk_X509_free(signers);
 
 	verok = 1; /* OK */
 out:
@@ -2406,9 +2432,13 @@ out:
 static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 {
 	int leafok = 0, verok;
+	X509 *signer;
 
-	if (!find_signer(signature->p7, options->leafhash, &leafok))
-		printf("Find signers error\n");
+	signer = find_signer(signature->p7, options->leafhash, &leafok);
+	if (!signer) {
+		printf("Find signer error\n");
+		return 1; /* FAILED */
+	}
 	if (!print_certs(signature->p7))
 		printf("Print certs error\n");
 	if (!print_attributes(signature, options->verbose))
@@ -2427,7 +2457,6 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 		printf("TSA's certificates file: %s\n", options->untrusted);
 	if (options->crluntrusted)
 		printf("TSA's CRL file: %s\n", options->crluntrusted);
-	printf("\n");
 
 	if (signature->timestamp) {
 		int timeok = verify_timestamp(signature, options);
@@ -2436,8 +2465,8 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 			signature->time = INVALID_TIME;
 		}
 	} else
-		printf("Timestamp is not available\n\n");
-	verok = verify_authenticode(signature, options);
+		printf("\nTimestamp is not available\n\n");
+	verok = verify_authenticode(signature, options, signer);
 	printf("Signature verification: %s\n\n", verok ? "ok" : "failed");
 	if (!verok)
 		return 1; /* FAILED */
