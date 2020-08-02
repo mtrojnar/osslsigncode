@@ -45,7 +45,7 @@ make_certs() {
     script_path=$(pwd)
     OPENSSL=openssl
     CONF="${script_path}/openssltest.cnf"
-    $OPENSSL req -config $CONF -new -x509 -days 1800 -key demoCA/CA.key -out tmp/CACert.pem \
+    $OPENSSL req -config $CONF -new -x509 -days 3600 -key demoCA/CA.key -out tmp/CACert.pem \
         -subj "/C=PL/O=osslsigncode/OU=Root CA/CN=CA/emailAddress=CA@example.com" \
         2>> "makecerts.log" 1>&2'
   test_result $?
