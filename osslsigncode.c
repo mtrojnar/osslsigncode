@@ -58,6 +58,9 @@
 
 */
 
+#define OPENSSL_API_COMPAT 0x10100000L
+#define OPENSSL_NO_DEPRECATED
+
 #ifdef __MINGW32__
 #define HAVE_WINDOWS_H
 #endif /* __MINGW32__ */
@@ -116,6 +119,7 @@ typedef unsigned char u_char;
 #include <openssl/pkcs12.h>
 #include <openssl/pem.h>
 #include <openssl/asn1t.h>
+#include <openssl/bn.h>
 #include <openssl/conf.h>
 #ifndef OPENSSL_NO_ENGINE
 #include <openssl/engine.h>
@@ -950,22 +954,6 @@ static int add_timestamp_rfc3161(PKCS7 *sig, GLOBAL_OPTIONS *options)
 static int gsf_initialized = 0;
 #endif /* WITH_GSF */
 
-static void cleanup_lib_state(void)
-{
-#ifdef WITH_GSF
-	if (gsf_initialized)
-		gsf_shutdown();
-#endif
-	OBJ_cleanup();
-#ifndef OPENSSL_NO_ENGINE
-	ENGINE_cleanup();
-#endif
-	EVP_cleanup();
-	CONF_modules_free();
-	CRYPTO_cleanup_all_ex_data();
-	ERR_free_strings();
-}
-
 static bool on_list(const char *txt, const char *list[])
 {
 	while (*list)
@@ -1048,7 +1036,6 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -timestamp-expiration ]\n", "");
 		printf("%12s[ -verbose ]\n\n", "");
 	}
-	cleanup_lib_state();
 	exit(-1);
 }
 
@@ -1530,7 +1517,7 @@ static void get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *opti
 	*len -= EVP_MD_size(options->md);
 }
 
-static int set_signing_blob(PKCS7 *sig, BIO *hash, char *buf, int len)
+static int set_signing_blob(PKCS7 *sig, BIO *hash, unsigned char *buf, int len)
 {
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	int mdlen;
@@ -1540,7 +1527,7 @@ static int set_signing_blob(PKCS7 *sig, BIO *hash, char *buf, int len)
 
 	mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
 	memcpy(buf+len, mdbuf, mdlen);
-	seqhdrlen = asn1_simple_hdr_len((unsigned char*)buf, len);
+	seqhdrlen = asn1_simple_hdr_len(buf, len);
 
 	if ((sigbio = PKCS7_dataInit(sig, NULL)) == NULL) {
 		printf("PKCS7_dataInit failed\n");
@@ -1575,7 +1562,7 @@ static int set_signing_blob(PKCS7 *sig, BIO *hash, char *buf, int len)
 static int set_indirect_data_blob(PKCS7 *sig, BIO *hash, file_type_t type,
 				char *indata, GLOBAL_OPTIONS *options, FILE_HEADER *header)
 {
-	static char buf[64*1024];
+	static unsigned char buf[64*1024];
 	u_char *p = NULL;
 	int len = 0;
 
@@ -4673,7 +4660,10 @@ static int read_crypto_params(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 		BIO_free(btmp);
 	} else if (options->p11module != NULL) {
 		if (options->p11engine != NULL) {
-			ENGINE_load_dynamic();
+			if (!OPENSSL_init_crypto(OPENSSL_INIT_ENGINE_DYNAMIC, NULL)) {
+				printf("Failed to init 'dynamic' engine\n");
+				ret = 0; /* FAILED */
+			}
 			cparams->dynamic = ENGINE_by_id("dynamic");
 			if (!cparams->dynamic) {
 				printf("Failed to load 'dynamic' engine\n");
@@ -5021,40 +5011,37 @@ static PKCS7 *cab_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 	return sig; /* OK */
 }
 
+static void print_version()
+{
+	printf(PACKAGE_STRING ", using:\n\t%s (Library: %s)\n\t%s\n",
+		OPENSSL_VERSION_TEXT, OpenSSL_version(OPENSSL_VERSION),
+#ifdef ENABLE_CURL
+		curl_version()
+#else
+		"no libcurl available"
+#endif /* ENABLE_CURL */
+		);
+	printf(
+#ifdef WITH_GSF
+		"\tlibgsf %d.%d.%d\n",
+		libgsf_major_version,
+		libgsf_minor_version,
+		libgsf_micro_version
+#else
+		"\tno libgsf available\n"
+#endif /* WITH_GSF */
+		);
+	printf("\nPlease send bug-reports to " PACKAGE_BUGREPORT "\n\n");
+}
+
 static cmd_type_t get_command(char **argv)
 {
 	if (!strcmp(argv[1], "--help")) {
-		printf(PACKAGE_STRING ", using:\n\t%s\n\t%s\n\n",
-			SSLeay_version(SSLEAY_VERSION),
-#ifdef ENABLE_CURL
-			curl_version()
-#else
-			"no libcurl available"
-#endif /* ENABLE_CURL */
-		);
+		print_version();
 		help_for(argv[0], "all");
 	} else if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version")) {
-		printf(PACKAGE_STRING ", using:\n\t%s\n\t%s\n",
-			SSLeay_version(SSLEAY_VERSION),
-#ifdef ENABLE_CURL
-			curl_version()
-#else
-			"no libcurl available"
-#endif /* ENABLE_CURL */
-			);
-		printf(
-#ifdef WITH_GSF
-			"\tlibgsf %d.%d.%d\n",
-			libgsf_major_version,
-			libgsf_minor_version,
-			libgsf_micro_version
-#else
-			"\tno libgsf available\n"
-#endif /* WITH_GSF */
-			);
-		printf("\nPlease send bug-reports to "
-			PACKAGE_BUGREPORT
-			"\n");
+		print_version();
+		exit(-1);
 	} else if (!strcmp(argv[1], "sign"))
 		return CMD_SIGN;
 	else if (!strcmp(argv[1], "extract-signature"))
@@ -5289,15 +5276,18 @@ int main(int argc, char **argv)
 	cmd_type_t cmd = CMD_SIGN;
 
 	/* Set up OpenSSL */
-	ERR_load_crypto_strings();
-	OPENSSL_add_all_algorithms_conf();
+	if (!OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CRYPTO_STRINGS
+			| OPENSSL_INIT_ADD_ALL_CIPHERS
+			| OPENSSL_INIT_ADD_ALL_DIGESTS
+			| OPENSSL_INIT_LOAD_CONFIG, NULL))
+		DO_EXIT_0("Failed to init crypto\n");
 
 	/* create some MS Authenticode OIDS we need later on */
 	if (!OBJ_create(SPC_STATEMENT_TYPE_OBJID, NULL, NULL) ||
-		!OBJ_create(SPC_MS_JAVA_SOMETHING, NULL, NULL) ||
-		!OBJ_create(SPC_SP_OPUS_INFO_OBJID, NULL, NULL) ||
-		!OBJ_create(SPC_NESTED_SIGNATURE_OBJID, NULL, NULL))
-		DO_EXIT_0("Failed to add objects\n");
+			!OBJ_create(SPC_MS_JAVA_SOMETHING, NULL, NULL) ||
+			!OBJ_create(SPC_SP_OPUS_INFO_OBJID, NULL, NULL) ||
+			!OBJ_create(SPC_NESTED_SIGNATURE_OBJID, NULL, NULL))
+		DO_EXIT_0("Failed to create objects\n");
 
 	/* reset crypto */
 	memset(&cparams, 0, sizeof(CRYPTO_PARAMS));
@@ -5489,7 +5479,10 @@ err_cleanup:
 	free_options(&options);
 	if (ret)
 		ERR_print_errors_fp(stdout);
-	cleanup_lib_state();
+#ifdef WITH_GSF
+	if (gsf_initialized)
+		gsf_shutdown();
+#endif
 
 	printf(ret ? "Failed\n" : "Succeeded\n");
 	return ret;
