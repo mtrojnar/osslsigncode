@@ -2587,7 +2587,7 @@ static gint msi_cmp(gpointer a, gpointer b)
  * of the children of the given infile. The children are
  * sorted according to the msi_cmp.
  *
- * The returned list must be freed with g_slist_free.
+ * The returned list must be freed with g_slist_free_full.
  */
 static GSList *msi_sorted_infile_children(GsfInfile *infile)
 {
@@ -2597,14 +2597,14 @@ static GSList *msi_sorted_infile_children(GsfInfile *infile)
 
 	for (i = 0; i < gsf_infile_num_children(infile); i++) {
 		GsfInput *child = gsf_infile_child_by_index(infile, i);
-		const guint8 *name = (const guint8*)gsf_input_name(child);
-		msi_decode(name, decoded);
+		const gchar *name = gsf_input_name(child);
+		msi_decode((const guint8*)name, decoded);
 
-		if (!g_strcmp0(decoded, "\05DigitalSignature"))
-			continue;
-		if (!g_strcmp0(decoded, "\05MsiDigitalSignatureEx"))
-			continue;
-		sorted = g_slist_insert_sorted(sorted, (gpointer)name, (GCompareFunc)msi_cmp);
+		if (g_strcmp0(decoded, "\05DigitalSignature") &&
+				g_strcmp0(decoded, "\05MsiDigitalSignatureEx"))
+			sorted = g_slist_insert_sorted(sorted, (gpointer)g_strdup(name), (GCompareFunc)msi_cmp);
+
+		g_object_unref(child);
 	}
 	return sorted;
 }
@@ -2621,7 +2621,7 @@ static gboolean msi_prehash_utf16_name(gchar *name, BIO *hash)
 
 	gchar *u16name = (gchar*)g_utf8_to_utf16(name, -1, NULL, &chars_written, NULL);
 	if (u16name == NULL) {
-		return FALSE;
+		return FALSE; /* FAILED */
 	}
 	BIO_write(hash, u16name, 2*chars_written);
 	g_free(u16name);
@@ -2638,20 +2638,19 @@ static gboolean msi_prehash_utf16_name(gchar *name, BIO *hash)
  */
 static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
 {
-	GSList *sorted = NULL;
+	GSList *sorted, *current;
 	guint8 classid[16], zeroes[8];
-	gchar *name;
-	GsfInput *child;
 	gboolean is_dir;
 	gsf_off_t size;
 	guint32 sizebuf;
+	bool ret = FALSE;
 
 	memset(&zeroes, 0, sizeof(zeroes));
 	gsf_infile_msole_get_class_id(GSF_INFILE_MSOLE(infile), classid);
 
 	if (dirname != NULL) {
 		if (!msi_prehash_utf16_name(dirname, hash))
-			return FALSE;
+			return ret; /* FAILED */
 	}
 	BIO_write(hash, classid, sizeof(classid));
 	BIO_write(hash, zeroes, 4);
@@ -2665,18 +2664,22 @@ static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
 		BIO_write(hash, zeroes, 8); /* mtime as Windows FILETIME */
 	}
 	sorted = msi_sorted_infile_children(infile);
-	for (; sorted; sorted = sorted->next) {
-		name = (gchar*)sorted->data;
-		child =  gsf_infile_child_by_name(infile, name);
+	for (current = sorted; current; current = g_slist_next(current)) {
+		gchar *name = current->data;
+		GsfInput *child =  gsf_infile_child_by_name(infile, name);
 		if (child == NULL)
 			continue;
 		is_dir = GSF_IS_INFILE(child) && gsf_infile_num_children(GSF_INFILE(child)) > 0;
 		if (is_dir) {
-			if (!msi_prehash(GSF_INFILE(child), name, hash))
-				return FALSE;
+			if (!msi_prehash(GSF_INFILE(child), name, hash)) {
+				g_object_unref(child);
+				goto out;
+			}
 		} else {
-			if (!msi_prehash_utf16_name(name, hash))
-				return FALSE;
+			if (!msi_prehash_utf16_name(name, hash)) {
+				g_object_unref(child);
+				goto out;
+			}
 			/*
 			 * File size.
 			 */
@@ -2697,9 +2700,12 @@ static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
 			BIO_write(hash, zeroes, 8); /* ctime as Windows FILETIME */
 			BIO_write(hash, zeroes, 8); /* mtime as Windows FILETIME */
 		}
+		g_object_unref(child);
 	}
-	g_slist_free(sorted);
-	return TRUE;
+	ret = TRUE;
+out:
+	g_slist_free_full(sorted, g_free);
+	return ret;
 }
 
 /**
@@ -2714,22 +2720,21 @@ static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
 static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 {
 	guint8 classid[16];
-	GSList *sorted = NULL;
-	gchar *name;
-	GsfInput *child;
+	GSList *sorted, *current;
 	GsfOutput *outchild = NULL;
 	gboolean is_dir;
 	gsf_off_t size;
 	guint8 const *data;
+	bool ret = FALSE;
 
 	gsf_infile_msole_get_class_id(GSF_INFILE_MSOLE(infile), classid);
 	if (outole != NULL)
 		gsf_outfile_msole_set_class_id(GSF_OUTFILE_MSOLE(outole), classid);
 
 	sorted = msi_sorted_infile_children(infile);
-	for (; sorted; sorted = sorted->next) {
-		name = (gchar*)sorted->data;
-		child =  gsf_infile_child_by_name(infile, name);
+	for (current = sorted; current; current = g_slist_next(current)) {
+		gchar *name = current->data;
+		GsfInput *child =  gsf_infile_child_by_name(infile, name);
 		if (child == NULL)
 			continue;
 		is_dir = GSF_IS_INFILE(child) && gsf_infile_num_children(GSF_INFILE(child)) > 0;
@@ -2737,7 +2742,10 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 			outchild = gsf_outfile_new_child(outole, name, is_dir);
 		if (is_dir) {
 			if (!msi_handle_dir(GSF_INFILE(child), GSF_OUTFILE(outchild), hash)) {
-				return FALSE;
+				gsf_output_close(outchild);
+				g_object_unref(outchild);
+				g_object_unref(child);
+				goto out;
 			}
 		} else {
 			while (gsf_input_remaining(child) > 0) {
@@ -2745,7 +2753,10 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 				data = gsf_input_read(child, size, NULL);
 				BIO_write(hash, data, size);
 				if (outchild != NULL && !gsf_output_write(outchild, size, data)) {
-					return FALSE;
+					gsf_output_close(outchild);
+					g_object_unref(outchild);
+					g_object_unref(child);
+					goto out;
 				}
 			}
 		}
@@ -2753,10 +2764,13 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 			gsf_output_close(outchild);
 			g_object_unref(outchild);
 		}
+		g_object_unref(child);
 	}
 	BIO_write(hash, classid, sizeof(classid));
-	g_slist_free(sorted);
-	return TRUE;
+	ret = TRUE;
+out:
+	g_slist_free_full(sorted, g_free);
+	return ret;
 }
 
 /*
@@ -2869,48 +2883,64 @@ out:
 }
 
 /*
+ * msi_get_child returns the first child that its value name matches the pattern.
+ * The returned input stream must be unrefed.
+*/
+
+static GsfInput *msi_get_child(GsfInfile *infile, const char *pattern)
+{
+	gchar decoded[0x40];
+	int i;
+
+	for (i = 0; i < gsf_infile_num_children(infile); i++) {
+		GsfInput *child = gsf_infile_child_by_index(infile, i);
+		const guint8 *name = (const guint8*)gsf_input_name(child);
+		msi_decode(name, decoded);
+		if (!g_strcmp0(decoded, pattern))
+			return child;
+		else
+			g_object_unref(child);
+	}
+	return NULL;
+}
+
+/*
  * msi_verify_file checks whether or not the signature of infile is valid.
  */
 static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 {
-	GsfInput *child, *sig = NULL, *exsig = NULL;
+	GsfInput *sig, *exsig;
 	unsigned char *exdata = NULL;
 	unsigned char *indata = NULL;
-	gchar decoded[0x40];
 	int i, ret = 1;
 	PKCS7 *p7 = NULL;
-	const guint8 *name;
 	unsigned long inlen, exlen = 0;
 	const unsigned char *blob;
 	STACK_OF(SIGNATURE) *signatures;
 	SIGNATURE *signature = NULL;
 
-	signatures = sk_SIGNATURE_new_null();
-
-	for (i = 0; i < gsf_infile_num_children(infile); i++) {
-		child = gsf_infile_child_by_index(infile, i);
-		name = (const guint8*)gsf_input_name(child);
-		msi_decode(name, decoded);
-		if (!g_strcmp0(decoded, "\05DigitalSignature"))
-			sig = child;
-		if (!g_strcmp0(decoded, "\05MsiDigitalSignatureEx"))
-			exsig = child;
-	}
+	sig = msi_get_child(infile, "\05DigitalSignature");
 	if (sig == NULL) {
 		printf("MSI file has no signature\n\n");
-		goto out;
+		return 1; /* FAILED */
 	}
+
+	signatures = sk_SIGNATURE_new_null();
+
 	inlen = (unsigned long) gsf_input_remaining(sig);
 	indata = OPENSSL_malloc(inlen);
 	if (gsf_input_read(sig, inlen, indata) == NULL) {
 		goto out;
 	}
+	exsig = msi_get_child(infile, "\05MsiDigitalSignatureEx");
 	if (exsig != NULL) {
 		exlen = (unsigned long) gsf_input_remaining(exsig);
 		exdata = OPENSSL_malloc(exlen);
 		if (gsf_input_read(exsig, exlen, exdata) == NULL) {
+			g_object_unref(exsig);
 			goto out;
 		}
+		g_object_unref(exsig);
 	}
 	blob = (unsigned char *)indata;
 	p7 = d2i_PKCS7(NULL, &blob, inlen);
@@ -2937,6 +2967,7 @@ static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 	}
 	printf("Number of verified signatures: %d\n", i);
 out:
+	g_object_unref(sig);
 	sk_SIGNATURE_free(signatures);
 	OPENSSL_free(indata);
 	OPENSSL_free(exdata);
@@ -2946,21 +2977,13 @@ out:
 static int msi_extract_dse(GsfInfile *infile, unsigned char **dsebuf,
 	unsigned long *dselen, int *has_dse)
 {
-	GsfInput *exsig = NULL;
-	gchar decoded[0x40];
+	GsfInput *exsig;
 	unsigned char *buf = NULL;
 	gsf_off_t size = 0;
-	int i;
 
-	for (i = 0; i < gsf_infile_num_children(infile); i++) {
-		GsfInput *child = gsf_infile_child_by_index(infile, i);
-		const guint8 *name = (const guint8*)gsf_input_name(child);
-		msi_decode(name, decoded);
-		if (!g_strcmp0(decoded, "\05MsiDigitalSignatureEx"))
-			exsig = child;
-	}
+	exsig = msi_get_child(infile, "\05MsiDigitalSignatureEx");
 	if (exsig == NULL)
-		return 1; /* FAILED */
+		return FALSE; /* FAILED */
 	if (has_dse != NULL) {
 		*has_dse = 1;
 	}
@@ -2970,11 +2993,14 @@ static int msi_extract_dse(GsfInfile *infile, unsigned char **dsebuf,
 	}
 	if (dsebuf != NULL) {
 		buf = OPENSSL_malloc(size);
-		if (gsf_input_read(exsig, size, buf) == NULL)
-			return 1; /* FAILED */
+		if (gsf_input_read(exsig, size, buf) == NULL) {
+			g_object_unref(exsig);
+			return FALSE; /* FAILED */
+		}
 		*dsebuf = buf;
 	}
-	return 0; /* OK */
+	g_object_unref(exsig);
+	return TRUE; /* OK */
 }
 
 /*
@@ -2984,26 +3010,16 @@ static int msi_extract_dse(GsfInfile *infile, unsigned char **dsebuf,
 static int msi_extract_signature_to_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 {
 	char hexbuf[EVP_MAX_MD_SIZE*2+1];
-	GsfInput *sig = NULL;
-	GsfInput *exsig = NULL;
+	GsfInput *sig, *exsig;
 	unsigned char *exdata = NULL;
 	unsigned long exlen = 0;
-	BIO *outdata = NULL;
-	gchar decoded[0x40];
-	int i, ret = 1;
+	BIO *outdata;
+	int ret = 1;
 
-	for (i = 0; i < gsf_infile_num_children(infile); i++) {
-		GsfInput *child = gsf_infile_child_by_index(infile, i);
-		const guint8 *name = (const guint8*)gsf_input_name(child);
-		msi_decode(name, decoded);
-		if (!g_strcmp0(decoded, "\05DigitalSignature"))
-			sig = child;
-		if (!g_strcmp0(decoded, "\05MsiDigitalSignatureEx"))
-			exsig = child;
-	}
+	sig = msi_get_child(infile, "\05DigitalSignature");
 	if (sig == NULL) {
 		printf("MSI file has no signature\n\n");
-		goto out;
+		return 1; /* FAILED */
 	}
 	/* Create outdata DER file */
 #ifdef WIN32
@@ -3023,25 +3039,32 @@ static int msi_extract_signature_to_file(GsfInfile *infile, GLOBAL_OPTIONS *opti
 		guint8 const *data = gsf_input_read(sig, size, NULL);
 		BIO_write(outdata, data, size);
 	}
+
+	exsig = msi_get_child(infile, "\05MsiDigitalSignatureEx");
 	if (exsig != NULL) {
 		exlen = (unsigned long) gsf_input_remaining(exsig);
 		if (exlen > EVP_MAX_MD_SIZE) {
 			printf("MsiDigitalSignatureEx is larger than EVP_MAX_MD_SIZE\n");
+			g_object_unref(exsig);
 			goto out;
 		}
 		exdata = OPENSSL_malloc(exlen);
 		if (gsf_input_read(exsig, exlen, exdata) == NULL) {
 			printf("Unable to read MsiDigitalSignatureEx\n");
+			OPENSSL_free(exdata);
+			g_object_unref(exsig);
 			goto out;
 		}
 		tohex(exdata, hexbuf, exlen);
 		printf("Note: MSI includes a MsiDigitalSignatureEx section\n");
 		printf("MsiDigitalSignatureEx pre-hash: %s\n", hexbuf);
+		OPENSSL_free(exdata);
+		g_object_unref(exsig);
 	}
 
 	ret = 0; /* OK */
 out:
-	OPENSSL_free(exdata);
+	g_object_unref(sig);
 	if (outdata)
 		BIO_free_all(outdata);
 	return ret;
@@ -3049,25 +3072,16 @@ out:
 
 static PKCS7 *msi_extract_signature_to_pkcs7(GsfInfile *infile)
 {
-	GsfInput *sig = NULL, *child;
-	const guint8 *name;
-	gchar decoded[0x40];
+	GsfInput *sig;
 	PKCS7 *p7 = NULL;
 	u_char *buf = NULL;
 	gsf_off_t size = 0;
-	int i = 0;
 	const unsigned char *p7buf;
 
-	for (i = 0; i < gsf_infile_num_children(infile); i++) {
-		child = gsf_infile_child_by_index(infile, i);
-		name = (const guint8*)gsf_input_name(child);
-		msi_decode(name, decoded);
-		if (!g_strcmp0(decoded, "\05DigitalSignature"))
-			sig = child;
-	}
+	sig = msi_get_child(infile, "\05DigitalSignature");
 	if (sig == NULL) {
 		printf("MSI file has no signature\n\n");
-		goto out;
+		return NULL; /* FAILED */
 	}
 	size = gsf_input_remaining(sig);
 	buf = OPENSSL_malloc(size);
@@ -3077,6 +3091,7 @@ static PKCS7 *msi_extract_signature_to_pkcs7(GsfInfile *infile)
 	p7 = d2i_PKCS7(NULL, &p7buf, size);
 
 out:
+	g_object_unref(sig);
 	OPENSSL_free(buf);
 	return p7;
 }
@@ -3128,7 +3143,7 @@ static int msi_check_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md)
 	unsigned long dselen = 0;
 	int mdlen, has_dse = 0;
 
-	if (msi_extract_dse(ole, NULL, &dselen, &has_dse) != 0 && has_dse) {
+	if (!msi_extract_dse(ole, NULL, &dselen, &has_dse) != 0 && has_dse) {
 		printf("Unable to extract MsiDigitalSignatureEx section\n\n");
 		return 0; /* FAILED */
 	}
@@ -3215,6 +3230,7 @@ static int msi_add_DigitalSignature(GsfOutfile *outole, u_char *p, int len)
 	if (!gsf_output_write(child, len, p))
 		ret = 0;
 	gsf_output_close(child);
+	g_object_unref(child);
 	return ret;
 }
 
@@ -3227,6 +3243,7 @@ static int msi_add_MsiDigitalSignatureEx(GsfOutfile *outole, GSF_PARAMS *gsfpara
 	if (!gsf_output_write(child, gsfparams->len_msiex, gsfparams->p_msiex))
 		ret = 0;
 	gsf_output_close(child);
+	g_object_unref(child);
 	OPENSSL_free(gsfparams->p_msiex);
 	return ret;
 }
@@ -4503,6 +4520,7 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 		}
 		ole = gsf_infile_msole_new(src, NULL);
 		g_object_unref(src);
+
 		ret = msi_verify_file(ole, options);
 		g_object_unref(ole);
 		if (ret) {
@@ -5346,21 +5364,30 @@ int main(int argc, char **argv)
 
 		if (cmd == CMD_EXTRACT) {
 			ret = msi_extract_file(ole, &options);
+			g_object_unref(ole);
 			goto skip_signing;
 		} else if (cmd == CMD_VERIFY) {
 			ret = msi_verify_file(ole, &options);
+			g_object_unref(ole);
 			goto skip_signing;
 		} else {
 			sig = msi_presign_file(type, cmd, &header, &options, &cparams, indata,
 				hash, ole, &gsfparams, &cursig);
 			if (cmd == CMD_REMOVE) {
-				gsf_output_close(GSF_OUTPUT(gsfparams.outole));
-				g_object_unref(gsfparams.sink);
-				ret = 0;
-				goto skip_signing;
+				g_object_unref(ole);
+				if (gsfparams.outole) {
+					gsf_output_close(GSF_OUTPUT(gsfparams.outole));
+					g_object_unref(gsfparams.outole);
+					g_object_unref(gsfparams.sink);
+					ret = 0;
+					goto skip_signing;
+				} else
+					/* Failed to create output file */
+					goto err_cleanup;
 			} else if (!sig) {
 				PKCS7_free(cursig);
 				OPENSSL_free(gsfparams.p_msiex);
+				g_object_unref(ole);
 				goto err_cleanup;
 			}
 		}
@@ -5441,6 +5468,7 @@ int main(int argc, char **argv)
 			outdata, &gsfparams);
 	if (type == FILE_TYPE_MSI) {
 		gsf_output_close(GSF_OUTPUT(gsfparams.outole));
+		g_object_unref(gsfparams.outole);
 		g_object_unref(gsfparams.sink);
 	}
 #else
