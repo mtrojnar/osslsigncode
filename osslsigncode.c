@@ -276,6 +276,7 @@ typedef struct {
 	X509 *cert;
 	STACK_OF(X509) *certs;
 	STACK_OF(X509) *xcerts;
+	STACK_OF(X509_CRL) *crls;
 } CRYPTO_PARAMS;
 
 #ifdef WITH_GSF
@@ -1868,7 +1869,7 @@ static int load_crlfile_lookup(X509_STORE *store, char *certs, char *crl)
 		printf("\nError: no certificate found\n");
 		return 0; /* FAILED */
 	}
-	if (!X509_load_crl_file(lookup, crl, X509_FILETYPE_PEM)) {
+	if (crl && !X509_load_crl_file(lookup, crl, X509_FILETYPE_PEM)) {
 		printf("\nError: no CRL found in %s\n", crl);
 		return 0; /* FAILED */
 	}
@@ -2287,7 +2288,8 @@ out:
 	return url;
 }
 
-static int verify_crl(char *ca_file, char *crl_file, X509 *signer, STACK_OF(X509) *chain)
+static int verify_crl(char *ca_file, char *crl_file, STACK_OF(X509_CRL) *crls,
+		X509 *signer, STACK_OF(X509) *chain)
 {
 	X509_STORE *store = NULL;
 	X509_STORE_CTX *ctx = NULL;
@@ -2305,6 +2307,10 @@ static int verify_crl(char *ca_file, char *crl_file, X509 *signer, STACK_OF(X509
 	/* initialise an X509_STORE_CTX structure for subsequent use by X509_verify_cert()*/
 	if (!X509_STORE_CTX_init(ctx, store, signer, chain))
 		goto out;
+
+	/* set an additional CRLs */
+	if (crls)
+		X509_STORE_CTX_set0_crls(ctx, crls);
 
 	if (X509_verify_cert(ctx) <= 0) {
 		int error = X509_STORE_CTX_get_error(ctx);
@@ -2329,6 +2335,7 @@ static int verify_timestamp(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 	STACK_OF(CMS_SignerInfo) *sinfos;
 	CMS_SignerInfo *cmssi;
 	X509 *signer;
+	STACK_OF(X509_CRL) *crls;
 	char *url;
 	PKCS7_SIGNER_INFO *si;
 	int verok = 0;
@@ -2377,9 +2384,10 @@ static int verify_timestamp(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 	printf("\n");
 
 	/* verify a Certificate Revocation List */
-	if (options->crluntrusted) {
+	crls = signature->p7->d.sign->crl;
+	if (options->crluntrusted || crls) {
 		STACK_OF(X509) *chain = CMS_get1_certs(signature->timestamp);
-		int crlok = verify_crl(options->untrusted, options->crluntrusted, signer, chain);
+		int crlok = verify_crl(options->untrusted, options->crluntrusted, crls, signer, chain);
 		sk_X509_pop_free(chain, X509_free);
 		printf("Timestamp Server Signature CRL verification: %s\n", crlok ? "ok" : "failed");
 		if (!crlok)
@@ -2408,6 +2416,7 @@ out:
 static int verify_authenticode(SIGNATURE *signature, GLOBAL_OPTIONS *options, X509 *signer)
 {
 	X509_STORE *store;
+	STACK_OF(X509_CRL) *crls;
 	size_t seqhdrlen;
 	BIO *bio = NULL;
 	int verok = 0;
@@ -2441,9 +2450,10 @@ static int verify_authenticode(SIGNATURE *signature, GLOBAL_OPTIONS *options, X5
 	BIO_free(bio);
 
 	/* verify a Certificate Revocation List */
-	if (options->crlfile) {
+	crls = signature->p7->d.sign->crl;
+	if (options->crlfile || crls) {
 		STACK_OF(X509) *chain = signature->p7->d.sign->cert;
-		int crlok = verify_crl(options->cafile, options->crlfile, signer, chain);
+		int crlok = verify_crl(options->cafile, options->crlfile, crls, signer, chain);
 		printf("Signature CRL verification: %s\n", crlok ? "ok" : "failed");
 		if (!crlok)
 			goto out;
@@ -3147,7 +3157,7 @@ static int msi_check_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md)
 	unsigned long dselen = 0;
 	int mdlen, has_dse = 0;
 
-	if (!msi_extract_dse(ole, NULL, &dselen, &has_dse) != 0 && has_dse) {
+	if (!msi_extract_dse(ole, NULL, &dselen, &has_dse) && has_dse) {
 		printf("Unable to extract MsiDigitalSignatureEx section\n\n");
 		return 0; /* FAILED */
 	}
@@ -4235,6 +4245,12 @@ static PKCS7 *create_new_signature(file_type_t type,
 	for (i = sk_X509_num(cparams->certs)-1; i>=0; i--)
 		PKCS7_add_certificate(sig, sk_X509_value(cparams->certs, i));
 
+	/* add crls */
+	if (cparams->crls) {
+		for (i=0; i<sk_X509_CRL_num(cparams->crls); i++)
+			PKCS7_add_crl(sig, sk_X509_CRL_value(cparams->crls, i));
+	}
+
 	return sig; /* OK */
 }
 
@@ -4662,15 +4678,35 @@ out:
 	return ret;
 }
 
+/* Obtain a copy of the whole X509_CRL chain */
+STACK_OF(X509_CRL) *X509_CRL_chain_up_ref(STACK_OF(X509_CRL) *chain)
+{
+	STACK_OF(X509_CRL) *ret;
+	int i;
+	ret = sk_X509_CRL_dup(chain);
+	if (ret == NULL)
+		return NULL;
+	for (i = 0; i < sk_X509_CRL_num(ret); i++) {
+		X509_CRL *x = sk_X509_CRL_value(ret, i);
+		if (!X509_CRL_up_ref(x))
+			goto err;
+	}
+	return ret;
+err:
+	while (i-- > 0)
+		X509_CRL_free(sk_X509_CRL_value(ret, i));
+	sk_X509_CRL_free(ret);
+	return NULL;
+}
+
 /*
  * Load certificates from a file.
- * If successful all certificates will be written to cparams->certs.
+ * If successful all certificates will be written to cparams->certs
+ * and optional CRLs will be written to cparams->crls.
  */
 static int read_certfile(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 {
 	BIO *btmp;
-	PKCS7 *p7;
-	X509 *x = NULL;
 	int ret = 0;
 
 	btmp = BIO_new_file(options->certfile, "rb");
@@ -4683,6 +4719,7 @@ static int read_certfile(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 
 	/* .der certificate file */
 	if (!cparams->certs) {
+		X509 *x = NULL;
 		(void)BIO_seek(btmp, 0);
 		if (d2i_X509_bio(btmp, &x)) {
 			cparams->certs = sk_X509_new_null();
@@ -4696,11 +4733,15 @@ static int read_certfile(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 
 	/* .spc or .p7b certificate file (PKCS#7 structure) */
 	if (!cparams->certs) {
+		PKCS7 *p7;
 		(void)BIO_seek(btmp, 0);
 		p7 = d2i_PKCS7_bio(btmp, NULL);
 		if (!p7)
 			goto out; /* FAILED */
 		cparams->certs = X509_chain_up_ref(p7->d.sign->cert);
+
+		/* additional CRLs may be supplied as part of a PKCS#7 signed data structure */
+		cparams->crls = X509_CRL_chain_up_ref(p7->d.sign->crl);
 		PKCS7_free(p7);
 	}
 
