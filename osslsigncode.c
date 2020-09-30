@@ -222,8 +222,11 @@ typedef struct {
 	char *pvkfile;
 	char *pkcs12file;
 	int output_pkcs7;
+#ifndef OPENSSL_NO_ENGINE
 	char *p11engine;
 	char *p11module;
+	char *p11cert;
+#endif /* OPENSSL_NO_ENGINE */
 	int askpass;
 	char *readpass;
 	char *pass;
@@ -273,8 +276,6 @@ typedef struct {
 	X509 *cert;
 	STACK_OF(X509) *certs;
 	STACK_OF(X509) *xcerts;
-	ENGINE *dynamic;
-	ENGINE *pkcs11;
 } CRYPTO_PARAMS;
 
 #ifdef WITH_GSF
@@ -1078,6 +1079,7 @@ static void help_for(const char *argv0, const char *cmd)
 	const char *cmds_pass[] = {"sign", NULL};
 	const char *cmds_pem[] = {"extract-signature", NULL};
 	const char *cmds_ph[] = {"sign", NULL};
+	const char *cmds_pkcs11cert[] = {"sign", NULL};
 	const char *cmds_pkcs11engine[] = {"sign", NULL};
 	const char *cmds_pkcs11module[] = {"sign", NULL};
 	const char *cmds_pkcs12[] = {"sign", NULL};
@@ -1145,7 +1147,7 @@ static void help_for(const char *argv0, const char *cmd)
 		printf("Options:\n");
 	}
 	if (on_list(cmd, cmds_ac))
-	printf("%-24s= an additional certificate to be added to the signature block\n", "-ac");
+	printf("%-24s= additional certificates to be added to the signature block\n", "-ac");
 #ifdef WITH_GSF
 	if (on_list(cmd, cmds_add_msi_dse))
 		printf("%-24s= sign a MSI file with the add-msi-dse option\n", "-add-msi-dse");
@@ -1180,7 +1182,7 @@ static void help_for(const char *argv0, const char *cmd)
 		printf("%26sonly \"low\" level is now supported\n", "");
 	}
 	if (on_list(cmd, cmds_key))
-		printf("%-24s= the private key to use\n", "-key");
+		printf("%-24s= the private key to use or PKCS#11 URI identifies a key in the token\n", "-key");
 	if (on_list(cmd, cmds_n))
 		printf("%-24s= specifies a description of the signed content\n", "-n");
 	if (on_list(cmd, cmds_nest))
@@ -1201,6 +1203,8 @@ static void help_for(const char *argv0, const char *cmd)
 		printf("%-24s= output data format PEM to use (default: DER)\n", "-pem");
 	if (on_list(cmd, cmds_ph))
 		printf("%-24s= generate page hashes for executable files\n", "-ph");
+	if (on_list(cmd, cmds_pkcs11cert))
+		printf("%-24s= PKCS#11 URI identifies a certificate in the token\n", "-pkcs11cert");
 	if (on_list(cmd, cmds_pkcs11engine))
 		printf("%-24s= PKCS11 engine\n", "-pkcs11engine");
 	if (on_list(cmd, cmds_pkcs11module))
@@ -2512,7 +2516,7 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 #ifdef WITH_GSF
 /*
  * MSI file support
-*/
+ */
 static gint msi_base64_decode(gint x)
 {
 	if (x < 10)
@@ -3253,7 +3257,7 @@ static int msi_add_MsiDigitalSignatureEx(GsfOutfile *outole, GSF_PARAMS *gsfpara
 
 /*
  * PE file support
-*/
+ */
 static void pe_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf, FILE_HEADER *header)
 {
 	BIO *bio = NULL;
@@ -4624,207 +4628,356 @@ static int read_password(GLOBAL_OPTIONS *options)
 	return 1; /* OK */
 }
 
-static char *read_key(GLOBAL_OPTIONS *options)
+/*
+ * Parse a PKCS#12 container with certificates and a private key.
+ * If successful the private key will be written to cparams->pkey,
+ * the corresponding certificate to cparams->cert
+ * and any additional certificates to cparams->certs.
+ */
+static int read_pkcs12file(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
+{
+	BIO *btmp;
+	PKCS12 *p12;
+	int ret = 0;
+
+	btmp = BIO_new_file(options->pkcs12file, "rb");
+	if (!btmp) {
+		printf("Failed to read PKCS#12 file: %s\n", options->pkcs12file);
+		return 0; /* FAILED */
+	}
+	p12 = d2i_PKCS12_bio(btmp, NULL);
+	if (!p12) {
+		printf("Failed to extract PKCS#12 data: %s\n", options->pkcs12file);
+		goto out; /* FAILED */
+	}
+	if (!PKCS12_parse(p12, options->pass ? options->pass : "", &cparams->pkey, &cparams->cert, &cparams->certs)) {
+		printf("Failed to parse PKCS#12 file: %s (Wrong password?)\n", options->pkcs12file);
+		PKCS12_free(p12);
+		goto out; /* FAILED */
+	}
+	PKCS12_free(p12);
+	ret = 1; /* OK */
+out:
+	BIO_free(btmp);
+	return ret;
+}
+
+/*
+ * Load certificates from a file.
+ * If successful all certificates will be written to cparams->certs.
+ */
+static int read_certfile(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
+{
+	BIO *btmp;
+	PKCS7 *p7;
+	X509 *x = NULL;
+	int ret = 0;
+
+	btmp = BIO_new_file(options->certfile, "rb");
+	if (!btmp) {
+		printf("Failed to read certificate file: %s\n", options->certfile);
+		return 0; /* FAILED */
+	}
+	/* .pem certificate file */
+	cparams->certs = PEM_read_certs(btmp, "");
+
+	/* .der certificate file */
+	if (!cparams->certs) {
+		(void)BIO_seek(btmp, 0);
+		if (d2i_X509_bio(btmp, &x)) {
+			cparams->certs = sk_X509_new_null();
+			if (!sk_X509_push(cparams->certs, x)) {
+				X509_free(x);
+				goto out; /* FAILED */
+			}
+			printf("Warning: The certificate file contains a single x509 certificate\n");
+		}
+	}
+
+	/* .spc or .p7b certificate file (PKCS#7 structure) */
+	if (!cparams->certs) {
+		(void)BIO_seek(btmp, 0);
+		p7 = d2i_PKCS7_bio(btmp, NULL);
+		if (!p7)
+			goto out; /* FAILED */
+		cparams->certs = X509_chain_up_ref(p7->d.sign->cert);
+		PKCS7_free(p7);
+	}
+
+	ret = 1; /* OK */
+out:
+	if (ret == 0)
+		printf("No certificate found\n");
+	BIO_free(btmp);
+	return ret;
+}
+
+/* Load additional (cross) certificates from a .pem file */
+static int read_xcertfile(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
+{
+	BIO *btmp;
+	PKCS7 *p7;
+	int ret = 0;
+
+	btmp = BIO_new_file(options->xcertfile, "rb");
+	if (!btmp) {
+		printf("Failed to read cross certificates file: %s\n", options->xcertfile);
+		return 0; /* FAILED */
+	}
+	cparams->xcerts = PEM_read_certs(btmp, "");
+	if (!cparams->xcerts) {
+		printf("Failed to read cross certificates file: %s\n", options->xcertfile);
+		goto out; /* FAILED */
+	}
+
+	ret = 1; /* OK */
+out:
+	BIO_free(btmp);
+	return ret;
+}
+
+/* Load the private key from a file */
+static int read_keyfile(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
+{
+	BIO *btmp;
+	int ret = 0;
+
+	btmp = BIO_new_file(options->keyfile, "rb");
+	if (!btmp) {
+		printf("Failed to read private key file: %s\n", options->keyfile);
+		return 0; /* FAILED */
+	}
+	if (((cparams->pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
+			(BIO_seek(btmp, 0) == 0) &&
+			(cparams->pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, options->pass ? options->pass : "")) == NULL &&
+			(BIO_seek(btmp, 0) == 0) &&
+			(cparams->pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL)) {
+		printf("Failed to decode private key file: %s (Wrong password?)\n", options->keyfile);
+		goto out; /* FAILED */
+	}
+	ret = 1; /* OK */
+out:
+	BIO_free(btmp);
+	return ret;
+}
+
+/*
+ * Decode Microsoft Private Key (PVK) file.
+ * PVK is a proprietary Microsoft format that stores a cryptographic private key.
+ * PVK files are often password-protected.
+ * A PVK file may have an associated .spc (PKCS7) certificate file.
+ */
+static char *find_pvk_key(GLOBAL_OPTIONS *options)
 {
 	unsigned char magic[4];
+	/* Microsoft Private Key format Header Hexdump */
 	unsigned char pvkhdr[4] = { 0x1e, 0xf1, 0xb5, 0xb0 };
 	char *pvkfile = NULL;
 	BIO *btmp;
 
-	if (options->keyfile && !options->p11module &&
-			(btmp = BIO_new_file(options->keyfile, "rb")) != NULL) {
-		magic[0] = 0x00;
-		BIO_read(btmp, magic, 4);
-		if (!memcmp(magic, pvkhdr, 4)) {
-			pvkfile = options->keyfile;
-			options->keyfile = NULL;
-		}
-		BIO_free(btmp);
-		return pvkfile;
-	} else
-		return NULL;
+	if (!options->keyfile
+#ifndef OPENSSL_NO_ENGINE
+			|| options->p11module
+#endif /* OPENSSL_NO_ENGINE */
+			)
+		return NULL; /* FAILED */
+	btmp = BIO_new_file(options->keyfile, "rb");
+	if (!btmp) {
+		printf("Failed to read private key file: %s\n", options->keyfile);
+		return NULL; /* FAILED */
+	}
+	magic[0] = 0x00;
+	BIO_read(btmp, magic, 4);
+	if (!memcmp(magic, pvkhdr, 4)) {
+		pvkfile = options->keyfile;
+		options->keyfile = NULL;
+	}
+	BIO_free(btmp);
+	return pvkfile;
 }
+
+static int read_pvk_key(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
+{
+	BIO *btmp;
+	int ret = 0;
+
+	btmp = BIO_new_file(options->pvkfile, "rb");
+	if (!btmp) {
+		printf("Failed to read private key file: %s\n", options->pvkfile);
+		return 0; /* FAILED */
+	}
+	if (((cparams->pkey = b2i_PVK_bio(btmp, NULL, options->pass ? options->pass : "")) == NULL &&
+			(BIO_seek(btmp, 0) == 0) &&
+			(cparams->pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL)) {
+		printf("Failed to decode private key file: %s\n", options->pvkfile);
+		goto out; /* FAILED */
+	}
+	ret = 1; /* OK */
+out:
+	BIO_free(btmp);
+	return ret;
+}
+
+#ifndef OPENSSL_NO_ENGINE
+
+/* Load an engine in a shareable library */
+ENGINE *dynamic_engine(GLOBAL_OPTIONS *options)
+{
+	ENGINE *engine = ENGINE_by_id("dynamic");
+	if (!engine) {
+		printf("Failed to load 'dynamic' engine\n");
+		return NULL; /* FAILED */
+	}
+	if (!ENGINE_ctrl_cmd_string(engine, "SO_PATH", options->p11engine, 0)
+			|| !ENGINE_ctrl_cmd_string(engine, "ID", "pkcs11", 0)
+			|| !ENGINE_ctrl_cmd_string(engine, "LIST_ADD", "1", 0)
+			|| !ENGINE_ctrl_cmd_string(engine, "LOAD", NULL, 0)) {
+		printf("Failed to set 'dynamic' engine\n");
+		ENGINE_free(engine);
+		return NULL; /* FAILED */
+	}
+	return engine; /* OK */
+}
+
+/* Load a pkcs11 engine */
+ENGINE *pkcs11_engine(GLOBAL_OPTIONS *options)
+{
+	ENGINE *engine = ENGINE_by_id("pkcs11");
+	if (!engine) {
+		printf("Failed to find and load 'pkcs11' engine\n");
+		return NULL; /* FAILED */
+	}
+	return engine; /* OK */
+}
+
+/* Load the private key and the signer certificate from a security token */
+static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine, CRYPTO_PARAMS *cparams)
+{
+	if (!ENGINE_ctrl_cmd_string(engine, "MODULE_PATH", options->p11module, 0)) {
+		printf("Failed to set pkcs11 engine MODULE_PATH to '%s'\n", options->p11module);
+		ENGINE_free(engine);
+		return 0; /* FAILED */
+	}
+	if (options->pass != NULL && !ENGINE_ctrl_cmd_string(engine, "PIN", options->pass, 0)) {
+		printf("Failed to set pkcs11 PIN\n");
+		ENGINE_free(engine);
+		return 0; /* FAILED */
+	}
+	if (!ENGINE_init(engine)) {
+		printf("Failed to initialized pkcs11 engine\n");
+		ENGINE_free(engine);
+		return 0; /* FAILED */
+	}
+	/*
+	 * ENGINE_init() returned a functional reference, so free the structural
+	 * reference from ENGINE_by_id().
+	 */
+	ENGINE_free(engine);
+
+	if (options->p11cert) {
+		struct {
+			const char *id;
+			X509 *cert;
+		} parms;
+
+		parms.id = options->p11cert;
+		parms.cert = NULL;
+		ENGINE_ctrl_cmd(engine, "LOAD_CERT_CTRL", 0, &parms, NULL, 1);
+		if (!parms.cert) {
+			printf("Failed to load certificate %s\n", options->p11cert);
+			ENGINE_finish(engine);
+			return 0; /* FAILED */
+		} else
+			cparams->cert = parms.cert;
+	}
+
+	cparams->pkey = ENGINE_load_private_key(engine, options->keyfile, NULL, NULL);
+	/* Free the functional reference from ENGINE_init */
+	ENGINE_finish(engine);
+	if (!cparams->pkey) {
+		printf("Failed to load private key %s\n", options->keyfile);
+		return 0; /* FAILED */
+	}
+	return 1; /* OK */
+}
+#endif /* OPENSSL_NO_ENGINE */
 
 static int read_crypto_params(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 {
-	PKCS12 *p12 = NULL;
-	PKCS7 *p7 = NULL, *p7x = NULL;
-	BIO *btmp;
-	const int CMD_MANDATORY = 0;
-	int ret = 1;
+	int ret = 0;
 
-	options->pvkfile = read_key(options);
-	if (options->pkcs12file != NULL) {
-		if ((btmp = BIO_new_file(options->pkcs12file, "rb")) == NULL ||
-				(p12 = d2i_PKCS12_bio(btmp, NULL)) == NULL) {
-			printf("Failed to read PKCS#12 file: %s\n", options->pkcs12file);
-			ret = 0; /* FAILED */
-		}
-		BIO_free(btmp);
-		if (!PKCS12_parse(p12, options->pass ? options->pass : "", &cparams->pkey, &cparams->cert, &cparams->certs)) {
-			printf("Failed to parse PKCS#12 file: %s (Wrong password?)\n", options->pkcs12file);
-			ret = 0; /* FAILED */
-		}
-		PKCS12_free(p12);
-	} else if (options->pvkfile != NULL) {
-		if ((btmp = BIO_new_file(options->certfile, "rb")) == NULL ||
-				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
-				(cparams->certs = PEM_read_certs(btmp, "")) == NULL)) {
-			printf("Failed to read certificate file: %s\n", options->certfile);
-			ret = 0; /* FAILED */
-		}
-		BIO_free(btmp);
-		if ((btmp = BIO_new_file(options->pvkfile, "rb")) == NULL ||
-				((cparams->pkey = b2i_PVK_bio(btmp, NULL, options->pass ? options->pass : "")) == NULL &&
-				(BIO_seek(btmp, 0) == 0) &&
-				(cparams->pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL)) {
-			printf("Failed to read PVK file: %s\n", options->pvkfile);
-			ret = 0; /* FAILED */
-		}
-		BIO_free(btmp);
-	} else if (options->p11module != NULL) {
-		if (options->p11engine != NULL) {
-			if (!OPENSSL_init_crypto(OPENSSL_INIT_ENGINE_DYNAMIC, NULL)) {
-				printf("Failed to init 'dynamic' engine\n");
-				ret = 0; /* FAILED */
-			}
-			cparams->dynamic = ENGINE_by_id("dynamic");
-			if (!cparams->dynamic) {
-				printf("Failed to load 'dynamic' engine\n");
-				ret = 0; /* FAILED */
-			}
-			if (1 != ENGINE_ctrl_cmd_string(cparams->dynamic, "SO_PATH", options->p11engine, CMD_MANDATORY)) {
-				printf("Failed to set dyn SO_PATH to '%s'\n", options->p11engine);
-				ret = 0; /* FAILED */
-			}
-			if (1 != ENGINE_ctrl_cmd_string(cparams->dynamic, "ID", "pkcs11", CMD_MANDATORY)) {
-				printf("Failed to set dyn ID to 'pkcs11'\n");
-				ret = 0; /* FAILED */
-			}
-			if (1 != ENGINE_ctrl_cmd(cparams->dynamic, "LIST_ADD", 1, NULL, NULL, CMD_MANDATORY)) {
-				printf("Failed to set dyn LIST_ADD to '1'\n");
-				ret = 0; /* FAILED */
-			}
-			if (1 != ENGINE_ctrl_cmd(cparams->dynamic, "LOAD", 1, NULL, NULL, CMD_MANDATORY)) {
-				printf("Failed to set dyn LOAD to '1'\n");
-				ret = 0; /* FAILED */
-			}
-		} else
-			ENGINE_load_builtin_engines();
-		cparams->pkcs11 = ENGINE_by_id("pkcs11");
-		if (!cparams->pkcs11) {
-			printf("Failed to find and load pkcs11 engine\n");
-			ret = 0; /* FAILED */
-		}
-		if (1 != ENGINE_ctrl_cmd_string(cparams->pkcs11, "MODULE_PATH", options->p11module, CMD_MANDATORY)) {
-			printf("Failed to set pkcs11 engine MODULE_PATH to '%s'\n", options->p11module);
-			ret = 0; /* FAILED */
-		}
-		if (options->pass != NULL &&
-				1 != ENGINE_ctrl_cmd_string(cparams->pkcs11, "PIN", options->pass, CMD_MANDATORY)) {
-			printf("Failed to set pkcs11 PIN\n");
-			ret = 0; /* FAILED */
-		}
-		if (1 != ENGINE_init(cparams->pkcs11)) {
-			printf("Failed to initialized pkcs11 engine\n");
-			ret = 0; /* FAILED */
-		}
-		cparams->pkey = ENGINE_load_private_key(cparams->pkcs11, options->keyfile, NULL, NULL);
-		if (cparams->pkey == NULL) {
-			printf("Failed to load private key %s\n", options->keyfile);
-			ret = 0; /* FAILED */
-		}
-		if ((btmp = BIO_new_file(options->certfile, "rb")) == NULL ||
-				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
-				(cparams->certs = PEM_read_certs(btmp, "")) == NULL)) {
-			printf("Failed to read certificate file: %s\n", options->certfile);
-			ret = 0; /* FAILED */
-		}
-		BIO_free(btmp);
-	} else {
-		if ((btmp = BIO_new_file(options->certfile, "rb")) == NULL ||
-				((p7 = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
-				(cparams->certs = PEM_read_certs(btmp, "")) == NULL)) {
-			printf("Failed to read certificate file: %s\n", options->certfile);
-			ret = 0; /* FAILED */
-		}
-		BIO_free(btmp);
-		if ((btmp = BIO_new_file(options->keyfile, "rb")) == NULL ||
-				((cparams->pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
-				(BIO_seek(btmp, 0) == 0) &&
-				(cparams->pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, options->pass ? options->pass : "")) == NULL &&
-				(BIO_seek(btmp, 0) == 0) &&
-				(cparams->pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL)) {
-			printf("Failed to read private key file: %s (Wrong password?)\n", options->keyfile);
-			ret = 0; /* FAILED */
-		}
-		BIO_free(btmp);
-	}
-	if (cparams->certs == NULL && p7 != NULL)
-		/* certificate file in the SPC format */
-		cparams->certs = X509_chain_up_ref(p7->d.sign->cert);
+	/* Microsoft Private Key format support */
+	options->pvkfile = find_pvk_key(options);
+	if (options->pvkfile) {
+		if (!read_certfile(options, cparams) || !read_pvk_key(options, cparams))
+			goto out; /* FAILED */
 
-	if (options->xcertfile) {
-		if ((btmp = BIO_new_file(options->xcertfile, "rb")) == NULL ||
-				((p7x = d2i_PKCS7_bio(btmp, NULL)) == NULL &&
-				(cparams->xcerts = PEM_read_certs(btmp, "")) == NULL)) {
-			printf("Failed to read cross certificate file: %s\n", options->xcertfile);
-			ret = 0; /* FAILED */
-		}
-		BIO_free(btmp);
-		PKCS7_free(p7x);
-	}
-	if (options->pass)
+	/* PKCS#12 container with certificates and the private key ("-pkcs12" option) */
+	} else if (options->pkcs12file) {
+		if (!read_pkcs12file(options, cparams))
+			goto out; /* FAILED */
+
+#ifndef OPENSSL_NO_ENGINE
+	/* PKCS11 engine and module support */
+	} else if (options->p11module) {
+		ENGINE *engine;
+		if (options->p11engine)
+			engine = dynamic_engine(options);
+		else
+			engine = pkcs11_engine(options);
+		if (!engine)
+			goto out; /* FAILED */
+		printf("Engine \"%s\" set.\n", ENGINE_get_id(engine));
+
+		/* Load the private key and the signer certificate from the security token*/
+		if (!read_token(options, engine, cparams))
+			goto out; /* FAILED */
+
+		/* Load the signer certificate and the whole certificate chain from a file */
+		if (options->certfile && !read_certfile(options, cparams))
+			goto out; /* FAILED */
+
+	/* PEM / DER / SPC file format support */
+	} else if (!read_certfile(options, cparams) || !read_keyfile(options, cparams))
+		goto out; /* FAILED */
+#endif /* OPENSSL_NO_ENGINE */
+
+	/* Load additional (cross) certificates ("-ac" option) */
+	if (options->xcertfile && !read_xcertfile(options, cparams))
+		goto out; /* FAILED */
+
+	ret = 1;
+out:
+	/* reset password */
+	if (options->pass) {
 		memset(options->pass, 0, strlen(options->pass));
-
-	PKCS7_free(p7);
+		OPENSSL_free(options->pass);
+	}
 	return ret; /* OK */
 }
 
-static void free_crypto_params(CRYPTO_PARAMS *cparams, GLOBAL_OPTIONS *options)
+static void free_crypto_params(CRYPTO_PARAMS *cparams)
 {
-	if (options->keyfile || options->pvkfile || options->pkcs12file) {
-		EVP_PKEY_free(cparams->pkey);
-		cparams->pkey = NULL;
-	}
-	if (options->pkcs12file) {
-		X509_free(cparams->cert);
-		cparams->cert = NULL;
-	}
-	if (options->certfile || options->pkcs12file) {
-		sk_X509_pop_free(cparams->certs, X509_free);
-		cparams->certs = NULL;
-	}
-	if (options->xcertfile) {
-		sk_X509_pop_free(cparams->xcerts, X509_free);
-		cparams->xcerts = NULL;
-	}
-
-	if (cparams->pkcs11) {
-		/* Free the functional reference from ENGINE_init. */
-		ENGINE_finish(cparams->pkcs11);
-		/* Free the structural reference from ENGINE_by_id. */
-		ENGINE_free(cparams->pkcs11);
-	}
-	if (cparams->dynamic) {
-		/*
-		 * Free the structural reference from ENGINE_by_id.
-		 * Note: We do not ENGINE_init the dynamic engine, so we are not responsible to ENGINE_finish it.
-		 */
-		ENGINE_free(cparams->dynamic);
-	}
+	/* If key is NULL nothing is done */
+	EVP_PKEY_free(cparams->pkey);
+	cparams->pkey = NULL;
+	/* If X509 structure is NULL nothing is done */
+	X509_free(cparams->cert);
+	cparams->cert = NULL;
+	/* Free up all elements of sk structure and sk itself */
+	sk_X509_pop_free(cparams->certs, X509_free);
+	cparams->certs = NULL;
+	sk_X509_pop_free(cparams->xcerts, X509_free);
+	cparams->xcerts = NULL;
 }
 
 static void free_options(GLOBAL_OPTIONS *options)
 {
+	/* If memory has not been allocated nothing is done */
 	OPENSSL_free(options->cafile);
 	OPENSSL_free(options->untrusted);
-	if (options->crlfile)
-		OPENSSL_free(options->crlfile);
-	if (options->crluntrusted)
-		OPENSSL_free(options->crluntrusted);
-	if (options->pass)
-		OPENSSL_free(options->pass);
+	OPENSSL_free(options->crlfile);
+	OPENSSL_free(options->crluntrusted);
 }
 
 static char *get_cafile(void)
@@ -5127,12 +5280,17 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 			options->pkcs12file = *(++argv);
 		} else if ((*cmd == CMD_EXTRACT) && !strcmp(*argv, "-pem")) {
 			options->output_pkcs7 = 1;
+#ifndef OPENSSL_NO_ENGINE
+		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11cert")) {
+			if (--argc < 1) usage(argv0, "all");
+			options->p11cert = *(++argv);
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11engine")) {
 			if (--argc < 1) usage(argv0, "all");
 			options->p11engine = *(++argv);
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11module")) {
 			if (--argc < 1) usage(argv0, "all");
 			options->p11module = *(++argv);
+#endif /* OPENSSL_NO_ENGINE */
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-pass")) {
 			if (options->askpass || options->readpass) usage(argv0, "all");
 			if (--argc < 1) usage(argv0, "all");
@@ -5269,7 +5427,10 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 		!options->infile ||
 		(*cmd != CMD_VERIFY && !options->outfile) ||
 		(*cmd == CMD_SIGN && !((options->certfile && options->keyfile) ||
-			options->pkcs12file || options->p11module))) {
+#ifndef OPENSSL_NO_ENGINE
+			options->p11module ||
+#endif /* OPENSSL_NO_ENGINE */
+			options->pkcs12file))) {
 		if (failarg)
 			printf("Unknown option: %s\n", failarg);
 		usage(argv0, "all");
@@ -5509,7 +5670,7 @@ err_cleanup:
 #else
 	munmap(indata, filesize);
 #endif
-	free_crypto_params(&cparams, &options);
+	free_crypto_params(&cparams);
 	free_options(&options);
 	if (ret)
 		ERR_print_errors_fp(stdout);
