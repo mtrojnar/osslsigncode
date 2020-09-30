@@ -4200,21 +4200,30 @@ static int add_opus_attribute(PKCS7_SIGNER_INFO *si, char *desc, char *url)
 static PKCS7 *create_new_signature(file_type_t type,
 			GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 {
-	int i;
+	int i, signer = -1;
 	PKCS7 *sig;
 	PKCS7_SIGNER_INFO *si = NULL;
-	X509 *signcert;
 
 	sig = PKCS7_new();
 	PKCS7_set_type(sig, NID_pkcs7_signed);
 
-	if (cparams->cert != NULL)
+	if (cparams->cert != NULL) {
+		/*
+		 * the private key and corresponding certificate are parsed from the PKCS12
+		 * structure or loaded from the security token, so we may omit to check
+		 * the consistency of a private key with the public key in an X509 certificate
+		 */
 		si = PKCS7_add_signature(sig, cparams->cert, cparams->pkey, options->md);
-
-	for (i=0; si == NULL && i<sk_X509_num(cparams->certs); i++) {
-		signcert = sk_X509_value(cparams->certs, i);
-		/* X509_print_fp(stdout, signcert); */
-		si = PKCS7_add_signature(sig, signcert, cparams->pkey, options->md);
+	} else {
+		/* find the signer's certificate located somewhere in the whole certificate chain */
+		for (i=0; i<sk_X509_num(cparams->certs); i++) {
+			X509 *signcert = sk_X509_value(cparams->certs, i);
+			if (X509_check_private_key(signcert, cparams->pkey)) {
+				si = PKCS7_add_signature(sig, signcert, cparams->pkey, options->md);
+				signer = i;
+				break;
+			}
+		}
 	}
 	if (si == NULL) {
 		printf("PKCS7_add_signature failed\n");
@@ -4236,21 +4245,28 @@ static PKCS7 *create_new_signature(file_type_t type,
 	}
 	PKCS7_content_new(sig, NID_pkcs7_data);
 
+	/* add the signer's certificate */
 	if (cparams->cert != NULL)
 		PKCS7_add_certificate(sig, cparams->cert);
+	if (signer != -1)
+		PKCS7_add_certificate(sig, sk_X509_value(cparams->certs, signer));
+
+	/* add the certificate chain */
+	for (i=0; i<sk_X509_num(cparams->certs); i++) {
+		if (i == signer)
+			continue;
+		PKCS7_add_certificate(sig, sk_X509_value(cparams->certs, i));
+	}
+	/* add all cross certificates */
 	if (cparams->xcerts) {
-		for(i = sk_X509_num(cparams->xcerts)-1; i>=0; i--)
+		for (i=0; i<sk_X509_num(cparams->xcerts); i++)
 			PKCS7_add_certificate(sig, sk_X509_value(cparams->xcerts, i));
 	}
-	for (i = sk_X509_num(cparams->certs)-1; i>=0; i--)
-		PKCS7_add_certificate(sig, sk_X509_value(cparams->certs, i));
-
 	/* add crls */
 	if (cparams->crls) {
 		for (i=0; i<sk_X509_CRL_num(cparams->crls); i++)
 			PKCS7_add_crl(sig, sk_X509_CRL_value(cparams->crls, i));
 	}
-
 	return sig; /* OK */
 }
 
