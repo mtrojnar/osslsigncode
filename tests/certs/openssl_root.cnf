@@ -1,0 +1,61 @@
+# OpenSSL root CA configuration file
+
+[ ca ]
+default_ca                      = CA_default
+
+[ CA_default ]
+# Directory and file locations.
+dir                             = .
+certs                           = $dir/demoCA
+crl_dir                         = $dir/demoCA
+new_certs_dir                   = $dir/demoCA
+database                        = $dir/demoCA/index.txt
+serial                          = $dir/demoCA/serial
+private_key                     = $dir/demoCA/CA.key
+certificate                     = $dir/tmp/CACert.pem
+crl_extensions                  = crl_ext
+default_md                      = sha256
+preserve                        = no
+policy                          = policy_match
+default_startdate               = 180101000000Z
+default_enddate                 = 260101000000Z
+x509_extensions                 = v3_intermediate_ca
+
+[ req ]
+# Options for the `req` tool
+encrypt_key                     = no
+default_bits                    = 2048
+default_md                      = sha256
+string_mask                     = utf8only
+x509_extensions                 = ca_extensions
+distinguished_name              = req_distinguished_name
+
+[ ca_extensions ]
+# Extension to add when the -x509 option is used
+basicConstraints                = critical, CA:true
+subjectKeyIdentifier            = hash
+authorityKeyIdentifier          = keyid:always,issuer
+keyUsage                        = critical, digitalSignature, cRLSign, keyCertSign
+
+[ v3_intermediate_ca ]
+# Extensions for a typical intermediate CA (`man x509v3_config`)
+basicConstraints                = critical, CA:true, pathlen:0
+subjectKeyIdentifier            = hash
+authorityKeyIdentifier          = keyid:always,issuer
+keyUsage                        = critical, digitalSignature, cRLSign, keyCertSign
+
+[ policy_match ]
+countryName                     = match
+organizationName                = match
+organizationalUnitName          = optional
+commonName                      = supplied
+emailAddress                    = optional
+
+[ req_distinguished_name ]
+countryName                     = Country Name (2 letter code)
+stateOrProvinceName             = State or Province Name
+localityName                    = Locality Name
+0.organizationName              = Organization Name
+organizationalUnitName          = Organizational Unit Name
+commonName                      = Common Name
+emailAddress                    = Email Address

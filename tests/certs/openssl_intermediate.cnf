@@ -1,0 +1,61 @@
+# OpenSSL intermediate CA configuration file
+
+[ ca ]
+default_ca                      = CA_default
+
+[ CA_default ]
+# Directory and file locations
+dir                             = .
+certs                           = $dir/demoCA
+crl_dir                         = $dir/demoCA
+new_certs_dir                   = $dir/demoCA
+database                        = $dir/demoCA/index.txt
+serial                          = $dir/demoCA/serial
+private_key                     = $dir/demoCA/intermediate.key
+certificate                     = $dir/tmp/intermediate.pem
+crl_extensions                  = crl_ext
+default_md                      = sha256
+preserve                        = no
+policy                          = policy_loose
+default_startdate               = 180101000000Z
+default_enddate                 = 210101000000Z
+
+[ req ]
+# Options for the `req` tool
+encrypt_key                     = no
+default_bits                    = 2048
+default_md                      = sha256
+string_mask                     = utf8only
+distinguished_name              = req_distinguished_name
+x509_extensions                 = usr_extensions
+
+[ crl_ext ]
+# Extension for CRLs
+authorityKeyIdentifier          = keyid:always
+
+[ usr_extensions ]
+# Extension to add when the -x509 option is used
+basicConstraints                = CA:FALSE
+subjectKeyIdentifier            = hash
+authorityKeyIdentifier          = keyid, issuer
+extendedKeyUsage                = codeSigning
+
+[ policy_loose ]
+# Allow the intermediate CA to sign a more diverse range of certificates.
+# See the POLICY FORMAT section of the `ca` man page.
+countryName                     = optional
+stateOrProvinceName             = optional
+localityName                    = optional
+organizationName                = optional
+organizationalUnitName          = optional
+commonName                      = supplied
+emailAddress                    = optional
+
+[ req_distinguished_name ]
+countryName                     = Country Name (2 letter code)
+stateOrProvinceName             = State or Province Name
+localityName                    = Locality Name
+0.organizationName              = Organization Name
+organizationalUnitName          = Organizational Unit Name
+commonName                      = Common Name
+emailAddress                    = Email Address
