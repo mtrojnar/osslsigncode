@@ -4839,10 +4839,8 @@ static char *find_pvk_key(GLOBAL_OPTIONS *options)
 			)
 		return NULL; /* FAILED */
 	btmp = BIO_new_file(options->keyfile, "rb");
-	if (!btmp) {
-		printf("Failed to read private key file: %s\n", options->keyfile);
+	if (!btmp)
 		return NULL; /* FAILED */
-	}
 	magic[0] = 0x00;
 	BIO_read(btmp, magic, 4);
 	if (!memcmp(magic, pvkhdr, 4)) {
@@ -5026,6 +5024,8 @@ static void free_crypto_params(CRYPTO_PARAMS *cparams)
 	cparams->certs = NULL;
 	sk_X509_pop_free(cparams->xcerts, X509_free);
 	cparams->xcerts = NULL;
+	sk_X509_CRL_pop_free(cparams->crls, X509_CRL_free);
+	cparams->crls = NULL;
 }
 
 static void free_options(GLOBAL_OPTIONS *options)
