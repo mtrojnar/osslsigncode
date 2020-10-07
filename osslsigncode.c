@@ -680,6 +680,9 @@ static int is_indirect_data_signature(PKCS7 *p7)
 
 static int blob_has_nl = 0;
 
+/*
+ * Callback for writing received data
+ */
 static size_t curl_write(void *ptr, size_t sz, size_t nmemb, void *stream)
 {
 	if (sz*nmemb > 0 && !blob_has_nl) {
@@ -714,7 +717,6 @@ static void print_timestamp_error(const char *url, long http_code)
 
   <base64encoded blob>
 
-
   .. and the blob has the following ASN1 structure:
 
   0:d=0  hl=4 l= 291 cons: SEQUENCE
@@ -725,12 +727,13 @@ static void print_timestamp_error(const char *url, long http_code)
   35:d=3 hl=4 l= 256 prim:    OCTET STRING
   <signature>
 
-
   .. and it returns a base64 encoded PKCS#7 structure.
-
 */
 
-static BIO *rfc3161_request(PKCS7 *sig, const EVP_MD *md)
+/*
+ * Encode RFC 3161 timestamp request and write it into BIO
+ */
+static BIO *encode_rfc3161_request(PKCS7 *sig, const EVP_MD *md)
 {
 	PKCS7_SIGNER_INFO *si;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
@@ -768,7 +771,10 @@ static BIO *rfc3161_request(PKCS7 *sig, const EVP_MD *md)
 	return bout;
 }
 
-static BIO *authenticode_request(PKCS7 *sig)
+/*
+ * Encode authenticode timestamp request and write it into BIO
+ */
+static BIO *encode_authenticode_request(PKCS7 *sig)
 {
 	PKCS7_SIGNER_INFO *si;
 	TimeStampRequest *req;
@@ -798,7 +804,12 @@ static BIO *authenticode_request(PKCS7 *sig)
 	return bout;
 }
 
-static int rfc3161_reply(PKCS7 *sig, BIO *bin, int verbose)
+/*
+ * Decode a curl response from BIO.
+ * If successful the RFC 3161 timestamp will be written into
+ * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1].
+ */
+static int decode_rfc3161_response(PKCS7 *sig, BIO *bin, int verbose)
 {
 	PKCS7_SIGNER_INFO *si;
 	STACK_OF(X509_ATTRIBUTE) *attrs;
@@ -838,7 +849,12 @@ static int rfc3161_reply(PKCS7 *sig, BIO *bin, int verbose)
 	return 0; /* OK */
 }
 
-static int authenticode_reply(PKCS7 *sig, BIO *bin, int verbose)
+/*
+ * Decode a curl response from BIO.
+ * If successful the authenticode timestamp will be written into
+ * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1].
+ */
+static int decode_authenticode_response(PKCS7 *sig, BIO *bin, int verbose)
 {
 	PKCS7 *p7;
 	PKCS7_SIGNER_INFO *info, *si;
@@ -879,13 +895,17 @@ static int authenticode_reply(PKCS7 *sig, BIO *bin, int verbose)
 	si = sk_PKCS7_SIGNER_INFO_value(sig->d.sign->signer_info, 0);
 	/*
 	 * PKCS7_set_attributes() frees up all elements of si->unauth_attr
-	 * and sets there a copy of attrs
+	 * and sets there a copy of attrs so overrides the previous timestamp
 	 */
 	PKCS7_set_attributes(si, attrs);
 	sk_X509_ATTRIBUTE_pop_free(attrs, X509_ATTRIBUTE_free);
 	return 0; /* OK */
 }
 
+/*
+ * Add timestamp to the PKCS7 SignerInfo structure:
+ * sig->d.sign->signer_info->unauth_attr
+ */
 static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	const EVP_MD *md, int verbose, int noverifypeer)
 {
@@ -898,6 +918,7 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 
 	if (!url)
 		return 1; /* FAILED */
+	/* Start a libcurl easy session and set options for a curl easy handle */
 	curl = curl_easy_init();
 	if (proxy) {
 		curl_easy_setopt(curl, CURLOPT_PROXY, proxy);
@@ -925,10 +946,11 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	slist = curl_slist_append(slist, "Cache-Control: no-cache");
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
 
+	/* Encode timestamp request */
 	if (rfc3161) {
-		bout = rfc3161_request(sig, md);
+		bout = encode_rfc3161_request(sig, md);
 	} else {
-		bout = authenticode_request(sig);
+		bout = encode_authenticode_request(sig);
 	}
 	len = BIO_get_mem_data(bout, &p);
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, len);
@@ -953,13 +975,15 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 		long http_code = -1;
 		(void)BIO_flush(bin);
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+		/* Decode a curl response from BIO and write it into the PKCS7 structure */
 		if (rfc3161)
-			res = rfc3161_reply(sig, bin, verbose);
+			res = decode_rfc3161_response(sig, bin, verbose);
 		else
-			res = authenticode_reply(sig, bin, verbose);
+			res = decode_authenticode_response(sig, bin, verbose);
 		if (res && verbose)
 			print_timestamp_error(url, http_code);
 	}
+	/* End a libcurl easy handle */
 	curl_easy_cleanup(curl);
 	return (int)res;
 }
