@@ -1,11 +1,14 @@
-### 2.1 (unreleased)
-- added certificate chain verification
-- added timestamp verification
+### 2.1 (2020-10-11)
+
+- certificate chain verification support
+- timestamp verification support
+- CRL verification support ("-CRLfile" option)
 - improved CAB signature support
+- nested signatures support
+- user-specified signing time ("-st" option) by vszakats
 - added more tests
 - fixed numerous bugs
 - dropped OpenSSL 1.1.0 support
-- multiple nested signatures support
 
 ### 2.0 (2018-12-04)
 
