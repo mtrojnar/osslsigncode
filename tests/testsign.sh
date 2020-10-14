@@ -67,6 +67,7 @@ cmp putty1.exe putty2.exe && \
 	cmp putty5.exe putty6.exe
 if [ $? -ne 0 ]; then
 	echo "Failure is not an option."
+	exit 1
 else
 	echo "Yes, it works."
 fi
