@@ -156,27 +156,30 @@ typedef unsigned char u_char;
 #define FILE_CREATE_MODE "w+bx"
 #endif
 
-/* MS Authenticode object ids */
+/* Microsoft OID Authenticode */
 #define SPC_INDIRECT_DATA_OBJID      "1.3.6.1.4.1.311.2.1.4"
 #define SPC_STATEMENT_TYPE_OBJID     "1.3.6.1.4.1.311.2.1.11"
 #define SPC_SP_OPUS_INFO_OBJID       "1.3.6.1.4.1.311.2.1.12"
-#define SPC_MS_JAVA_SOMETHING        "1.3.6.1.4.1.311.15.1"
 #define SPC_PE_IMAGE_DATA_OBJID      "1.3.6.1.4.1.311.2.1.15"
 #define SPC_CAB_DATA_OBJID           "1.3.6.1.4.1.311.2.1.25"
-#define SPC_TIME_STAMP_REQUEST_OBJID "1.3.6.1.4.1.311.3.2.1"
 #define SPC_SIPINFO_OBJID            "1.3.6.1.4.1.311.2.1.30"
-
-#define SPC_PE_IMAGE_PAGE_HASHES_V1  "1.3.6.1.4.1.311.2.3.1" /* Page hash using SHA1 */
-#define SPC_PE_IMAGE_PAGE_HASHES_V2  "1.3.6.1.4.1.311.2.3.2" /* Page hash using SHA256 */
-
+#define SPC_PE_IMAGE_PAGE_HASHES_V1  "1.3.6.1.4.1.311.2.3.1" /* SHA1 */
+#define SPC_PE_IMAGE_PAGE_HASHES_V2  "1.3.6.1.4.1.311.2.3.2" /* SHA256 */
 #define SPC_NESTED_SIGNATURE_OBJID   "1.3.6.1.4.1.311.2.4.1"
+/* Microsoft OID Time Stamping */
+#define SPC_TIME_STAMP_REQUEST_OBJID "1.3.6.1.4.1.311.3.2.1"
+#define SPC_RFC3161_OBJID            "1.3.6.1.4.1.311.3.3.1"
+/* Microsoft OID Crypto 2.0 */
+#define MS_CTL_OBJID                 "1.3.6.1.4.1.311.10.1"
+/* Microsoft OID Microsoft_Java */
+#define MS_JAVA_SOMETHING            "1.3.6.1.4.1.311.15.1"
 
-#define SPC_RFC3161_OBJID                        "1.3.6.1.4.1.311.3.3.1"
-#define SPC_AUTHENTICODE_COUNTER_SIGNATURE_OBJID "1.2.840.113549.1.9.6"
-#define SPC_UNAUTHENTICATED_DATA_BLOB_OBJID      "1.3.6.1.4.1.42921.1.2.1"
-#define SPC_TIMESTAMP_SIGNING_TIME_OBJID         "1.2.840.113549.1.9.5"
+#define SPC_UNAUTHENTICATED_DATA_BLOB_OBJID  "1.3.6.1.4.1.42921.1.2.1"
 
-/* 1.3.6.1.4.1.311.4... MS Crypto 2.0 stuff... */
+/* Public Key Cryptography Standards PKCS#9 */
+#define PKCS9_TIMESTAMP_SIGNING_TIME         "1.2.840.113549.1.9.5"
+#define PKCS9_AUTHENTICODE_COUNTER_SIGNATURE "1.2.840.113549.1.9.6"
+
 
 #define WIN_CERT_REVISION_2             0x0200
 #define WIN_CERT_TYPE_PKCS_SIGNED_DATA  0x0002
@@ -889,7 +892,7 @@ static int decode_authenticode_response(PKCS7 *sig, BIO *bin, int verbose)
 	PKCS7_free(p7);
 
 	attrs = sk_X509_ATTRIBUTE_new_null();
-	attrs = X509at_add1_attr_by_txt(&attrs, SPC_AUTHENTICODE_COUNTER_SIGNATURE_OBJID, V_ASN1_SET, p, len);
+	attrs = X509at_add1_attr_by_txt(&attrs, PKCS9_AUTHENTICODE_COUNTER_SIGNATURE, V_ASN1_SET, p, len);
 	OPENSSL_free(p);
 
 	si = sk_PKCS7_SIGNER_INFO_value(sig->d.sign->signer_info, 0);
@@ -1870,7 +1873,7 @@ static time_t si_get_time(PKCS7_SIGNER_INFO *si)
 				return INVALID_TIME; /* FAILED */
 			object_txt[0] = 0x00;
 			OBJ_obj2txt(object_txt, sizeof(object_txt), object, 1);
-			if (!strcmp(object_txt, SPC_TIMESTAMP_SIGNING_TIME_OBJID)) {
+			if (!strcmp(object_txt, PKCS9_TIMESTAMP_SIGNING_TIME)) {
 				/* "1.2.840.113549.1.9.5" */
 				time = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
 			}
@@ -2128,7 +2131,7 @@ static int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, in
 				continue;
 			object_txt[0] = 0x00;
 			OBJ_obj2txt(object_txt, sizeof(object_txt), object, 1);
-			if (!strcmp(object_txt, SPC_AUTHENTICODE_COUNTER_SIGNATURE_OBJID)) {
+			if (!strcmp(object_txt, PKCS9_AUTHENTICODE_COUNTER_SIGNATURE)) {
 				/* Authenticode Timestamp - Policy OID: 1.2.840.113549.1.9.6 */
 				CMS_ContentInfo *timestamp = NULL;
 				time_t time;
@@ -2150,7 +2153,7 @@ static int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, in
 						PKCS7_SIGNER_INFO_free(countersi);
 					}
 				} else {
-					printf("Error: SPC_TIMESTAMP_SIGNING_TIME_OBJID attribute not found\n\n");
+					printf("Error: PKCS9_TIMESTAMP_SIGNING_TIME attribute not found\n\n");
 					PKCS7_SIGNER_INFO_free(countersi);
 				}
 			} else if (!strcmp(object_txt, SPC_RFC3161_OBJID)) {
@@ -4207,7 +4210,7 @@ static void add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp)
 	if (attrs) {
 		astr = ASN1_STRING_new();
 		ASN1_STRING_set(astr, attrs, len);
-		PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_MS_JAVA_SOMETHING),
+		PKCS7_add_signed_attribute(si, OBJ_txt2nid(MS_JAVA_SOMETHING),
 				V_ASN1_SEQUENCE, astr);
 	}
 }
@@ -5588,7 +5591,7 @@ int main(int argc, char **argv)
 
 	/* create some MS Authenticode OIDS we need later on */
 	if (!OBJ_create(SPC_STATEMENT_TYPE_OBJID, NULL, NULL) ||
-			!OBJ_create(SPC_MS_JAVA_SOMETHING, NULL, NULL) ||
+			!OBJ_create(MS_JAVA_SOMETHING, NULL, NULL) ||
 			!OBJ_create(SPC_SP_OPUS_INFO_OBJID, NULL, NULL) ||
 			!OBJ_create(SPC_NESTED_SIGNATURE_OBJID, NULL, NULL))
 		DO_EXIT_0("Failed to create objects\n");
