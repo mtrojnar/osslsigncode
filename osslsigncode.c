@@ -4835,7 +4835,6 @@ out:
 static int read_xcertfile(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 {
 	BIO *btmp;
-	PKCS7 *p7;
 	int ret = 0;
 
 	btmp = BIO_new_file(options->xcertfile, "rb");
@@ -4957,7 +4956,7 @@ ENGINE *dynamic_engine(GLOBAL_OPTIONS *options)
 }
 
 /* Load a pkcs11 engine */
-ENGINE *pkcs11_engine(GLOBAL_OPTIONS *options)
+ENGINE *pkcs11_engine()
 {
 	ENGINE *engine = ENGINE_by_id("pkcs11");
 	if (!engine) {
@@ -4970,7 +4969,7 @@ ENGINE *pkcs11_engine(GLOBAL_OPTIONS *options)
 /* Load the private key and the signer certificate from a security token */
 static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine, CRYPTO_PARAMS *cparams)
 {
-	if (!ENGINE_ctrl_cmd_string(engine, "MODULE_PATH", options->p11module, 0)) {
+	if (options->p11module && !ENGINE_ctrl_cmd_string(engine, "MODULE_PATH", options->p11module, 0)) {
 		printf("Failed to set pkcs11 engine MODULE_PATH to '%s'\n", options->p11module);
 		ENGINE_free(engine);
 		return 0; /* FAILED */
@@ -5036,12 +5035,12 @@ static int read_crypto_params(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 
 #ifndef OPENSSL_NO_ENGINE
 	/* PKCS11 engine and module support */
-	} else if (options->p11module) {
+	} else if ((options->p11engine) || (options->p11module)) {
 		ENGINE *engine;
 		if (options->p11engine)
 			engine = dynamic_engine(options);
 		else
-			engine = pkcs11_engine(options);
+			engine = pkcs11_engine();
 		if (!engine)
 			goto out; /* FAILED */
 		printf("Engine \"%s\" set.\n", ENGINE_get_id(engine));
@@ -5547,7 +5546,7 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 		(*cmd != CMD_VERIFY && !options->outfile) ||
 		(*cmd == CMD_SIGN && !((options->certfile && options->keyfile) ||
 #ifndef OPENSSL_NO_ENGINE
-			options->p11module ||
+			options->p11engine || options->p11module ||
 #endif /* OPENSSL_NO_ENGINE */
 			options->pkcs12file))) {
 		if (failarg)
