@@ -1337,7 +1337,8 @@ static void help_for(const char *argv0, const char *cmd)
 typedef enum {
 	FILE_TYPE_CAB,
 	FILE_TYPE_PE,
-	FILE_TYPE_MSI
+	FILE_TYPE_MSI,
+	FILE_TYPE_CAT
 } file_type_t;
 
 typedef enum {
@@ -1623,6 +1624,38 @@ static int set_signing_blob(PKCS7 *sig, BIO *hash, unsigned char *buf, int len)
 	ASN1_STRING_set(td7->d.other->value.sequence, buf, len+mdlen);
 	if (!PKCS7_set_content(sig, td7)) {
 		PKCS7_free(td7);
+		printf("PKCS7_set_content failed\n");
+		return 0; /* FAILED */
+	}
+	return 1; /* OK */
+}
+
+int set_content_blob(PKCS7 *sig, PKCS7 *cursig)
+{
+	PKCS7 *contents;
+	unsigned char *content;
+	unsigned seqhdrlen;
+	size_t content_length;
+	BIO *sigbio;
+
+	contents = cursig->d.sign->contents;
+	seqhdrlen = asn1_simple_hdr_len(contents->d.other->value.sequence->data,
+		contents->d.other->value.sequence->length);
+	content = contents->d.other->value.sequence->data + seqhdrlen;
+	content_length = contents->d.other->value.sequence->length - seqhdrlen;
+
+	if ((sigbio = PKCS7_dataInit(sig, NULL)) == NULL) {
+		printf("PKCS7_dataInit failed\n");
+		return 0; /* FAILED */
+	}
+	BIO_write(sigbio, content, content_length);
+	(void)BIO_flush(sigbio);
+	if (!PKCS7_dataFinal(sig, sigbio)) {
+		printf("PKCS7_dataFinal failed\n");
+		return 0; /* FAILED */
+	}
+	BIO_free_all(sigbio);
+	if (!PKCS7_set_content(sig, PKCS7_dup(contents))) {
 		printf("PKCS7_set_content failed\n");
 		return 0; /* FAILED */
 	}
@@ -4186,6 +4219,92 @@ static void cab_add_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *ou
 	BIO_write(hash, indata + i, header->fileend - i);
 }
 
+/*
+ * CAT file support
+ * Catalog files are a bit odd, in that they are only a PKCS7 blob.
+ */
+
+static PKCS7 *cat_extract_existing_pkcs7(char *indata, FILE_HEADER *header)
+{
+	PKCS7 *p7 = NULL;
+	const unsigned char *blob;
+
+	blob = (unsigned char*)indata;
+	p7 = d2i_PKCS7(NULL, &blob, header->fileend);
+	return p7;
+}
+
+static int cat_verify_header(char *indata, size_t filesize, FILE_HEADER *header)
+{
+	PKCS7 *p7;
+	PKCS7_SIGNER_INFO *si;
+
+	p7 = cat_extract_existing_pkcs7(indata, header);
+	if (!p7) {
+		return 0; /* FAILED */
+	}
+	if (!PKCS7_type_is_signed(p7)) {
+		PKCS7_free(p7);
+		return 0; /* FAILED */
+	}
+	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+	if (si == NULL)
+		/* catalog file is unsigned */
+		header->sigpos = filesize;
+
+	header->fileend = filesize;
+	PKCS7_free(p7);
+	return 1; /* OK */
+}
+
+static int cat_verify_pkcs7(SIGNATURE *signature, GLOBAL_OPTIONS *options)
+{
+	int ret;
+
+	/* The message digest is checked by PKCS7_verify() */
+	ret = verify_signature(signature, options);
+	if (!ret)
+		ERR_print_errors_fp(stdout);
+	return ret;
+}
+
+static int cat_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *options)
+{
+	int i, ret = 1;
+	PKCS7 *p7;
+	STACK_OF(SIGNATURE) *signatures;
+	SIGNATURE *signature;
+
+	signatures = sk_SIGNATURE_new_null();
+
+	if (header->sigpos == header->fileend) {
+		printf("No signature found\n\n");
+		goto out;
+	}
+	p7 = cat_extract_existing_pkcs7(indata, header);
+	if (!append_signature_list(&signatures, p7, 1)) {
+		printf("Failed to create signature list\n\n");
+		PKCS7_free(p7);
+		goto out;
+	}
+
+	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
+		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
+		signature = sk_SIGNATURE_value(signatures, i);
+		ret &= cat_verify_pkcs7(signature, options);
+		if (signature->timestamp) {
+			CMS_ContentInfo_free(signature->timestamp);
+			ERR_clear_error();
+		}
+		PKCS7_free(signature->p7);
+		OPENSSL_free(signature);
+	}
+	printf("Number of verified signatures: %d\n", i);
+out:
+	sk_SIGNATURE_free(signatures);
+	return ret;
+}
+
 static void add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp)
 {
 	ASN1_STRING *astr;
@@ -4295,8 +4414,13 @@ static PKCS7 *create_new_signature(file_type_t type,
 		return NULL; /* FAILED */
 	}
 	pkcs7_add_signing_time(si, options->signing_time);
-	PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
-		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1));
+	if (type == FILE_TYPE_CAT) {
+		PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
+			V_ASN1_OBJECT, OBJ_txt2obj(MS_CTL_OBJID, 1));
+	} else {
+		PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
+			V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1));
+	}
 
 	if (type == FILE_TYPE_CAB && options->jp >= 0)
 		add_jp_attribute(si, options->jp);
@@ -4375,7 +4499,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 	static char buf[64*1024];
 	PKCS7 *outsig = NULL;
 
-	if (options->nest) {
+	if (type != FILE_TYPE_CAT && options->nest) {
 		if (cursig == NULL) {
 			printf("Internal error: No 'cursig' was extracted\n");
 			return 1; /* FAILED */
@@ -4425,6 +4549,8 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 			}
 		}
 #endif
+	} else if (type == FILE_TYPE_CAT) {
+		i2d_PKCS7_bio(outdata, outsig);
 	}
 	OPENSSL_free(p);
 	return 0; /* OK */
@@ -4540,6 +4666,22 @@ static int input_validation(file_type_t type, GLOBAL_OPTIONS *options, FILE_HEAD
 			printf("Corrupt CAB file\n");
 			return 0; /* FAILED */
 		}
+	} else if (type == FILE_TYPE_CAT) {
+		if (options->nest)
+			/* I've not tried using pkcs7_set_nested_signature as signtool won't do this */
+			printf("Warning: CAT files do not support nesting\n");
+		if (options->jp >= 0)
+			printf("Warning: -jp option is only valid for CAB files\n");
+		if (options->pagehash == 1)
+			printf("Warning: -ph option is only valid for PE files\n");
+#ifdef WITH_GSF
+		if (options->add_msi_dse == 1)
+			printf("Warning: -add-msi-dse option is only valid for MSI files\n");
+#endif
+		if (!cat_verify_header(indata, filesize, header)) {
+			printf("Corrupt CAT file: %s\n", options->infile);
+			return 0; /* FAILED */
+		}
 	} else if (type == FILE_TYPE_PE) {
 		if (options->jp >= 0)
 			printf("Warning: -jp option is only valid for CAB files\n");
@@ -4644,6 +4786,9 @@ static int get_file_type(char *indata, char *infile, file_type_t *type)
 	static u_char msi_signature[] = {
 		0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1
 	};
+	static u_char pkcs7_signed_data[] = {
+		0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02,
+	};
 
 	if (!memcmp(indata, "MSCF", 4)) {
 		*type = FILE_TYPE_CAB;
@@ -4655,6 +4800,8 @@ static int get_file_type(char *indata, char *infile, file_type_t *type)
 		gsf_init();
 		gsf_initialized = 1;
 #endif
+	} else if (!memcmp(indata+4, pkcs7_signed_data, sizeof(pkcs7_signed_data))) {
+		*type = FILE_TYPE_CAT;
 	} else {
 		printf("Unrecognized file type: %s\n", infile);
 		return 0; /* FAILED */
@@ -5176,7 +5323,7 @@ static PKCS7 *get_sigfile(char *sigfile, file_type_t type)
  * Obtain an existing signature or create a new one
  */
 static PKCS7 *get_pkcs7(cmd_type_t cmd, BIO *hash, file_type_t type, char *indata,
-			GLOBAL_OPTIONS *options, FILE_HEADER *header, CRYPTO_PARAMS *cparams)
+			GLOBAL_OPTIONS *options, FILE_HEADER *header, CRYPTO_PARAMS *cparams, PKCS7 *cursig)
 {
 	PKCS7 *sig = NULL;
 
@@ -5192,9 +5339,18 @@ static PKCS7 *get_pkcs7(cmd_type_t cmd, BIO *hash, file_type_t type, char *indat
 			printf("Creating a new signature failed\n");
 			return NULL; /* FAILED */
 		}
-		if (!set_indirect_data_blob(sig, hash, type, indata, options, header)) {
-			printf("Signing failed\n");
-			return NULL; /* FAILED */
+		if (type == FILE_TYPE_CAT) {
+			if (!set_content_blob(sig, cursig)) {
+				PKCS7_free(sig);
+				printf("Signing failed\n");
+				return NULL; /* FAILED */
+			}
+		} else {
+			if (!set_indirect_data_blob(sig, hash, type, indata, options, header)) {
+				PKCS7_free(sig);
+				printf("Signing failed\n");
+				return NULL; /* FAILED */
+			}
 		}
 	}
 	return sig;
@@ -5249,7 +5405,7 @@ static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 
 	/* Obtain an existing signature or create a new one */
 	if ((cmd == CMD_ATTACH) || (cmd == CMD_SIGN))
-		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams);
+		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams, NULL);
 	return sig; /* OK */
 }
 #endif
@@ -5278,7 +5434,7 @@ static PKCS7 *pe_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *hea
 	pe_modify_header(indata, header, hash, outdata);
 	/* Obtain an existing signature or create a new one */
 	if ((cmd == CMD_ATTACH) || (cmd == CMD_SIGN))
-		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams);
+		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams, NULL);
 	return sig; /* OK */
 }
 
@@ -5306,7 +5462,24 @@ static PKCS7 *cab_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 		cab_add_header(indata, header, hash, outdata);
 	/* Obtain an existing signature or create a new one */
 	if ((cmd == CMD_ATTACH) || (cmd == CMD_SIGN))
-		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams);
+		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams, NULL);
+	return sig; /* OK */
+}
+
+static PKCS7 *cat_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *header,
+			GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams, char *indata, PKCS7 **cursig)
+{
+	PKCS7 *sig;
+
+	*cursig = cat_extract_existing_pkcs7(indata, header);
+	if (!*cursig) {
+		printf("Failed to extract PKCS7 signed data\n");
+		return NULL; /* FAILED */
+	}
+	if (cmd == CMD_ADD)
+		sig = *cursig;
+	else
+		sig = get_pkcs7(cmd, NULL, type, indata, options, header, cparams, *cursig);
 	return sig; /* OK */
 }
 
@@ -5678,7 +5851,7 @@ int main(int argc, char **argv)
 	}
 #endif /* WITH_GSF */
 
-	if ((type == FILE_TYPE_CAB || type == FILE_TYPE_PE) && (cmd != CMD_VERIFY)) {
+	if (type != FILE_TYPE_MSI && cmd != CMD_VERIFY) {
 		/* Create outdata file */
 #ifdef WIN32
 		if (!access(options.outfile, R_OK))
@@ -5726,6 +5899,17 @@ int main(int argc, char **argv)
 				ret = 0; /* OK */
 				goto skip_signing;
 			} else if (!sig)
+				goto err_cleanup;
+		}
+	} else if (type == FILE_TYPE_CAT) {
+		if (cmd == CMD_REMOVE || cmd == CMD_EXTRACT || (cmd==CMD_ATTACH)) {
+			DO_EXIT_0("Unsupported command\n");
+		} else if (cmd == CMD_VERIFY) {
+			ret = cat_verify_file(indata, &header, &options);
+			goto skip_signing;
+		} else {
+			sig = cat_presign_file(type, cmd, &header, &options, &cparams, indata, &cursig);
+			if (!sig)
 				goto err_cleanup;
 		}
 	}

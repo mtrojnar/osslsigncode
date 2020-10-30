@@ -1,3 +1,8 @@
+### 2.2 (unreleased)
+
+- CAT files support
+  (Thanks to James McKenzie)
+
 ### 2.1 (2020-10-11)
 
 - certificate chain verification support
