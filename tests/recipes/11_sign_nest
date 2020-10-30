@@ -68,4 +68,7 @@ if test -s "sample.msi"
     printf "Test skipped\n"
   fi
 
+# CAT file
+# Warning: CAT files do not support nesting
+
 exit 0

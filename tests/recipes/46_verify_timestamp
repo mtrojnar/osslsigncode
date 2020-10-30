@@ -30,4 +30,7 @@ if test -s "test.exe" && ! grep -q "no libcurl available" "results.log"
 # MSI file
 # Command is not supported for non-PE files
 
+# CAT file
+# Command is not supported for non-PE files
+
 exit 0

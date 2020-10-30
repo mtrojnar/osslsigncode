@@ -57,4 +57,21 @@ if test -s "sample.msi"
     printf "Test skipped\n"
   fi
 
+# CAT file
+test_name="174. Add an additional certificate to the signature block of the CAT file"
+printf "\n%s\n" "$test_name"
+if test -s "good.cat"
+  then
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -ac "${script_path}/../certs/crosscert.pem" \
+        -in "good.cat" -out "test_174.cat"
+    verify_signature "$?" "174" "cat" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "crosscert" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
 exit 0

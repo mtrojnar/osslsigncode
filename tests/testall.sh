@@ -88,6 +88,9 @@ if grep -q "no libgsf available" "results.log"
       fi
   fi
 
+# CAT files support
+cp "../sources/good.cat" "good.cat"
+
 # Timestamping support
 if grep -q "no libcurl available" "results.log"
   then
@@ -101,7 +104,7 @@ if test -n "$(command -v faketime)"
       then
         make_tests
         result=$?
-        rm -f "test.exe" "test.ex_" "sample.msi" "sample.wxs" "FoobarAppl10.exe"
+        rm -f "test.exe" "test.ex_" "sample.msi" "sample.wxs" "FoobarAppl10.exe" "good.cat"
         rm -f "sign_pe.der" "sign_cab.der" "sign_msi.der"
         rm -f "sign_pe.pem" "sign_cab.pem" "sign_msi.pem" "verify.log"
       else

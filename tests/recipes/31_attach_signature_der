@@ -55,4 +55,7 @@ if test -s "sample.msi"
     printf "Test skipped\n"
   fi
 
+# CAT file
+# Unsupported command
+
 exit 0
