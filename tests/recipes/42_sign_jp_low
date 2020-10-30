@@ -28,4 +28,7 @@ if test -s "test.ex_"
 # MSI file
 # Warning: -jp option is only valid for CAB files
 
+# CAT file
+# Warning: -jp option is only valid for CAB files
+
 exit 0

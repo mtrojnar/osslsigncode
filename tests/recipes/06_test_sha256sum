@@ -45,7 +45,20 @@ if test -s "sample.msi"
     skip=$(($skip+1))
   fi
 
-if test $skip -lt 3
+if test -s "good.cat"
+  then
+    if test $(cat "sha256sum_cat.log" | cut -d' ' -f1 | uniq | wc -l) -ne 1
+      then
+        res=1
+        cat "sha256sum_cat.log" >> "results.log"
+        printf "Non-unique SHA256 message digests found\n" >> "results.log"
+      fi
+    rm -f "sha256sum_cat.log"
+  else
+    skip=$(($skip+1))
+  fi
+
+if test $skip -lt 4
   then
     test_result "$res" "$test_name"
   else

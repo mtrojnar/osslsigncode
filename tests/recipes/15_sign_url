@@ -56,4 +56,21 @@ if test -s "sample.msi"
     printf "Test skipped\n"
   fi
 
+# CAT file
+test_name="154. Sign a CAT file with specified URL"
+printf "\n%s\n" "$test_name"
+if test -s "good.cat"
+  then
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -i "https://www.osslsigncode.com/" \
+        -in "good.cat" -out "test_154.cat"
+    verify_signature "$?" "154" "cat" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "https://www.osslsigncode.com/" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
 exit 0

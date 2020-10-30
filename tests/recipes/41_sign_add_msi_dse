@@ -32,4 +32,7 @@ if test -s "sample.msi"
     printf "Test skipped\n"
   fi
 
+# CAT file
+# Warning: -add-msi-dse option is only valid for MSI files
+
 exit 0

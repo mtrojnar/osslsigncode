@@ -24,4 +24,6 @@ if test -s "test.exe"
 
 # MSI file
 
+# CAT file
+
 exit 0

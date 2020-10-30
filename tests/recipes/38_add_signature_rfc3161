@@ -67,4 +67,25 @@ if test -s "sample.msi" && ! grep -q "no libcurl available" "results.log"
     printf "Test skipped\n"
   fi
 
+# CAT file
+test_name="384. Add RFC 3161 timestamp to signed CAT file"
+printf "\n%s\n" "$test_name"
+if test -s "good.cat" && ! grep -q "no libcurl available" "results.log"
+  then
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "good.cat" -out "test_384_signed.cat"
+    ../../osslsigncode add \
+        -ts http://time.certum.pl/ \
+        -ts http://timestamp.digicert.com/ \
+        -verbose \
+        -in "test_384_signed.cat" -out "test_384.cat"
+    verify_signature "$?" "384" "cat" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "Timestamp Server Signature" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
 exit 0

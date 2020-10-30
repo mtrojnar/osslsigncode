@@ -26,4 +26,7 @@ if test -s "test.exe"
 # MSI file
 # Warning: -ph option is only valid for PE files
 
+# CAT file
+# Warning: -ph option is only valid for PE files
+
 exit 0

@@ -61,4 +61,23 @@ if test -s "sample.msi" && ! grep -q "no libcurl available" "results.log"
     printf "Test skipped\n"
   fi
 
+# CAT file
+test_name="074. Sign a CAT file with Authenticode timestamping"
+printf "\n%s\n" "$test_name"
+if test -s "good.cat" && ! grep -q "no libcurl available" "results.log"
+  then
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -t http://time.certum.pl/ \
+        -t http://timestamp.digicert.com/ \
+        -verbose \
+        -in "good.cat" -out "test_074.cat"
+    verify_signature "$?" "074" "cat" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "Timestamp Server Signature" "UNUSED_PATTERN"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
 exit 0

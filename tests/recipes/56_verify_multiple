@@ -96,4 +96,7 @@ if test -s "sample.msi" && ! grep -q "no libcurl available" "results.log"
     printf "Test skipped\n"
   fi
 
+# CAT file
+# Warning: CAT files do not support nesting
+
 exit 0

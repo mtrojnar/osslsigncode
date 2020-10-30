@@ -27,4 +27,7 @@ if test -s "test.exe"
 # MSI file
 # Command is not supported for non-PE files
 
+# CAT file
+# Command is not supported for non-PE files
+
 exit 0

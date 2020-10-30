@@ -15,7 +15,7 @@ if test -s "test.exe"
         -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
         -in "test.exe" -out "test_101.exe" 2>> "results.log" 1>&2
     verify_signature "$?" "101" "exe" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "BEGIN_BLOB" "MODIFY"
+	"UNUSED_PATTERN" "ASCII" "BEGIN_BLOB---" "MODIFY"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -32,7 +32,7 @@ if test -s "test.ex_"
         -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
         -in "test.ex_" -out "test_102.ex_" 2>> "results.log" 1>&2
     verify_signature "$?" "102" "ex_" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "BEGIN_BLOB" "MODIFY"
+	"UNUSED_PATTERN" "ASCII" "BEGIN_BLOB---" "MODIFY"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
@@ -49,7 +49,25 @@ if test -s "sample.msi"
         -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
         -in "sample.msi" -out "test_103.msi" 2>> "results.log" 1>&2
     verify_signature "$?" "103" "msi" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "BEGIN_BLOB" "MODIFY"
+	"UNUSED_PATTERN" "ASCII" "BEGIN_BLOB---" "MODIFY"
+    test_result "$?" "$test_name"
+  else
+    printf "Test skipped\n"
+  fi
+
+# CAT file
+# The message digest is checked by PKCS7_verify()
+test_name="104. Sign a CAT file with addUnauthenticatedBlob"
+printf "\n%s\n" "$test_name"
+if test -s "good.cat"
+  then
+    ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -addUnauthenticatedBlob \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -in "good.cat" -out "test_104.cat" 2>> "results.log" 1>&2
+    verify_signature "$?" "104" "cat" "success" "@2019-09-01 12:00:00" \
+	"UNUSED_PATTERN" "ASCII" "UNUSED_PATTERN" "UNUSED_PATTERN"
     test_result "$?" "$test_name"
   else
     printf "Test skipped\n"
