@@ -4800,7 +4800,9 @@ static int get_file_type(char *indata, char *infile, file_type_t *type)
 		gsf_init();
 		gsf_initialized = 1;
 #endif
-	} else if (!memcmp(indata+4, pkcs7_signed_data, sizeof(pkcs7_signed_data))) {
+	} else if (!memcmp(indata + ((GET_UINT8_LE(indata+1) == 0x82) ? 4 : 5),
+			pkcs7_signed_data, sizeof(pkcs7_signed_data))) {
+		/* the maximum size of a supported cat file is (2^24 -1) bytes */
 		*type = FILE_TYPE_CAT;
 	} else {
 		printf("Unrecognized file type: %s\n", infile);
