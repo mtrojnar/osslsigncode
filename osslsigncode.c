@@ -424,6 +424,65 @@ ASN1_SEQUENCE(SpcIndirectDataContent) = {
 IMPLEMENT_ASN1_FUNCTIONS(SpcIndirectDataContent)
 
 
+typedef struct CatalogAuthAttr_st {
+	ASN1_OBJECT *type;
+	ASN1_TYPE *contents;
+} CatalogAuthAttr;
+
+DEFINE_STACK_OF(CatalogAuthAttr)
+DECLARE_ASN1_FUNCTIONS(CatalogAuthAttr)
+
+ASN1_SEQUENCE(CatalogAuthAttr) = {
+	ASN1_SIMPLE(CatalogAuthAttr, type, ASN1_OBJECT),
+	ASN1_OPT(CatalogAuthAttr, contents, ASN1_ANY)
+} ASN1_SEQUENCE_END(CatalogAuthAttr)
+
+IMPLEMENT_ASN1_FUNCTIONS(CatalogAuthAttr)
+
+
+typedef struct {
+	ASN1_OCTET_STRING *digest;
+	STACK_OF(CatalogAuthAttr) *attributes;
+} CatalogInfo;
+
+DEFINE_STACK_OF(CatalogInfo)
+DECLARE_ASN1_FUNCTIONS(CatalogInfo)
+
+ASN1_SEQUENCE(CatalogInfo) = {
+	ASN1_SIMPLE(CatalogInfo, digest, ASN1_OCTET_STRING),
+	ASN1_SET_OF(CatalogInfo, attributes, CatalogAuthAttr)
+} ASN1_SEQUENCE_END(CatalogInfo)
+
+IMPLEMENT_ASN1_FUNCTIONS(CatalogInfo)
+
+
+typedef struct {
+	/* 1.3.6.1.4.1.311.12.1.1 szOID_CATALOG_LIST */
+	SpcAttributeTypeAndOptionalValue *type;
+	ASN1_OCTET_STRING *identifier;
+	ASN1_UTCTIME *time;
+	/* 1.3.6.1.4.1.311.12.1.2 CatalogVersion = 1
+	 * 1.3.6.1.4.1.311.12.1.3 CatalogVersion = 2 */
+	SpcAttributeTypeAndOptionalValue *version;
+	STACK_OF(CatalogInfo) *header_attributes;
+	/* 1.3.6.1.4.1.311.12.2.1 CAT_NAMEVALUE_OBJID */
+	ASN1_TYPE *filename;
+} MsCtlContent;
+
+DECLARE_ASN1_FUNCTIONS(MsCtlContent)
+
+ASN1_SEQUENCE(MsCtlContent) = {
+	ASN1_SIMPLE(MsCtlContent, type, SpcAttributeTypeAndOptionalValue),
+	ASN1_SIMPLE(MsCtlContent, identifier, ASN1_OCTET_STRING),
+	ASN1_SIMPLE(MsCtlContent, time, ASN1_UTCTIME),
+	ASN1_SIMPLE(MsCtlContent, version, SpcAttributeTypeAndOptionalValue),
+	ASN1_SEQUENCE_OF(MsCtlContent, header_attributes, CatalogInfo),
+	ASN1_OPT(MsCtlContent, filename, ASN1_ANY)
+} ASN1_SEQUENCE_END(MsCtlContent)
+
+IMPLEMENT_ASN1_FUNCTIONS(MsCtlContent)
+
+
 typedef struct {
 	ASN1_BIT_STRING* flags;
 	SpcLink *file;
