@@ -254,6 +254,7 @@ typedef struct {
 #ifdef WITH_GSF
 	int add_msi_dse;
 #endif /* WITH_GSF */
+	char *catalog;
 	char *cafile;
 	char *crlfile;
 	char *untrusted;
@@ -725,12 +726,12 @@ static void tohex(const unsigned char *v, char *b, int len)
 		sprintf(b+i*2, "%02X", v[i]);
 }
 
-static int is_indirect_data_signature(PKCS7 *p7)
+static int is_content_type(PKCS7 *p7, const char *objid)
 {
 	ASN1_OBJECT *indir_objid;
 	int retval;
 
-	indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+	indir_objid = OBJ_txt2obj(objid, 1);
 	retval = p7 && PKCS7_type_is_signed(p7) &&
 		!OBJ_cmp(p7->d.sign->contents->type, indir_objid) &&
 		p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE;
@@ -1104,7 +1105,7 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%1s[ --help ]\n\n", "");
 	}
 	if (on_list(cmd, cmds_sign)) {
-		printf("%1s[ sign ] ( -certs <certfile> -key <keyfile> | -pkcs12 <pkcs12file> |\n", "");
+		printf("%1s[ sign ] ( -certs | -spc <certfile> -key <keyfile> | -pkcs12 <pkcs12file> |\n", "");
 		printf("%12s  [ -pkcs11engine <engine> ] -pkcs11module <module> -certs <certfile> -key <pkcs11 key id>)\n", "");
 		printf("%12s[ -pass <password>", "");
 #ifdef PROVIDE_ASKPASS
@@ -1154,6 +1155,7 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%1sremove-signature [ -in ] <infile> [ -out ] <outfile>\n\n", "");
 	if (on_list(cmd, cmds_verify)) {
 		printf("%1sverify [ -in ] <infile>\n", "");
+		printf("%12s[ -c | -catalog <infile> ]\n", "");
 		printf("%12s[ -CAfile <infile> ]\n", "");
 		printf("%12s[ -CRLfile <infile> ]\n", "");
 		printf("%12s[ -untrusted <infile> ]\n", "");
@@ -1183,6 +1185,7 @@ static void help_for(const char *argv0, const char *cmd)
 	const char *cmds_askpass[] = {"sign", NULL};
 #endif /* PROVIDE_ASKPASS */
 	const char *cmds_CAfile[] = {"attach-signature", "verify", NULL};
+	const char *cmds_catalog[] = {"verify", NULL};
 	const char *cmds_certs[] = {"sign", NULL};
 	const char *cmds_comm[] = {"sign", NULL};
 	const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
@@ -1283,10 +1286,12 @@ static void help_for(const char *argv0, const char *cmd)
 	if (on_list(cmd, cmds_askpass))
 		printf("%-24s= ask for the private key password\n", "-askpass");
 #endif /* PROVIDE_ASKPASS */
+	if (on_list(cmd, cmds_catalog))
+		printf("%-24s= specifies the catalog file by name\n", "-c, -catalog");
 	if (on_list(cmd, cmds_CAfile))
 		printf("%-24s= the file containing one or more trusted certificates in PEM format\n", "-CAfile");
 	if (on_list(cmd, cmds_certs))
-		printf("%-24s= the signing certificate to use\n", "-certs");
+		printf("%-24s= the signing certificate to use\n", "-certs, -spc");
 	if (on_list(cmd, cmds_comm))
 		printf("%-24s= set commercial purpose (default: individual purpose)\n", "-comm");
 	if (on_list(cmd, cmds_CRLfile))
@@ -2651,6 +2656,8 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 			return 1; /* FAILED */
 		}
 	}
+	if (options->catalog)
+		printf("\nFile is signed in catalog: %s\n", options->catalog);
 	printf("\nCAfile: %s\n", options->cafile);
 	if (options->crlfile)
 		printf("CRLfile: %s\n", options->crlfile);
@@ -2961,10 +2968,10 @@ static int msi_verify_pkcs7(SIGNATURE *signature, GsfInfile *infile, unsigned ch
 	const EVP_MD *md;
 	BIO *hash, *prehash;
 
-	if (is_indirect_data_signature(signature->p7)) {
-		ASN1_STRING *astr = signature->p7->d.sign->contents->d.other->value.sequence;
-		const unsigned char *p = astr->data;
-		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
+	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
+		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
+		const unsigned char *p = content_val->data;
+		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
 		if (idc) {
 			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
 				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
@@ -3051,6 +3058,37 @@ out:
 	if (!ret)
 		ERR_print_errors_fp(stdout);
 	return ret;
+}
+
+/* Compute a simple sha1/sha256 message digest of the MSI file */
+static void msi_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf, size_t fileend)
+{
+	BIO *bio = NULL;
+	static unsigned char bfb[16*1024*1024];
+	EVP_MD_CTX *mdctx;
+	size_t n;
+	int l;
+
+	bio = BIO_new_mem_buf(indata, fileend);
+	mdctx = EVP_MD_CTX_new();
+	EVP_DigestInit(mdctx, md);
+	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
+	(void)BIO_seek(bio, 0);
+
+	n = 0;
+	while (n < fileend) {
+		size_t want = fileend - n;
+		if (want > sizeof(bfb))
+			want = sizeof(bfb);
+		l = BIO_read(bio, bfb, want);
+		if (l <= 0)
+			break;
+		EVP_DigestUpdate(mdctx, bfb, l);
+		n += l;
+	}
+	EVP_DigestFinal(mdctx, mdbuf, NULL);
+	EVP_MD_CTX_free(mdctx);
+	BIO_free(bio);
 }
 
 /*
@@ -3425,6 +3463,8 @@ static int msi_add_MsiDigitalSignatureEx(GsfOutfile *outole, GSF_PARAMS *gsfpara
 /*
  * PE file support
  */
+
+/* Compute a message digest value of the signed or unsigned PE file */
 static void pe_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf, FILE_HEADER *header)
 {
 	BIO *bio = NULL;
@@ -3432,14 +3472,19 @@ static void pe_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf,
 	EVP_MD_CTX *mdctx;
 	size_t n;
 	int l;
+	size_t offset;
 
-	bio = BIO_new_mem_buf(indata, header->sigpos + header->siglen);
+	if (header->sigpos)
+		offset = header->sigpos;
+	else
+		offset = header->fileend;
+
+	bio = BIO_new_mem_buf(indata, offset);
 	mdctx = EVP_MD_CTX_new();
 	EVP_DigestInit(mdctx, md);
-
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
-
 	(void)BIO_seek(bio, 0);
+
 	BIO_read(bio, bfb, header->header_size + 88);
 	EVP_DigestUpdate(mdctx, bfb, header->header_size + 88);
 	BIO_read(bio, bfb, 4);
@@ -3448,8 +3493,8 @@ static void pe_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf,
 	BIO_read(bio, bfb, 8);
 
 	n = header->header_size + 88 + 4 + 60 + header->pe32plus * 16 + 8;
-	while (n < header->sigpos) {
-		size_t want = header->sigpos - n;
+	while (n < offset) {
+		size_t want = offset - n;
 		if (want > sizeof(bfb))
 			want = sizeof(bfb);
 		l = BIO_read(bio, bfb, want);
@@ -3458,6 +3503,16 @@ static void pe_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf,
 		EVP_DigestUpdate(mdctx, bfb, l);
 		n += l;
 	}
+
+	if (!header->sigpos) {
+		/* pad (with 0's) unsigned PE file to 8 byte boundary */
+		int len = 8 - header->fileend % 8;
+		if (len > 0 && len != 8) {
+			memset(bfb, 0, len);
+			EVP_DigestUpdate(mdctx, bfb, len);
+		}
+	}
+
 	EVP_DigestFinal(mdctx, mdbuf, NULL);
 	EVP_MD_CTX_free(mdctx);
 	BIO_free(bio);
@@ -3528,10 +3583,10 @@ static int pe_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *head
 	size_t phlen = 0;
 	const EVP_MD *md;
 
-	if (is_indirect_data_signature(signature->p7)) {
-		ASN1_STRING *astr = signature->p7->d.sign->contents->d.other->value.sequence;
-		const unsigned char *p = astr->data;
-		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
+	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
+		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
+		const unsigned char *p = content_val->data;
+		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
 		if (idc) {
 			pe_extract_page_hash(idc->data, &ph, &phlen, &phtype);
 			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
@@ -3819,13 +3874,20 @@ static int cab_verify_header(char *indata, char *infile, size_t filesize, FILE_H
 	return ret;
 }
 
-static void cab_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf, size_t offset)
+/* Compute a message digest value of the signed or unsigned CAB file */
+static void cab_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf, FILE_HEADER *header)
 {
 	BIO *bio;
 	size_t coffFiles, nfolders, flags;
 	static unsigned char bfb[16*1024*1024];
 	EVP_MD_CTX *mdctx;
 	int l;
+	size_t offset;
+
+	if (header->sigpos)
+		offset = header->sigpos;
+	else
+		offset = header->fileend;
 
 	bio = BIO_new_mem_buf(indata, offset);
 	mdctx = EVP_MD_CTX_new();
@@ -3838,84 +3900,89 @@ static void cab_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf
 	EVP_DigestUpdate(mdctx, bfb, 4);
 	/* u4 reserved1 00000000: 4-7 */
 	BIO_read(bio, bfb, 4);
-	/*
-	 * u4 cbCabinet - size of this cabinet file in bytes: 8-11
-	 * u4 reserved2 00000000: 12-15
-	 */
-	BIO_read(bio, bfb, 8);
-	EVP_DigestUpdate(mdctx, bfb, 8);
-	 /* u4 coffFiles - offset of the first CFFILE entry: 16-19 */
-	BIO_read(bio, bfb, 4);
-	coffFiles = GET_UINT32_LE(bfb);
-	EVP_DigestUpdate(mdctx, bfb, 4);
-	/*
-	 * u4 reserved3 00000000: 20-23
-	 * u1 versionMinor 03: 24
-	 * u1 versionMajor 01: 25
-	 */
-	BIO_read(bio, bfb, 6);
-	EVP_DigestUpdate(mdctx, bfb, 6);
-	/* u2 cFolders - number of CFFOLDER entries in this cabinet: 26-27 */
-	BIO_read(bio, bfb, 2);
-	nfolders = GET_UINT16_LE(bfb);
-	EVP_DigestUpdate(mdctx, bfb, 2);
-	/* u2 cFiles - number of CFFILE entries in this cabinet: 28-29 */
-	BIO_read(bio, bfb, 2);
-	EVP_DigestUpdate(mdctx, bfb, 2);
-	/* u2 flags: 30-31 */
-	BIO_read(bio, bfb, 2);
-	flags = GET_UINT16_LE(bfb);
-	EVP_DigestUpdate(mdctx, bfb, 2);
-	/* u2 setID must be the same for all cabinets in a set: 32-33 */
-	BIO_read(bio, bfb, 2);
-	EVP_DigestUpdate(mdctx, bfb, 2);
-	/*
-	* u2 iCabinet - number of this cabinet file in a set: 34-35
-	* u2 cbCFHeader: 36-37
-	* u1 cbCFFolder: 38
-	* u1 cbCFData: 39
-	* u22 abReserve: 40-55
-	* - Additional data offset: 44-47
-	* - Additional data size: 48-51
-	*/
-	BIO_read(bio, bfb, 22);
-	/* u22 abReserve: 56-59 */
-	BIO_read(bio, bfb, 4);
-	EVP_DigestUpdate(mdctx, bfb, 4);
-
-	/* TODO */
-	if (flags & FLAG_PREV_CABINET) {
-		/* szCabinetPrev */
-		do {
-			BIO_read(bio, bfb, 1);
-			EVP_DigestUpdate(mdctx, bfb, 1);
-		} while (bfb[0]);
-		/* szDiskPrev */
-		do {
-			BIO_read(bio, bfb, 1);
-			EVP_DigestUpdate(mdctx, bfb, 1);
-		} while (bfb[0]);
-	}
-	if (flags & FLAG_NEXT_CABINET) {
-		/* szCabinetNext */
-		do {
-			BIO_read(bio, bfb, 1);
-			EVP_DigestUpdate(mdctx, bfb, 1);
-		} while (bfb[0]);
-		/* szDiskNext */
-		do {
-			BIO_read(bio, bfb, 1);
-			EVP_DigestUpdate(mdctx, bfb, 1);
-		} while (bfb[0]);
-	}
-	/*
-	 * (u8 * cFolders) CFFOLDER - structure contains information about
-	 * one of the folders or partial folders stored in this cabinet file
-	 */
-	while (nfolders) {
+	if (header->sigpos) {
+		/*
+		 * u4 cbCabinet - size of this cabinet file in bytes: 8-11
+		 * u4 reserved2 00000000: 12-15
+		 */
 		BIO_read(bio, bfb, 8);
 		EVP_DigestUpdate(mdctx, bfb, 8);
-		nfolders--;
+		 /* u4 coffFiles - offset of the first CFFILE entry: 16-19 */
+		BIO_read(bio, bfb, 4);
+		coffFiles = GET_UINT32_LE(bfb);
+		EVP_DigestUpdate(mdctx, bfb, 4);
+		/*
+		 * u4 reserved3 00000000: 20-23
+		 * u1 versionMinor 03: 24
+		 * u1 versionMajor 01: 25
+		 */
+		BIO_read(bio, bfb, 6);
+		EVP_DigestUpdate(mdctx, bfb, 6);
+		/* u2 cFolders - number of CFFOLDER entries in this cabinet: 26-27 */
+		BIO_read(bio, bfb, 2);
+		nfolders = GET_UINT16_LE(bfb);
+		EVP_DigestUpdate(mdctx, bfb, 2);
+		/* u2 cFiles - number of CFFILE entries in this cabinet: 28-29 */
+		BIO_read(bio, bfb, 2);
+		EVP_DigestUpdate(mdctx, bfb, 2);
+		/* u2 flags: 30-31 */
+		BIO_read(bio, bfb, 2);
+		flags = GET_UINT16_LE(bfb);
+		EVP_DigestUpdate(mdctx, bfb, 2);
+		/* u2 setID must be the same for all cabinets in a set: 32-33 */
+		BIO_read(bio, bfb, 2);
+		EVP_DigestUpdate(mdctx, bfb, 2);
+		/*
+		* u2 iCabinet - number of this cabinet file in a set: 34-35
+		* u2 cbCFHeader: 36-37
+		* u1 cbCFFolder: 38
+		* u1 cbCFData: 39
+		* u22 abReserve: 40-55
+		* - Additional data offset: 44-47
+		* - Additional data size: 48-51
+		*/
+		BIO_read(bio, bfb, 22);
+		/* u22 abReserve: 56-59 */
+		BIO_read(bio, bfb, 4);
+		EVP_DigestUpdate(mdctx, bfb, 4);
+
+		/* TODO */
+		if (flags & FLAG_PREV_CABINET) {
+			/* szCabinetPrev */
+			do {
+				BIO_read(bio, bfb, 1);
+				EVP_DigestUpdate(mdctx, bfb, 1);
+			} while (bfb[0]);
+			/* szDiskPrev */
+			do {
+				BIO_read(bio, bfb, 1);
+				EVP_DigestUpdate(mdctx, bfb, 1);
+			} while (bfb[0]);
+		}
+		if (flags & FLAG_NEXT_CABINET) {
+			/* szCabinetNext */
+			do {
+				BIO_read(bio, bfb, 1);
+				EVP_DigestUpdate(mdctx, bfb, 1);
+			} while (bfb[0]);
+			/* szDiskNext */
+			do {
+				BIO_read(bio, bfb, 1);
+				EVP_DigestUpdate(mdctx, bfb, 1);
+			} while (bfb[0]);
+		}
+		/*
+		 * (u8 * cFolders) CFFOLDER - structure contains information about
+		 * one of the folders or partial folders stored in this cabinet file
+		 */
+		while (nfolders) {
+			BIO_read(bio, bfb, 8);
+			EVP_DigestUpdate(mdctx, bfb, 8);
+			nfolders--;
+		}
+	} else {
+		/* read what's left of the unsigned PE file */
+		coffFiles = 8;
 	}
 	/* (variable) ab - the compressed data bytes */
 	while (coffFiles < offset) {
@@ -3943,10 +4010,10 @@ static int cab_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *hea
 	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	const EVP_MD *md;
 
-	if (is_indirect_data_signature(signature->p7)) {
-		ASN1_STRING *astr = signature->p7->d.sign->contents->d.other->value.sequence;
-		const unsigned char *p = astr->data;
-		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, astr->length);
+	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
+		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
+		const unsigned char *p = content_val->data;
+		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
 		if (idc) {
 			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
 				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
@@ -3965,7 +4032,7 @@ static int cab_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *hea
 	tohex(mdbuf, hexbuf, EVP_MD_size(md));
 	printf("Current message digest    : %s\n", hexbuf);
 
-	cab_calc_digest(indata, md, cmdbuf, header->sigpos);
+	cab_calc_digest(indata, md, cmdbuf, header);
 
 	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
 	mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
@@ -4316,18 +4383,160 @@ static int cat_verify_header(char *indata, size_t filesize, FILE_HEADER *header)
 	return 1; /* OK */
 }
 
-static int cat_verify_pkcs7(SIGNATURE *signature, GLOBAL_OPTIONS *options)
+/*
+ * If the attribute type is SPC_INDIRECT_DATA_OBJID, get a digest algorithm and a message digest
+ * from the content and compare the message digest against the computed message digest of the file
+ */
+static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEADER *header,
+			file_type_t filetype)
 {
-	int ret;
+	int ret = 1, mdok, mdtype = -1, phtype = -1;
+	unsigned char mdbuf[EVP_MAX_MD_SIZE];
+	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
+	char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	unsigned char *ph = NULL;
+	size_t phlen = 0;
+	const EVP_MD *md;
+	ASN1_STRING *content_val;
+	const unsigned char *p;
+	ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
 
-	/* The message digest is checked by PKCS7_verify() */
-	ret = verify_signature(signature, options);
+	if (attribute && !OBJ_cmp(attribute->type, indir_objid)) {
+		STACK_OF(ASN1_TYPE) *contents;
+		ASN1_TYPE *content;
+		SpcIndirectDataContent *idc;
+
+		content_val = attribute->contents->value.sequence;
+		p = content_val->data;
+		contents = d2i_ASN1_SET_ANY(NULL, &p, content_val->length);
+		if (contents == NULL)
+			goto out;
+
+		content = sk_ASN1_TYPE_value(contents, 0);
+		sk_ASN1_TYPE_free(contents);
+		content_val = content->value.sequence;
+		p = content_val->data;
+		idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
+		if (idc) {
+			if (header->sigpos) {
+				/* try to get a page hash if the file is signed */
+				pe_extract_page_hash(idc->data, &ph, &phlen, &phtype);
+			}
+			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
+				/* get a digest algorithm a message digest of the file from the content */
+				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
+				memcpy(mdbuf, idc->messageDigest->digest->data, idc->messageDigest->digest->length);
+			}
+			SpcIndirectDataContent_free(idc);
+		}
+		ASN1_TYPE_free(content);
+		if (mdtype == -1) {
+			printf("Failed to extract current message digest\n\n");
+			goto out;
+		}
+		md = EVP_get_digestbynid(mdtype);
+		/* compute a message digest of the input file */
+		switch (filetype) {
+			case FILE_TYPE_CAB:
+				cab_calc_digest(indata, md, cmdbuf, header);
+				break;
+			case FILE_TYPE_PE:
+				pe_calc_digest(indata, md, cmdbuf, header);
+				break;
+			case FILE_TYPE_MSI:
+				msi_calc_digest(indata, md, cmdbuf, header->fileend);
+				break;
+			default:
+				break;
+			}
+		mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
+		if (mdok) {
+			printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
+			tohex(mdbuf, hexbuf, EVP_MD_size(md));
+			printf("Current message digest    : %s\n", hexbuf);
+			tohex(cmdbuf, hexbuf, EVP_MD_size(md));
+			printf("Calculated message digest : %s\n\n", hexbuf);
+		} else {
+			goto out;
+		}
+
+		if (phlen > 0) {
+			size_t cphlen = 0;
+			unsigned char *cph;
+			cph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &cphlen);
+			tohex(cph, hexbuf, (cphlen < 32) ? cphlen : 32);
+			mdok = (phlen = cphlen) && !memcmp(ph, cph, phlen);
+			OPENSSL_free(cph);
+			if (mdok) {
+				printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
+				tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
+				printf("Page hash            : %s\n", hexbuf);
+				printf("Calculated page hash : %s\n\n", hexbuf);
+			} else {
+				goto out;
+			}
+		}
+		ret = 0; /* OK */
+	}
+out:
+	ASN1_OBJECT_free(indir_objid);
+	OPENSSL_free(ph);
+	return ret;
+}
+
+/*
+ * If the message digest of the input file is found in the catalog file,
+ * or the input file itself is a catalog file, verify the signature.
+ */
+static int cat_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *header,
+				file_type_t filetype, GLOBAL_OPTIONS *options)
+{
+	int ret = 1, ok = 0;	
+	
+	/* A CTL (MS_CTL_OBJID) is a list of hashes of certificates or a list of hashes files */
+	if (options->catalog && is_content_type(signature->p7, MS_CTL_OBJID)) {
+		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
+		const unsigned char *p = content_val->data;
+		MsCtlContent *ctlc = d2i_MsCtlContent(NULL, &p, content_val->length);
+		if (ctlc) {
+			int i, j;
+			/* find the message digest of the file for all files added to the catalog file */
+			for (i = 0; i < sk_CatalogInfo_num(ctlc->header_attributes); i++) {
+				STACK_OF(CatalogAuthAttr) *attributes;
+				CatalogInfo *header_attr = sk_CatalogInfo_value(ctlc->header_attributes, i);
+				if (header_attr == NULL)
+					continue;
+				attributes = header_attr->attributes;
+				for (j = 0; j < sk_CatalogAuthAttr_num(attributes); j++) {
+					CatalogAuthAttr *attribute = sk_CatalogAuthAttr_value(attributes, j);
+					if (!cat_verify_member(attribute, indata, header, filetype)) {
+						/* computed message digest of the file is found in the catalog file */
+						ok = 1;
+						break;
+					}
+				}
+				if (ok)
+					break;
+			}
+			MsCtlContent_free(ctlc);
+		}
+	} else {
+		/* the input file is a catalog file */
+		ok = 1;
+	}
+	if (ok)
+		/* a message digest value of the catalog file is checked by PKCS7_verify() */
+		ret = verify_signature(signature, options);
+	else
+		printf("File not found in the specified catalog.\n\n");
+
 	if (!ret)
 		ERR_print_errors_fp(stdout);
 	return ret;
 }
 
-static int cat_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *options)
+static int cat_verify_file(char *catdata, FILE_HEADER *catheader,
+				char *indata, FILE_HEADER *header, file_type_t filetype, GLOBAL_OPTIONS *options)
 {
 	int i, ret = 1;
 	PKCS7 *p7;
@@ -4336,11 +4545,15 @@ static int cat_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *op
 
 	signatures = sk_SIGNATURE_new_null();
 
-	if (header->sigpos == header->fileend) {
+	if (header->sigpos == header->fileend ||
+			(options->catalog && (catheader->sigpos == catheader->fileend))) {
 		printf("No signature found\n\n");
 		goto out;
 	}
-	p7 = cat_extract_existing_pkcs7(indata, header);
+	if (options->catalog)
+		p7 = cat_extract_existing_pkcs7(catdata, catheader);
+	else
+		p7 = cat_extract_existing_pkcs7(indata, header);
 	if (!append_signature_list(&signatures, p7, 1)) {
 		printf("Failed to create signature list\n\n");
 		PKCS7_free(p7);
@@ -4348,9 +4561,10 @@ static int cat_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *op
 	}
 
 	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
-		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
+		if (!options->catalog)
+			printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
 		signature = sk_SIGNATURE_value(signatures, i);
-		ret &= cat_verify_pkcs7(signature, options);
+		ret &= cat_verify_pkcs7(signature, indata, header, filetype, options);
 		if (signature->timestamp) {
 			CMS_ContentInfo_free(signature->timestamp);
 			ERR_clear_error();
@@ -5715,6 +5929,9 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-add-msi-dse")) {
 			options->add_msi_dse = 1;
 #endif
+		} else if ((*cmd == CMD_VERIFY) && (!strcmp(*argv, "-c") || !strcmp(*argv, "-catalog"))) {
+			if (--argc < 1) usage(argv0, "all");
+			options->catalog = *(++argv);
 		} else if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && !strcmp(*argv, "-CAfile")) {
 			if (--argc < 1) usage(argv0, "all");
 			OPENSSL_free(options->cafile);
@@ -5803,17 +6020,17 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 int main(int argc, char **argv)
 {
 	GLOBAL_OPTIONS options;
-	FILE_HEADER header;
+	FILE_HEADER header, catheader;
 	CRYPTO_PARAMS cparams;
 #ifdef WITH_GSF
 	GSF_PARAMS gsfparams;
 #endif
 	BIO *hash = NULL, *outdata = NULL;
 	PKCS7 *cursig = NULL, *sig = NULL;
-	char *indata = NULL;
+	char *indata = NULL, *catdata = NULL;
 	int ret = -1, len = 0;
 	size_t padlen = 0, filesize = 0;
-	file_type_t type;
+	file_type_t type, filetype = FILE_TYPE_CAT;
 	cmd_type_t cmd = CMD_SIGN;
 
 	/* Set up OpenSSL */
@@ -5861,12 +6078,29 @@ int main(int argc, char **argv)
 
 	if (!get_file_type(indata, options.infile, &type))
 		goto err_cleanup;
+	if (!input_validation(type, &options, &header, indata, filesize))
+		goto err_cleanup;
+
+	/* search catalog file to determine whether the file is signed in a catalog */
+	if (options.catalog) {
+		size_t catsize = get_file_size(options.catalog);
+		if (catsize == 0)
+			goto err_cleanup;
+		catdata = map_file(options.catalog, catsize);
+		if (catdata == NULL)
+			DO_EXIT_1("Failed to open file: %s\n", options.catalog);
+		filetype = type;
+		if (!get_file_type(catdata, options.catalog, &type))
+			goto err_cleanup;
+		/* reset file header */
+		memset(&catheader, 0, sizeof(FILE_HEADER));
+		catheader.fileend = catsize;
+		if (!input_validation(type, &options, &catheader, catdata, catsize))
+				goto err_cleanup;
+	}
 
 	hash = BIO_new(BIO_f_md());
 	BIO_set_md(hash, options.md);
-
-	if (!input_validation(type, &options, &header, indata, filesize))
-		goto err_cleanup;
 
 #ifdef WITH_GSF
 	if (type == FILE_TYPE_MSI) {
@@ -5966,7 +6200,7 @@ int main(int argc, char **argv)
 		if (cmd == CMD_REMOVE || cmd == CMD_EXTRACT || (cmd==CMD_ATTACH)) {
 			DO_EXIT_0("Unsupported command\n");
 		} else if (cmd == CMD_VERIFY) {
-			ret = cat_verify_file(indata, &header, &options);
+			ret = cat_verify_file(catdata, &catheader, indata, &header, filetype, &options);
 			goto skip_signing;
 		} else {
 			sig = cat_presign_file(type, cmd, &header, &options, &cparams, indata, &cursig);
