@@ -3064,10 +3064,8 @@ out:
 static void msi_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf, size_t fileend)
 {
 	BIO *bio = NULL;
-	static unsigned char bfb[16*1024*1024];
 	EVP_MD_CTX *mdctx;
 	size_t n;
-	int l;
 
 	bio = BIO_new_mem_buf(indata, fileend);
 	mdctx = EVP_MD_CTX_new();
@@ -3077,6 +3075,8 @@ static void msi_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf
 
 	n = 0;
 	while (n < fileend) {
+		int l;
+		static unsigned char bfb[16*1024*1024];
 		size_t want = fileend - n;
 		if (want > sizeof(bfb))
 			want = sizeof(bfb);
@@ -3125,16 +3125,13 @@ static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 	PKCS7 *p7 = NULL;
 	unsigned long inlen, exlen = 0;
 	const unsigned char *blob;
-	STACK_OF(SIGNATURE) *signatures;
-	SIGNATURE *signature = NULL;
+	STACK_OF(SIGNATURE) *signatures = sk_SIGNATURE_new_null();
 
 	sig = msi_get_child(infile, "\05DigitalSignature");
 	if (sig == NULL) {
 		printf("MSI file has no signature\n\n");
 		return 1; /* FAILED */
 	}
-
-	signatures = sk_SIGNATURE_new_null();
 
 	inlen = (unsigned long) gsf_input_remaining(sig);
 	indata = OPENSSL_malloc(inlen);
@@ -3164,8 +3161,8 @@ static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 		goto out;
 	}
 	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
+		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
 		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-		signature = sk_SIGNATURE_value(signatures, i);
 		ret &= msi_verify_pkcs7(signature, infile, exdata, exlen, options);
 		if (signature->timestamp) {
 			CMS_ContentInfo_free(signature->timestamp);
@@ -3471,7 +3468,6 @@ static void pe_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf,
 	static unsigned char bfb[16*1024*1024];
 	EVP_MD_CTX *mdctx;
 	size_t n;
-	int l;
 	size_t offset;
 
 	if (header->sigpos)
@@ -3494,6 +3490,7 @@ static void pe_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf,
 
 	n = header->header_size + 88 + 4 + 60 + header->pe32plus * 16 + 8;
 	while (n < offset) {
+		int l;
 		size_t want = offset - n;
 		if (want > sizeof(bfb))
 			want = sizeof(bfb);
@@ -3671,13 +3668,10 @@ static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 	BIO *bio;
 	unsigned int real_pe_checksum;
 	PKCS7 *p7;
-	STACK_OF(SIGNATURE) *signatures;
-	SIGNATURE *signature = NULL;
+	STACK_OF(SIGNATURE) *signatures = sk_SIGNATURE_new_null();
 
 	if (header->siglen == 0)
 		header->siglen = header->fileend;
-
-	signatures = sk_SIGNATURE_new_null();
 
 	/* check PE checksum */
 	printf("Current PE checksum   : %08X\n", header->pe_checksum);
@@ -3704,8 +3698,8 @@ static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 		goto out;
 	}
 	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
+		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
 		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-		signature = sk_SIGNATURE_value(signatures, i);
 		ret &= pe_verify_pkcs7(signature, indata, header, options);
 		if (signature->timestamp) {
 			CMS_ContentInfo_free(signature->timestamp);
@@ -3878,11 +3872,9 @@ static int cab_verify_header(char *indata, char *infile, size_t filesize, FILE_H
 static void cab_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf, FILE_HEADER *header)
 {
 	BIO *bio;
-	size_t coffFiles, nfolders, flags;
 	static unsigned char bfb[16*1024*1024];
 	EVP_MD_CTX *mdctx;
-	int l;
-	size_t offset;
+	size_t offset, coffFiles;
 
 	if (header->sigpos)
 		offset = header->sigpos;
@@ -3901,6 +3893,7 @@ static void cab_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf
 	/* u4 reserved1 00000000: 4-7 */
 	BIO_read(bio, bfb, 4);
 	if (header->sigpos) {
+		size_t nfolders, flags;
 		/*
 		 * u4 cbCabinet - size of this cabinet file in bytes: 8-11
 		 * u4 reserved2 00000000: 12-15
@@ -3986,6 +3979,7 @@ static void cab_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf
 	}
 	/* (variable) ab - the compressed data bytes */
 	while (coffFiles < offset) {
+		int l;
 		size_t want = offset - coffFiles;
 		if (want > sizeof(bfb))
 			want = sizeof(bfb);
@@ -4063,10 +4057,7 @@ static int cab_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *op
 {
 	int i, ret = 1;
 	PKCS7 *p7;
-	STACK_OF(SIGNATURE) *signatures;
-	SIGNATURE *signature = NULL;
-
-	signatures = sk_SIGNATURE_new_null();
+	STACK_OF(SIGNATURE) *signatures = sk_SIGNATURE_new_null();
 
 	if (header->header_size != 20) {
 		printf("No signature found\n\n");
@@ -4084,8 +4075,8 @@ static int cab_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *op
 		goto out;
 	}
 	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
+		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
 		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-		signature = sk_SIGNATURE_value(signatures, i);
 		ret &= cab_verify_pkcs7(signature, indata, header, options);
 		if (signature->timestamp) {
 			CMS_ContentInfo_free(signature->timestamp);
@@ -4374,9 +4365,10 @@ static int cat_verify_header(char *indata, size_t filesize, FILE_HEADER *header)
 		return 0; /* FAILED */
 	}
 	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-	if (si == NULL)
+	if (si == NULL) {
 		/* catalog file is unsigned */
 		header->sigpos = filesize;
+	}
 
 	header->fileend = filesize;
 	PKCS7_free(p7);
@@ -4390,25 +4382,23 @@ static int cat_verify_header(char *indata, size_t filesize, FILE_HEADER *header)
 static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEADER *header,
 			file_type_t filetype)
 {
-	int ret = 1, mdok, mdtype = -1, phtype = -1;
-	unsigned char mdbuf[EVP_MAX_MD_SIZE];
-	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	int ret = 1;
 	unsigned char *ph = NULL;
-	size_t phlen = 0;
-	const EVP_MD *md;
-	ASN1_STRING *content_val;
-	const unsigned char *p;
 	ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
 
 	if (attribute && !OBJ_cmp(attribute->type, indir_objid)) {
-		STACK_OF(ASN1_TYPE) *contents;
+		int mdok, mdtype = -1, phtype = -1;
+		unsigned char mdbuf[EVP_MAX_MD_SIZE];
+		unsigned char cmdbuf[EVP_MAX_MD_SIZE];
+		char hexbuf[EVP_MAX_MD_SIZE*2+1];
+		size_t phlen = 0;
+		const EVP_MD *md;
 		ASN1_TYPE *content;
 		SpcIndirectDataContent *idc;
 
-		content_val = attribute->contents->value.sequence;
-		p = content_val->data;
-		contents = d2i_ASN1_SET_ANY(NULL, &p, content_val->length);
+		ASN1_STRING *content_val = attribute->contents->value.sequence;
+		const unsigned char *p = content_val->data;
+		STACK_OF(ASN1_TYPE) *contents = d2i_ASN1_SET_ANY(NULL, &p, content_val->length);
 		if (contents == NULL)
 			goto out;
 
@@ -4443,9 +4433,11 @@ static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEAD
 			case FILE_TYPE_PE:
 				pe_calc_digest(indata, md, cmdbuf, header);
 				break;
+#ifdef WITH_GSF
 			case FILE_TYPE_MSI:
 				msi_calc_digest(indata, md, cmdbuf, header->fileend);
 				break;
+#endif
 			default:
 				break;
 			}
@@ -4515,8 +4507,9 @@ static int cat_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *hea
 						break;
 					}
 				}
-				if (ok)
+				if (ok) {
 					break;
+				}
 			}
 			MsCtlContent_free(ctlc);
 		}
@@ -4524,12 +4517,12 @@ static int cat_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *hea
 		/* the input file is a catalog file */
 		ok = 1;
 	}
-	if (ok)
+	if (ok) {
 		/* a message digest value of the catalog file is checked by PKCS7_verify() */
 		ret = verify_signature(signature, options);
-	else
+	} else {
 		printf("File not found in the specified catalog.\n\n");
-
+	}
 	if (!ret)
 		ERR_print_errors_fp(stdout);
 	return ret;
@@ -4540,10 +4533,7 @@ static int cat_verify_file(char *catdata, FILE_HEADER *catheader,
 {
 	int i, ret = 1;
 	PKCS7 *p7;
-	STACK_OF(SIGNATURE) *signatures;
-	SIGNATURE *signature;
-
-	signatures = sk_SIGNATURE_new_null();
+	STACK_OF(SIGNATURE) *signatures = sk_SIGNATURE_new_null();
 
 	if (header->sigpos == header->fileend ||
 			(options->catalog && (catheader->sigpos == catheader->fileend))) {
@@ -4561,9 +4551,9 @@ static int cat_verify_file(char *catdata, FILE_HEADER *catheader,
 	}
 
 	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
+		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
 		if (!options->catalog)
 			printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-		signature = sk_SIGNATURE_value(signatures, i);
 		ret &= cat_verify_pkcs7(signature, indata, header, filetype, options);
 		if (signature->timestamp) {
 			CMS_ContentInfo_free(signature->timestamp);
