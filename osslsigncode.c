@@ -150,11 +150,7 @@ typedef unsigned char u_char;
 #define PROVIDE_ASKPASS 1
 #endif
 
-#ifdef _WIN32
 #define FILE_CREATE_MODE "w+b"
-#else
-#define FILE_CREATE_MODE "w+bx"
-#endif
 
 /* Microsoft OID Authenticode */
 #define SPC_INDIRECT_DATA_OBJID      "1.3.6.1.4.1.311.2.1.4"
