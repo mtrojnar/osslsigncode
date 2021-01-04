@@ -14,7 +14,7 @@ osslsigncode sign -addUnauthenticatedBlob -pkcs12 yourcert.pfx -pass your_passwo
 
 ```
 # Example 2. Timestamp and add blob to signed file 
-osslsigncode.exe add -addUnauthenticatedBlob -t http://timestamp.verisign.com/scripts/timstamp.dll -in your_signed_file.exe -out out.exe
+osslsigncode.exe add -addUnauthenticatedBlob -t http://timestamp.digicert.com -in your_signed_file.exe -out out.exe
 ```
 
 ```
