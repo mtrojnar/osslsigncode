@@ -75,7 +75,7 @@ or if you want to add a timestamp as well:
 ```
   osslsigncode sign -certs <cert-file> -key <key-file> \
     -n "Your Application" -i http://www.yourwebsite.com/ \
-    -t http://timestamp.verisign.com/scripts/timstamp.dll \
+    -t http://timestamp.digicert.com \
     -in yourapp.exe -out yourapp-signed.exe
 ```
 You can use a certificate and key stored in a PKCS#12 container:
