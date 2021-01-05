@@ -18,7 +18,8 @@ default_md                      = sha256
 preserve                        = no
 policy                          = policy_loose
 default_startdate               = 180101000000Z
-default_enddate                 = 210101000000Z
+default_enddate                 = 241231000000Z
+x509_extensions                 = v3_req
 
 [ req ]
 # Options for the `req` tool
@@ -35,6 +36,12 @@ authorityKeyIdentifier          = keyid:always
 
 [ usr_extensions ]
 # Extension to add when the -x509 option is used
+basicConstraints                = CA:FALSE
+subjectKeyIdentifier            = hash
+authorityKeyIdentifier          = keyid, issuer
+extendedKeyUsage                = codeSigning
+
+[ v3_req ]
 basicConstraints                = CA:FALSE
 subjectKeyIdentifier            = hash
 authorityKeyIdentifier          = keyid, issuer
