@@ -2,7 +2,7 @@
    OpenSSL based Authenticode signing for PE/MSI/Java CAB files.
 
    Copyright (C) 2005-2015 Per Allansson <pallansson@gmail.com>
-   Copyright (C) 2018-2020 Michał Trojnara <Michal.Trojnara@stunnel.org>
+   Copyright (C) 2018-2021 Michał Trojnara <Michal.Trojnara@stunnel.org>
 
    This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -4483,8 +4483,8 @@ out:
 static int cat_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *header,
 				file_type_t filetype, GLOBAL_OPTIONS *options)
 {
-	int ret = 1, ok = 0;	
-	
+	int ret = 1, ok = 0;
+
 	/* A CTL (MS_CTL_OBJID) is a list of hashes of certificates or a list of hashes files */
 	if (options->catalog && is_content_type(signature->p7, MS_CTL_OBJID)) {
 		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
