@@ -177,8 +177,9 @@ typedef unsigned char u_char;
 #define SPC_UNAUTHENTICATED_DATA_BLOB_OBJID  "1.3.6.1.4.1.42921.1.2.1"
 
 /* Public Key Cryptography Standards PKCS#9 */
-#define PKCS9_TIMESTAMP_SIGNING_TIME         "1.2.840.113549.1.9.5"
-#define PKCS9_AUTHENTICODE_COUNTER_SIGNATURE "1.2.840.113549.1.9.6"
+#define PKCS9_MESSAGE_DIGEST         "1.2.840.113549.1.9.4"
+#define PKCS9_SIGNING_TIME           "1.2.840.113549.1.9.5"
+#define PKCS9_COUNTER_SIGNATURE      "1.2.840.113549.1.9.6"
 
 
 #define WIN_CERT_REVISION_2             0x0200
@@ -207,6 +208,12 @@ typedef unsigned char u_char;
 
 typedef struct SIGNATURE_st {
 	PKCS7 *p7;
+	ASN1_STRING *digest;
+	time_t signtime;
+	char *url;
+	char *desc;
+	char *purpose;
+	char *level;
 	CMS_ContentInfo *timestamp;
 	time_t time;
 	ASN1_STRING *blob;
@@ -674,6 +681,35 @@ ASN1_SEQUENCE(TimeStampToken) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampToken)
 
+/*
+ * $ echo -n 3006030200013000 | xxd -r -p | openssl asn1parse -i -inform der
+ * 0:d=0  hl=2 l=   6 cons: SEQUENCE
+ * 2:d=1  hl=2 l=   2 prim:  BIT STRING
+ * 6:d=1  hl=2 l=   0 cons:  SEQUENCE
+*/
+static const u_char java_attrs_low[] = {
+	0x30, 0x06, 0x03, 0x02, 0x00, 0x01, 0x30, 0x00
+};
+
+/*
+ * $ echo -n 300c060a2b060104018237020115 | xxd -r -p | openssl asn1parse -i -inform der
+ * 0:d=0  hl=2 l=  12 cons: SEQUENCE
+ * 2:d=1  hl=2 l=  10 prim:  OBJECT     :Microsoft Individual Code Signing
+*/
+static u_char purpose_ind[] = {
+	0x30, 0x0c,
+	0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x15
+};
+
+/*
+ * $ echo -n 300c060a2b060104018237020116 | xxd -r -p | openssl asn1parse -i -inform der
+ * 0:d=0  hl=2 l=  12 cons: SEQUENCE
+ * 2:d=1  hl=2 l=  10 prim:  OBJECT     :Microsoft Commercial Code Signing
+*/
+static u_char purpose_comm[] = {
+	0x30, 0x0c,
+	0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x16
+};
 
 static SpcSpOpusInfo *createOpus(const char *desc, const char *url)
 {
@@ -952,7 +988,7 @@ static int decode_authenticode_response(PKCS7 *sig, BIO *bin, int verbose)
 	PKCS7_free(p7);
 
 	attrs = sk_X509_ATTRIBUTE_new_null();
-	attrs = X509at_add1_attr_by_txt(&attrs, PKCS9_AUTHENTICODE_COUNTER_SIGNATURE, V_ASN1_SET, p, len);
+	attrs = X509at_add1_attr_by_txt(&attrs, PKCS9_COUNTER_SIGNATURE, V_ASN1_SET, p, len);
 	OPENSSL_free(p);
 
 	si = sk_PKCS7_SIGNER_INFO_value(sig->d.sign->signer_info, 0);
@@ -1970,8 +2006,8 @@ static time_t si_get_time(PKCS7_SIGNER_INFO *si)
 				return INVALID_TIME; /* FAILED */
 			object_txt[0] = 0x00;
 			OBJ_obj2txt(object_txt, sizeof(object_txt), object, 1);
-			if (!strcmp(object_txt, PKCS9_TIMESTAMP_SIGNING_TIME)) {
-				/* "1.2.840.113549.1.9.5" */
+			if (!strcmp(object_txt, PKCS9_SIGNING_TIME)) {
+				/* PKCS#9 signing time - Policy OID: 1.2.840.113549.1.9.5 */
 				time = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
 			}
 		}
@@ -2180,11 +2216,55 @@ out:
 	return cms;
 }
 
+/*
+ * RFC3852: the message-digest authenticated attribute type MUST be
+ * present when there are any authenticated attributes present
+ */
 static int print_attributes(SIGNATURE *signature, int verbose)
 {
-	if (signature->timestamp)
+	char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	unsigned char *mdbuf;
+	int len;
+
+	if (!signature->digest)
+		return 0; /* FAILED */
+
+	printf("\nAuthenticated attributes:\n");
+	mdbuf = (unsigned char *)ASN1_STRING_get0_data(signature->digest);
+	len = ASN1_STRING_length(signature->digest);
+	tohex(mdbuf, hexbuf, len);
+	printf("\tMessage digest: %s\n", hexbuf);
+	printf("\tSigning time: ");
+	print_time_t(signature->signtime);
+
+	if (signature->purpose) {
+		if (!memcmp(signature->purpose, purpose_comm, sizeof(purpose_comm)))
+			printf("\tMicrosoft Commercial Code Signing purpose\n");
+		else if (!memcmp(signature->purpose, purpose_ind, sizeof(purpose_ind)))
+			printf("\tMicrosoft Individual Code Signing purpose\n");
+		else
+			printf("\tUnrecognized Code Signing purpose\n");
+	}
+	if (signature->url) {
+		printf("\tURL description: %s\n", signature->url);
+		OPENSSL_free(signature->url);
+	}
+	if (signature->desc) {
+		printf("\tText description: %s\n", signature->desc);
+		OPENSSL_free(signature->desc);
+	}
+	if (signature->level) {
+		if (!memcmp(signature->level, java_attrs_low, sizeof(java_attrs_low)))
+			printf("\tLow level of permissions in Microsoft Internet Explorer 4.x for CAB files\n");
+		else
+			printf("\tUnrecognized level of permissions in Microsoft Internet Explorer 4.x for CAB files\n");
+	}
+
+	/* Unauthenticated attributes */
+	if (signature->timestamp) {
 		if (!cms_print_timestamp(signature->timestamp, signature->time))
 			return 0; /* FAILED */
+	}
 	if (signature->blob) {
 		if (verbose) {
 			char *data_blob;
@@ -2197,11 +2277,64 @@ static int print_attributes(SIGNATURE *signature, int verbose)
 	return 1; /* OK */
 }
 
-static int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allownest)
+static void get_signed_attributes(SIGNATURE *signature, STACK_OF(X509_ATTRIBUTE) *auth_attr)
 {
-	SIGNATURE *signature = NULL;
-	PKCS7_SIGNER_INFO *si, *countersi;
-	STACK_OF(X509_ATTRIBUTE) *unauth_attr;
+	X509_ATTRIBUTE *attr;
+	ASN1_OBJECT *object;
+	ASN1_STRING *value;
+	char object_txt[128];
+	const unsigned char *data;
+	int i;
+
+	for (i=0; i<X509at_get_attr_count(auth_attr); i++) {
+		attr = X509at_get_attr(auth_attr, i);
+		object = X509_ATTRIBUTE_get0_object(attr);
+		if (object == NULL)
+			continue;
+		object_txt[0] = 0x00;
+		OBJ_obj2txt(object_txt, sizeof(object_txt), object, 1);
+		if (!strcmp(object_txt, PKCS9_MESSAGE_DIGEST)) {
+			/* PKCS#9 message digest - Policy OID: 1.2.840.113549.1.9.4 */
+			signature->digest  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_OCTET_STRING, NULL);
+		} else if (!strcmp(object_txt, PKCS9_SIGNING_TIME)) {
+			/* PKCS#9 signing time - Policy OID: 1.2.840.113549.1.9.5 */
+			ASN1_UTCTIME *time;
+			time = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
+			signature->signtime = asn1_get_time_t(time);
+		} else if (!strcmp(object_txt, SPC_SP_OPUS_INFO_OBJID)) {
+			/* Microsoft OID: 1.3.6.1.4.1.311.2.1.12 */
+			SpcSpOpusInfo *opus;
+			value  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
+			if (value == NULL)
+				continue;
+			data = ASN1_STRING_get0_data(value);
+			opus = d2i_SpcSpOpusInfo(NULL, &data, value->length);
+			if (opus->moreInfo)
+				signature->url = OPENSSL_strdup((char *)opus->moreInfo->value.url->data);
+			if (opus->programName)
+				signature->desc = OPENSSL_strdup((char *)opus->programName->value.ascii->data);
+			SpcSpOpusInfo_free(opus);
+		} else if (!strcmp(object_txt, SPC_STATEMENT_TYPE_OBJID)) {
+			/* Microsoft OID: 1.3.6.1.4.1.311.2.1.11 */
+			value  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
+			if (value == NULL)
+				continue;
+			signature->purpose = (char *)ASN1_STRING_get0_data(value);
+		} else if (!strcmp(object_txt, MS_JAVA_SOMETHING)) {
+			/* Microsoft OID: 1.3.6.1.4.1.311.15.1 */
+			value  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
+			if (value == NULL)
+				continue;
+			signature->level = (char *)ASN1_STRING_get0_data(value);
+		}
+	}
+}
+
+static int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allownest);
+
+static void get_unsigned_attributes(STACK_OF(SIGNATURE) **signatures, SIGNATURE *signature,
+		STACK_OF(X509_ATTRIBUTE) *unauth_attr, PKCS7 *p7, int allownest)
+{
 	X509_ATTRIBUTE *attr;
 	ASN1_OBJECT *object;
 	ASN1_STRING *value;
@@ -2209,95 +2342,121 @@ static int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, in
 	const unsigned char *data;
 	int i, j;
 
+	for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
+		attr = X509at_get_attr(unauth_attr, i);
+		object = X509_ATTRIBUTE_get0_object(attr);
+		if (object == NULL)
+			continue;
+		object_txt[0] = 0x00;
+		OBJ_obj2txt(object_txt, sizeof(object_txt), object, 1);
+		if (!strcmp(object_txt, PKCS9_COUNTER_SIGNATURE)) {
+			/* Authenticode Timestamp - Policy OID: 1.2.840.113549.1.9.6 */
+			PKCS7_SIGNER_INFO *countersi;
+			CMS_ContentInfo *timestamp = NULL;
+			time_t time;
+			value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
+			if (value == NULL)
+				continue;
+			data = ASN1_STRING_get0_data(value);
+			countersi = d2i_PKCS7_SIGNER_INFO(NULL, &data, value->length);
+			if (countersi == NULL)
+				continue;
+			time = si_get_time(countersi);
+			if (time != INVALID_TIME) {
+				timestamp = cms_get_timestamp(p7->d.sign, countersi);
+				if (timestamp) {
+					signature->time = time;
+					signature->timestamp = timestamp;
+				} else {
+					printf("Error: Authenticode Timestamp could not be decoded correctly\n\n");
+					PKCS7_SIGNER_INFO_free(countersi);
+				}
+			} else {
+				printf("Error: PKCS9_TIMESTAMP_SIGNING_TIME attribute not found\n\n");
+				PKCS7_SIGNER_INFO_free(countersi);
+			}
+		} else if (!strcmp(object_txt, SPC_RFC3161_OBJID)) {
+			/* RFC3161 Timestamp - Policy OID: 1.3.6.1.4.1.311.3.3.1 */
+			CMS_ContentInfo *timestamp = NULL;
+			time_t time;
+			value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
+			if (value == NULL)
+				continue;
+			data = ASN1_STRING_get0_data(value);
+			timestamp = d2i_CMS_ContentInfo(NULL, &data, value->length);
+			if (timestamp) {
+				time = cms_get_time(timestamp);
+				if (time != INVALID_TIME) {
+					signature->time = time;
+					signature->timestamp = timestamp;
+				} else {
+					printf("Error: Corrupt RFC3161 Timestamp embedded content\n\n");
+					ERR_print_errors_fp(stdout);
+				}
+			} else {
+				printf("Error: RFC3161 Timestamp could not be decoded correctly\n\n");
+				ERR_print_errors_fp(stdout);
+			}
+		} else if (allownest && !strcmp(object_txt, SPC_NESTED_SIGNATURE_OBJID)) {
+			/* Nested Signature - Policy OID: 1.3.6.1.4.1.311.2.4.1 */
+			PKCS7 *nested;
+			for (j=0; j<X509_ATTRIBUTE_count(attr); j++) {
+				value = X509_ATTRIBUTE_get0_data(attr, j, V_ASN1_SEQUENCE, NULL);
+				if (value == NULL)
+					continue;
+				data = ASN1_STRING_get0_data(value);
+				nested = d2i_PKCS7(NULL, &data, value->length);
+				if (nested)
+					(void)append_signature_list(signatures, nested, 0);
+			}
+		} else if (!strcmp(object_txt, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
+			/* Unauthenticated Data Blob - Policy OID: 1.3.6.1.4.1.42921.1.2.1 */
+			signature->blob = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTF8STRING, NULL);
+		} else
+			printf("Unsupported Policy OID: %s\n\n", object_txt);
+	}
+}
+
+static int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allownest)
+{
+	SIGNATURE *signature = NULL;
+	PKCS7_SIGNER_INFO *si;
+	STACK_OF(X509_ATTRIBUTE) *auth_attr, *unauth_attr;
+
 	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
 	if (si == NULL)
 		return 0; /* FAILED */
 
 	signature = OPENSSL_malloc(sizeof(SIGNATURE));
 	signature->p7 = p7;
+	signature->digest = NULL;
+	signature->signtime = INVALID_TIME;
+	signature->url = NULL;
+	signature->desc = NULL;
+	signature->purpose = NULL;
+	signature->level = NULL;
 	signature->timestamp = NULL;
 	signature->time = INVALID_TIME;
 	signature->blob = NULL;
 
+	auth_attr = PKCS7_get_signed_attributes(si);  /* cont[0] */
+	if (auth_attr)
+		get_signed_attributes(signature, auth_attr);
+
 	unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
 	if (unauth_attr)
-		for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
-			attr = X509at_get_attr(unauth_attr, i);
-			object = X509_ATTRIBUTE_get0_object(attr);
-			if (object == NULL)
-				continue;
-			object_txt[0] = 0x00;
-			OBJ_obj2txt(object_txt, sizeof(object_txt), object, 1);
-			if (!strcmp(object_txt, PKCS9_AUTHENTICODE_COUNTER_SIGNATURE)) {
-				/* Authenticode Timestamp - Policy OID: 1.2.840.113549.1.9.6 */
-				CMS_ContentInfo *timestamp = NULL;
-				time_t time;
-				value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
-				if (value == NULL)
-					continue;
-				data = value->data;
-				countersi = d2i_PKCS7_SIGNER_INFO(NULL, &data, value->length);
-				if (countersi == NULL)
-					continue;
-				time = si_get_time(countersi);
-				if (time != INVALID_TIME) {
-					timestamp = cms_get_timestamp(p7->d.sign, countersi);
-					if (timestamp) {
-						signature->time = time;
-						signature->timestamp = timestamp;
-					} else {
-						printf("Error: Authenticode Timestamp could not be decoded correctly\n\n");
-						PKCS7_SIGNER_INFO_free(countersi);
-					}
-				} else {
-					printf("Error: PKCS9_TIMESTAMP_SIGNING_TIME attribute not found\n\n");
-					PKCS7_SIGNER_INFO_free(countersi);
-				}
-			} else if (!strcmp(object_txt, SPC_RFC3161_OBJID)) {
-				/* RFC3161 Timestamp - Policy OID: 1.3.6.1.4.1.311.3.3.1 */
-				CMS_ContentInfo *timestamp = NULL;
-				time_t time;
-				value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
-				if (value == NULL)
-					continue;
-				data = value->data;
-				timestamp = d2i_CMS_ContentInfo(NULL, &data, value->length);
-				if (timestamp) {
-					time = cms_get_time(timestamp);
-					if (time != INVALID_TIME) {
-						signature->time = time;
-						signature->timestamp = timestamp;
-					} else {
-						printf("Error: Corrupt RFC3161 Timestamp embedded content\n\n");
-						ERR_print_errors_fp(stdout);
-					}
-				} else {
-					printf("Error: RFC3161 Timestamp could not be decoded correctly\n\n");
-					ERR_print_errors_fp(stdout);
-				}
-			} else if (allownest && !strcmp(object_txt, SPC_NESTED_SIGNATURE_OBJID)) {
-				/* Nested Signature - Policy OID: 1.3.6.1.4.1.311.2.4.1 */
-				PKCS7 *nested;
-				for (j=0; j<X509_ATTRIBUTE_count(attr); j++) {
-					value = X509_ATTRIBUTE_get0_data(attr, j, V_ASN1_SEQUENCE, NULL);
-					if (value == NULL)
-						continue;
-					data = value->data;
-					nested = d2i_PKCS7(NULL, &data, value->length);
-					if (nested)
-						(void)append_signature_list(signatures, nested, 0);
-				}
-			} else if (!strcmp(object_txt, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
-				/* Unauthenticated Data Blob - Policy OID: 1.3.6.1.4.1.42921.1.2.1 */
-				signature->blob = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTF8STRING, NULL);
-			} else
-				printf("Unsupported Policy OID: %s\n\n", object_txt);
-		}
+		get_unsigned_attributes(signatures, signature, unauth_attr, p7, allownest);
 
 	if (!sk_SIGNATURE_unshift(*signatures, signature)) {
 		if (signature->timestamp) {
 			CMS_ContentInfo_free(signature->timestamp);
 			ERR_clear_error();
+		}
+		if (signature->url) {
+			OPENSSL_free(signature->url);
+		}
+		if (signature->desc) {
+			OPENSSL_free(signature->desc);
 		}
 		PKCS7_free(signature->p7);
 		OPENSSL_free(signature);
@@ -4573,9 +4732,6 @@ static void add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp)
 	ASN1_STRING *astr;
 	int len;
 	const u_char *attrs = NULL;
-	static const u_char java_attrs_low[] = {
-		0x30, 0x06, 0x03, 0x02, 0x00, 0x01, 0x30, 0x00
-	};
 
 	switch (jp) {
 		case 0:
@@ -4600,14 +4756,6 @@ static void add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp)
 static void add_purpose_attribute(PKCS7_SIGNER_INFO *si, int comm)
 {
 	ASN1_STRING *astr;
-	static u_char purpose_ind[] = {
-		0x30, 0x0c,
-		0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x15
-	};
-	static u_char purpose_comm[] = {
-		0x30, 0x0c,
-		0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x16
-	};
 
 	astr = ASN1_STRING_new();
 	if (comm) {
