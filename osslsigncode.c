@@ -208,6 +208,7 @@ typedef unsigned char u_char;
 
 typedef struct SIGNATURE_st {
 	PKCS7 *p7;
+	int md_nid;
 	ASN1_STRING *digest;
 	time_t signtime;
 	char *url;
@@ -2230,6 +2231,8 @@ static int print_attributes(SIGNATURE *signature, int verbose)
 		return 0; /* FAILED */
 
 	printf("\nAuthenticated attributes:\n");
+	printf("\tMessage digest algorithm: %s\n",
+		(signature->md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2sn(signature->md_nid));
 	mdbuf = (unsigned char *)ASN1_STRING_get0_data(signature->digest);
 	len = ASN1_STRING_length(signature->digest);
 	tohex(mdbuf, hexbuf, len);
@@ -2429,6 +2432,7 @@ static int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, in
 
 	signature = OPENSSL_malloc(sizeof(SIGNATURE));
 	signature->p7 = p7;
+	signature->md_nid = OBJ_obj2nid(si->digest_alg->algorithm);
 	signature->digest = NULL;
 	signature->signtime = INVALID_TIME;
 	signature->url = NULL;
