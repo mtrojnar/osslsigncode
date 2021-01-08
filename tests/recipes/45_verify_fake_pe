@@ -1,33 +1,36 @@
 #!/bin/sh
-# Verify changed PE file after signing.
-
+# Verify changed file after signing.
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
+test_nr=45
 
-# PE file
-test_name="451. Verify changed PE file after signing"
-printf "\n%s\n" "$test_name"
-if test -s "test.exe"
-  then
+for file in ${script_path}/../logs/notsigned/*.*
+  do
+    name="${file##*/}"
+    ext="${file##*.}"
+    desc=""
+    case $ext in
+      "cat") continue;; # Test is not supported for non-PE files
+      "msi") continue;; # Test is not supported for non-PE files
+      "ex_") continue;; # Test is not supported for non-PE files
+      "exe") filetype=PE; format_nr=4 ;;
+      "ps1") continue;; # Test is not supported for non-PE files
+    esac
+
+    number="$test_nr$format_nr"
+    test_name="Verify changed $filetype$desc file after signing"
+    printf "\n%03d. %s\n" "$number" "$test_name"
+
     ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "test.exe" -out "test_451.exe"
-    verify_signature "$?" "451" "exe" "fail" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "Hello world!" "MODIFY"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+      -st "1556668800" \
+      -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+      -in "notsigned/$name" -out "test_$number.$ext"
+    result=$?
 
-# CAB file
-# Command is not supported for non-PE files
-
-# MSI file
-# Command is not supported for non-PE files
-
-# CAT file
-# Command is not supported for non-PE files
+    verify_signature "$result" "$number" "$ext" "fail" "@2019-09-01 12:00:00" \
+      "UNUSED_PATTERN" "Hello world!" "MODIFY"
+    test_result "$?" "$number" "$test_name"
+  done
 
 exit 0

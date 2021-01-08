@@ -1,78 +1,58 @@
 #!/bin/sh
-# Sign a PE/CAB/MSI file with the commercial purpose set for SPC_STATEMENT_TYPE_OBJID
+# Sign a file with Microsoft Commercial Code Signing purpose set for SPC_STATEMENT_TYPE_OBJID
 # object ID numbers (OIDs) "1.3.6.1.4.1.311.2.1.11"
-# changes default Individual Code Signing: "0x30, 0x0c, x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x15"
-# sets Commercial Code Signing: "0x30, 0x0c, x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x16"
+# changes default Microsoft Individual Code Signing:
+# "0x30, 0x0c, x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x15"
+# sets Microsoft Commercial Code Signing:
+# "0x30, 0x0c, x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x16"
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
+test_nr=16
 
-# PE file
-test_name="161. Sign a PE file with the common purpose set"
-printf "\n%s\n" "$test_name"
-if test -s "test.exe"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -comm \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "test.exe" -out "test_161.exe"
-    verify_signature "$?" "161" "exe" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "HEX" "300c060a2b060104018237020116" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+for file in ${script_path}/../logs/notsigned/*.*
+  do
+    name="${file##*/}"
+    ext="${file##*.}"
+    desc=""
+    case $ext in
+      "cat") filetype=CAT; format_nr=1 ;;
+      "msi") filetype=MSI; format_nr=2 ;;
+      "ex_") filetype=CAB; format_nr=3 ;;
+      "exe") filetype=PE; format_nr=4 ;;
+      "ps1")
+        filetype=TXT
+        if xxd -p -l 2 "notsigned/$name" | grep -q "fffe"; then
+          format_nr=5
+          desc=" UTF-16LE(BOM)"
+        elif xxd -p -l 3 "notsigned/$name" | grep -q "efbbbf"; then
+          format_nr=6
+          desc=" UTF-8(BOM)"
+        else
+          format_nr=7
+          desc=" UTF-8"
+        fi ;;
+    esac
 
-# CAB file
-test_name="162. Sign a CAB file with the common purpose set"
-printf "\n%s\n" "$test_name"
-if test -s "test.ex_"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -comm \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "test.ex_" -out "test_162.ex_"
-    verify_signature "$?" "162" "ex_" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "HEX" "300c060a2b060104018237020116" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+    number="$test_nr$format_nr"
+    test_name="Sign a $filetype$desc file with the common purpose set"
+    printf "\n%03d. %s\n" "$number" "$test_name"
 
-# MSI file
-test_name="163. Sign a MSI file with the common purpose set"
-printf "\n%s\n" "$test_name"
-if test -s "sample.msi"
-  then
     ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -comm \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "sample.msi" -out "test_163.msi"
-    verify_signature "$?" "163" "msi" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "HEX" "300c060a2b060104018237020116" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+      -st "1556668800" \
+      -comm \
+      -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+      -in "notsigned/$name" -out "test_$number.$ext"
+    result=$?
 
-# CAT file
-test_name="164. Sign a CAT file with the common purpose set"
-printf "\n%s\n" "$test_name"
-if test -s "good.cat"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -comm \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "good.cat" -out "test_164.cat"
-    verify_signature "$?" "164" "cat" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "HEX" "300c060a2b060104018237020116" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+    if test "$filetype" = "TXT" && ! cmp -l -n 3 "notsigned/$name" "test_$number.$ext"; then
+      printf "%s\n" "Compare file prefix failed"
+      test_result "1" "$number" "$test_name"
+    else
+      verify_signature "$result" "$number" "$ext" "success" "@2019-09-01 12:00:00" \
+        "UNUSED_PATTERN" "Microsoft Commercial Code Signing" "UNUSED_PATTERN"
+      test_result "$?" "$number" "$test_name"
+    fi
+  done
 
 exit 0

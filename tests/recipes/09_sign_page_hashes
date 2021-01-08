@@ -1,32 +1,33 @@
 #!/bin/sh
-# Generate page hashes for a PE file
+# Generate page hashes for a file
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
+test_nr=9
 
-# PE file
-test_name="091. Generate page hashes for a PE file"
-printf "\n%s\n" "$test_name"
-if test -s "test.exe"
-  then
+for file in ${script_path}/../logs/notsigned/*.*
+  do
+    name="${file##*/}"
+    ext="${file##*.}"
+    desc=""
+    case $ext in
+      "exe") filetype=PE; format_nr=4 ;;
+      *) continue ;; # Warning: -ph option is only valid for PE files
+    esac
+
+    number="$test_nr$format_nr"
+    test_name="Generate page hashes for a $filetype file"
+    printf "\n%03d. %s\n" "$number" "$test_name"
+
     ../../osslsigncode sign -h sha256 -ph \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "test.exe" -out "test_091.exe"
-    verify_signature "$?" "091" "exe" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+      -st "1556668800" \
+      -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+      -in "notsigned/$name" -out "test_$number.$ext"
+    result=$?
 
-# CAB file
-# Warning: -ph option is only valid for PE files
-
-# MSI file
-# Warning: -ph option is only valid for PE files
-
-# CAT file
-# Warning: -ph option is only valid for PE files
+    verify_signature "$result" "$number" "$ext" "success" "@2019-09-01 12:00:00" \
+      "UNUSED_PATTERN" "osslsigncode" "UNUSED_PATTERN"
+    test_result "$?" "$number" "$test_name"
+  done
 
 exit 0

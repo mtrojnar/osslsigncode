@@ -33,6 +33,7 @@ make_tests() {
 rm -rf "${result_path}"
 mkdir "${result_path}"
 cd "${result_path}"
+mkdir "notsigned" "sha256sum"
 
 date > "results.log"
 ../../osslsigncode -v >> "results.log" 2>/dev/null
@@ -57,7 +58,7 @@ if test "$result" -ne 0
 # PE files support
 if test -n "$(command -v x86_64-w64-mingw32-gcc)"
   then
-    x86_64-w64-mingw32-gcc "../sources/myapp.c" -o "test.exe" 2>> "results.log" 1>&2
+    x86_64-w64-mingw32-gcc "../sources/myapp.c" -o "notsigned/test.exe" 2>> "results.log" 1>&2
   else
     printf "%s\n" "x86_64-w64-mingw32-gcc not found in \$PATH"
     printf "%s\n" "tests for PE files skipped, please install mingw64-gcc package"
@@ -66,7 +67,7 @@ if test -n "$(command -v x86_64-w64-mingw32-gcc)"
 # CAB files support
 if test -n "$(command -v gcab)"
   then
-    gcab -c "test.ex_" "../sources/a" "../sources/b" "../sources/c" 2>> "results.log" 1>&2
+    gcab -c "notsigned/test.ex_" "../sources/a" "../sources/b" "../sources/c" 2>> "results.log" 1>&2
   else
     printf "%s\n" "gcab not found in \$PATH"
     printf "%s\n" "tests for CAB files skipped, please install gcab package"
@@ -80,8 +81,10 @@ if grep -q "no libgsf available" "results.log"
     if test -n "$(command -v wixl)"
       then
         touch FoobarAppl10.exe
-        cp "../sources/sample.wxs" "sample.wxs" 2>> "results.log" 1>&2
-        wixl -v "sample.wxs" 2>> "results.log" 1>&2
+        cp "../sources/sample.wxs" "notsigned/sample.wxs" 2>> "results.log" 1>&2
+        wixl -v "notsigned/sample.wxs" 2>> "results.log" 1>&2
+        rm -f "notsigned/sample.wxs"
+        rm -f "FoobarAppl10.exe"
       else
         printf "%s\n" "wixl not found in \$PATH"
         printf "%s\n" "tests for MSI files skipped, please install msitools package"
@@ -89,7 +92,24 @@ if grep -q "no libgsf available" "results.log"
   fi
 
 # CAT files support
-cp "../sources/good.cat" "good.cat"
+if test -s "../sources/good.cat"
+  then
+    cp "../sources/good.cat" "notsigned/good.cat"
+  fi
+
+# TXT files support
+if test -s "../sources/utf8.ps1"
+  then
+    cp "../sources/utf8.ps1" "notsigned/utf8.ps1"
+  fi
+if test -s "../sources/utf8bom.ps1"
+  then
+    cp "../sources/utf8bom.ps1" "notsigned/utf8bom.ps1"
+  fi
+if test -s "../sources/utf16le.ps1"
+  then
+    cp "../sources/utf16le.ps1" "notsigned/utf16le.ps1"
+  fi
 
 # Timestamping support
 if grep -q "no libcurl available" "results.log"
@@ -104,9 +124,9 @@ if test -n "$(command -v faketime)"
       then
         make_tests
         result=$?
-        rm -f "test.exe" "test.ex_" "sample.msi" "sample.wxs" "FoobarAppl10.exe" "good.cat"
-        rm -f "sign_pe.der" "sign_cab.der" "sign_msi.der"
-        rm -f "sign_pe.pem" "sign_cab.pem" "sign_msi.pem" "verify.log"
+        rm -r -f "notsigned/" "sha256sum/"
+        rm -f sign_[1-9].pem sign_[1-9].der
+        rm -f "verify.log"
       else
         printf "%s\n" "xxd not found in \$PATH"
         printf "%s\n" "tests skipped, please install vim-common package"

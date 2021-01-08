@@ -1,76 +1,54 @@
 #!/bin/sh
-# Sign a PE/CAB/MSI file with the certificate file in the SPC format
-# and the private key file in the Microsoft Private Key (PVK) format.
+# Sign a file with a certificate in the SPC format
+# and a private key in the Microsoft Private Key (PVK) format.
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
+test_nr=4
 
-# PE file
-test_name="041. Sign a PE file a SPC certificate file and a PVK private key file"
-printf "\n%s\n" "$test_name"
-if test -s "test.exe"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -spc "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/key.pvk" \
-        -pass passme \
-        -in "test.exe" -out "test_041.exe"
-    verify_signature "$?" "041" "exe" "success" "@2019-09-01 12:00:00" \
-	"sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+for file in ${script_path}/../logs/notsigned/*.*
+  do
+    name="${file##*/}"
+    ext="${file##*.}"
+    desc=""
+    case $ext in
+      "cat") filetype=CAT; format_nr=1 ;;
+      "msi") filetype=MSI; format_nr=2 ;;
+      "ex_") filetype=CAB; format_nr=3 ;;
+      "exe") filetype=PE; format_nr=4 ;;
+      "ps1")
+        filetype=TXT
+        if xxd -p -l 2 "notsigned/$name" | grep -q "fffe"; then
+          format_nr=5
+          desc=" UTF-16LE(BOM)"
+        elif xxd -p -l 3 "notsigned/$name" | grep -q "efbbbf"; then
+          format_nr=6
+          desc=" UTF-8(BOM)"
+        else
+          format_nr=7
+          desc=" UTF-8"
+        fi ;;
+    esac
 
-# CAB file
-test_name="042. Sign a CAB file a SPC certificate file and a PVK private key file"
-printf "\n%s\n" "$test_name"
-if test -s "test.ex_"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -spc "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/key.pvk" \
-        -pass passme \
-        -in "test.ex_" -out "test_042.ex_"
-    verify_signature "$?" "042" "ex_" "success" "@2019-09-01 12:00:00" \
-	"sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+    number="$test_nr$format_nr"
+    test_name="Sign a $filetype$desc file with a SPC certificate and a PVK private key"
+    printf "\n%03d. %s\n" "$number" "$test_name"
 
-# MSI file
-test_name="043. Sign a MSI file a SPC certificate file and a PVK private key file"
-printf "\n%s\n" "$test_name"
-if test -s "sample.msi"
-  then
     ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -spc "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/key.pvk" \
-        -pass passme \
-        -in "sample.msi" -out "test_043.msi"
-    verify_signature "$?" "043" "msi" "success" "@2019-09-01 12:00:00" \
-	"sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+      -st "1556668800" \
+      -spc "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/key.pvk" \
+      -pass passme \
+      -in "notsigned/$name" -out "test_$number.$ext"
+    result=$?
 
-# CAT file
-test_name="044. Sign a CAT file a SPC certificate file and a PVK private key file"
-printf "\n%s\n" "$test_name"
-if test -s "good.cat"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -spc "${script_path}/../certs/cert.spc" -key "${script_path}/../certs/key.pvk" \
-        -pass passme \
-        -in "good.cat" -out "test_044.cat"
-    verify_signature "$?" "044" "cat" "success" "@2019-09-01 12:00:00" \
-	"sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+    if test "$filetype" = "TXT" && ! cmp -l -n 3 "notsigned/$name" "test_$number.$ext"; then
+      printf "%s\n" "Compare file prefix failed"
+      test_result "1" "$number" "$test_name"
+    else
+      verify_signature "$result" "$number" "$ext" "success" "@2019-09-01 12:00:00" \
+        "sha256sum" "osslsigncode" "UNUSED_PATTERN"
+      test_result "$?" "$number" "$test_name"
+    fi
+  done
 
 exit 0

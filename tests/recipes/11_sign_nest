@@ -1,74 +1,42 @@
 #!/bin/sh
-# Sign a PE/CAB/MSI file twice with the "nest" flag in the second time
+# Sign a file twice with the "nest" flag in the second time
 # in order to add the new signature instead of replacing the first one.
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
+test_nr=11
 
-# PE file
-test_name="111. Sign a PE file with the nest flag"
-printf "\n%s\n" "$test_name"
-if test -s "test.exe"
-  then
+for file in ${script_path}/../logs/notsigned/*.*
+  do
+    name="${file##*/}"
+    ext="${file##*.}"
+    desc=""
+    case $ext in
+      "cat") continue;; # Warning: CAT files do not support nesting
+      "msi") filetype=MSI; format_nr=2 ;;
+      "ex_") filetype=CAB; format_nr=3 ;;
+      "exe") filetype=PE; format_nr=4 ;;
+      "ps1") continue;; # Warning: TXT files do not support nesting
+    esac
+
+    number="$test_nr$format_nr"
+    test_name="Sign a $filetype$desc file with the nest flag"
+    printf "\n%03d. %s\n" "$number" "$test_name"
+
     ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "test.exe" -out "test_111_signed.exe"
+      -st "1556668800" \
+      -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+      -in "notsigned/$name" -out "signed_$number.$ext"
     ../../osslsigncode sign -h sha512 \
-        -nest \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "test_111_signed.exe" -out "test_111.exe"
-    verify_signature "$?" "111" "exe" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "SHA512" "UNUSED_PATTERN"
-    test_result "$?" "$test_name" 
-  else
-    printf "Test skipped\n"
-  fi
+      -nest \
+      -st "1556668800" \
+      -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+      -in "signed_$number.$ext" -out "test_$number.$ext"
+    result=$?
 
-# CAB file
-test_name="112. Sign a CAB file with the nest flag"
-printf "\n%s\n" "$test_name"
-if test -s "test.ex_"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "test.ex_" -out "test_112_signed.ex_"
-    ../../osslsigncode sign -h sha512 \
-        -nest \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "test_112_signed.ex_" -out "test_112.ex_"
-    verify_signature "$?" "112" "ex_" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "SHA512" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
-
-# MSI file
-test_name="113. Sign a MSI file with the nest flag"
-printf "\n%s\n" "$test_name"
-if test -s "sample.msi"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "sample.msi" -out "test_113_signed.msi"
-    ../../osslsigncode sign -h sha512 \
-        -nest \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "test_113_signed.msi" -out "test_113.msi"
-    verify_signature "$?" "113" "msi" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "SHA512" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
-
-# CAT file
-# Warning: CAT files do not support nesting
+    verify_signature "$result" "$number" "$ext" "success" "@2019-09-01 12:00:00" \
+      "UNUSED_PATTERN" "osslsigncode" "UNUSED_PATTERN"
+    test_result "$?" "$number" "$test_name"
+  done
 
 exit 0

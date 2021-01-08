@@ -1,67 +1,51 @@
 #!/bin/sh
-# Compare the leaf certificate hash against specified SHA256 message digest for the PE/CAB/MSI file
+# Compare the leaf certificate hash against specified SHA256 message digest for the file
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
+test_nr=40
 
-# PE file
-test_name="401. Compare the leaf certificate hash against specified SHA256 message digest for the PE file"
-printf "\n%s\n" "$test_name"
-if test -s "test.exe"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.der" \
-        -in "test.exe" -out "test_401.exe"
-    verify_leaf_hash "$?" "401" "exe" "@2019-05-01 00:00:00"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+for file in ${script_path}/../logs/notsigned/*.*
+  do
+    name="${file##*/}"
+    ext="${file##*.}"
+    desc=""
+    case $ext in
+      "cat") filetype=CAT; format_nr=1 ;;
+      "msi") filetype=MSI; format_nr=2 ;;
+      "ex_") filetype=CAB; format_nr=3 ;;
+      "exe") filetype=PE; format_nr=4 ;;
+      "ps1")
+        filetype=TXT
+        if xxd -p -l 2 "notsigned/$name" | grep -q "fffe"; then
+          format_nr=5
+          desc=" UTF-16LE(BOM)"
+        elif xxd -p -l 3 "notsigned/$name" | grep -q "efbbbf"; then
+          format_nr=6
+          desc=" UTF-8(BOM)"
+        else
+          format_nr=7
+          desc=" UTF-8"
+        fi ;;
+    esac
 
-# CAB file
-test_name="402. Compare the leaf certificate hash against specified SHA256 message digest for the CAB file"
-printf "\n%s\n" "$test_name"
-if test -s "test.ex_"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.der" \
-        -in "test.ex_" -out "test_402.ex_"
-    verify_leaf_hash "$?" "402" "ex_" "@2019-05-01 00:00:00"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+    number="$test_nr$format_nr"
+    test_name="Compare the leaf hash against SHA256 message digest for the $filetype$desc file"
+    printf "\n%03d. %s\n" "$number" "$test_name"
 
-# MSI file
-test_name="403. Compare the leaf certificate hash against specified SHA256 message digest for the MSI file"
-printf "\n%s\n" "$test_name"
-if test -s "sample.msi"
-  then
     ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.der" \
-        -in "sample.msi" -out "test_403.msi"
-    verify_leaf_hash "$?" "403" "msi" "@2019-05-01 00:00:00"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+      -st "1556668800" \
+      -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.der" \
+      -in "notsigned/$name" -out "test_$number.$ext"
+    result=$?
 
-# CAT file
-test_name="404. Compare the leaf certificate hash against specified SHA256 message digest for the CAT file"
-printf "\n%s\n" "$test_name"
-if test -s "good.cat"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.der" \
-        -in "good.cat" -out "test_404.cat"
-    verify_leaf_hash "$?" "404" "cat" "@2019-05-01 00:00:00"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+    if test "$filetype" = "TXT" && ! cmp -l -n 3 "notsigned/$name" "test_$number.$ext"; then
+      printf "%s\n" "Compare file prefix failed"
+      test_result "1" "$number" "$test_name"
+    else
+      verify_leaf_hash "$result" "$number" "$ext" "@2019-05-01 00:00:00"
+      test_result "$?" "$number" "$test_name"
+    fi
+  done
 
 exit 0

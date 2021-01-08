@@ -1,74 +1,53 @@
 #!/bin/sh
-# Sign a PE/CAB/MSI file with the certificate and key stored in a PKCS#12 container.
+# Sign a file with a certificate and a key stored in a PKCS#12 container.
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
+test_nr=5
 
-# PE file
-test_name="051. Sign a PE file with a certificate and key stored in a PKCS#12 container"
-printf "\n%s\n" "$test_name"
-if test -s "test.exe"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -pkcs12 "${script_path}/../certs/cert.p12" -pass passme \
-        -in "test.exe" -out "test_051.exe"
-    verify_signature "$?" "051" "exe" "success" "@2019-09-01 12:00:00" \
-	"sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+for file in ${script_path}/../logs/notsigned/*.*
+  do
+    name="${file##*/}"
+    ext="${file##*.}"
+    desc=""
+    case $ext in
+      "cat") filetype=CAT; format_nr=1 ;;
+      "msi") filetype=MSI; format_nr=2 ;;
+      "ex_") filetype=CAB; format_nr=3 ;;
+      "exe") filetype=PE; format_nr=4 ;;
+      "ps1")
+        filetype=TXT
+        if xxd -p -l 2 "notsigned/$name" | grep -q "fffe"; then
+          format_nr=5
+          desc=" UTF-16LE(BOM)"
+        elif xxd -p -l 3 "notsigned/$name" | grep -q "efbbbf"; then
+          format_nr=6
+          desc=" UTF-8(BOM)"
+        else
+          format_nr=7
+          desc=" UTF-8"
+        fi ;;
+    esac
 
-# CAB file
-test_name="052. Sign a CAB file with a certificate and key stored in a PKCS#12 container"
-printf "\n%s\n" "$test_name"
-if test -s "test.ex_"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -pkcs12 "${script_path}/../certs/cert.p12" \
-        -pass passme \
-        -in "test.ex_" -out "test_052.ex_"
-    verify_signature "$?" "052" "ex_" "success" "@2019-09-01 12:00:00" \
-	"sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+    number="$test_nr$format_nr"
+    test_name="Sign a $filetype$desc file with a certificate and a key stored in a PKCS#12 container"
+    printf "\n%03d. %s\n" "$number" "$test_name"
 
-# MSI file
-test_name="053. Sign a MSI file with a certificate and key stored in a PKCS#12 container"
-printf "\n%s\n" "$test_name"
-if test -s "sample.msi"
-  then
     ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -pkcs12 "${script_path}/../certs/cert.p12" \
-        -pass passme \
-        -in "sample.msi" -out "test_053.msi"
-    verify_signature "$?" "053" "msi" "success" "@2019-09-01 12:00:00" \
-	"sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+      -st "1556668800" \
+      -pkcs12 "${script_path}/../certs/cert.p12" \
+      -pass passme \
+      -in "notsigned/$name" -out "test_$number.$ext"
+    result=$?
 
-# CAT file
-test_name="054. Sign a CAT file with a certificate and key stored in a PKCS#12 container"
-printf "\n%s\n" "$test_name"
-if test -s "good.cat"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -pkcs12 "${script_path}/../certs/cert.p12" \
-        -pass passme \
-        -in "good.cat" -out "test_054.cat"
-    verify_signature "$?" "054" "cat" "success" "@2019-09-01 12:00:00" \
-	"sha256sum" "ASCII" "osslsigncode" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+    if test "$filetype" = "TXT" && ! cmp -l -n 3 "notsigned/$name" "test_$number.$ext"; then
+      printf "%s\n" "Compare file prefix failed"
+      test_result "1" "$number" "$test_name"
+    else
+      verify_signature "$result" "$number" "$ext" "success" "@2019-09-01 12:00:00" \
+        "sha256sum" "osslsigncode" "UNUSED_PATTERN"
+      test_result "$?" "$number" "$test_name"
+    fi
+  done
 
 exit 0
