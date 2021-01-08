@@ -1,75 +1,54 @@
 #!/bin/sh
-# Sign a PE/CAB/MSI file with a PEM key file and a password read from password.txt file.
+# Sign a file with a PEM key and a password read from password.txt file.
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
+test_nr=12
 
-# PE file
-test_name="121. Sign a PE file with the PEM key file and the file with a password"
-printf "\n%s\n" "$test_name"
-if test -s "test.exe"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -readpass "${script_path}/../certs/password.txt" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "test.exe" -out "test_121.exe"
-    verify_signature "$?" "121" "exe" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+for file in ${script_path}/../logs/notsigned/*.*
+  do
+    name="${file##*/}"
+    ext="${file##*.}"
+    desc=""
+    case $ext in
+      "cat") filetype=CAT; format_nr=1 ;;
+      "msi") filetype=MSI; format_nr=2 ;;
+      "ex_") filetype=CAB; format_nr=3 ;;
+      "exe") filetype=PE; format_nr=4 ;;
+      "ps1")
+        filetype=TXT
+        if xxd -p -l 2 "notsigned/$name" | grep -q "fffe"; then
+          format_nr=5
+          desc=" UTF-16LE(BOM)"
+        elif xxd -p -l 3 "notsigned/$name" | grep -q "efbbbf"; then
+          format_nr=6
+          desc=" UTF-8(BOM)"
+        else
+          format_nr=7
+          desc=" UTF-8"
+        fi ;;
+    esac
 
-# CAB file
-test_name="122. Sign a CAB file with a PEM key file and the file with a password"
-printf "\n%s\n" "$test_name"
-if test -s "test.ex_"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -readpass "${script_path}/../certs/password.txt" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/keyp.pem" \
-        -in "test.ex_" -out "test_122.ex_"
-    verify_signature "$?" "122" "ex_" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+    number="$test_nr$format_nr"
+    test_name="Sign a $filetype$desc file with a PEM key and a password read from password.txt file"
+    printf "\n%03d. %s\n" "$number" "$test_name"
 
-# MSI file
-test_name="123. Sign a MSI file with a PEM key file and the file with a password"
-printf "\n%s\n" "$test_name"
-if test -s "sample.msi"
-  then
     ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -readpass "${script_path}/../certs/password.txt" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/keyp.pem" \
-        -in "sample.msi" -out "test_123.msi"
-    verify_signature "$?" "123" "msi" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+      -st "1556668800" \
+      -addUnauthenticatedBlob \
+      -readpass "${script_path}/../certs/password.txt" \
+      -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/keyp.pem" \
+      -in "notsigned/$name" -out "test_$number.$ext"
+    result=$?
 
-# CAT file
-test_name="124. Sign a CAT file with a PEM key file and the file with a password"
-printf "\n%s\n" "$test_name"
-if test -s "good.cat"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -readpass "${script_path}/../certs/password.txt" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/keyp.pem" \
-        -in "good.cat" -out "test_124.cat"
-    verify_signature "$?" "124" "cat" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "osslsigncode" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+    if test "$filetype" = "TXT" && ! cmp -l -n 3 "notsigned/$name" "test_$number.$ext"; then
+      printf "%s\n" "Compare file prefix failed"
+      test_result "1" "$number" "$test_name"
+    else
+      verify_signature "$result" "$number" "$ext" "success" "@2019-09-01 12:00:00" \
+        "UNUSED_PATTERN" "osslsigncode" "UNUSED_PATTERN"
+      test_result "$?" "$number" "$test_name"
+    fi
+  done
 
 exit 0

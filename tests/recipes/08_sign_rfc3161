@@ -1,5 +1,5 @@
 #!/bin/sh
-# Sign a PE/CAB/MSI file with RFC 3161 timestamping
+# Sign a file with RFC 3161 timestamping
 # An RFC3161 timestamp server provides an essential function in protecting
 # data records for the long-term. It provides proof that the data existed
 # at a particular moment in time and that it has not changed, even by
@@ -7,81 +7,59 @@
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
+test_nr=8
 
-# PE file
-test_name="081. Sign a PE file with RFC 3161 timestamping"
-printf "\n%s\n" "$test_name"
-if test -s "test.exe" && ! grep -q "no libcurl available" "results.log"
-  then
-    ../../osslsigncode sign -h sha256 \
+if ! grep -q "no libcurl available" "results.log"; then
+  for file in ${script_path}/../logs/notsigned/*.*
+    do
+      name="${file##*/}"
+      ext="${file##*.}"
+      desc=""
+      case $ext in
+        "cat") filetype=CAT; format_nr=1 ;;
+        "msi") filetype=MSI; format_nr=2 ;;
+        "ex_") filetype=CAB; format_nr=3 ;;
+        "exe") filetype=PE; format_nr=4 ;;
+        "ps1")
+          filetype=TXT
+          if xxd -p -l 2 "notsigned/$name" | grep -q "fffe"; then
+            format_nr=5
+            desc=" UTF-16LE(BOM)"
+          elif xxd -p -l 3 "notsigned/$name" | grep -q "efbbbf"; then
+            format_nr=6
+            desc=" UTF-8(BOM)"
+        else
+            format_nr=7
+            desc=" UTF-8"
+          fi ;;
+      esac
+
+      number="$test_nr$format_nr"
+      test_name="Sign a $filetype$desc file with RFC 3161 timestamping"
+      printf "\n%03d. %s\n" "$number" "$test_name"
+
+      ../../osslsigncode sign -h sha256 \
         -st "1556668800" \
         -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
         -ts http://time.certum.pl/ \
         -ts http://timestamp.digicert.com/ \
-        -verbose \
-        -in "test.exe" -out "test_081.exe"
-    verify_signature "$?" "081" "exe" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "Timestamp Server Signature" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+        -in "notsigned/$name" -out "test_$number.$ext"
+      result=$?
 
-# CAB file
-test_name="082. Sign a CAB file with RFC 3161 timestamping"
-printf "\n%s\n" "$test_name"
-if test -s "test.ex_" && ! grep -q "no libcurl available" "results.log"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -ts http://time.certum.pl/ \
-        -ts http://timestamp.digicert.com/ \
-        -verbose \
-        -in "test.ex_" -out "test_082.ex_"
-    verify_signature "$?" "082" "ex_" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "Timestamp Server Signature" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
+      if test "$filetype" = "TXT" && ! cmp -l -n 3 "notsigned/$name" "test_$number.$ext"; then
+        printf "%s\n" "Compare file prefix failed"
+        test_result "1" "$number" "$test_name"
+      else
+        verify_signature "$result" "$number" "$ext" "success" "@2019-09-01 12:00:00" \
+          "UNUSED_PATTERN" "osslsigncode" "UNUSED_PATTERN"
+        test_result "$?" "$number" "$test_name"
+      fi
+    done
   else
-    printf "Test skipped\n"
-  fi
-
-# MSI file
-test_name="083. Sign a MSI file with RFC 3161 timestamping"
-printf "\n%s\n" "$test_name"
-if test -s "sample.msi" && ! grep -q "no libcurl available" "results.log"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -ts http://time.certum.pl/ \
-        -ts http://timestamp.digicert.com/ \
-        -verbose \
-        -in "sample.msi" -out "test_083.msi"
-    verify_signature "$?" "083" "msi" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "Timestamp Server Signature" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
-
-# CAT file
-test_name="084. Sign a CAT file with RFC 3161 timestamping"
-printf "\n%s\n" "$test_name"
-if test -s "good.cat" && ! grep -q "no libcurl available" "results.log"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -ts http://time.certum.pl/ \
-        -ts http://timestamp.digicert.com/ \
-        -verbose \
-        -in "good.cat" -out "test_084.cat"
-    verify_signature "$?" "084" "cat" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "Timestamp Server Signature" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
+    format_nr=0
+    number="$test_nr$format_nr"
+    test_name="Sign a file with RFC 3161 timestamping"
+    printf "\n%03d. %s\nTest skipped\n" "$number" "$test_name"
   fi
 
 exit 0

@@ -1,86 +1,62 @@
 #!/bin/sh
-# Verify PE/CAB/MSI file signature with RFC3161 timestamping after the cert has been expired.
+# Verify a file signed with RFC3161 timestamping after the cert has been expired.
 
 . $(dirname $0)/../test_library
+script_path=$(pwd)
+test_nr=53
 
-# PE file
-test_name="531. Verify PE file signature with RFC3161 after the cert has been expired"
-printf "\n%s\n" "$test_name"
-if test -s "test.exe" && ! grep -q "no libcurl available" "results.log"
-  then
-    TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-            -ts http://time.certum.pl/ \
-            -ts http://timestamp.digicert.com/ \
-            -verbose \
-            -in "test.exe" -out "test_531.exe" 2>> "results.log" 1>&2'
-    verify_signature "$?" "531" "exe" "success" "@2025-01-01 12:00:00" \
-	"UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+if ! grep -q "no libcurl available" "results.log"; then
+  for file in ${script_path}/../logs/notsigned/*.*
+    do
+      name="${file##*/}"
+      ext="${file##*.}"
+      desc=""
+      case $ext in
+        "cat") filetype=CAT; format_nr=1 ;;
+        "msi") filetype=MSI; format_nr=2 ;;
+        "ex_") filetype=CAB; format_nr=3 ;;
+        "exe") filetype=PE; format_nr=4 ;;
+        "ps1")
+          filetype=TXT
+          if xxd -p -l 2 "notsigned/$name" | grep -q "fffe"; then
+            format_nr=5
+            desc=" UTF-16LE(BOM)"
+          elif xxd -p -l 3 "notsigned/$name" | grep -q "efbbbf"; then
+            format_nr=6
+            desc=" UTF-8(BOM)"
+          else
+            format_nr=7
+            desc=" UTF-8"
+          fi ;;
+      esac
 
-# CAB file
-test_name="532. Verify CAB file signature with RFC3161 after the cert has been expired"
-printf "\n%s\n" "$test_name"
-if test -s "test.ex_" && ! grep -q "no libcurl available" "results.log"
-  then
-    TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-            -ts http://time.certum.pl/ \
-            -ts http://timestamp.digicert.com/ \
-            -verbose \
-            -in "test.ex_" -out "test_532.ex_" 2>> "results.log" 1>&2'
-    verify_signature "$?" "532" "ex_" "success" "@2025-01-01 12:00:00" \
-	"UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+      number="$test_nr$format_nr"
+      test_name="Verify a $filetype$desc file signed with RFC3161 after the cert has been expired"
+      printf "\n%03d. %s\n" "$number" "$test_name"
 
-# MSI file
-test_name="533. Verify MSI file signature with RFC3161 after the cert has been expired"
-printf "\n%s\n" "$test_name"
-if test -s "sample.msi" && ! grep -q "no libcurl available" "results.log"
-  then
-    TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-            -ts http://time.certum.pl/ \
-            -ts http://timestamp.digicert.com/ \
-            -verbose \
-            -in "sample.msi" -out "test_533.msi"'
-    verify_signature "$?" "533" "msi" "success" "@2025-01-01 12:00:00" \
-	"UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+      ../../osslsigncode sign -h sha256 \
+        -st "1556668800" \
+        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+        -ts http://time.certum.pl/ \
+        -ts http://timestamp.digicert.com/ \
+        -verbose \
+        -in "notsigned/$name" -out "test_$number.$ext"
+      result=$?
 
-# CAT file
-test_name="534. Verify CAT file signature with RFC3161 after the cert has been expired"
-printf "\n%s\n" "$test_name"
-if test -s "good.cat" && ! grep -q "no libcurl available" "results.log"
-  then
-    TZ=GMT faketime -f '@2019-05-01 00:00:00' /bin/bash -c '
-        script_path=$(pwd)
-        ../../osslsigncode sign -h sha256 \
-            -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-            -ts http://time.certum.pl/ \
-            -ts http://timestamp.digicert.com/ \
-            -verbose \
-            -in "good.cat" -out "test_534.cat"'
-    verify_signature "$?" "534" "cat" "success" "@2025-01-01 12:00:00" \
-	"UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
+      if test "$filetype" = "TXT" && ! cmp -l -n 3 "notsigned/$name" "test_$number.$ext"; then
+        printf "%s\n" "Compare file prefix failed"
+        test_result "1" "$number" "$test_name"
+      else
+        verify_signature "$result" "$number" "$ext" "success" "@2025-01-01 12:00:00" \
+          "UNUSED_PATTERN" "UNUSED_PATTERN" "UNUSED_PATTERN"
+        test_result "$?" "$number" "$test_name"
+      fi
+    done
   else
-    printf "Test skipped\n"
+    format_nr=0
+    number="$test_nr$format_nr"
+    test_name="Verify a file signed with RFC3161 after the cert has been expired"
+    printf "\n%03d. %s\nTest skipped\n" "$number" "$test_name"
   fi
 
 exit 0

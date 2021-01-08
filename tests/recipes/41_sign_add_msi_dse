@@ -7,32 +7,35 @@
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
+test_nr=41
 
-# PE file
-# Warning: -add-msi-dse option is only valid for MSI files
+for file in ${script_path}/../logs/notsigned/*.*
+  do
+    name="${file##*/}"
+    ext="${file##*.}"
+    desc=""
+    case $ext in
+      "cat") continue;; # Warning: -add-msi-dse option is only valid for MSI files
+      "msi") filetype=MSI; format_nr=2 ;;
+      "ex_") continue;; # Warning: -add-msi-dse option is only valid for MSI files
+      "exe") continue;; # Warning: -add-msi-dse option is only valid for MSI files
+      "ps1") continue;; # Warning: -add-msi-dse option is only valid for MSI files
+    esac
 
-# CAB file
-# Warning: -add-msi-dse option is only valid for MSI files
+    number="$test_nr$format_nr"
+    test_name="Sign a $filetype$desc file with the add-msi-dse option"
+    printf "\n%03d. %s\n" "$number" "$test_name"
 
-# MSI file
-test_name="411. Sign a MSI file with the add-msi-dse option"
-printf "\n%s\n" "$test_name"
-if test -s "sample.msi"
-  then
     ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -add-msi-dse \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/keyp.pem" \
-        -pass passme \
-        -in "sample.msi" -out "test_411.msi"
-    verify_signature "$?" "411" "msi" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "HEX" "MsiDigitalSignatureEx" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+      -st "1556668800" \
+      -add-msi-dse \
+      -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+      -in "notsigned/$name" -out "test_$number.$ext"
+    result=$?
 
-# CAT file
-# Warning: -add-msi-dse option is only valid for MSI files
+    verify_signature "$result" "$number" "$ext" "success" "@2019-09-01 12:00:00" \
+      "UNUSED_PATTERN" "MsiDigitalSignatureEx" "UNUSED_PATTERN"
+    test_result "$?" "$number" "$test_name"
+  done
 
 exit 0

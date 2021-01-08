@@ -1,29 +1,52 @@
 #!/bin/sh
-# Sign a PE file with SHA1 set of cryptographic hash functions.
+# Sign a file with SHA1 set of cryptographic hash functions.
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
+test_nr=22
 
-# PE file
-test_name="221. Sign a PE file with SHA1 set of cryptographic hash functions"
-printf "\n%s\n" "$test_name"
-if test -s "test.exe"
-  then
+for file in ${script_path}/../logs/notsigned/*.*
+  do
+    name="${file##*/}"
+    ext="${file##*.}"
+    desc=""
+    case $ext in
+      "cat") filetype=CAT; format_nr=1 ;;
+      "msi") filetype=MSI; format_nr=2 ;;
+      "ex_") filetype=CAB; format_nr=3 ;;
+      "exe") filetype=PE; format_nr=4 ;;
+      "ps1")
+        filetype=TXT
+        if xxd -p -l 2 "notsigned/$name" | grep -q "fffe"; then
+          format_nr=5
+          desc=" UTF-16LE(BOM)"
+        elif xxd -p -l 3 "notsigned/$name" | grep -q "efbbbf"; then
+          format_nr=6
+          desc=" UTF-8(BOM)"
+        else
+          format_nr=7
+          desc=" UTF-8"
+        fi ;;
+    esac
+
+    number="$test_nr$format_nr"
+    test_name="Sign a $filetype$desc file with SHA1 set of cryptographic hash functions"
+    printf "\n%03d. %s\n" "$number" "$test_name"
+
     ../../osslsigncode sign -h sha1 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -in "test.exe" -out "test_221.exe"
-    verify_signature "$?" "221" "exe" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "SHA1" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+      -st "1556668800" \
+      -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+      -in "notsigned/$name" -out "test_$number.$ext"
+    result=$?
 
-# CAB file
-
-# MSI file
-
-# CAT file
+    if test "$filetype" = "TXT" && ! cmp -l -n 3 "notsigned/$name" "test_$number.$ext"; then
+      printf "%s\n" "Compare file prefix failed"
+      test_result "1" "$number" "$test_name"
+    else
+      verify_signature "$result" "$number" "$ext" "success" "@2019-09-01 12:00:00" \
+        "UNUSED_PATTERN" "SHA1" "UNUSED_PATTERN"
+      test_result "$?" "$number" "$test_name"
+    fi
+  done
 
 exit 0

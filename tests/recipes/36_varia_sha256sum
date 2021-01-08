@@ -1,55 +1,34 @@
 #!/bin/sh
-# Checking SHA256 message digests for 31x-33x tests.
+# Checking SHA256 message digests for "extract" and "attach" tests.
 
 . $(dirname $0)/../test_library
-res=0
-res=0
-skip=0
-test_name="361. Checking SHA256 message digests for 31x-33x tests"
-printf "\n%s\n" "$test_name"
-if test -s "test.exe"
-  then
-    if test $(cat "sha256sum_exe.log" | cut -d' ' -f1 | uniq | wc -l) -ne 1
+script_path=$(pwd)
+result=0
+test_nr=36
+
+for file in ${script_path}/../logs/sha256sum/*.*
+  do
+    name="${file##*/}"
+    case $name in
+      "cat.log") filetype=CAT; format_nr=1 ;;
+      "msi.log") filetype=MSI; format_nr=2 ;;
+      "ex_.log") filetype=CAB; format_nr=3 ;;
+      "exe.log") filetype=PE; format_nr=4 ;;
+      "ps1.log") filetype=TXT; format_nr=5 ;;
+    esac
+
+    number="$test_nr$format_nr"
+    test_name="Checking SHA256 message digests for a $filetype file test"
+    printf "\n%03d. %s\n" "$number" "$test_name"
+
+    if test $(cat "sha256sum/$name" | cut -d' ' -f1 | uniq | wc -l) -ne 1
       then
-        res=1
-        cat "sha256sum_exe.log" >> "results.log"
+        result=1
+        cat "sha256sum/$name" >> "results.log"
         printf "Non-unique SHA256 message digests found\n" >> "results.log"
       fi
-    rm -f "sha256sum_exe.log"
-  else
-    skip=$(($skip+1))
-  fi
+    rm -f "sha256sum/$name"
+    test_result "$result" "$number" "$test_name"
+  done
 
-if test -s "test.ex_"
-  then
-    if test $(cat "sha256sum_ex_.log" | cut -d' ' -f1 | uniq | wc -l) -ne 1
-      then
-        res=1
-        cat "sha256sum_ex_.log" >> "results.log"
-        printf "Non-unique SHA256 message digests found\n" >> "results.log"
-      fi
-    rm -f "sha256sum_ex_.log"
-  else
-    skip=$(($skip+1))
-  fi
-
-if test -s "sample.msi"
-  then
-    if test $(cat "sha256sum_msi.log" | cut -d' ' -f1 | uniq | wc -l) -ne 1
-      then
-        res=1
-        cat "sha256sum_msi.log" >> "results.log"
-        printf "Non-unique SHA256 message digests found\n" >> "results.log"
-      fi
-    rm -f "sha256sum_msi.log"
-  else
-    skip=$(($skip+1))
-  fi
-
-if test $skip -lt 2
-  then
-    test_result "$res" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
 exit 0

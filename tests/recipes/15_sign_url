@@ -1,76 +1,54 @@
 #!/bin/sh
-# Sign a PE/CAB/MSI file with specified URL for expanded description of the signed content
+# Sign a file with specified URL for expanded description of the signed content
 # https://docs.microsoft.com/en-us/windows-hardware/drivers/install/authenticode-signing-of-csps
 
 . $(dirname $0)/../test_library
 script_path=$(pwd)
+test_nr=15
 
-# PE file
-test_name="151. Sign a PE file with specified URL"
-printf "\n%s\n" "$test_name"
-if test -s "test.exe"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -i "https://www.osslsigncode.com/" \
-        -in "test.exe" -out "test_151.exe"
-    verify_signature "$?" "151" "exe" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "https://www.osslsigncode.com/" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+for file in ${script_path}/../logs/notsigned/*.*
+  do
+    name="${file##*/}"
+    ext="${file##*.}"
+    desc=""
+    case $ext in
+      "cat") filetype=CAT; format_nr=1 ;;
+      "msi") filetype=MSI; format_nr=2 ;;
+      "ex_") filetype=CAB; format_nr=3 ;;
+      "exe") filetype=PE; format_nr=4 ;;
+      "ps1")
+        filetype=TXT
+        if xxd -p -l 2 "notsigned/$name" | grep -q "fffe"; then
+          format_nr=5
+          desc=" UTF-16LE(BOM)"
+        elif xxd -p -l 3 "notsigned/$name" | grep -q "efbbbf"; then
+          format_nr=6
+          desc=" UTF-8(BOM)"
+        else
+          format_nr=7
+          desc=" UTF-8"
+        fi ;;
+    esac
 
-# CAB file
-test_name="152. Sign a CAB file with specified URL"
-printf "\n%s\n" "$test_name"
-if test -s "test.ex_"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -i "https://www.osslsigncode.com/" \
-        -in "test.ex_" -out "test_152.ex_"
-    verify_signature "$?" "152" "ex_" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "https://www.osslsigncode.com/" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+    number="$test_nr$format_nr"
+    test_name="Sign a $filetype$desc file with specified URL"
+    printf "\n%03d. %s\n" "$number" "$test_name"
 
-# MSI file
-test_name="153. Sign a MSI file with specified URL"
-printf "\n%s\n" "$test_name"
-if test -s "sample.msi"
-  then
     ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -i "https://www.osslsigncode.com/" \
-        -in "sample.msi" -out "test_153.msi"
-    verify_signature "$?" "153" "msi" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "https://www.osslsigncode.com/" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+      -st "1556668800" \
+      -i "https://www.osslsigncode.com/" \
+      -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
+      -in "notsigned/$name" -out "test_$number.$ext"
+    result=$?
 
-# CAT file
-test_name="154. Sign a CAT file with specified URL"
-printf "\n%s\n" "$test_name"
-if test -s "good.cat"
-  then
-    ../../osslsigncode sign -h sha256 \
-        -st "1556668800" \
-        -certs "${script_path}/../certs/cert.pem" -key "${script_path}/../certs/key.pem" \
-        -i "https://www.osslsigncode.com/" \
-        -in "good.cat" -out "test_154.cat"
-    verify_signature "$?" "154" "cat" "success" "@2019-09-01 12:00:00" \
-	"UNUSED_PATTERN" "ASCII" "https://www.osslsigncode.com/" "UNUSED_PATTERN"
-    test_result "$?" "$test_name"
-  else
-    printf "Test skipped\n"
-  fi
+    if test "$filetype" = "TXT" && ! cmp -l -n 3 "notsigned/$name" "test_$number.$ext"; then
+      printf "%s\n" "Compare file prefix failed"
+      test_result "1" "$number" "$test_name"
+    else
+      verify_signature "$result" "$number" "$ext" "success" "@2019-09-01 12:00:00" \
+        "UNUSED_PATTERN" "https://www.osslsigncode.com/" "UNUSED_PATTERN"
+      test_result "$?" "$number" "$test_name"
+    fi
+  done
 
 exit 0
