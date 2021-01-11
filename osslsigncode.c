@@ -144,8 +144,6 @@ typedef unsigned char u_char;
 #define TRUE 1
 #endif
 
-#define GSF_CAN_READ_MSI_METADATA
-
 #if defined (HAVE_TERMIOS_H) || defined (HAVE_GETPASS)
 #define PROVIDE_ASKPASS 1
 #endif
@@ -3125,13 +3123,19 @@ out:
 }
 
 /*
+ * Until libgsf can read more MSI metadata,
+ * we can't verify MsiDigitalSignatureEx
+ * #define GSF_CAN_READ_MSI_METADATA
+ */
+
+/*
  * msi_verify_pkcs7 is a helper function for msi_verify_file.
  * It exists to make it easier to implement verification of nested signatures.
  */
 static int msi_verify_pkcs7(SIGNATURE *signature, GsfInfile *infile, unsigned char *exdata,
 		size_t exlen, GLOBAL_OPTIONS *options)
 {
-	int ret = 1, mdtype = -1, mdok, exok;
+	int ret = 1, mdtype = -1, mdok;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
 #ifdef GSF_CAN_READ_MSI_METADATA
@@ -3139,7 +3143,7 @@ static int msi_verify_pkcs7(SIGNATURE *signature, GsfInfile *infile, unsigned ch
 #endif
 	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	const EVP_MD *md;
-	BIO *hash, *prehash;
+	BIO *hash;
 
 	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
 		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
@@ -3176,7 +3180,7 @@ static int msi_verify_pkcs7(SIGNATURE *signature, GsfInfile *infile, unsigned ch
 		 * file content hashes ourselves.
 		 */
 #ifdef GSF_CAN_READ_MSI_METADATA
-		prehash = BIO_new(BIO_f_md());
+		BIO *prehash = BIO_new(BIO_f_md());
 		BIO_set_md(prehash, md);
 		BIO_push(prehash, BIO_new(BIO_s_null()));
 
@@ -3211,8 +3215,9 @@ static int msi_verify_pkcs7(SIGNATURE *signature, GsfInfile *infile, unsigned ch
 	} else
 		printf("\n");
 
-#ifdef GSF_CAN_READ_MSI_METADATA
 	if (exdata) {
+#ifdef GSF_CAN_READ_MSI_METADATA
+		int exok;
 		tohex(cexmdbuf, hexbuf, EVP_MD_size(md));
 		exok = !memcmp(exdata, cexmdbuf, MIN((size_t)EVP_MD_size(md), exlen));
 		printf("Calculated MsiDigitalSignatureEx : %s", hexbuf);
@@ -3223,9 +3228,13 @@ static int msi_verify_pkcs7(SIGNATURE *signature, GsfInfile *infile, unsigned ch
 			goto out;
 		} else
 			printf("\n");
-	}
+#else
+		tohex(exdata, hexbuf, MIN((size_t)EVP_MD_size(md), exlen));
+		printf("\nWarning: MsiDigitalSignatureEx found but not verified\n");
+		printf("Current MsiDigitalSignatureEx    : %s\n\n", hexbuf);
 #endif
-
+	}
+	
 	ret = verify_signature(signature, options);
 out:
 	if (!ret)
