@@ -2312,10 +2312,20 @@ static void get_signed_attributes(SIGNATURE *signature, STACK_OF(X509_ATTRIBUTE)
 				continue;
 			data = ASN1_STRING_get0_data(value);
 			opus = d2i_SpcSpOpusInfo(NULL, &data, value->length);
-			if (opus->moreInfo)
+			if (opus->moreInfo && opus->moreInfo->type == 0)
 				signature->url = OPENSSL_strdup((char *)opus->moreInfo->value.url->data);
-			if (opus->programName)
-				signature->desc = OPENSSL_strdup((char *)opus->programName->value.ascii->data);
+			if (opus->programName) {
+				if (opus->programName->type == 0) {
+					unsigned char *data;
+					int len = ASN1_STRING_to_UTF8(&data, opus->programName->value.unicode);
+					if (len >= 0) {
+						signature->desc = OPENSSL_strndup((char *)data, len);
+						OPENSSL_free(data);
+					}
+				} else {
+					signature->desc = OPENSSL_strdup((char *)opus->programName->value.ascii->data);
+				}
+			}
 			SpcSpOpusInfo_free(opus);
 		} else if (!strcmp(object_txt, SPC_STATEMENT_TYPE_OBJID)) {
 			/* Microsoft OID: 1.3.6.1.4.1.311.2.1.11 */
