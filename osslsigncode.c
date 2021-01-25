@@ -102,6 +102,7 @@ typedef unsigned char u_char;
 #ifdef WITH_GSF
 #include <gsf/gsf-infile-msole.h>
 #include <gsf/gsf-infile.h>
+#include <gsf/gsf-infile-impl.h>
 #include <gsf/gsf-input-stdio.h>
 #include <gsf/gsf-outfile-msole.h>
 #include <gsf/gsf-outfile.h>
@@ -290,12 +291,83 @@ typedef struct {
 } CRYPTO_PARAMS;
 
 #ifdef WITH_GSF
+#define OLE_HEADER_SIZE      0x200 /* independent of big block size */
+#define DIRENT_MAX_NAME_SIZE 0x40
+#define DIRENT_DETAILS_SIZE  0x40
+#define DIRENT_SIZE          (DIRENT_MAX_NAME_SIZE + DIRENT_DETAILS_SIZE)
+#define DIRENT_NAME_LEN      0x40 /* length in bytes incl 0 terminator */
+#define DIRENT_TYPE          0x42
+#define DIRENT_PREV          0x44
+#define DIRENT_NEXT          0x48
+#define DIRENT_CHILD         0x4c
+#define DIRENT_CLSID         0x50
+#define DIRENT_USERFLAGS     0x60
+#define DIRENT_CREATE_TIME   0x64
+#define DIRENT_MODIFY_TIME   0x6c
+#define DIRENT_FILE_SIZE     0x78
+#define DIRENT_MAGIC_END     0xffffffff
+
+#define DIRENT_TYPE_STORAGE  1
+#define DIRENT_TYPE_STREAM   2
+#define DIRENT_TYPE_ROOT     5
+
+#define OLE_BIG_BLOCK(index, ole)	((index) >> ole->info->bb.shift)
+
 typedef struct {
 	GsfOutfile *outole;
 	GsfOutput *sink;
 	u_char *p_msiex;
 	int len_msiex;
 } GSF_PARAMS;
+
+typedef struct {
+	guint32 *block;
+	guint32  num_blocks;
+} MSOleBAT;
+
+typedef struct {
+	int	entry;
+	guint16 name_len;
+	guint8 type;
+	guint32 prev;
+	guint32 next;
+	guint32 child;
+	unsigned char clsid[16];
+	unsigned char size[4];
+	unsigned char flags[4];
+	unsigned char cretime[8];
+	unsigned char modtime[8];
+	unsigned char name[DIRENT_MAX_NAME_SIZE];
+	GSList *children;
+} MSOleDirent;
+
+typedef struct {
+	struct {
+		MSOleBAT bat;
+		unsigned shift;
+		unsigned filter;
+		size_t   size;
+	} bb, sb;
+	gsf_off_t max_block;
+	guint32 threshold;
+        guint32 sbat_start, num_sbat;
+	MSOleDirent *root_dir;
+	GsfInput *sb_file;
+	int ref_count;
+} MSOleInfo;
+
+struct _GsfInfileMSOle {
+	GsfInfile parent;
+	GsfInput    *input;
+	MSOleInfo   *info;
+	MSOleDirent *dirent;
+	MSOleBAT     bat;
+	gsf_off_t    cur_block;
+	struct {
+		guint8  *buf;
+		size_t  buf_size;
+	} stream;
+};
 #endif /* WITH_GSF */
 
 
@@ -679,6 +751,25 @@ ASN1_SEQUENCE(TimeStampToken) = {
 } ASN1_SEQUENCE_END(TimeStampToken)
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampToken)
+
+#ifdef WITH_GSF
+static const u_char digital_signature[] = {
+	0x05, 0x00, 0x44, 0x00, 0x69, 0x00, 0x67, 0x00,
+	0x69, 0x00, 0x74, 0x00, 0x61, 0x00, 0x6C, 0x00,
+	0x53, 0x00, 0x69, 0x00, 0x67, 0x00, 0x6E, 0x00,
+	0x61, 0x00, 0x74, 0x00, 0x75, 0x00, 0x72, 0x00,
+	0x65, 0x00
+};
+
+static const u_char digital_signature_ex[] = {
+	0x05, 0x00, 0x4D, 0x00, 0x73, 0x00, 0x69, 0x00,
+	0x44, 0x00, 0x69, 0x00, 0x67, 0x00, 0x69, 0x00,
+	0x74, 0x00, 0x61, 0x00, 0x6C, 0x00, 0x53, 0x00,
+	0x69, 0x00, 0x67, 0x00, 0x6E, 0x00, 0x61, 0x00,
+	0x74, 0x00, 0x75, 0x00, 0x72, 0x00, 0x65, 0x00,
+	0x45, 0x00, 0x78, 0x00
+};
+#endif
 
 /*
  * $ echo -n 3006030200013000 | xxd -r -p | openssl asn1parse -i -inform der
@@ -1389,7 +1480,7 @@ static void help_for(const char *argv0, const char *cmd)
 	if (on_list(cmd, cmds_st))
 		printf("%-24s= the unix-time to set the signing time\n", "-st");
 	if (on_list(cmd, cmds_timestamp_expiration))
-		printf("%-24s= verify a finite lifetime of the TSA private key\n", "-st");
+		printf("%-24s= verify a finite lifetime of the TSA private key\n", "-timestamp-expiration");
 #ifdef ENABLE_CURL
 	if (on_list(cmd, cmds_t)) {
 		printf("%-24s= specifies that the digital signature will be timestamped\n", "-t");
@@ -2861,6 +2952,7 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 #ifdef WITH_GSF
 /*
  * MSI file support
+ * https://msdn.microsoft.com/en-us/library/dd942138.aspx
  */
 static gint msi_base64_decode(gint x)
 {
@@ -2958,23 +3050,90 @@ static GSList *msi_sorted_infile_children(GsfInfile *infile)
 	return sorted;
 }
 
-/*
- * msi_prehash_utf16_name converts an UTF-8 representation of
- * an MSI filename to its on-disk UTF-16 representation and
- * writes it to the hash BIO.  It is used when calculating the
- * pre-hash used for MsiDigitalSignatureEx signatures in MSI files.
- */
-static gboolean msi_prehash_utf16_name(gchar *name, BIO *hash)
+static guint8 const *msi_get_block(GsfInfileMSOle const *ole, guint32 entry)
 {
-	glong chars_written = 0;
+	guint8 const *data;
+	guint32 block, oleblock;
 
-	gchar *u16name = (gchar*)g_utf8_to_utf16(name, -1, NULL, &chars_written, NULL);
-	if (u16name == NULL) {
-		return FALSE; /* FAILED */
+	if (entry >= DIRENT_MAGIC_END) {
+		return NULL; /* FAILED */
 	}
-	BIO_write(hash, u16name, 2*chars_written);
-	g_free(u16name);
-	return TRUE;
+	if (entry > G_MAXUINT / DIRENT_SIZE) {
+		return NULL; /* FAILED */
+	}
+	block = OLE_BIG_BLOCK(entry * DIRENT_SIZE, ole);
+	oleblock = ole->bat.block[block];
+	if (oleblock >= ole->info->max_block)
+		return NULL; /* FAILED */
+
+	/* OLE_HEADER_SIZE is fixed at 512, but the sector containing the
+	 * header is padded out to bb.size (sector size) when bb.size > 512. */
+	if (gsf_input_seek(ole->input, (gsf_off_t)(MAX(OLE_HEADER_SIZE, ole->info->bb.size)
+			+ (oleblock << ole->info->bb.shift)), G_SEEK_SET)) {
+		return NULL; /* FAILED */
+	}
+	data = gsf_input_read(ole->input, ole->info->bb.size, NULL);
+	if (data == NULL) {
+		return NULL; /* FAILED */
+	}
+	data += (DIRENT_SIZE * entry) % ole->info->bb.size;
+
+	return data;
+}
+
+static gint msi_dirent_cmp(MSOleDirent const *a, MSOleDirent const *b)
+{
+	gint diff = memcmp(a->name, b->name, MIN(a->name_len, b->name_len));
+	/* apparently the longer wins */
+	if (diff == 0) {
+		return a->name_len > b->name_len ? 1 : -1;
+	}
+	return diff;
+}
+
+MSOleDirent *msi_dirent_new(GsfInfileMSOle *ole, guint32 entry, MSOleDirent *parent)
+{
+	MSOleDirent *dirent;
+	guint8 const *data;
+	guint8 type;
+
+	data = msi_get_block(ole, entry);
+	if (data == NULL) {
+		return NULL; /* FAILED */
+	}
+	type = GSF_LE_GET_GUINT8(data + DIRENT_TYPE);
+	if (type != DIRENT_TYPE_STORAGE && type != DIRENT_TYPE_STREAM && type != DIRENT_TYPE_ROOT) {
+		printf("Unknown stream type 0x%02x\n", type);
+		return NULL; /* FAILED */
+	}
+
+	dirent = g_new0(MSOleDirent, 1);
+	dirent->entry = entry;
+	dirent->name_len = GSF_LE_GET_GUINT16(data + DIRENT_NAME_LEN) - 2;
+	dirent->type = type;
+	dirent->prev = GSF_LE_GET_GUINT32(data + DIRENT_PREV);
+	dirent->next = GSF_LE_GET_GUINT32(data + DIRENT_NEXT);
+	dirent->child = GSF_LE_GET_GUINT32(data + DIRENT_CHILD);
+	memcpy(dirent->clsid, data + DIRENT_CLSID, sizeof(dirent->clsid));
+	memcpy(dirent->size, data + DIRENT_FILE_SIZE, sizeof(dirent->size));
+	memcpy(dirent->flags, data + DIRENT_USERFLAGS, sizeof(dirent->flags));
+	memcpy(dirent->cretime, data + DIRENT_CREATE_TIME, sizeof(dirent->cretime));
+	memcpy(dirent->modtime, data + DIRENT_MODIFY_TIME, sizeof(dirent->modtime));
+	memcpy(dirent->name, data, dirent->name_len);
+	dirent->children = NULL;
+
+	if (parent != NULL) {
+		parent->children = g_slist_insert_sorted(parent->children, dirent, (GCompareFunc)msi_dirent_cmp);
+	}
+	/* NOTE : These links are a tree, not a linked list */
+	msi_dirent_new(ole, dirent->prev, parent);
+	msi_dirent_new(ole, dirent->next, parent);
+
+	if (dirent->type != DIRENT_TYPE_STREAM) {
+		msi_dirent_new(ole, dirent->child, dirent);
+	}
+
+	return dirent;
 }
 
 /*
@@ -2985,76 +3144,70 @@ static gboolean msi_prehash_utf16_name(gchar *name, BIO *hash)
  *
  * The hash is written to the hash BIO.
  */
-static gboolean msi_prehash(GsfInfile *infile, gchar *dirname, BIO *hash)
+
+/* Hash a MSI stream's extended metadata */
+static void msi_prehash(MSOleDirent *dirent, BIO *hash)
 {
-	GSList *sorted, *current;
-	guint8 classid[16], zeroes[8];
-	gboolean is_dir;
-	gsf_off_t size;
-	guint32 sizebuf;
+	if (dirent->type != DIRENT_TYPE_ROOT) {
+		BIO_write(hash, dirent->name, dirent->name_len);
+	}
+	if (dirent->type != DIRENT_TYPE_STREAM) {
+		BIO_write(hash, dirent->clsid, sizeof(dirent->clsid));
+	} else {
+		BIO_write(hash, dirent->size, sizeof(dirent->size));
+	}
+	BIO_write(hash, dirent->flags, sizeof(dirent->flags));
+
+	if (dirent->type != DIRENT_TYPE_ROOT) {
+		BIO_write(hash, dirent->cretime, sizeof(dirent->cretime));
+		BIO_write(hash, dirent->modtime, sizeof(dirent->modtime));
+	}
+}
+
+/* Recursively hash a MSI directory's extended metadata */
+static gboolean msi_prehash_dir(MSOleDirent *dirent, BIO *hash)
+{
+	GSList *tmp;
 	bool ret = FALSE;
 
-	memset(&zeroes, 0, sizeof(zeroes));
-	gsf_infile_msole_get_class_id(GSF_INFILE_MSOLE(infile), classid);
-
-	if (dirname != NULL) {
-		if (!msi_prehash_utf16_name(dirname, hash))
-			return ret; /* FAILED */
+	if (dirent == NULL) {
+		goto out;
 	}
-	BIO_write(hash, classid, sizeof(classid));
-	BIO_write(hash, zeroes, 4);
-	if (dirname != NULL) {
-		/*
-		 * Creation time and modification time for the root directory.
-		 * These are always zero. The ctime and mtime of the actual
-		 * file itself takes precedence.
-		 */
-		BIO_write(hash, zeroes, 8); /* ctime as Windows FILETIME */
-		BIO_write(hash, zeroes, 8); /* mtime as Windows FILETIME */
-	}
-	sorted = msi_sorted_infile_children(infile);
-	for (current = sorted; current; current = g_slist_next(current)) {
-		gchar *name = current->data;
-		GsfInput *child =  gsf_infile_child_by_name(infile, name);
-		if (child == NULL)
+	msi_prehash(dirent, hash);
+	for (tmp = dirent->children; tmp; tmp = tmp->next) {
+		MSOleDirent *child = tmp->data;
+		if (!memcmp(child->name, digital_signature, sizeof(digital_signature))
+				|| !memcmp(child->name, digital_signature_ex, sizeof(digital_signature_ex))) {
 			continue;
-		is_dir = GSF_IS_INFILE(child) && gsf_infile_num_children(GSF_INFILE(child)) > 0;
-		if (is_dir) {
-			if (!msi_prehash(GSF_INFILE(child), name, hash)) {
-				g_object_unref(child);
-				goto out;
-			}
-		} else {
-			if (!msi_prehash_utf16_name(name, hash)) {
-				g_object_unref(child);
-				goto out;
-			}
-			/*
-			 * File size.
-			 */
-			size = gsf_input_remaining(child);
-			sizebuf = GUINT32_TO_LE((guint32)size);
-			BIO_write(hash, &sizebuf, sizeof(sizebuf));
-			/*
-			 * Reserved - must be 0. Corresponds to
-			 * offset 0x7c..0x7f in the CDFv2 file.
-			 */
-			BIO_write(hash, zeroes, 4);
-			/*
-			 * Creation time and modification time
-			 * as Windows FILETIMEs. We keep them
-			 * zeroed, because libgsf doesn't seem
-			 * to support outputting them.
-			 */
-			BIO_write(hash, zeroes, 8); /* ctime as Windows FILETIME */
-			BIO_write(hash, zeroes, 8); /* mtime as Windows FILETIME */
 		}
-		g_object_unref(child);
+		if (child->type == DIRENT_TYPE_STREAM) {
+			msi_prehash(child, hash);
+		}
+		if (child->type == DIRENT_TYPE_STORAGE) {
+			if (!msi_prehash_dir(child, hash)) {
+				goto out;
+			}
+		}
 	}
 	ret = TRUE;
 out:
-	g_slist_free_full(sorted, g_free);
 	return ret;
+}
+
+static gboolean msi_dirent_free(MSOleDirent *dirent)
+{
+	GSList *tmp;
+
+	if (dirent == NULL) {
+		return FALSE;
+	}
+	for (tmp = dirent->children; tmp; tmp = tmp->next) {
+		MSOleDirent *child = tmp->data;
+		msi_dirent_free(child);
+	}
+	g_slist_free(dirent->children);
+	g_free(dirent);
+	return TRUE;
 }
 
 /**
@@ -3087,8 +3240,9 @@ static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
 		if (child == NULL)
 			continue;
 		is_dir = GSF_IS_INFILE(child) && gsf_infile_num_children(GSF_INFILE(child)) > 0;
-		if (outole != NULL)
+		if (outole != NULL) {
 			outchild = gsf_outfile_new_child(outole, name, is_dir);
+		}
 		if (is_dir) {
 			if (!msi_handle_dir(GSF_INFILE(child), GSF_OUTFILE(outchild), hash)) {
 				gsf_output_close(outchild);
@@ -3121,13 +3275,6 @@ out:
 	g_slist_free_full(sorted, g_free);
 	return ret;
 }
-
-/*
- * Until libgsf can read more MSI metadata,
- * we can't verify MsiDigitalSignatureEx
- * #define GSF_CAN_READ_MSI_METADATA
- */
-
 /*
  * msi_verify_pkcs7 is a helper function for msi_verify_file.
  * It exists to make it easier to implement verification of nested signatures.
@@ -3138,9 +3285,7 @@ static int msi_verify_pkcs7(SIGNATURE *signature, GsfInfile *infile, unsigned ch
 	int ret = 1, mdtype = -1, mdok;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
-#ifdef GSF_CAN_READ_MSI_METADATA
 	unsigned char cexmdbuf[EVP_MAX_MD_SIZE];
-#endif
 	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	const EVP_MD *md;
 	BIO *hash;
@@ -3167,35 +3312,23 @@ static int msi_verify_pkcs7(SIGNATURE *signature, GsfInfile *infile, unsigned ch
 	BIO_set_md(hash, md);
 	BIO_push(hash, BIO_new(BIO_s_null()));
 	if (exdata) {
-		/*
-		 * Until libgsf can read more MSI metadata, we can't
-		 * really verify them by plowing through the file.
-		 * Verifying files signed by osslsigncode itself works,
-		 * though!
-		 *
-		 * For now, the compromise is to use the hash given
-		 * by the file, which is equivalent to verifying a
-		 * non-MsiDigitalSignatureEx signature from a security
-		 * perspective, because we'll only be calculating the
-		 * file content hashes ourselves.
-		 */
-#ifdef GSF_CAN_READ_MSI_METADATA
+		MSOleDirent *dirent;
 		BIO *prehash = BIO_new(BIO_f_md());
 		BIO_set_md(prehash, md);
 		BIO_push(prehash, BIO_new(BIO_s_null()));
 
-		if (!msi_prehash(infile, NULL, prehash)) {
+		dirent = msi_dirent_new(GSF_INFILE_MSOLE(infile), 0, NULL);
+		if (!msi_prehash_dir(dirent, prehash)) {
 			printf("Failed to calculate pre-hash used for MsiDigitalSignatureEx\n\n");
+			msi_dirent_free(dirent);
 			BIO_free_all(hash);
 			BIO_free_all(prehash);
 			goto out;
 		}
+		msi_dirent_free(dirent);
 		BIO_gets(prehash, (char*)cexmdbuf, EVP_MAX_MD_SIZE);
 		BIO_free_all(prehash);
 		BIO_write(hash, (char*)cexmdbuf, EVP_MD_size(md));
-#else
-		BIO_write(hash, (char *)exdata, EVP_MD_size(md));
-#endif
 	}
 	if (!msi_handle_dir(infile, NULL, hash)) {
 		printf("Failed to write a new output file\n\n");
@@ -3216,7 +3349,6 @@ static int msi_verify_pkcs7(SIGNATURE *signature, GsfInfile *infile, unsigned ch
 		printf("\n");
 
 	if (exdata) {
-#ifdef GSF_CAN_READ_MSI_METADATA
 		int exok;
 		tohex(cexmdbuf, hexbuf, EVP_MD_size(md));
 		exok = !memcmp(exdata, cexmdbuf, MIN((size_t)EVP_MD_size(md), exlen));
@@ -3228,13 +3360,8 @@ static int msi_verify_pkcs7(SIGNATURE *signature, GsfInfile *infile, unsigned ch
 			goto out;
 		} else
 			printf("\n");
-#else
-		tohex(exdata, hexbuf, MIN((size_t)EVP_MD_size(md), exlen));
-		printf("\nWarning: MsiDigitalSignatureEx found but not verified\n");
-		printf("Current MsiDigitalSignatureEx    : %s\n\n", hexbuf);
-#endif
 	}
-	
+
 	ret = verify_signature(signature, options);
 out:
 	if (!ret)
@@ -3588,20 +3715,22 @@ static int msi_check_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md)
  * ("metadata") hash.
  */
 
-static int msi_calc_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md,
+static int msi_calc_MsiDigitalSignatureEx(GsfInfile *infile, const EVP_MD *md,
 			BIO *hash, GSF_PARAMS *gsfparams)
 {
-	BIO *prehash;
-
-	prehash = BIO_new(BIO_f_md());
+	MSOleDirent *dirent;
+	BIO *prehash= BIO_new(BIO_f_md());
 	BIO_set_md(prehash, md);
 	BIO_push(prehash, BIO_new(BIO_s_null()));
 
-	if (!msi_prehash(ole, NULL, prehash)) {
+	dirent = msi_dirent_new(GSF_INFILE_MSOLE(infile), 0, NULL);
+	if (!msi_prehash_dir(dirent, prehash)) {
 		printf("Unable to calculate MSI pre-hash ('metadata') hash\n");
+		msi_dirent_free(dirent);
 		BIO_free_all(prehash);
 		return 0; /* FAILED */
 	}
+	msi_dirent_free(dirent);
 	gsfparams->p_msiex = OPENSSL_malloc(EVP_MAX_MD_SIZE);
 	gsfparams->len_msiex = BIO_gets(prehash, (char*)gsfparams->p_msiex, EVP_MAX_MD_SIZE);
 	BIO_write(hash, gsfparams->p_msiex, gsfparams->len_msiex);
