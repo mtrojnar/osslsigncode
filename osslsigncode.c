@@ -99,17 +99,6 @@ typedef unsigned char u_char;
 #endif /* HAVE_TERMIOS_H */
 #endif /* _WIN32 */
 
-#ifdef WITH_GSF
-#include <gsf/gsf-infile-msole.h>
-#include <gsf/gsf-infile.h>
-#include <gsf/gsf-infile-impl.h>
-#include <gsf/gsf-input-stdio.h>
-#include <gsf/gsf-outfile-msole.h>
-#include <gsf/gsf-outfile.h>
-#include <gsf/gsf-output-stdio.h>
-#include <gsf/gsf-utils.h>
-#endif /* WITH_GSF */
-
 #include <openssl/err.h>
 #include <openssl/objects.h>
 #include <openssl/evp.h>
@@ -125,6 +114,8 @@ typedef unsigned char u_char;
 #ifndef OPENSSL_NO_ENGINE
 #include <openssl/engine.h>
 #endif /* OPENSSL_NO_ENGINE */
+
+#include "msi.h"
 
 #ifdef ENABLE_CURL
 #ifdef __CYGWIN__
@@ -258,9 +249,7 @@ typedef struct {
 	int nest;
 	int timestamp_expiration;
 	int verbose;
-#ifdef WITH_GSF
 	int add_msi_dse;
-#endif /* WITH_GSF */
 	char *catalog;
 	char *cafile;
 	char *crlfile;
@@ -290,86 +279,14 @@ typedef struct {
 	STACK_OF(X509_CRL) *crls;
 } CRYPTO_PARAMS;
 
-#ifdef WITH_GSF
-#define OLE_HEADER_SIZE      0x200 /* independent of big block size */
-#define DIRENT_MAX_NAME_SIZE 0x40
-#define DIRENT_DETAILS_SIZE  0x40
-#define DIRENT_SIZE          (DIRENT_MAX_NAME_SIZE + DIRENT_DETAILS_SIZE)
-#define DIRENT_NAME_LEN      0x40 /* length in bytes incl 0 terminator */
-#define DIRENT_TYPE          0x42
-#define DIRENT_PREV          0x44
-#define DIRENT_NEXT          0x48
-#define DIRENT_CHILD         0x4c
-#define DIRENT_CLSID         0x50
-#define DIRENT_USERFLAGS     0x60
-#define DIRENT_CREATE_TIME   0x64
-#define DIRENT_MODIFY_TIME   0x6c
-#define DIRENT_FILE_SIZE     0x78
-#define DIRENT_MAGIC_END     0xffffffff
-
-#define DIRENT_TYPE_STORAGE  1
-#define DIRENT_TYPE_STREAM   2
-#define DIRENT_TYPE_ROOT     5
-
-#define OLE_BIG_BLOCK(index, ole)	((index) >> ole->info->bb.shift)
-
 typedef struct {
-	GsfOutfile *outole;
-	GsfOutput *sink;
-	u_char *p_msiex;
+	MSI_FILE *msi;
+	MSI_DIR_ENTRY *dirent;
+	MSI_FILE_ENTRY *ds;
+	MSI_FILE_ENTRY *dse;
+	unsigned char *p_msiex;
 	int len_msiex;
-} GSF_PARAMS;
-
-typedef struct {
-	guint32 *block;
-	guint32  num_blocks;
-} MSOleBAT;
-
-typedef struct {
-	int	entry;
-	guint16 name_len;
-	guint8 type;
-	guint32 prev;
-	guint32 next;
-	guint32 child;
-	unsigned char clsid[16];
-	unsigned char size[4];
-	unsigned char flags[4];
-	unsigned char cretime[8];
-	unsigned char modtime[8];
-	unsigned char name[DIRENT_MAX_NAME_SIZE];
-	GSList *children;
-} MSOleDirent;
-
-typedef struct {
-	struct {
-		MSOleBAT bat;
-		unsigned shift;
-		unsigned filter;
-		size_t   size;
-	} bb, sb;
-	gsf_off_t max_block;
-	guint32 threshold;
-        guint32 sbat_start, num_sbat;
-	MSOleDirent *root_dir;
-	GsfInput *sb_file;
-	int ref_count;
-} MSOleInfo;
-
-struct _GsfInfileMSOle {
-	GsfInfile parent;
-	GsfInput    *input;
-	MSOleInfo   *info;
-	MSOleDirent *dirent;
-	MSOleBAT     bat;
-	gsf_off_t    cur_block;
-	struct {
-		guint8  *buf;
-		size_t  buf_size;
-	} stream;
-};
-#endif /* WITH_GSF */
-
+} MSI_PARAMS;
 
 /*
  * ASN.1 definitions (more or less from official MS Authenticode docs)
@@ -751,25 +668,6 @@ ASN1_SEQUENCE(TimeStampToken) = {
 } ASN1_SEQUENCE_END(TimeStampToken)
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampToken)
-
-#ifdef WITH_GSF
-static const u_char digital_signature[] = {
-	0x05, 0x00, 0x44, 0x00, 0x69, 0x00, 0x67, 0x00,
-	0x69, 0x00, 0x74, 0x00, 0x61, 0x00, 0x6C, 0x00,
-	0x53, 0x00, 0x69, 0x00, 0x67, 0x00, 0x6E, 0x00,
-	0x61, 0x00, 0x74, 0x00, 0x75, 0x00, 0x72, 0x00,
-	0x65, 0x00
-};
-
-static const u_char digital_signature_ex[] = {
-	0x05, 0x00, 0x4D, 0x00, 0x73, 0x00, 0x69, 0x00,
-	0x44, 0x00, 0x69, 0x00, 0x67, 0x00, 0x69, 0x00,
-	0x74, 0x00, 0x61, 0x00, 0x6C, 0x00, 0x53, 0x00,
-	0x69, 0x00, 0x67, 0x00, 0x6E, 0x00, 0x61, 0x00,
-	0x74, 0x00, 0x75, 0x00, 0x72, 0x00, 0x65, 0x00,
-	0x45, 0x00, 0x78, 0x00
-};
-#endif
 
 /*
  * $ echo -n 3006030200013000 | xxd -r -p | openssl asn1parse -i -inform der
@@ -1200,12 +1098,8 @@ static int add_timestamp_rfc3161(PKCS7 *sig, GLOBAL_OPTIONS *options)
 	}
 	return 1; /* FAILED */
 }
-
 #endif /* ENABLE_CURL */
 
-#ifdef WITH_GSF
-static int gsf_initialized = 0;
-#endif /* WITH_GSF */
 
 static bool on_list(const char *txt, const char *list[])
 {
@@ -1250,9 +1144,7 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -addUnauthenticatedBlob ]\n", "");
 		printf("%12s[ -nest ]\n", "");
 		printf("%12s[ -verbose ]\n", "");
-#ifdef WITH_GSF
 		printf("%12s[ -add-msi-dse ]\n", "");
-#endif /* WITH_GSF */
 		printf("%12s[ -in ] <infile> [-out ] <outfile>\n\n", "");
 	}
 	if (on_list(cmd, cmds_add)) {
@@ -1303,9 +1195,7 @@ static void help_for(const char *argv0, const char *cmd)
 	const char *cmds_sign[] = {"sign", NULL};
 	const char *cmds_verify[] = {"verify", NULL};
 	const char *cmds_ac[] = {"sign", NULL};
-#ifdef WITH_GSF
 	const char *cmds_add_msi_dse[] = {"sign", NULL};
-#endif /* WITH_GSF */
 	const char *cmds_addUnauthenticatedBlob[] = {"sign", "add", NULL};
 #ifdef PROVIDE_ASKPASS
 	const char *cmds_askpass[] = {"sign", NULL};
@@ -1402,10 +1292,8 @@ static void help_for(const char *argv0, const char *cmd)
 	}
 	if (on_list(cmd, cmds_ac))
 	printf("%-24s= additional certificates to be added to the signature block\n", "-ac");
-#ifdef WITH_GSF
 	if (on_list(cmd, cmds_add_msi_dse))
 		printf("%-24s= sign a MSI file with the add-msi-dse option\n", "-add-msi-dse");
-#endif /* WITH_GSF */
 	if (on_list(cmd, cmds_addUnauthenticatedBlob))
 		printf("%-24s= add an unauthenticated blob to the PE/MSI file\n", "-addUnauthenticatedBlob");
 #ifdef PROVIDE_ASKPASS
@@ -1505,13 +1393,6 @@ static void help_for(const char *argv0, const char *cmd)
 #define DO_EXIT_0(x) { printf(x); goto err_cleanup; }
 #define DO_EXIT_1(x, y) { printf(x, y); goto err_cleanup; }
 #define DO_EXIT_2(x, y, z) { printf(x, y, z); goto err_cleanup; }
-
-#define GET_UINT8_LE(p) ((u_char*)(p))[0]
-
-#define GET_UINT16_LE(p) (((u_char*)(p))[0] | (((u_char*)(p))[1]<<8))
-
-#define GET_UINT32_LE(p) (((u_char*)(p))[0] | (((u_char*)(p))[1]<<8) | \
-			(((u_char*)(p))[2]<<16) | (((u_char*)(p))[3]<<24))
 
 #define PUT_UINT16_LE(i,p) \
 	((u_char*)(p))[0] = (i) & 0xff; \
@@ -2949,340 +2830,78 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 	return 0; /* OK */
 }
 
-#ifdef WITH_GSF
 /*
  * MSI file support
  * https://msdn.microsoft.com/en-us/library/dd942138.aspx
  */
-static gint msi_base64_decode(gint x)
+
+static int msi_verify_header(char *indata, char *infile, size_t filesize, MSI_PARAMS *msiparams,
+		FILE_HEADER *header)
 {
-	if (x < 10)
-		return x + '0';
-	if (x < (10 + 26))
-		return x - 10 + 'A';
-	if (x < (10 + 26 + 26))
-		return x - 10 - 26 + 'a';
-	if (x == (10 + 26 + 26))
-		return '.';
-	return 1;
-}
+	int ret = 1;
+	MSI_FILE_ENTRY *ds = NULL;
+	MSI_FILE_ENTRY *dse = NULL;
 
-static void msi_decode(const guint8 *in, gchar *out)
-{
-	guint count = 0;
-	guint8 *q = (guint8 *)out;
-
-	/* utf-8 encoding of 0x4840 */
-	if (in[0] == 0xe4 && in[1] == 0xa1 && in[2] == 0x80)
-		in += 3;
-
-	while (*in) {
-		guint8 ch = *in;
-		if ((ch == 0xe3 && in[1] >= 0xa0) || (ch == 0xe4 && in[1] < 0xa0)) {
-			*q++ = msi_base64_decode(in[2] & 0x7f);
-			*q++ = msi_base64_decode(in[1] ^ 0xa0);
-			in += 3;
-			count += 2;
-			continue;
-		}
-		if (ch == 0xe4 && in[1] == 0xa0) {
-			*q++ = msi_base64_decode(in[2] & 0x7f);
-			in += 3;
-			count++;
-			continue;
-		}
-		*q++ = *in++;
-		if (ch >= 0xc1)
-			*q++ = *in++;
-		if (ch >= 0xe0)
-			*q++ = *in++;
-		if (ch >= 0xf0)
-			*q++ = *in++;
-		count++;
+	msiparams->msi = msi_msifile_new(indata, filesize);
+	if (!msiparams->msi) {
+		printf("Corrupt MSI file: %s\n", infile);
+		return 0; /* FAILED */
 	}
-	*q = 0;
-}
+	MSI_FILE_ENTRY *root = msi_get_root_entry(msiparams->msi);
+	msiparams->dirent = msi_dirent_new(msiparams->msi, root, NULL, &ds, &dse);
+	msiparams->ds = ds;
+	msiparams->dse = dse;
+	MSI_FILE_HDR *hdr = msi_get_file_info(msiparams->msi);
 
-/*
- * Sorry if this code looks a bit silly, but that seems
- * to be the best solution so far...
- */
-static gint msi_cmp(gpointer a, gpointer b)
-{
-	glong anc = 0, bnc = 0;
-	gchar *pa = (gchar*)g_utf8_to_utf16(a, -1, NULL, &anc, NULL);
-	gchar *pb = (gchar*)g_utf8_to_utf16(b, -1, NULL, &bnc, NULL);
-	gint diff;
-
-	diff = memcmp(pa, pb, MIN(2*anc, 2*bnc));
-	/* apparently the longer wins */
-	if (diff == 0)
-		return 2*anc > 2*bnc ? 1 : -1;
-	g_free(pa);
-	g_free(pb);
-	return diff;
-}
-
-/*
- * msi_sorted_infile_children returns a sorted list of all
- * of the children of the given infile. The children are
- * sorted according to the msi_cmp.
- *
- * The returned list must be freed with g_slist_free_full.
- */
-static GSList *msi_sorted_infile_children(GsfInfile *infile)
-{
-	GSList *sorted = NULL;
-	gchar decoded[0x40];
-	int i;
-
-	for (i = 0; i < gsf_infile_num_children(infile); i++) {
-		GsfInput *child = gsf_infile_child_by_index(infile, i);
-		const gchar *name = gsf_input_name(child);
-		msi_decode((const guint8*)name, decoded);
-
-		if (g_strcmp0(decoded, "\05DigitalSignature") &&
-				g_strcmp0(decoded, "\05MsiDigitalSignatureEx"))
-			sorted = g_slist_insert_sorted(sorted, (gpointer)g_strdup(name), (GCompareFunc)msi_cmp);
-
-		g_object_unref(child);
+	/* Minor Version field SHOULD be set to 0x003E.
+	 * Major Version field MUST be set to either 0x0003 (version 3) or 0x0004 (version 4). */
+	if (hdr->majorVersion != 0x0003 && hdr->majorVersion != 0x0004) {
+		printf("Unknown Major Version: 0x%04X\n", hdr->majorVersion);
+		ret = 0; /* FAILED */
 	}
-	return sorted;
-}
-
-static guint8 const *msi_get_block(GsfInfileMSOle const *ole, guint32 entry)
-{
-	guint8 const *data;
-	guint32 block, oleblock;
-
-	if (entry >= DIRENT_MAGIC_END) {
-		return NULL; /* FAILED */
+	/* Byte Order field MUST be set to 0xFFFE, specifies little-endian byte order. */
+	if (hdr->byteOrder != 0xFFFE) {
+		printf("Unknown Byte Order: 0x%04X\n", hdr->byteOrder);
+		ret = 0; /* FAILED */
 	}
-	if (entry > G_MAXUINT / DIRENT_SIZE) {
-		return NULL; /* FAILED */
+	/* Sector Shift field MUST be set to 0x0009, or 0x000c, depending on the Major Version field.
+	 * This field specifies the sector size of the compound file as a power of 2. */
+	if ((hdr->majorVersion == 0x0003 && hdr->sectorShift != 0x0009) ||
+			(hdr->majorVersion == 0x0004 && hdr->sectorShift != 0x000C)) {
+		printf("Unknown Sector Shift: 0x%04X\n", hdr->sectorShift);
+		ret = 0; /* FAILED */
 	}
-	block = OLE_BIG_BLOCK(entry * DIRENT_SIZE, ole);
-	oleblock = ole->bat.block[block];
-	if (oleblock >= ole->info->max_block)
-		return NULL; /* FAILED */
-
-	/* OLE_HEADER_SIZE is fixed at 512, but the sector containing the
-	 * header is padded out to bb.size (sector size) when bb.size > 512. */
-	if (gsf_input_seek(ole->input, (gsf_off_t)(MAX(OLE_HEADER_SIZE, ole->info->bb.size)
-			+ (oleblock << ole->info->bb.shift)), G_SEEK_SET)) {
-		return NULL; /* FAILED */
+	/* Mini Sector Shift field MUST be set to 0x0006.
+	 * This field specifies the sector size of the Mini Stream as a power of 2.
+	 * The sector size of the Mini Stream MUST be 64 bytes. */
+	if (hdr->miniSectorShift != 0x0006) {
+		printf("Unknown Mini Sector Shift: 0x%04X\n", hdr->miniSectorShift);
+		ret = 0; /* FAILED */
 	}
-	data = gsf_input_read(ole->input, ole->info->bb.size, NULL);
-	if (data == NULL) {
-		return NULL; /* FAILED */
+	/* Number of Directory Sectors field contains the count of the number
+	 * of directory sectors in the compound file.
+	 * If Major Version is 3, the Number of Directory Sectors MUST be zero. */
+	if (hdr->majorVersion == 0x0003 && hdr->numDirectorySector != 0x00000000) {
+		printf("Unsupported Number of Directory Sectors: 0x%08X\n", hdr->numDirectorySector);
+		ret = 0; /* FAILED */
 	}
-	data += (DIRENT_SIZE * entry) % ole->info->bb.size;
-
-	return data;
-}
-
-static gint msi_dirent_cmp(MSOleDirent const *a, MSOleDirent const *b)
-{
-	gint diff = memcmp(a->name, b->name, MIN(a->name_len, b->name_len));
-	/* apparently the longer wins */
-	if (diff == 0) {
-		return a->name_len > b->name_len ? 1 : -1;
+	/* Mini Stream Cutoff Size field MUST be set to 0x00001000.
+	 * This field specifies the maximum size of a user-defined data stream that is allocated
+	 * from the mini FAT and mini stream, and that cutoff is 4,096 bytes.
+	 * Any user-defined data stream that is greater than or equal to this cutoff size
+	 * must be allocated as normal sectors from the FAT. */
+	if (hdr->miniStreamCutoffSize != 0x00001000) {
+		printf("Unsupported Mini Stream Cutoff Size: 0x%08X\n", hdr->miniStreamCutoffSize);
+		ret = 0; /* FAILED */
 	}
-	return diff;
-}
-
-MSOleDirent *msi_dirent_new(GsfInfileMSOle *ole, guint32 entry, MSOleDirent *parent)
-{
-	MSOleDirent *dirent;
-	guint8 const *data;
-	guint8 type;
-
-	data = msi_get_block(ole, entry);
-	if (data == NULL) {
-		return NULL; /* FAILED */
-	}
-	type = GSF_LE_GET_GUINT8(data + DIRENT_TYPE);
-	if (type != DIRENT_TYPE_STORAGE && type != DIRENT_TYPE_STREAM && type != DIRENT_TYPE_ROOT) {
-		printf("Unknown stream type 0x%02x\n", type);
-		return NULL; /* FAILED */
-	}
-
-	dirent = g_new0(MSOleDirent, 1);
-	dirent->entry = entry;
-	dirent->name_len = GSF_LE_GET_GUINT16(data + DIRENT_NAME_LEN) - 2;
-	dirent->type = type;
-	dirent->prev = GSF_LE_GET_GUINT32(data + DIRENT_PREV);
-	dirent->next = GSF_LE_GET_GUINT32(data + DIRENT_NEXT);
-	dirent->child = GSF_LE_GET_GUINT32(data + DIRENT_CHILD);
-	memcpy(dirent->clsid, data + DIRENT_CLSID, sizeof(dirent->clsid));
-	memcpy(dirent->size, data + DIRENT_FILE_SIZE, sizeof(dirent->size));
-	memcpy(dirent->flags, data + DIRENT_USERFLAGS, sizeof(dirent->flags));
-	memcpy(dirent->cretime, data + DIRENT_CREATE_TIME, sizeof(dirent->cretime));
-	memcpy(dirent->modtime, data + DIRENT_MODIFY_TIME, sizeof(dirent->modtime));
-	memcpy(dirent->name, data, dirent->name_len);
-	dirent->children = NULL;
-
-	if (parent != NULL) {
-		parent->children = g_slist_insert_sorted(parent->children, dirent, (GCompareFunc)msi_dirent_cmp);
-	}
-	/* NOTE : These links are a tree, not a linked list */
-	msi_dirent_new(ole, dirent->prev, parent);
-	msi_dirent_new(ole, dirent->next, parent);
-
-	if (dirent->type != DIRENT_TYPE_STREAM) {
-		msi_dirent_new(ole, dirent->child, dirent);
-	}
-
-	return dirent;
-}
-
-/*
- * msi_prehash calculates the pre-hash used for 'MsiDigitalSignatureEx'
- * signatures in MSI files.  The pre-hash hashes only metadata (file names,
- * file sizes, creation times and modification times), whereas the basic
- * 'DigitalSignature' MSI signature only hashes file content.
- *
- * The hash is written to the hash BIO.
- */
-
-/* Hash a MSI stream's extended metadata */
-static void msi_prehash(MSOleDirent *dirent, BIO *hash)
-{
-	if (dirent->type != DIRENT_TYPE_ROOT) {
-		BIO_write(hash, dirent->name, dirent->name_len);
-	}
-	if (dirent->type != DIRENT_TYPE_STREAM) {
-		BIO_write(hash, dirent->clsid, sizeof(dirent->clsid));
-	} else {
-		BIO_write(hash, dirent->size, sizeof(dirent->size));
-	}
-	BIO_write(hash, dirent->flags, sizeof(dirent->flags));
-
-	if (dirent->type != DIRENT_TYPE_ROOT) {
-		BIO_write(hash, dirent->cretime, sizeof(dirent->cretime));
-		BIO_write(hash, dirent->modtime, sizeof(dirent->modtime));
-	}
-}
-
-/* Recursively hash a MSI directory's extended metadata */
-static gboolean msi_prehash_dir(MSOleDirent *dirent, BIO *hash)
-{
-	GSList *tmp;
-	bool ret = FALSE;
-
-	if (dirent == NULL) {
-		goto out;
-	}
-	msi_prehash(dirent, hash);
-	for (tmp = dirent->children; tmp; tmp = tmp->next) {
-		MSOleDirent *child = tmp->data;
-		if (!memcmp(child->name, digital_signature, sizeof(digital_signature))
-				|| !memcmp(child->name, digital_signature_ex, sizeof(digital_signature_ex))) {
-			continue;
-		}
-		if (child->type == DIRENT_TYPE_STREAM) {
-			msi_prehash(child, hash);
-		}
-		if (child->type == DIRENT_TYPE_STORAGE) {
-			if (!msi_prehash_dir(child, hash)) {
-				goto out;
-			}
-		}
-	}
-	ret = TRUE;
-out:
+	header->fileend = filesize;
 	return ret;
 }
 
-static gboolean msi_dirent_free(MSOleDirent *dirent)
+static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIR_ENTRY *dirent,
+		char *exdata, uint32_t exlen, GLOBAL_OPTIONS *options)
 {
-	GSList *tmp;
-
-	if (dirent == NULL) {
-		return FALSE;
-	}
-	for (tmp = dirent->children; tmp; tmp = tmp->next) {
-		MSOleDirent *child = tmp->data;
-		msi_dirent_free(child);
-	}
-	g_slist_free(dirent->children);
-	g_free(dirent);
-	return TRUE;
-}
-
-/**
- * msi_handle_dir performs a direct copy of the input MSI file in infile to a new
- * output file in outfile.  While copying, it also writes all file content to the
- * hash BIO in order to calculate a 'basic' hash that can be used for an MSI
- * 'DigitalSignature' hash.
- *
- * msi_handle_dir is hierarchy aware: if any subdirectories are found, they will be
- * visited, copied and hashed as well.
- */
-static gboolean msi_handle_dir(GsfInfile *infile, GsfOutfile *outole, BIO *hash)
-{
-	guint8 classid[16];
-	GSList *sorted, *current;
-	GsfOutput *outchild = NULL;
-	gboolean is_dir;
-	gsf_off_t size;
-	guint8 const *data;
-	bool ret = FALSE;
-
-	gsf_infile_msole_get_class_id(GSF_INFILE_MSOLE(infile), classid);
-	if (outole != NULL)
-		gsf_outfile_msole_set_class_id(GSF_OUTFILE_MSOLE(outole), classid);
-
-	sorted = msi_sorted_infile_children(infile);
-	for (current = sorted; current; current = g_slist_next(current)) {
-		gchar *name = current->data;
-		GsfInput *child =  gsf_infile_child_by_name(infile, name);
-		if (child == NULL)
-			continue;
-		is_dir = GSF_IS_INFILE(child) && gsf_infile_num_children(GSF_INFILE(child)) > 0;
-		if (outole != NULL) {
-			outchild = gsf_outfile_new_child(outole, name, is_dir);
-		}
-		if (is_dir) {
-			if (!msi_handle_dir(GSF_INFILE(child), GSF_OUTFILE(outchild), hash)) {
-				gsf_output_close(outchild);
-				g_object_unref(outchild);
-				g_object_unref(child);
-				goto out;
-			}
-		} else {
-			while (gsf_input_remaining(child) > 0) {
-				size = MIN(gsf_input_remaining(child), 4096);
-				data = gsf_input_read(child, size, NULL);
-				BIO_write(hash, data, size);
-				if (outchild != NULL && !gsf_output_write(outchild, size, data)) {
-					gsf_output_close(outchild);
-					g_object_unref(outchild);
-					g_object_unref(child);
-					goto out;
-				}
-			}
-		}
-		if (outchild != NULL) {
-			gsf_output_close(outchild);
-			g_object_unref(outchild);
-		}
-		g_object_unref(child);
-	}
-	BIO_write(hash, classid, sizeof(classid));
-	ret = TRUE;
-out:
-	g_slist_free_full(sorted, g_free);
-	return ret;
-}
-/*
- * msi_verify_pkcs7 is a helper function for msi_verify_file.
- * It exists to make it easier to implement verification of nested signatures.
- */
-static int msi_verify_pkcs7(SIGNATURE *signature, GsfInfile *infile, unsigned char *exdata,
-		size_t exlen, GLOBAL_OPTIONS *options)
-{
-	int ret = 1, mdtype = -1, mdok;
+	int ret = 1, mdok, mdtype = -1;
 	unsigned char mdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cmdbuf[EVP_MAX_MD_SIZE];
 	unsigned char cexmdbuf[EVP_MAX_MD_SIZE];
@@ -3307,59 +2926,47 @@ static int msi_verify_pkcs7(SIGNATURE *signature, GsfInfile *infile, unsigned ch
 		goto out;
 	}
 	printf("Message digest algorithm         : %s\n", OBJ_nid2sn(mdtype));
+
 	md = EVP_get_digestbynid(mdtype);
 	hash = BIO_new(BIO_f_md());
 	BIO_set_md(hash, md);
 	BIO_push(hash, BIO_new(BIO_s_null()));
 	if (exdata) {
-		MSOleDirent *dirent;
 		BIO *prehash = BIO_new(BIO_f_md());
 		BIO_set_md(prehash, md);
 		BIO_push(prehash, BIO_new(BIO_s_null()));
 
-		dirent = msi_dirent_new(GSF_INFILE_MSOLE(infile), 0, NULL);
+		tohex((unsigned char *)exdata, hexbuf, exlen);
+		printf("Current MsiDigitalSignatureEx    : %s\n", hexbuf);
+
 		if (!msi_prehash_dir(dirent, prehash)) {
 			printf("Failed to calculate pre-hash used for MsiDigitalSignatureEx\n\n");
-			msi_dirent_free(dirent);
 			BIO_free_all(hash);
 			BIO_free_all(prehash);
 			goto out;
 		}
-		msi_dirent_free(dirent);
 		BIO_gets(prehash, (char*)cexmdbuf, EVP_MAX_MD_SIZE);
 		BIO_free_all(prehash);
 		BIO_write(hash, (char*)cexmdbuf, EVP_MD_size(md));
+		tohex(cexmdbuf, hexbuf, EVP_MD_size(md));
+		printf("Calculated MsiDigitalSignatureEx : %s\n", hexbuf);
 	}
-	if (!msi_handle_dir(infile, NULL, hash)) {
-		printf("Failed to write a new output file\n\n");
+
+	if (!msi_hash_dir(msi, dirent, hash)) {
+		printf("Failed to calculate DigitalSignature\n\n");
 		BIO_free_all(hash);
 		goto out;
 	}
+	tohex(mdbuf, hexbuf, EVP_MD_size(md));
+	printf("Current DigitalSignature         : %s\n", hexbuf);
 	BIO_gets(hash, (char*)cmdbuf, EVP_MAX_MD_SIZE);
 	BIO_free_all(hash);
 	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
-	printf("Calculated DigitalSignature      : %s", hexbuf);
 	mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
+	printf("Calculated DigitalSignature      : %s%s\n\n", hexbuf, mdok ? "" : "    MISMATCH!!!");
 	if (!mdok) {
-		tohex(mdbuf, hexbuf, EVP_MD_size(md));
-		printf("    MISMATCH!!!\n\t\t\tFILE HAS : %s\n\n", hexbuf);
 		printf("Signature verification: failed\n\n");
 		goto out;
-	} else
-		printf("\n");
-
-	if (exdata) {
-		int exok;
-		tohex(cexmdbuf, hexbuf, EVP_MD_size(md));
-		exok = !memcmp(exdata, cexmdbuf, MIN((size_t)EVP_MD_size(md), exlen));
-		printf("Calculated MsiDigitalSignatureEx : %s", hexbuf);
-		if (!exok) {
-			tohex(exdata, hexbuf, MIN((size_t)EVP_MD_size(md), exlen));
-			printf("    MISMATCH!!!\n\t\t\tFILE HAS : %s\n\n", hexbuf);
-			printf("Signature verification: failed\n\n");
-			goto out;
-		} else
-			printf("\n");
 	}
 
 	ret = verify_signature(signature, options);
@@ -3369,93 +2976,36 @@ out:
 	return ret;
 }
 
-/* Compute a simple sha1/sha256 message digest of the MSI file */
-static void msi_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf, size_t fileend)
+static int msi_verify_file(MSI_PARAMS *msiparams, GLOBAL_OPTIONS *options)
 {
-	BIO *bio = NULL;
-	EVP_MD_CTX *mdctx;
-	size_t n;
-
-	bio = BIO_new_mem_buf(indata, fileend);
-	mdctx = EVP_MD_CTX_new();
-	EVP_DigestInit(mdctx, md);
-	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
-	(void)BIO_seek(bio, 0);
-
-	n = 0;
-	while (n < fileend) {
-		int l;
-		static unsigned char bfb[16*1024*1024];
-		size_t want = fileend - n;
-		if (want > sizeof(bfb))
-			want = sizeof(bfb);
-		l = BIO_read(bio, bfb, want);
-		if (l <= 0)
-			break;
-		EVP_DigestUpdate(mdctx, bfb, l);
-		n += l;
-	}
-	EVP_DigestFinal(mdctx, mdbuf, NULL);
-	EVP_MD_CTX_free(mdctx);
-	BIO_free(bio);
-}
-
-/*
- * msi_get_child returns the first child that its value name matches the pattern.
- * The returned input stream must be unrefed.
-*/
-
-static GsfInput *msi_get_child(GsfInfile *infile, const char *pattern)
-{
-	gchar decoded[0x40];
-	int i;
-
-	for (i = 0; i < gsf_infile_num_children(infile); i++) {
-		GsfInput *child = gsf_infile_child_by_index(infile, i);
-		const guint8 *name = (const guint8*)gsf_input_name(child);
-		msi_decode(name, decoded);
-		if (!g_strcmp0(decoded, pattern))
-			return child;
-		else
-			g_object_unref(child);
-	}
-	return NULL;
-}
-
-/*
- * msi_verify_file checks whether or not the signature of infile is valid.
- */
-static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
-{
-	GsfInput *sig, *exsig;
-	unsigned char *exdata = NULL;
-	unsigned char *indata = NULL;
 	int i, ret = 1;
-	PKCS7 *p7 = NULL;
-	unsigned long inlen, exlen = 0;
+	char *indata = NULL;
+	char *exdata = NULL;
 	const unsigned char *blob;
+	uint32_t inlen, exlen = 0;
+	PKCS7 *p7;
+
 	STACK_OF(SIGNATURE) *signatures = sk_SIGNATURE_new_null();
 
-	sig = msi_get_child(infile, "\05DigitalSignature");
-	if (sig == NULL) {
+	if (!msiparams->ds) {
 		printf("MSI file has no signature\n\n");
-		return 1; /* FAILED */
-	}
-
-	inlen = (unsigned long) gsf_input_remaining(sig);
-	indata = OPENSSL_malloc(inlen);
-	if (gsf_input_read(sig, inlen, indata) == NULL) {
 		goto out;
 	}
-	exsig = msi_get_child(infile, "\05MsiDigitalSignatureEx");
-	if (exsig != NULL) {
-		exlen = (unsigned long) gsf_input_remaining(exsig);
+	inlen = GET_UINT32_LE(msiparams->ds->size);
+	indata = OPENSSL_malloc(inlen);
+	if (!msi_read_file(msiparams->msi, msiparams->ds, 0, indata, inlen)) {
+		printf("DigitalSignature stream data error\n\n");
+		goto out;
+	}
+	if (!msiparams->dse) {
+		printf("Warning: MsiDigitalSignatureEx stream doesn't exist\n");
+	} else {
+		exlen = GET_UINT32_LE(msiparams->dse->size);
 		exdata = OPENSSL_malloc(exlen);
-		if (gsf_input_read(exsig, exlen, exdata) == NULL) {
-			g_object_unref(exsig);
+		if (!msi_read_file(msiparams->msi, msiparams->dse, 0, exdata, exlen)) {
+			printf("MsiDigitalSignatureEx stream data error\n\n");
 			goto out;
 		}
-		g_object_unref(exsig);
 	}
 	blob = (unsigned char *)indata;
 	p7 = d2i_PKCS7(NULL, &blob, inlen);
@@ -3472,7 +3022,7 @@ static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
 		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
 		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-		ret &= msi_verify_pkcs7(signature, infile, exdata, exlen, options);
+		ret &= msi_verify_pkcs7(signature, msiparams->msi, msiparams->dirent, exdata, exlen, options);
 		if (signature->timestamp) {
 			CMS_ContentInfo_free(signature->timestamp);
 			ERR_clear_error();
@@ -3482,291 +3032,57 @@ static int msi_verify_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
 	}
 	printf("Number of verified signatures: %d\n", i);
 out:
-	g_object_unref(sig);
 	sk_SIGNATURE_free(signatures);
 	OPENSSL_free(indata);
 	OPENSSL_free(exdata);
 	return ret;
 }
 
-static int msi_extract_dse(GsfInfile *infile, unsigned char **dsebuf,
-	unsigned long *dselen, int *has_dse)
+static PKCS7 *msi_extract_existing_pkcs7(MSI_PARAMS *msiparams, char **data, uint32_t *len)
 {
-	GsfInput *exsig;
-	unsigned char *buf = NULL;
-	gsf_off_t size = 0;
-
-	exsig = msi_get_child(infile, "\05MsiDigitalSignatureEx");
-	if (exsig == NULL)
-		return FALSE; /* FAILED */
-	if (has_dse != NULL) {
-		*has_dse = 1;
-	}
-	size = gsf_input_remaining(exsig);
-	if (dselen != NULL) {
-		*dselen = (unsigned long) size;
-	}
-	if (dsebuf != NULL) {
-		buf = OPENSSL_malloc(size);
-		if (gsf_input_read(exsig, size, buf) == NULL) {
-			g_object_unref(exsig);
-			return FALSE; /* FAILED */
-		}
-		*dsebuf = buf;
-	}
-	g_object_unref(exsig);
-	return TRUE; /* OK */
-}
-
-/*
- * msi_extract_signature_to_file extracts the MSI DigitalSignaure from infile
- * to a file at the path given by outfile.
- */
-static int msi_extract_signature_to_file(GsfInfile *infile, GLOBAL_OPTIONS *options)
-{
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
-	GsfInput *sig, *exsig;
-	unsigned char *exdata = NULL;
-	unsigned long exlen = 0;
-	BIO *outdata;
-	int ret = 1;
-
-	sig = msi_get_child(infile, "\05DigitalSignature");
-	if (sig == NULL) {
-		printf("MSI file has no signature\n\n");
-		return 1; /* FAILED */
-	}
-	/* Create outdata DER file */
-#ifdef WIN32
-	if (!access(options->outfile, R_OK)) {
-		/* outdata file exists */
-		printf("Failed to create file: %s\n", options->outfile);
-		goto out;
-	}
-#endif
-	outdata = BIO_new_file(options->outfile, FILE_CREATE_MODE);
-	if (outdata == NULL) {
-		printf("Failed to create file: %s\n", options->outfile);
-		goto out;
-	}
-	while (gsf_input_remaining(sig) > 0) {
-		gsf_off_t size = MIN(gsf_input_remaining(sig), 4096);
-		guint8 const *data = gsf_input_read(sig, size, NULL);
-		BIO_write(outdata, data, size);
-	}
-
-	exsig = msi_get_child(infile, "\05MsiDigitalSignatureEx");
-	if (exsig != NULL) {
-		exlen = (unsigned long) gsf_input_remaining(exsig);
-		if (exlen > EVP_MAX_MD_SIZE) {
-			printf("MsiDigitalSignatureEx is larger than EVP_MAX_MD_SIZE\n");
-			g_object_unref(exsig);
-			goto out;
-		}
-		exdata = OPENSSL_malloc(exlen);
-		if (gsf_input_read(exsig, exlen, exdata) == NULL) {
-			printf("Unable to read MsiDigitalSignatureEx\n");
-			OPENSSL_free(exdata);
-			g_object_unref(exsig);
-			goto out;
-		}
-		tohex(exdata, hexbuf, exlen);
-		printf("Note: MSI includes a MsiDigitalSignatureEx section\n");
-		printf("MsiDigitalSignatureEx pre-hash: %s\n", hexbuf);
-		OPENSSL_free(exdata);
-		g_object_unref(exsig);
-	}
-
-	ret = 0; /* OK */
-out:
-	g_object_unref(sig);
-	if (outdata)
-		BIO_free_all(outdata);
-	return ret;
-}
-
-static PKCS7 *msi_extract_signature_to_pkcs7(GsfInfile *infile)
-{
-	GsfInput *sig;
 	PKCS7 *p7 = NULL;
-	u_char *buf = NULL;
-	gsf_off_t size = 0;
-	const unsigned char *p7buf;
+	const unsigned char *blob;
 
-	sig = msi_get_child(infile, "\05DigitalSignature");
-	if (sig == NULL) {
-		printf("MSI file has no signature\n\n");
-		return NULL; /* FAILED */
+	if (!msiparams->ds) {
+		return NULL;
 	}
-	size = gsf_input_remaining(sig);
-	buf = OPENSSL_malloc(size);
-	if (gsf_input_read(sig, size, buf) == NULL)
-		goto out;
-	p7buf = buf;
-	p7 = d2i_PKCS7(NULL, &p7buf, size);
-
-out:
-	g_object_unref(sig);
-	OPENSSL_free(buf);
+	*len = GET_UINT32_LE(msiparams->ds->size);
+	*data = OPENSSL_malloc(*len);
+	if (!msi_read_file(msiparams->msi, msiparams->ds, 0, *data, *len)) {
+		printf("DigitalSignature stream data error\n");
+		return NULL;
+	}
+	blob = (unsigned char *)*data;
+	p7 = d2i_PKCS7(NULL, &blob, *len);
+	if (!p7) {
+		printf("Failed to extract PKCS7 data\n");
+		return NULL;
+	}
 	return p7;
 }
 
-static int msi_extract_file(GsfInfile *ole, GLOBAL_OPTIONS *options)
+static int msi_extract_file(MSI_PARAMS *msiparams, BIO *outdata, int output_pkcs7)
 {
-	int ret = 0;
-	BIO *outdata;
+	int ret;
 	PKCS7 *sig;
+	char *data;
+	uint32_t len = 0;
 
-	if (options->output_pkcs7) {
-		sig = msi_extract_signature_to_pkcs7(ole);
-		if (!sig) {
-			printf("Unable to extract existing signature\n");
-			return 1; /* FAILED */
-		}
-		/* Create outdata PEM file */
-#ifdef WIN32
-		if (!access(options->outfile, R_OK)) {
-			/* outdata file exists */
-			printf("Failed to create file: %s\n", options->outfile);
-			PKCS7_free(sig);
-			return 1; /* FAILED */
-		}
-#endif
-		outdata = BIO_new_file(options->outfile, FILE_CREATE_MODE);
-		if (outdata == NULL) {
-			printf("Failed to create file: %s\n", options->outfile);
-			PKCS7_free(sig);
-			return 1; /* FAILED */
-		}
+	(void)BIO_reset(outdata);
+	sig = msi_extract_existing_pkcs7(msiparams, &data, &len);
+	if (!sig) {
+		printf("Unable to extract existing signature\n");
+		return 1; /* FAILED */
+	}
+	if (output_pkcs7) {
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
-		BIO_free_all(outdata);
-		PKCS7_free(sig);
-	} else
-		ret = msi_extract_signature_to_file(ole, options);
-
+	} else {
+		ret = !BIO_write(outdata, data, len);
+	}
+	PKCS7_free(sig);
+	OPENSSL_free(data);
 	return ret;
 }
-
-/*
- * Perform a sanity check for the MsiDigitalSignatureEx section.
- * If the file we're attempting to sign has an MsiDigitalSignatureEx
- * section, we can't add a nested signature of a different MD type
- * without breaking the initial signature.
- */
-static int msi_check_MsiDigitalSignatureEx(GsfInfile *ole, const EVP_MD *md)
-{
-	unsigned long dselen = 0;
-	int mdlen, has_dse = 0;
-
-	if (!msi_extract_dse(ole, NULL, &dselen, &has_dse) && has_dse) {
-		printf("Unable to extract MsiDigitalSignatureEx section\n\n");
-		return 0; /* FAILED */
-	}
-	if (has_dse) {
-		mdlen = EVP_MD_size(md);
-		if (dselen != (unsigned long)mdlen) {
-			printf("Unable to add nested signature with a different MD type (-h parameter) "
-				"than what exists in the MSI file already.\nThis is due to the presence of "
-				"MsiDigitalSignatureEx (-add-msi-dse parameter).\n\n");
-				return 0; /* FAILED */
-		}
-	}
-	return 1; /* OK */
-}
-
-/*
- * MsiDigitalSignatureEx is an enhanced signature type that
- * can be used when signing MSI files.  In addition to
- * file content, it also hashes some file metadata, specifically
- * file names, file sizes, creation times and modification times.
- *
- * The file content hashing part stays the same, so the
- * msi_handle_dir() function can be used across both variants.
- *
- * When an MsiDigitalSigntaureEx section is present in an MSI file,
- * the meaning of the DigitalSignature section changes:  Instead
- * of being merely a file content hash (as what is output by the
- * msi_handle_dir() function), it is now hashes both content
- * and metadata.
- *
- * Here is how it works:
- *
- * First, a "pre-hash" is calculated. This is the "metadata" hash.
- * It iterates over the files in the MSI in the same order as the
- * file content hashing method would - but it only processes the
- * metadata.
- *
- * Once the pre-hash is calculated, a new hash is created for
- * calculating the hash of the file content.  The output of the
- * pre-hash is added as the first element of the file content hash.
- *
- * After the pre-hash is written, what follows is the "regular"
- * stream of data that would normally be written when performing
- * file content hashing.
- *
- * The output of this hash, which combines both metadata and file
- * content, is what will be output in signed form to the
- * DigitalSignature section when in 'MsiDigitalSignatureEx' mode.
- *
- * As mentioned previously, this new mode of operation is signalled
- * by the presence of a 'MsiDigitalSignatureEx' section in the MSI
- * file.  This section must come after the 'DigitalSignature'
- * section, and its content must be the output of the pre-hash
- * ("metadata") hash.
- */
-
-static int msi_calc_MsiDigitalSignatureEx(GsfInfile *infile, const EVP_MD *md,
-			BIO *hash, GSF_PARAMS *gsfparams)
-{
-	MSOleDirent *dirent;
-	BIO *prehash= BIO_new(BIO_f_md());
-	BIO_set_md(prehash, md);
-	BIO_push(prehash, BIO_new(BIO_s_null()));
-
-	dirent = msi_dirent_new(GSF_INFILE_MSOLE(infile), 0, NULL);
-	if (!msi_prehash_dir(dirent, prehash)) {
-		printf("Unable to calculate MSI pre-hash ('metadata') hash\n");
-		msi_dirent_free(dirent);
-		BIO_free_all(prehash);
-		return 0; /* FAILED */
-	}
-	msi_dirent_free(dirent);
-	gsfparams->p_msiex = OPENSSL_malloc(EVP_MAX_MD_SIZE);
-	gsfparams->len_msiex = BIO_gets(prehash, (char*)gsfparams->p_msiex, EVP_MAX_MD_SIZE);
-	BIO_write(hash, gsfparams->p_msiex, gsfparams->len_msiex);
-	BIO_free_all(prehash);
-	return 1; /* OK */
-}
-
-static int msi_add_DigitalSignature(GsfOutfile *outole, u_char *p, int len)
-{
-	GsfOutput *child;
-	int ret = 1;
-
-	child = gsf_outfile_new_child(outole, "\05DigitalSignature", FALSE);
-	if (!gsf_output_write(child, len, p))
-		ret = 0;
-	gsf_output_close(child);
-	g_object_unref(child);
-	return ret;
-}
-
-static int msi_add_MsiDigitalSignatureEx(GsfOutfile *outole, GSF_PARAMS *gsfparams)
-{
-	GsfOutput *child;
-	int ret = 1;
-
-	child = gsf_outfile_new_child(outole, "\05MsiDigitalSignatureEx", FALSE);
-	if (!gsf_output_write(child, gsfparams->len_msiex, gsfparams->p_msiex))
-		ret = 0;
-	gsf_output_close(child);
-	g_object_unref(child);
-	OPENSSL_free(gsfparams->p_msiex);
-	return ret;
-}
-
-#endif
-
 
 /*
  * PE file support
@@ -4744,11 +4060,9 @@ static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEAD
 			case FILE_TYPE_PE:
 				pe_calc_digest(indata, md, cmdbuf, header);
 				break;
-#ifdef WITH_GSF
 			case FILE_TYPE_MSI:
 				msi_calc_digest(indata, md, cmdbuf, header->fileend);
 				break;
-#endif
 			default:
 				break;
 			}
@@ -5050,13 +4364,8 @@ static int add_unauthenticated_blob(PKCS7 *sig)
 /*
  * Append signature to the outfile
  */
-#ifdef WITH_GSF
-static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type, cmd_type_t cmd,
-			GLOBAL_OPTIONS *options, size_t *padlen, int *len, BIO *outdata, GSF_PARAMS *gsfparams)
-#else
 static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 			GLOBAL_OPTIONS *options, size_t *padlen, int *len, BIO *outdata)
-#endif
 {
 	u_char *p = NULL;
 	static char buf[64*1024];
@@ -5097,21 +4406,8 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 			memset(p, 0, *padlen);
 			BIO_write(outdata, p, *padlen);
 		}
-#ifdef WITH_GSF
 	} else if (type == FILE_TYPE_MSI) {
-		/* Only output signatures if we're signing */
-		if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
-			if (!msi_add_DigitalSignature(gsfparams->outole, p, *len)) {
-				printf("Failed to write MSI 'DigitalSignature' signature to %s\n", options->infile);
-				return 1; /* FAILED */
-			}
-			if (gsfparams->p_msiex != NULL &&
-					!msi_add_MsiDigitalSignatureEx(gsfparams->outole, gsfparams)) {
-				printf("Failed to write MSI 'MsiDigitalSignatureEx' signature to %s\n", options->infile);
-				return 1; /* FAILED */
-			}
-		}
-#endif
+		/* TODO */
 	} else if (type == FILE_TYPE_CAT) {
 		i2d_PKCS7_bio(outdata, outsig);
 	}
@@ -5216,15 +4512,13 @@ static char *map_file(const char *infile, const off_t size)
 }
 
 static int input_validation(file_type_t type, GLOBAL_OPTIONS *options, FILE_HEADER *header,
-			char *indata, size_t filesize)
+			MSI_PARAMS *msiparams, char *indata, size_t filesize)
 {
 	if (type == FILE_TYPE_CAB) {
 		if (options->pagehash == 1)
 			printf("Warning: -ph option is only valid for PE files\n");
-#ifdef WITH_GSF
 		if (options->add_msi_dse == 1)
 			printf("Warning: -add-msi-dse option is only valid for MSI files\n");
-#endif
 		if (!cab_verify_header(indata, options->infile, filesize, header)) {
 			printf("Corrupt CAB file\n");
 			return 0; /* FAILED */
@@ -5237,10 +4531,8 @@ static int input_validation(file_type_t type, GLOBAL_OPTIONS *options, FILE_HEAD
 			printf("Warning: -jp option is only valid for CAB files\n");
 		if (options->pagehash == 1)
 			printf("Warning: -ph option is only valid for PE files\n");
-#ifdef WITH_GSF
 		if (options->add_msi_dse == 1)
 			printf("Warning: -add-msi-dse option is only valid for MSI files\n");
-#endif
 		if (!cat_verify_header(indata, filesize, header)) {
 			printf("Corrupt CAT file: %s\n", options->infile);
 			return 0; /* FAILED */
@@ -5248,24 +4540,21 @@ static int input_validation(file_type_t type, GLOBAL_OPTIONS *options, FILE_HEAD
 	} else if (type == FILE_TYPE_PE) {
 		if (options->jp >= 0)
 			printf("Warning: -jp option is only valid for CAB files\n");
-#ifdef WITH_GSF
 		if (options->add_msi_dse == 1)
 			printf("Warning: -add-msi-dse option is only valid for MSI files\n");
-#endif
 		if (!pe_verify_header(indata, options->infile, filesize, header)) {
 			printf("Corrupt PE file\n");
 			return 0; /* FAILED */
 		}
-
 	} else if (type == FILE_TYPE_MSI) {
 		if (options->pagehash == 1)
 			printf("Warning: -ph option is only valid for PE files\n");
 		if (options->jp >= 0)
 			printf("Warning: -jp option is only valid for CAB files\n");
-#ifndef WITH_GSF
-		printf("libgsf is not available, msi support is disabled: %s\n", options->infile);
-		return 0; /* FAILED */
-#endif
+		if (!msi_verify_header(indata, options->infile, filesize, msiparams, header)) {
+			printf("Corrupt MSI file\n");
+			return 0; /* FAILED */
+		}
 	}
 	return 1; /* OK */
 }
@@ -5314,29 +4603,7 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 			return 1; /* FAILED */
 		}
 	} else if (type == FILE_TYPE_MSI) {
-#ifdef WITH_GSF
-		GsfInput *src;
-		GsfInfile *ole;
-		int ret;
-
-		src = gsf_input_stdio_new(options->outfile, NULL);
-		if (!src) {
-			printf("Error opening output file %s\n", options->outfile);
-			return 1; /* FAILED */
-		}
-		ole = gsf_infile_msole_new(src, NULL);
-		g_object_unref(src);
-
-		ret = msi_verify_file(ole, options);
-		g_object_unref(ole);
-		if (ret) {
-			printf("Signature mismatch\n");
-			return 1; /* FAILED */
-		}
-#else
-		printf("libgsf is not available, msi support is disabled: %s\n", options->infile);
-		return 1; /* FAILED */
-#endif
+		/* TODO */
 	} else {
 		printf("Unknown input type for file: %s\n", options->infile);
 		return 1; /* FAILED */
@@ -5346,9 +4613,6 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 
 static int get_file_type(char *indata, char *infile, file_type_t *type)
 {
-	static u_char msi_signature[] = {
-		0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1
-	};
 	static u_char pkcs7_signed_data[] = {
 		0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02,
 	};
@@ -5357,12 +4621,8 @@ static int get_file_type(char *indata, char *infile, file_type_t *type)
 		*type = FILE_TYPE_CAB;
 	} else if (!memcmp(indata, "MZ", 2)) {
 		*type = FILE_TYPE_PE;
-	} else if (!memcmp(indata, msi_signature, sizeof(msi_signature))) {
+	} else if (!memcmp(indata, msi_magic, sizeof(msi_magic))) {
 		*type = FILE_TYPE_MSI;
-#ifdef WITH_GSF
-		gsf_init();
-		gsf_initialized = 1;
-#endif
 	} else if (!memcmp(indata + ((GET_UINT8_LE(indata+1) == 0x82) ? 4 : 5),
 			pkcs7_signed_data, sizeof(pkcs7_signed_data))) {
 		/* the maximum size of a supported cat file is (2^24 -1) bytes */
@@ -5787,6 +5047,11 @@ out:
 	return ret; /* OK */
 }
 
+static void free_msi_params(MSI_PARAMS *msiparams) {
+	msi_msifile_free(msiparams->msi);
+	msi_dirent_free(msiparams->dirent);
+}
+
 static void free_crypto_params(CRYPTO_PARAMS *cparams)
 {
 	/* If key is NULL nothing is done */
@@ -5871,13 +5136,8 @@ static PKCS7 *get_sigfile(char *sigfile, file_type_t type)
 		else if (type == FILE_TYPE_CAB)
 			sig = cab_extract_existing_pkcs7(insigdata, &header);
 		else if (type == FILE_TYPE_MSI) {
-#ifdef WITH_GSF
-			const unsigned char *p = (unsigned char*)insigdata;
-			sig = d2i_PKCS7(NULL, &p, sigfilesize);
-#else
-			printf("libgsf is not available, msi support is disabled\n");
-			return NULL; /* FAILED */
-#endif
+			/* TODO */
+			/* sig = msi_extract_existing_pkcs7(msiparams, NULL, 0); */
 		}
 	}
 	return sig; /* OK */
@@ -5887,7 +5147,8 @@ static PKCS7 *get_sigfile(char *sigfile, file_type_t type)
  * Obtain an existing signature or create a new one
  */
 static PKCS7 *get_pkcs7(cmd_type_t cmd, BIO *hash, file_type_t type, char *indata,
-			GLOBAL_OPTIONS *options, FILE_HEADER *header, CRYPTO_PARAMS *cparams, PKCS7 *cursig)
+			GLOBAL_OPTIONS *options, FILE_HEADER *header, CRYPTO_PARAMS *cparams,
+			PKCS7 *cursig)
 {
 	PKCS7 *sig = NULL;
 
@@ -5919,60 +5180,6 @@ static PKCS7 *get_pkcs7(cmd_type_t cmd, BIO *hash, file_type_t type, char *indat
 	}
 	return sig;
 }
-
-/*
- * Prepare the output file for signing
- */
-#ifdef WITH_GSF
-
-
-static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *header,
-			GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams, char *indata,
-			BIO *hash, GsfInfile *ole, GSF_PARAMS *gsfparams, PKCS7 **cursig)
-{
-	PKCS7 *sig = NULL;
-
-	/* Create outdata MSI file */
-	if (!access(options->outfile, R_OK)) {
-		/* outdata file exists */
-		printf("Failed to create file: %s\n", options->outfile);
-		return NULL; /* FAILED */
-	}
-	gsfparams->sink = gsf_output_stdio_new(options->outfile, NULL);
-	if (!gsfparams->sink) {
-		printf("Failed to create file: %s\n", options->outfile);
-		return NULL; /* FAILED */
-	}
-	gsfparams->outole = gsf_outfile_msole_new(gsfparams->sink);
-
-	BIO_push(hash, BIO_new(BIO_s_null()));
-	if (options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ole, options->md, hash, gsfparams))
-		return NULL; /* FAILED */
-	if (!msi_handle_dir(ole, gsfparams->outole, hash)) {
-		printf("Unable to msi_handle_dir()\n");
-		return NULL; /* FAILED */
-	}
-
-	/* Obtain a current signature from previously-signed file */
-	if ((cmd == CMD_SIGN && options->nest) ||
-			(cmd == CMD_ATTACH && options->nest) || cmd == CMD_ADD) {
-		if (!msi_check_MsiDigitalSignatureEx(ole, options->md))
-			return NULL; /* FAILED */
-		*cursig = msi_extract_signature_to_pkcs7(ole);
-		if (*cursig == NULL) {
-			printf("Unable to extract existing signature in -nest mode\n");
-			return NULL; /* FAILED */
-		}
-		if (cmd == CMD_ADD)
-			sig = *cursig;
-	}
-
-	/* Obtain an existing signature or create a new one */
-	if ((cmd == CMD_ATTACH) || (cmd == CMD_SIGN))
-		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams, NULL);
-	return sig; /* OK */
-}
-#endif
 
 static PKCS7 *pe_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *header,
 			GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams, char *indata,
@@ -6056,16 +5263,6 @@ static void print_version()
 #else
 		"no libcurl available"
 #endif /* ENABLE_CURL */
-		);
-	printf(
-#ifdef WITH_GSF
-		"\tlibgsf %d.%d.%d\n",
-		libgsf_major_version,
-		libgsf_minor_version,
-		libgsf_micro_version
-#else
-		"\tno libgsf available\n"
-#endif /* WITH_GSF */
 		);
 	printf("\nPlease send bug-reports to " PACKAGE_BUGREPORT "\n\n");
 }
@@ -6214,10 +5411,8 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 			options->timestamp_expiration = 1;
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD || *cmd == CMD_VERIFY) && !strcmp(*argv, "-verbose")) {
 			options->verbose = 1;
-#ifdef WITH_GSF
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-add-msi-dse")) {
 			options->add_msi_dse = 1;
-#endif
 		} else if ((*cmd == CMD_VERIFY) && (!strcmp(*argv, "-c") || !strcmp(*argv, "-catalog"))) {
 			if (--argc < 1) usage(argv0, "all");
 			options->catalog = *(++argv);
@@ -6310,10 +5505,8 @@ int main(int argc, char **argv)
 {
 	GLOBAL_OPTIONS options;
 	FILE_HEADER header, catheader;
+	MSI_PARAMS msiparams;
 	CRYPTO_PARAMS cparams;
-#ifdef WITH_GSF
-	GSF_PARAMS gsfparams;
-#endif
 	BIO *hash = NULL, *outdata = NULL;
 	PKCS7 *cursig = NULL, *sig = NULL;
 	char *indata = NULL, *catdata = NULL;
@@ -6360,14 +5553,13 @@ int main(int argc, char **argv)
 	/* reset file header */
 	memset(&header, 0, sizeof(FILE_HEADER));
 	header.fileend = filesize;
-#ifdef WITH_GSF
-	/* reset Gsf parameters */
-	memset(&gsfparams, 0, sizeof(GSF_PARAMS));
-#endif /* WITH_GSF */
+	
+	/* reset MSI parameters */
+	memset(&msiparams, 0, sizeof(MSI_PARAMS));
 
 	if (!get_file_type(indata, options.infile, &type))
 		goto err_cleanup;
-	if (!input_validation(type, &options, &header, indata, filesize))
+	if (!input_validation(type, &options, &header, &msiparams, indata, filesize))
 		goto err_cleanup;
 
 	/* search catalog file to determine whether the file is signed in a catalog */
@@ -6384,58 +5576,14 @@ int main(int argc, char **argv)
 		/* reset file header */
 		memset(&catheader, 0, sizeof(FILE_HEADER));
 		catheader.fileend = catsize;
-		if (!input_validation(type, &options, &catheader, catdata, catsize))
+		if (!input_validation(type, &options, &catheader, NULL, catdata, catsize))
 				goto err_cleanup;
 	}
 
 	hash = BIO_new(BIO_f_md());
 	BIO_set_md(hash, options.md);
 
-#ifdef WITH_GSF
-	if (type == FILE_TYPE_MSI) {
-		GsfInput *src;
-		GsfInfile *ole;
-
-		src = gsf_input_stdio_new(options.infile, NULL);
-		if (!src)
-			DO_EXIT_1("Error opening file %s\n", options.infile);
-		ole = gsf_infile_msole_new(src, NULL);
-		g_object_unref(src);
-
-		if (cmd == CMD_EXTRACT) {
-			ret = msi_extract_file(ole, &options);
-			g_object_unref(ole);
-			goto skip_signing;
-		} else if (cmd == CMD_VERIFY) {
-			ret = msi_verify_file(ole, &options);
-			g_object_unref(ole);
-			goto skip_signing;
-		} else {
-			sig = msi_presign_file(type, cmd, &header, &options, &cparams, indata,
-				hash, ole, &gsfparams, &cursig);
-			if (cmd == CMD_REMOVE) {
-				g_object_unref(ole);
-				if (gsfparams.outole) {
-					gsf_output_close(GSF_OUTPUT(gsfparams.outole));
-					g_object_unref(gsfparams.outole);
-					g_object_unref(gsfparams.sink);
-					ret = 0;
-					goto skip_signing;
-				} else
-					/* Failed to create output file */
-					goto err_cleanup;
-			} else if (!sig) {
-				PKCS7_free(cursig);
-				OPENSSL_free(gsfparams.p_msiex);
-				g_object_unref(ole);
-				goto err_cleanup;
-			}
-		}
-		g_object_unref(ole);
-	}
-#endif /* WITH_GSF */
-
-	if (type != FILE_TYPE_MSI && cmd != CMD_VERIFY) {
+	if (cmd != CMD_VERIFY) {
 		/* Create outdata file */
 #ifdef WIN32
 		if (!access(options.outfile, R_OK))
@@ -6445,10 +5593,30 @@ int main(int argc, char **argv)
 		outdata = BIO_new_file(options.outfile, FILE_CREATE_MODE);
 		if (outdata == NULL)
 			DO_EXIT_1("Failed to create file: %s\n", options.outfile);
-		BIO_push(hash, outdata);
+		if (type == FILE_TYPE_MSI)
+			BIO_push(hash, BIO_new(BIO_s_null()));
+		else
+			BIO_push(hash, outdata);
 	}
 
-	if (type == FILE_TYPE_CAB) {
+	if (type == FILE_TYPE_MSI) {
+		if (cmd == CMD_EXTRACT) {
+			ret = msi_extract_file(&msiparams, outdata, options.output_pkcs7);
+			goto skip_signing;
+		} else if (cmd == CMD_VERIFY) {
+			ret = msi_verify_file(&msiparams, &options);
+			goto skip_signing;
+		} else {
+			/* TODO */
+			/* sig = msi_presign_file(type, cmd, &header, &options, &cparams, indata,
+				hash, outdata, &cursig, &msiparams); */		
+			if (cmd == CMD_REMOVE) {
+				ret = 0; /* OK */
+				goto skip_signing;
+			} else if (!sig)
+				goto err_cleanup;
+		}
+	} else if (type == FILE_TYPE_CAB) {
 		if (!(header.flags & FLAG_RESERVE_PRESENT) &&
 				(cmd == CMD_REMOVE || cmd == CMD_EXTRACT)) {
 			DO_EXIT_1("CAB file does not have any signature: %s\n", options.infile);
@@ -6514,20 +5682,10 @@ int main(int argc, char **argv)
 		DO_EXIT_0("PKCS7 output failed\n");
 #endif
 
-#ifdef WITH_GSF
-	ret = append_signature(sig, cursig, type, cmd, &options, &padlen, &len,
-			outdata, &gsfparams);
-	if (type == FILE_TYPE_MSI) {
-		gsf_output_close(GSF_OUTPUT(gsfparams.outole));
-		g_object_unref(gsfparams.outole);
-		g_object_unref(gsfparams.sink);
-	}
-#else
 	ret = append_signature(sig, cursig, type, &options, &padlen, &len, outdata);
-#endif /* WITH_GSF */
 	if (ret)
 		DO_EXIT_0("Append signature to outfile failed\n");
-
+			
 skip_signing:
 
 	update_data_size(type, cmd, &header, padlen, len, outdata);
@@ -6560,14 +5718,11 @@ err_cleanup:
 #else
 	munmap(indata, filesize);
 #endif
+	free_msi_params(&msiparams);
 	free_crypto_params(&cparams);
 	free_options(&options);
 	if (ret)
 		ERR_print_errors_fp(stdout);
-#ifdef WITH_GSF
-	if (gsf_initialized)
-		gsf_shutdown();
-#endif
 
 	printf(ret ? "Failed\n" : "Succeeded\n");
 	return ret;

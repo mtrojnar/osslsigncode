@@ -15,7 +15,10 @@ install-sh
 missing
 osslsigncode
 osslsigncode.o
+msi.o
 stamp-h1
+INSTALL
+COPYING
 
 .#*#
 .*.bak
