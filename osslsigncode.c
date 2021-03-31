@@ -4819,7 +4819,8 @@ static int read_certfile(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 		cparams->certs = X509_chain_up_ref(p7->d.sign->cert);
 
 		/* additional CRLs may be supplied as part of a PKCS#7 signed data structure */
-		cparams->crls = X509_CRL_chain_up_ref(p7->d.sign->crl);
+		if (p7->d.sign->crl)
+			cparams->crls = X509_CRL_chain_up_ref(p7->d.sign->crl);
 		PKCS7_free(p7);
 	}
 
