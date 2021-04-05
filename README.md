@@ -130,7 +130,7 @@ use instead of your *.spc file. It's the same basic thing, in a different format
 For your PVK file, you will need to download a little utility called
 PVK.EXE. This can currently be downloaded at
 
-  http://support.globalsign.net/en/objectsign/PVK.zip
+  https://www.globalsign.com/support/code-signing/PVK.zip
 
 Run:
 ```
