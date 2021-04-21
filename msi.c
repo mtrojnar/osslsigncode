@@ -27,15 +27,18 @@ static const u_char *sector_offset_to_address(MSI_FILE *msi, size_t sector, size
 
 static size_t get_fat_sector_location(MSI_FILE *msi, size_t fatSectorNumber)
 {
+	size_t entriesPerSector, difatSectorLocation;
+	const u_char *address;
+
 	if (fatSectorNumber < DIFAT_IN_HEADER) {
 		return msi->m_hdr->headerDIFAT[fatSectorNumber];
 	} else {
 		fatSectorNumber -= DIFAT_IN_HEADER;
-		size_t entriesPerSector = msi->m_sectorSize / 4 - 1;
-		size_t difatSectorLocation = msi->m_hdr->firstDIFATSectorLocation;
+		entriesPerSector = msi->m_sectorSize / 4 - 1;
+		difatSectorLocation = msi->m_hdr->firstDIFATSectorLocation;
 		while (fatSectorNumber >= entriesPerSector) {
 			fatSectorNumber -= entriesPerSector;
-			const u_char *address = sector_offset_to_address(msi, difatSectorLocation, msi->m_sectorSize - 4);
+			address = sector_offset_to_address(msi, difatSectorLocation, msi->m_sectorSize - 4);
 			difatSectorLocation = GET_UINT32_LE(address);
 		}
 		return GET_UINT32_LE(sector_offset_to_address(msi, difatSectorLocation, fatSectorNumber * 4));
@@ -202,6 +205,10 @@ static MSI_ENTRY *parse_entry(const u_char *data)
  */
 static MSI_ENTRY *get_entry(MSI_FILE *msi, size_t entryID)
 {
+	size_t sector = 0;
+	size_t offset = 0;
+	const u_char *address;
+
 	/* The special value NOSTREAM (0xFFFFFFFF) is used as a terminator */
 	if (entryID == NOSTREAM) {
 		return NULL; /* FAILED */
@@ -210,10 +217,8 @@ static MSI_ENTRY *get_entry(MSI_FILE *msi, size_t entryID)
 		printf("Invalid argument entryID\n");
 		return NULL; /* FAILED */
 	}
-	size_t sector = 0;
-	size_t offset = 0;
 	locate_final_sector(msi, msi->m_hdr->firstDirectorySectorLocation, entryID * sizeof(MSI_ENTRY), &sector, &offset);
-	const u_char *address = sector_offset_to_address(msi, sector, offset);
+	address = sector_offset_to_address(msi, sector, offset);
 	return parse_entry(address);
 }
 
@@ -553,13 +558,13 @@ int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name)
 static MSI_DIRENT *dirent_add(const u_char *name, uint16_t nameLen)
 {
 	MSI_DIRENT *dirent = (MSI_DIRENT *)OPENSSL_malloc(sizeof(MSI_DIRENT));
+	MSI_ENTRY *entry = (MSI_ENTRY *)OPENSSL_malloc(sizeof(MSI_ENTRY));
 
 	memcpy(dirent->name, name, nameLen);
 	dirent->nameLen = nameLen;
 	dirent->type = DIR_STREAM;
 	dirent->children = sk_MSI_DIRENT_new_null();
 
-	MSI_ENTRY *entry = (MSI_ENTRY *)OPENSSL_malloc(sizeof(MSI_ENTRY));
 	memcpy(entry->name, name, nameLen);
 	entry->nameLen = nameLen;
 	entry->type = DIR_STREAM;
@@ -650,7 +655,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, int l
 		} else { /* DIR_STREAM */
 			uint32_t inlen = GET_UINT32_LE(child->entry->size);
 			char *indata = (char *)OPENSSL_malloc(inlen);
-			char buf[out->sectorSize];
+			char buf[MAX_SECTOR_SIZE];
 
 			inlen = stream_read(msi, child->entry, p_msi, len_msi, p_msiex, len_msiex, &indata, inlen, is_root);
 			if (inlen == 0) {
@@ -709,7 +714,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, int l
 
 static void ministream_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
 {
-	char buf[out->sectorSize];
+	char buf[MAX_SECTOR_SIZE];
 	int remain, i;
 	int ministreamSectorsCount = (out->miniStreamLen + out->sectorSize - 1) / out->sectorSize;
 
@@ -738,7 +743,7 @@ static void ministream_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
 
 static void minifat_save(BIO *outdata, MSI_OUT *out)
 {
-	char buf[out->sectorSize];
+	char buf[MAX_SECTOR_SIZE];
 	int i,remain;
 	
 	/* set Mini FAT Starting Sector Location in the header */
@@ -875,7 +880,7 @@ static int dirents_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out, int *str
 
 static void dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
 {
-	char buf[out->sectorSize];
+	char buf[MAX_SECTOR_SIZE];
 	char *unused_entry;
 	int i, remain;
 	int streamId = 0;
@@ -916,7 +921,7 @@ static void dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
 
 static int fat_save(BIO *outdata, MSI_OUT *out)
 {
-	char buf[out->sectorSize];
+	char buf[MAX_SECTOR_SIZE];
 	int i, remain;
 	
 	remain = (out->fatLen + out->sectorSize - 1) / out->sectorSize;
@@ -951,7 +956,7 @@ static int fat_save(BIO *outdata, MSI_OUT *out)
 
 static void header_save(BIO *outdata, MSI_OUT *out)
 {
-	char buf[out->sectorSize];
+	char buf[MAX_SECTOR_SIZE];
 	int remain;
 
 	/* set Number of FAT sectors in the header */
