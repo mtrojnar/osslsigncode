@@ -2,6 +2,9 @@
 
 - CAT files support
   (Thanks to James McKenzie)
+- libgsf library dependency remove
+- unlimited support for MsiDigitalSignatureEx signature
+  through handling all MSI metadata
 
 ### 2.1 (2020-10-11)
 
