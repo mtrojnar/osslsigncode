@@ -34,6 +34,7 @@
 #define DIFAT_IN_HEADER             109
 #define MINI_STREAM_CUTOFF_SIZE     0x00001000 /* 4096 bytes */
 #define HEADER_SIZE                 0x200  /* 512 bytes, independent of sector size */
+#define MAX_SECTOR_SIZE             0x1000 /* 4096 bytes */
 
 #define HEADER_SIGNATURE            0x00   /* 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 */
 #define HEADER_CLSID                0x08   /* reserved and unused */
