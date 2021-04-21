@@ -1,5 +1,10 @@
 /*
- * Microsoft Compound File Reader
+ * MSI file support library
+ *
+ * Copyright (C) 2021 Michał Trojnara <Michal.Trojnara@stunnel.org>
+ * Author: Małgorzata Olszówka <Malgorzata.Olszowka@stunnel.org>
+ *
+ * Reference specifications:
  * http://en.wikipedia.org/wiki/Compound_File_Binary_Format
  * https://msdn.microsoft.com/en-us/library/dd942138.aspx
  * https://github.com/microsoft/compoundfilereader
