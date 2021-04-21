@@ -154,9 +154,10 @@ int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, size_t offset, char *buffer, 
 /* Parse MSI_FILE_HDR struct */
 static MSI_FILE_HDR *parse_header(char *data)
 {
-	MSI_FILE_HDR *header = (MSI_FILE_HDR *)OPENSSL_malloc(sizeof(MSI_FILE_HDR));
+	MSI_FILE_HDR *header = (MSI_FILE_HDR *)OPENSSL_malloc(HEADER_SIZE);
 	if (!data) {
-		memset(&header, 0, sizeof(MSI_FILE_HDR));
+		/* initialise 512 bytes */
+		memset(header, 0, sizeof(MSI_FILE_HDR));
 	} else {
 		memcpy(header->signature, data + HEADER_SIGNATURE, sizeof(header->signature));
 		header->minorVersion = GET_UINT16_LE(data + HEADER_MINOR_VER);
@@ -308,9 +309,9 @@ MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse)
 
 	for (i = 0; i < sk_MSI_DIRENT_num(dirent->children); i++) {
 		MSI_DIRENT *child = sk_MSI_DIRENT_value(dirent->children, i);
-		if (!memcmp(child->name, digital_signature, sizeof(digital_signature))) {
+		if (!memcmp(child->name, digital_signature, MIN(child->nameLen, sizeof(digital_signature)))) {
 			ds = child->entry;
-		} else if (dse && !memcmp(child->name, digital_signature_ex, sizeof(digital_signature_ex))) {
+		} else if (dse && !memcmp(child->name, digital_signature_ex, MIN(child->nameLen, sizeof(digital_signature_ex)))) {
 			*dse = child->entry;
 		} else {
 			continue;
@@ -413,8 +414,8 @@ int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root)
 	sk_MSI_DIRENT_sort(children);
 	for (i = 0; i < sk_MSI_DIRENT_num(children); i++) {
 		MSI_DIRENT *child = sk_MSI_DIRENT_value(children, i);
-		if (is_root && (!memcmp(child->name, digital_signature, sizeof(digital_signature))
-				|| !memcmp(child->name, digital_signature_ex, sizeof(digital_signature_ex)))) {
+		if (is_root && (!memcmp(child->name, digital_signature, MIN(child->nameLen, sizeof(digital_signature)))
+				|| !memcmp(child->name, digital_signature_ex, MIN(child->nameLen, sizeof(digital_signature_ex))))) {
 			continue;
 		}
 		if (child->type == DIR_STREAM) {
@@ -443,8 +444,8 @@ int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root)
 
 	for (i = 0; i < sk_MSI_DIRENT_num(children); i++) {
 		MSI_DIRENT *child = sk_MSI_DIRENT_value(children, i);
-		if (is_root && (!memcmp(child->name, digital_signature, sizeof(digital_signature))
-				|| !memcmp(child->name, digital_signature_ex, sizeof(digital_signature_ex)))) {
+		if (is_root && (!memcmp(child->name, digital_signature, MIN(child->nameLen, sizeof(digital_signature)))
+				|| !memcmp(child->name, digital_signature_ex, MIN(child->nameLen, sizeof(digital_signature_ex))))) {
 			continue;
 		}
 		if (child->type == DIR_STREAM) {
@@ -536,13 +537,13 @@ static void fat_append(MSI_OUT *out, char *buf, int len)
 	out->fatLen += len;
 }
 
-int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name)
+int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen)
 {
 	int i;
 
 	for (i = 0; i < sk_MSI_DIRENT_num(dirent->children); i++) {
 		MSI_DIRENT *child = sk_MSI_DIRENT_value(dirent->children, i);
-		if (memcmp(child->name, name, child->nameLen)) {
+		if (memcmp(child->name, name, MIN(child->nameLen, nameLen))) {
 			continue;
 		}
 		if (child->type != DIR_STREAM) {
@@ -587,7 +588,7 @@ static int dirent_insert(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLe
 {
 	MSI_DIRENT *new_dirent;
 
-	if (!msi_dirent_delete(dirent, name)) {
+	if (!msi_dirent_delete(dirent, name, nameLen)) {
 		return 0; /* FAILED */
 	}
 	/* create new dirent */
@@ -604,7 +605,7 @@ static int signature_insert(MSI_DIRENT *dirent, int len_msiex)
 			return 0; /* FAILED */
 		}
 	} else {
-		if (!msi_dirent_delete(dirent, digital_signature_ex)) {
+		if (!msi_dirent_delete(dirent, digital_signature_ex, sizeof(digital_signature_ex))) {
 			return 0; /* FAILED */
 		}
 	}

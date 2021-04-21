@@ -202,5 +202,5 @@ MSI_FILE_HDR *msi_header_get(MSI_FILE *msi);
 int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root);
 int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root);
 void msi_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, size_t fileend);
-int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name);
+int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen);
 int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p, int len, u_char *p_msiex, int len_msiex, BIO *outdata);
