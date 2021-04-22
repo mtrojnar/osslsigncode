@@ -3076,10 +3076,10 @@ static int msi_extract_file(MSI_PARAMS *msiparams, BIO *outdata, int output_pkcs
 
 static int msi_remove_file(MSI_PARAMS *msiparams, BIO *outdata)
 {
-	if (!msi_dirent_delete(msiparams->dirent, digital_signature_ex, sizeof(digital_signature_ex))) {
+	if (!msi_dirent_delete(msiparams->dirent, digital_signature_ex, sizeof digital_signature_ex)) {
 		return 1; /* FAILED */
 	}
-	if (!msi_dirent_delete(msiparams->dirent, digital_signature, sizeof(digital_signature))) {
+	if (!msi_dirent_delete(msiparams->dirent, digital_signature, sizeof digital_signature)) {
 		return 1; /* FAILED */
 	}
 	if (!msi_file_write(msiparams->msi, msiparams->dirent, NULL, 0, NULL, 0, outdata)) {

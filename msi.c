@@ -159,7 +159,7 @@ static MSI_FILE_HDR *parse_header(char *data)
 		/* initialise 512 bytes */
 		memset(header, 0, sizeof(MSI_FILE_HDR));
 	} else {
-		memcpy(header->signature, data + HEADER_SIGNATURE, sizeof(header->signature));
+		memcpy(header->signature, data + HEADER_SIGNATURE, sizeof header->signature);
 		header->minorVersion = GET_UINT16_LE(data + HEADER_MINOR_VER);
 		header->majorVersion = GET_UINT16_LE(data + HEADER_MAJOR_VER);
 		header->byteOrder = GET_UINT16_LE(data + HEADER_BYTE_ORDER);
@@ -174,7 +174,7 @@ static MSI_FILE_HDR *parse_header(char *data)
 		header->numMiniFATSector = GET_UINT32_LE(data + HEADER_MINI_FAT_SECTORS_NUM);
 		header->firstDIFATSectorLocation = GET_UINT32_LE(data + HEADER_DIFAT_SECTOR_LOC);
 		header->numDIFATSector = GET_UINT32_LE(data + HEADER_DIFAT_SECTORS_NUM);
-		memcpy(header->headerDIFAT, data + HEADER_DIFAT, sizeof(header->headerDIFAT));
+		memcpy(header->headerDIFAT, data + HEADER_DIFAT, sizeof header->headerDIFAT);
 	}
 	return header;
 }
@@ -246,8 +246,8 @@ MSI_FILE *msi_file_new(char *buffer, size_t len)
 	msi->m_minisectorSize = 1 << msi->m_hdr->miniSectorShift;
 	msi->m_miniStreamStartSector = 0;
 
-	if (msi->m_bufferLen < sizeof(*(msi->m_hdr)) ||
-			memcmp(msi->m_hdr->signature, msi_magic, sizeof(msi_magic))) {
+	if (msi->m_bufferLen < sizeof *(msi->m_hdr) ||
+			memcmp(msi->m_hdr->signature, msi_magic, sizeof msi_magic)) {
 		printf("Wrong file format\n");
 		return NULL; /* FAILED */
 	}
@@ -309,9 +309,9 @@ MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse)
 
 	for (i = 0; i < sk_MSI_DIRENT_num(dirent->children); i++) {
 		MSI_DIRENT *child = sk_MSI_DIRENT_value(dirent->children, i);
-		if (!memcmp(child->name, digital_signature, MIN(child->nameLen, sizeof(digital_signature)))) {
+		if (!memcmp(child->name, digital_signature, MIN(child->nameLen, sizeof digital_signature))) {
 			ds = child->entry;
-		} else if (dse && !memcmp(child->name, digital_signature_ex, MIN(child->nameLen, sizeof(digital_signature_ex)))) {
+		} else if (dse && !memcmp(child->name, digital_signature_ex, MIN(child->nameLen, sizeof digital_signature_ex))) {
 			*dse = child->entry;
 		} else {
 			continue;
@@ -388,15 +388,15 @@ static void prehash_metadata(MSI_ENTRY *entry, BIO *hash)
 		BIO_write(hash, entry->name, entry->nameLen - 2);
 	}
 	if (entry->type != DIR_STREAM) {
-		BIO_write(hash, entry->clsid, sizeof(entry->clsid));
+		BIO_write(hash, entry->clsid, sizeof entry->clsid);
 	} else {
-		BIO_write(hash, entry->size, sizeof(entry->size)/2);
+		BIO_write(hash, entry->size, (sizeof entry->size)/2);
 	}
-	BIO_write(hash, entry->stateBits, sizeof(entry->stateBits));
+	BIO_write(hash, entry->stateBits, sizeof entry->stateBits);
 
 	if (entry->type != DIR_ROOT) {
-		BIO_write(hash, entry->creationTime, sizeof(entry->creationTime));
-		BIO_write(hash, entry->modifiedTime, sizeof(entry->modifiedTime));
+		BIO_write(hash, entry->creationTime, sizeof entry->creationTime);
+		BIO_write(hash, entry->modifiedTime, sizeof entry->modifiedTime);
 	}
 }
 
@@ -414,8 +414,8 @@ int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root)
 	sk_MSI_DIRENT_sort(children);
 	for (i = 0; i < sk_MSI_DIRENT_num(children); i++) {
 		MSI_DIRENT *child = sk_MSI_DIRENT_value(children, i);
-		if (is_root && (!memcmp(child->name, digital_signature, MIN(child->nameLen, sizeof(digital_signature)))
-				|| !memcmp(child->name, digital_signature_ex, MIN(child->nameLen, sizeof(digital_signature_ex))))) {
+		if (is_root && (!memcmp(child->name, digital_signature, MIN(child->nameLen, sizeof digital_signature))
+				|| !memcmp(child->name, digital_signature_ex, MIN(child->nameLen, sizeof digital_signature_ex)))) {
 			continue;
 		}
 		if (child->type == DIR_STREAM) {
@@ -444,8 +444,8 @@ int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root)
 
 	for (i = 0; i < sk_MSI_DIRENT_num(children); i++) {
 		MSI_DIRENT *child = sk_MSI_DIRENT_value(children, i);
-		if (is_root && (!memcmp(child->name, digital_signature, MIN(child->nameLen, sizeof(digital_signature)))
-				|| !memcmp(child->name, digital_signature_ex, MIN(child->nameLen, sizeof(digital_signature_ex))))) {
+		if (is_root && (!memcmp(child->name, digital_signature, MIN(child->nameLen, sizeof digital_signature))
+				|| !memcmp(child->name, digital_signature_ex, MIN(child->nameLen, sizeof digital_signature_ex)))) {
 			continue;
 		}
 		if (child->type == DIR_STREAM) {
@@ -468,7 +468,7 @@ int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root)
 			}
 		}
 	}
-	BIO_write(hash, dirent->entry->clsid, sizeof(dirent->entry->clsid));
+	BIO_write(hash, dirent->entry->clsid, sizeof dirent->entry->clsid);
 	ret = 1; /* OK */
 out:
 	sk_MSI_DIRENT_free(children);
@@ -493,8 +493,8 @@ void msi_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, size_t filee
 		int l;
 		static u_char bfb[16*1024*1024];
 		size_t want = fileend - n;
-		if (want > sizeof(bfb))
-			want = sizeof(bfb);
+		if (want > sizeof bfb)
+			want = sizeof bfb;
 		l = BIO_read(bio, bfb, want);
 		if (l <= 0)
 			break;
@@ -601,15 +601,15 @@ static int dirent_insert(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLe
 static int signature_insert(MSI_DIRENT *dirent, int len_msiex)
 {
 	if (len_msiex > 0) {
-		if (!dirent_insert(dirent, digital_signature_ex, sizeof(digital_signature_ex))) {
+		if (!dirent_insert(dirent, digital_signature_ex, sizeof digital_signature_ex)) {
 			return 0; /* FAILED */
 		}
 	} else {
-		if (!msi_dirent_delete(dirent, digital_signature_ex, sizeof(digital_signature_ex))) {
+		if (!msi_dirent_delete(dirent, digital_signature_ex, sizeof digital_signature_ex)) {
 			return 0; /* FAILED */
 		}
 	}
-	if (!dirent_insert(dirent, digital_signature, sizeof(digital_signature))) {
+	if (!dirent_insert(dirent, digital_signature, sizeof digital_signature)) {
 			return 0; /* FAILED */
 	}
 	return 1; /* OK */
@@ -618,10 +618,10 @@ static int signature_insert(MSI_DIRENT *dirent, int len_msiex)
 static int stream_read(MSI_FILE *msi, MSI_ENTRY *entry, u_char *p_msi, int len_msi,
 		u_char *p_msiex, int len_msiex, char **indata, int inlen, int is_root)
 {
-	if (is_root && !memcmp(entry->name, digital_signature, sizeof(digital_signature))) {
+	if (is_root && !memcmp(entry->name, digital_signature, sizeof digital_signature)) {
 		*indata = (char *)p_msi;
 		inlen = len_msi;
-	} else if (is_root && !memcmp(entry->name, digital_signature_ex, sizeof(digital_signature_ex))) {
+	} else if (is_root && !memcmp(entry->name, digital_signature_ex, sizeof digital_signature_ex)) {
 		*indata = (char *)p_msiex;
 		inlen = len_msiex;
 	} else {
@@ -664,7 +664,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, int l
 			}
 			/* set the size of the user-defined data if this is a stream object */
 			PUT_UINT32_LE(inlen, buf);
-			memcpy(child->entry->size, buf, sizeof(child->entry->size));
+			memcpy(child->entry->size, buf, sizeof child->entry->size);
 			
 			if (inlen < MINI_STREAM_CUTOFF_SIZE) {
 				/* set the index into the mini FAT to track the chain of sectors through the mini stream */
@@ -893,7 +893,7 @@ static void dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
 	/* set the size of the mini stream in the root object */
 	if (dirent->type == DIR_ROOT) {
 		PUT_UINT32_LE(out->miniStreamLen, buf);
-		memcpy(dirent->entry->size, buf, sizeof(dirent->entry->size));
+		memcpy(dirent->entry->size, buf, sizeof dirent->entry->size);
 	}
 	/* sort and save all directory entries */
 	dirents_save(dirent, outdata, out, &streamId, 0, 0);
@@ -993,7 +993,7 @@ static char *header_new(MSI_FILE_HDR *hdr, MSI_OUT *out)
 	/* initialise 512 bytes */
 	memset(data, 0, HEADER_SIZE);
 
-	memcpy(data + HEADER_SIGNATURE, msi_magic, sizeof(msi_magic));
+	memcpy(data + HEADER_SIGNATURE, msi_magic, sizeof msi_magic);
 	memset(data + HEADER_CLSID, 0, 16);
 	PUT_UINT16_LE(hdr->minorVersion, buf);
 	memcpy(data + HEADER_MINOR_VER, buf, 2);
