@@ -5284,8 +5284,6 @@ static int read_password(GLOBAL_OPTIONS *options)
 {
 	char passbuf[4096];
 	int passfd, passlen;
-	static const u_char lf[] = {0x0a};
-	static const u_char cr_lf[] = {0x0d, 0x0a};
 	static const u_char utf8_bom[] = {0xef, 0xbb, 0xbf};
 
 	if (options->readpass) {
@@ -5300,13 +5298,10 @@ static int read_password(GLOBAL_OPTIONS *options)
 			printf("Failed to read password from file: %s\n", options->readpass);
 			return 0; /* FAILED */
 		}
-		passbuf[passlen] = 0x00;
-		if (!memcmp(passbuf + passlen - 2, cr_lf, sizeof(cr_lf))) {
-			passbuf[passlen-1]=0x00;
-			passbuf[passlen-2]=0x00;
-		} else if (!memcmp(passbuf + passlen - 1, lf, sizeof(lf))) {
-			passbuf[passlen-1]=0x00;
+		while (passlen > 0 && (passbuf[passlen-1] == 0x0a || passbuf[passlen-1] == 0x0d)) {
+			passlen--;
 		}
+		passbuf[passlen] = 0x00;
 		if (!memcmp(passbuf, utf8_bom, sizeof(utf8_bom))) {
 			options->pass = OPENSSL_strdup(passbuf + 3);	
 		} else {
