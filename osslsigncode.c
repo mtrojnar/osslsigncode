@@ -270,15 +270,15 @@ typedef struct {
 } GLOBAL_OPTIONS;
 
 typedef struct {
-	size_t header_size;
+	uint32_t header_size;
 	int pe32plus;
-	unsigned short magic;
-	unsigned int pe_checksum;
-	size_t nrvas;
-	size_t sigpos;
-	size_t siglen;
+	uint16_t magic;
+	uint32_t pe_checksum;
+	uint32_t nrvas;
+	uint32_t sigpos;
+	uint32_t siglen;
 	size_t fileend;
-	size_t flags;
+	uint16_t flags;
 } FILE_HEADER;
 
 typedef struct {
@@ -1471,12 +1471,12 @@ static const unsigned char classid_page_hash[] = {
 	0xAE, 0x05, 0xA2, 0x17, 0xDA, 0x8E, 0x60, 0xD6
 };
 
-static unsigned char *pe_calc_page_hash(char *indata, size_t header_size,
-	int pe32plus, size_t sigpos, int phtype, size_t *rphlen)
+static unsigned char *pe_calc_page_hash(char *indata, uint32_t header_size,
+	int pe32plus, uint32_t sigpos, int phtype, size_t *rphlen)
 {
-	unsigned short nsections, sizeofopthdr;
-	size_t pagesize, hdrsize;
-	size_t rs, ro, l, lastpos = 0;
+	uint16_t nsections, sizeofopthdr;
+	uint32_t pagesize, hdrsize;
+	uint32_t rs, ro, l, lastpos = 0;
 	int pphlen, phlen, i, pi = 1;
 	unsigned char *res, *zeroes;
 	char *sections;
@@ -1543,7 +1543,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 	SpcLink *link;
 	STACK_OF(ASN1_TYPE) *oset, *aset;
 
-	ph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, \
+	ph = pe_calc_page_hash(indata, header->header_size, header->pe32plus,
 			header->fileend, phtype, &phlen);
 	if (!ph) {
 		printf("Failed to calculate page hash\n");
@@ -3826,13 +3826,13 @@ out:
  */
 static PKCS7 *pe_extract_existing_pkcs7(char *indata, FILE_HEADER *header)
 {
-	size_t pos = 0;
+	uint32_t pos = 0;
 	PKCS7 *p7 = NULL;
 
 	while (pos < header->siglen) {
-		size_t l = GET_UINT32_LE(indata + header->sigpos + pos);
-		unsigned short certrev  = GET_UINT16_LE(indata + header->sigpos + pos + 4);
-		unsigned short certtype = GET_UINT16_LE(indata + header->sigpos + pos + 6);
+		uint32_t l = GET_UINT32_LE(indata + header->sigpos + pos);
+		uint16_t certrev  = GET_UINT16_LE(indata + header->sigpos + pos + 4);
+		uint16_t certtype = GET_UINT16_LE(indata + header->sigpos + pos + 6);
 		if (certrev == WIN_CERT_REVISION_2 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
 			const unsigned char *blob = (unsigned char*)indata + header->sigpos + pos + 8;
 			p7 = d2i_PKCS7(NULL, &blob, l - 8);
@@ -3924,7 +3924,9 @@ static int pe_verify_header(char *indata, char *infile, size_t filesize, FILE_HE
 		printf("Corrupt DOS file - too short: %s\n", infile);
 		ret = 0; /* FAILED */
 	}
-	header->header_size = GET_UINT32_LE(indata+60);
+	/* SizeOfHeaders field specifies the combined size of an MS-DOS stub, PE header,
+	 * and section headers rounded up to a multiple of FileAlignment. */
+	header->header_size = GET_UINT32_LE(indata + 60);
 	if (filesize < header->header_size + 160) {
 		printf("Corrupt DOS file - too short: %s\n", infile);
 		ret = 0; /* FAILED */
@@ -3933,6 +3935,10 @@ static int pe_verify_header(char *indata, char *infile, size_t filesize, FILE_HE
 		printf("Unrecognized DOS file type: %s\n", infile);
 		ret = 0; /* FAILED */
 	}
+	/* Magic field identifies the state of the image file. The most common number is
+	 * 0x10B, which identifies it as a normal executable file,
+	 * 0x20B identifies it as a PE32+ executable,
+	 * 0x107 identifies it as a ROM image (not supported) */
 	header->magic = GET_UINT16_LE(indata + header->header_size + 24);
 	if (header->magic == 0x20b) {
 		header->pe32plus = 1;
@@ -3942,12 +3948,16 @@ static int pe_verify_header(char *indata, char *infile, size_t filesize, FILE_HE
 		printf("Corrupt PE file - found unknown magic %04X: %s\n", header->magic, infile);
 		ret = 0; /* FAILED */
 	}
+	/* The image file checksum */
 	header->pe_checksum = GET_UINT32_LE(indata + header->header_size + 88);
+	/* NumberOfRvaAndSizes field specifies the number of data-directory entries
+	 * in the remainder of the optional header. Each describes a location and size. */
 	header->nrvas = GET_UINT32_LE(indata + header->header_size + 116 + header->pe32plus * 16);
 	if (header->nrvas < 5) {
 		printf("Can not handle PE files without certificate table resource: %s\n", infile);
 		ret = 0; /* FAILED */
 	}
+	/* Certificate Table field specifies the attribute certificate table address (4 bytes) and size (4 bytes) */
 	header->sigpos = GET_UINT32_LE(indata + header->header_size + 152 + header->pe32plus * 16);
 	header->siglen = GET_UINT32_LE(indata + header->header_size + 152 + header->pe32plus * 16 + 4);
 
@@ -3994,7 +4004,7 @@ static void pe_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *
 static int cab_verify_header(char *indata, char *infile, size_t filesize, FILE_HEADER *header)
 {
 	int ret = 1;
-	size_t reserved;
+	uint32_t reserved;
 
 	if (filesize < 44) {
 		printf("Corrupt cab file - too short: %s\n", infile);
@@ -4002,7 +4012,7 @@ static int cab_verify_header(char *indata, char *infile, size_t filesize, FILE_H
 	}
 	reserved = GET_UINT32_LE(indata + 4);
 	if (reserved) {
-		printf("Reserved1: 0x%08lX\n", reserved);
+		printf("Reserved1: 0x%08X\n", reserved);
 		ret = 0; /* FAILED */
 	}
 	/* flags specify bit-mapped values that indicate the presence of optional data */
@@ -4010,7 +4020,7 @@ static int cab_verify_header(char *indata, char *infile, size_t filesize, FILE_H
 #if 1
 	if (header->flags & FLAG_PREV_CABINET) {
 		/* FLAG_NEXT_CABINET works */
-		printf("Multivolume cabinet file is unsupported: flags 0x%04lX\n", header->flags);
+		printf("Multivolume cabinet file is unsupported: flags 0x%04X\n", header->flags);
 		ret = 0; /* FAILED */
 	}
 #endif
@@ -4021,12 +4031,12 @@ static int cab_verify_header(char *indata, char *infile, size_t filesize, FILE_H
 		*/
 		header->header_size = GET_UINT32_LE(indata + 36);
 		if (header->header_size != 20) {
-			printf("Additional header size: 0x%08lX\n", header->header_size);
+			printf("Additional header size: 0x%08X\n", header->header_size);
 			ret = 0; /* FAILED */
 		}
 		reserved = GET_UINT32_LE(indata + 40);
 		if (reserved != 0x00100000) {
-			printf("abReserved: 0x%08lX\n", reserved);
+			printf("abReserved: 0x%08X\n", reserved);
 			ret = 0; /* FAILED */
 		}
 		/*
@@ -4041,7 +4051,7 @@ static int cab_verify_header(char *indata, char *infile, size_t filesize, FILE_H
 		header->sigpos = GET_UINT32_LE(indata + 44);
 		header->siglen = GET_UINT32_LE(indata + 48);
 		if (header->sigpos < filesize && header->sigpos + header->siglen != filesize) {
-			printf("Additional data offset:\t%lu bytes\nAdditional data size:\t%lu bytes\n",
+			printf("Additional data offset:\t%u bytes\nAdditional data size:\t%u bytes\n",
 					header->sigpos, header->siglen);
 			printf("File size:\t\t%lu bytes\n", filesize);
 			ret = 0; /* FAILED */
@@ -4056,7 +4066,7 @@ static void cab_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf
 	BIO *bio;
 	static unsigned char bfb[16*1024*1024];
 	EVP_MD_CTX *mdctx;
-	size_t offset, coffFiles;
+	uint32_t offset, coffFiles;
 
 	if (header->sigpos)
 		offset = header->sigpos;
@@ -4075,7 +4085,7 @@ static void cab_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf
 	/* u4 reserved1 00000000: 4-7 */
 	BIO_read(bio, bfb, 4);
 	if (header->sigpos) {
-		size_t nfolders, flags;
+		uint16_t nfolders, flags;
 		/*
 		 * u4 cbCabinet - size of this cabinet file in bytes: 8-11
 		 * u4 reserved2 00000000: 12-15
@@ -4162,7 +4172,7 @@ static void cab_calc_digest(char *indata, const EVP_MD *md, unsigned char *mdbuf
 	/* (variable) ab - the compressed data bytes */
 	while (coffFiles < offset) {
 		int l;
-		size_t want = offset - coffFiles;
+		uint32_t want = offset - coffFiles;
 		if (want > sizeof(bfb))
 			want = sizeof(bfb);
 		l = BIO_read(bio, bfb, want);
@@ -4293,7 +4303,7 @@ static int cab_extract_file(char *indata, FILE_HEADER *header, BIO *outdata, int
 	return ret;
 }
 
-static void cab_optional_names(size_t flags, char *indata, BIO *outdata, int *len)
+static void cab_optional_names(uint16_t flags, char *indata, BIO *outdata, int *len)
 {
 	int i;
 
@@ -4337,8 +4347,8 @@ static void cab_optional_names(size_t flags, char *indata, BIO *outdata, int *le
 static int cab_remove_file(char *indata, FILE_HEADER *header, size_t filesize, BIO *outdata)
 {
 	int i;
-	unsigned short nfolders;
-	size_t tmp, flags;
+	uint32_t tmp;
+	uint16_t nfolders, flags;
 	static char buf[64*1024];
 
 	/*
@@ -4398,8 +4408,7 @@ static int cab_remove_file(char *indata, FILE_HEADER *header, size_t filesize, B
 static void cab_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
 {
 	int i;
-	unsigned short nfolders;
-	size_t flags;
+	uint16_t nfolders, flags;
 	static char buf[64*1024];
 
 	/* u1 signature[4] 4643534D MSCF: 0-3 */
@@ -4455,8 +4464,8 @@ static void cab_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO 
 static void cab_add_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
 {
 	int i;
-	unsigned short nfolders;
-	size_t tmp, flags;
+	uint32_t tmp;
+	uint16_t nfolders, flags;
 	static char buf[64*1024];
 	u_char cabsigned[] = {
 		0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
