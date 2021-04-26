@@ -1181,7 +1181,6 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -timestamp-expiration ]\n", "");
 		printf("%12s[ -verbose ]\n\n", "");
 	}
-	exit(-1);
 }
 
 static void help_for(const char *argv0, const char *cmd)
@@ -1406,7 +1405,8 @@ typedef enum {
 	CMD_REMOVE,
 	CMD_VERIFY,
 	CMD_ADD,
-	CMD_ATTACH
+	CMD_ATTACH,
+	CMD_HELP
 } cmd_type_t;
 
 
@@ -1507,7 +1507,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 			header->fileend, phtype, &phlen);
 	if (!ph) {
 		printf("Failed to calculate page hash\n");
-		exit(-1);
+		return NULL; /* FAILED */
 	}
 	tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
 	printf("Calculated page hash            : %s ...\n", hexbuf);
@@ -1564,7 +1564,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 	return link;
 }
 
-static void get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *options,
+static int get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *options,
 			FILE_HEADER *header, file_type_t type, char *indata)
 {
 	u_char *p;
@@ -1593,10 +1593,14 @@ static void get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *opti
 		SpcPeImageData *pid = SpcPeImageData_new();
 		ASN1_BIT_STRING_set(pid->flags, (unsigned char*)"0", 0);
 		if (options->pagehash) {
+			SpcLink *link;
 			phtype = NID_sha1;
 			if (EVP_MD_size(options->md) > EVP_MD_size(EVP_sha1()))
 				phtype = NID_sha256;
-			pid->file = get_page_hash_link(phtype, indata, header);
+			link = get_page_hash_link(phtype, indata, header);
+			if (!link)
+				return 0; /* FAILED */
+			pid->file = link;
 		} else {
 			pid->file = get_obsolete_link();
 		}
@@ -1623,7 +1627,7 @@ static void get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *opti
 		SpcSipInfo_free(si);
 	} else {
 		printf("Unexpected file type: %d\n", type);
-		exit(1);
+		return 0; /* FAILED */
 	}
 
 	idc->data->type = dtype;
@@ -1645,6 +1649,7 @@ static void get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *opti
 	i2d_SpcIndirectDataContent(idc, &p);
 	SpcIndirectDataContent_free(idc);
 	*len -= EVP_MD_size(options->md);
+	return 1; /* OK */
 }
 
 static int set_signing_blob(PKCS7 *sig, BIO *hash, unsigned char *buf, int len)
@@ -1728,7 +1733,8 @@ static int set_indirect_data_blob(PKCS7 *sig, BIO *hash, file_type_t type,
 	u_char *p = NULL;
 	int len = 0;
 
-	get_indirect_data_blob(&p, &len, options, header, type, indata);
+	if (!get_indirect_data_blob(&p, &len, options, header, type, indata))
+		return 0; /* FAILED */
 	memcpy(buf, p, len);
 	OPENSSL_free(p);
 	if (!set_signing_blob(sig, hash, buf, len))
@@ -5450,9 +5456,10 @@ static cmd_type_t get_command(char **argv)
 	if (!strcmp(argv[1], "--help")) {
 		print_version();
 		help_for(argv[0], "all");
+		return CMD_HELP;
 	} else if (!strcmp(argv[1], "-v") || !strcmp(argv[1], "--version")) {
 		print_version();
-		exit(-1);
+		return CMD_HELP;
 	} else if (!strcmp(argv[1], "sign"))
 		return CMD_SIGN;
 	else if (!strcmp(argv[1], "extract-signature"))
@@ -5486,68 +5493,122 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 	options->signing_time = INVALID_TIME;
 	options->jp = -1;
 
+	if (*cmd == CMD_HELP) {
+		return 0; /* FAILED */
+	}
 	if (*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) {
 		options->cafile = get_cafile();
 		options->untrusted = get_cafile();
 	}
 	for (argc--,argv++; argc >= 1; argc--,argv++) {
 		if (!strcmp(*argv, "-in")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->infile = *(++argv);
 		} else if (!strcmp(*argv, "-out")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->outfile = *(++argv);
 		} else if (!strcmp(*argv, "-sigin")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->sigfile = *(++argv);
 		} else if ((*cmd == CMD_SIGN) && (!strcmp(*argv, "-spc") || !strcmp(*argv, "-certs"))) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->certfile = *(++argv);
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-ac")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->xcertfile = *(++argv);
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-key")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->keyfile = *(++argv);
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs12")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->pkcs12file = *(++argv);
 		} else if ((*cmd == CMD_EXTRACT) && !strcmp(*argv, "-pem")) {
 			options->output_pkcs7 = 1;
 #ifndef OPENSSL_NO_ENGINE
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11cert")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->p11cert = *(++argv);
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11engine")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->p11engine = *(++argv);
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11module")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->p11module = *(++argv);
 #endif /* OPENSSL_NO_ENGINE */
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-pass")) {
-			if (options->askpass || options->readpass) usage(argv0, "all");
-			if (--argc < 1) usage(argv0, "all");
+			if (options->askpass || options->readpass) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->pass = OPENSSL_strdup(*(++argv));
 			memset(*argv, 0, strlen(*argv));
 #ifdef PROVIDE_ASKPASS
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-askpass")) {
-			if (options->pass || options->readpass) usage(argv0, "all");
+			if (options->pass || options->readpass) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->askpass = 1;
 #endif
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-readpass")) {
-			if (options->askpass || options->pass) usage(argv0, "all");
-			if (--argc < 1) usage(argv0, "all");
+			if (options->askpass || options->pass) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->readpass = *(++argv);
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-comm")) {
 			options->comm = 1;
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-ph")) {
 			options->pagehash = 1;
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-n")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->desc = *(++argv);
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-h")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			++argv;
 			if (!strcmp(*argv, "md5")) {
 				options->md = EVP_md5();
@@ -5561,22 +5622,38 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 				options->md = EVP_sha512();
 			} else {
 				usage(argv0, "all");
+				return 0; /* FAILED */
 			}
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-i")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->url = *(++argv);
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-st")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->signing_time = (time_t)strtoul(*(++argv), NULL, 10);
 #ifdef ENABLE_CURL
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD) && !strcmp(*argv, "-t")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->turl[options->nturl++] = *(++argv);
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD) && !strcmp(*argv, "-ts")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->tsurl[options->ntsurl++] = *(++argv);
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD) && !strcmp(*argv, "-p")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->proxy = *(++argv);
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD) && !strcmp(*argv, "-noverifypeer")) {
 			options->noverifypeer = 1;
@@ -5592,40 +5669,73 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD || *cmd == CMD_ATTACH) && !strcmp(*argv, "-add-msi-dse")) {
 			options->add_msi_dse = 1;
 		} else if ((*cmd == CMD_VERIFY) && (!strcmp(*argv, "-c") || !strcmp(*argv, "-catalog"))) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->catalog = *(++argv);
 		} else if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && !strcmp(*argv, "-CAfile")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			OPENSSL_free(options->cafile);
 			options->cafile = OPENSSL_strdup(*++argv);
 		} else if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && !strcmp(*argv, "-CRLfile")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->crlfile = OPENSSL_strdup(*++argv);
 		} else if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && !strcmp(*argv, "-CRLuntrusted")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->crluntrusted = OPENSSL_strdup(*++argv);
 		} else if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && !strcmp(*argv, "-untrusted")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			OPENSSL_free(options->untrusted);
 			options->untrusted = OPENSSL_strdup(*++argv);
 		} else if ((*cmd == CMD_VERIFY) && !strcmp(*argv, "-require-leaf-hash")) {
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			options->leafhash = (*++argv);
 		} else if ((*cmd == CMD_ADD) && !strcmp(*argv, "--help")) {
 			help_for(argv0, "add");
+			*cmd = CMD_HELP;
+			return 0; /* FAILED */
 		} else if ((*cmd == CMD_ATTACH) && !strcmp(*argv, "--help")) {
 			help_for(argv0, "attach-signature");
+			*cmd = CMD_HELP;
+			return 0; /* FAILED */
 		} else if ((*cmd == CMD_EXTRACT) && !strcmp(*argv, "--help")) {
 			help_for(argv0, "extract-signature");
+			*cmd = CMD_HELP;
+			return 0; /* FAILED */
 		} else if ((*cmd == CMD_REMOVE) && !strcmp(*argv, "--help")) {
 			help_for(argv0, "remove-signature");
+			*cmd = CMD_HELP;
+			return 0; /* FAILED */
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "--help")) {
 			help_for(argv0, "sign");
+			*cmd = CMD_HELP;
+			return 0; /* FAILED */
 		} else if ((*cmd == CMD_VERIFY) && !strcmp(*argv, "--help")) {
 			help_for(argv0, "verify");
+			*cmd = CMD_HELP;
+			return 0; /* FAILED */
 		} else if (!strcmp(*argv, "-jp")) {
 			char *ap;
-			if (--argc < 1) usage(argv0, "all");
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 			ap = *(++argv);
 			for (i=0; ap[i]; i++) ap[i] = tolower((int)ap[i]);
 			if (!strcmp(ap, "low")) {
@@ -5635,7 +5745,10 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 			} else if (!strcmp(ap, "high")) {
 				options->jp = 2;
 			}
-			if (options->jp != 0) usage(argv0, "all"); /* XXX */
+			if (options->jp != 0) { /* XXX */
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
 		} else {
 			failarg = *argv;
 			break;
@@ -5669,6 +5782,7 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 		if (failarg)
 			printf("Unknown option: %s\n", failarg);
 		usage(argv0, "all");
+		return 0; /* FAILED */
 	}
 
 	if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && access(options->cafile, R_OK)) {
@@ -5676,7 +5790,7 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 		return 0; /* FAILED */
 	}
 
-	return 1;
+	return 1; /* OK */
 }
 
 int main(int argc, char **argv)
@@ -5913,8 +6027,8 @@ err_cleanup:
 	free_options(&options);
 	if (ret)
 		ERR_print_errors_fp(stdout);
-
-	printf(ret ? "Failed\n" : "Succeeded\n");
+	if (cmd != CMD_HELP)
+		printf(ret ? "Failed\n" : "Succeeded\n");
 	return ret;
 }
 
