@@ -252,8 +252,8 @@ typedef struct {
 	char *catalog;
 	char *cafile;
 	char *crlfile;
-	char *untrusted;
-	char *crluntrusted;
+	char *tsa_cafile;
+	char *tsa_crlfile;
 	char *leafhash;
 	int jp;
 } GLOBAL_OPTIONS;
@@ -1158,8 +1158,8 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%1sattach-signature [ -sigin ] <sigfile>\n", "");
 		printf("%12s[ -CAfile <infile> ]\n", "");
 		printf("%12s[ -CRLfile <infile> ]\n", "");
-		printf("%12s[ -untrusted <infile> ]\n", "");
-		printf("%12s[ -CRLuntrusted <infile> ]\n", "");
+		printf("%12s[ -TSA-CAfile <infile> ]\n", "");
+		printf("%12s[ -TSA-CRLfile <infile> ]\n", "");
 		printf("%12s[ -nest ]\n", "");
 		printf("%12s[ -add-msi-dse ]\n", "");
 		printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
@@ -1175,8 +1175,8 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -c | -catalog <infile> ]\n", "");
 		printf("%12s[ -CAfile <infile> ]\n", "");
 		printf("%12s[ -CRLfile <infile> ]\n", "");
-		printf("%12s[ -untrusted <infile> ]\n", "");
-		printf("%12s[ -CRLuntrusted <infile> ]\n", "");
+		printf("%12s[ -TSA-CAfile <infile> ]\n", "");
+		printf("%12s[ -TSA-CRLfile <infile> ]\n", "");
 		printf("%12s[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n", "");
 		printf("%12s[ -timestamp-expiration ]\n", "");
 		printf("%12s[ -verbose ]\n\n", "");
@@ -1204,7 +1204,7 @@ static void help_for(const char *argv0, const char *cmd)
 	const char *cmds_certs[] = {"sign", NULL};
 	const char *cmds_comm[] = {"sign", NULL};
 	const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
-	const char *cmds_CRLuntrusted[] = {"attach-signature", "verify", NULL};
+	const char *cmds_CRLfileTSA[] = {"attach-signature", "verify", NULL};
 	const char *cmds_h[] = {"sign", NULL};
 	const char *cmds_i[] = {"sign", NULL};
 	const char *cmds_in[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", "verify", NULL};
@@ -1235,7 +1235,7 @@ static void help_for(const char *argv0, const char *cmd)
 	const char *cmds_t[] = {"add", "sign", NULL};
 	const char *cmds_ts[] = {"add", "sign", NULL};
 #endif /* ENABLE_CURL */
-	const char *cmds_untrusted[] = {"attach-signature", "verify", NULL};
+	const char *cmds_CAfileTSA[] = {"attach-signature", "verify", NULL};
 	const char *cmds_verbose[] = {"add", "sign", "verify", NULL};
 
 	if (on_list(cmd, cmds_all)) {
@@ -1309,8 +1309,6 @@ static void help_for(const char *argv0, const char *cmd)
 		printf("%-24s= set commercial purpose (default: individual purpose)\n", "-comm");
 	if (on_list(cmd, cmds_CRLfile))
 		printf("%-24s= the file containing one or more CRLs in PEM format\n", "-CRLfile");
-	if (on_list(cmd, cmds_CRLuntrusted))
-		printf("%-24s= the file containing one or more additional untrusted CRLs in PEM format\n", "-CRLuntrusted");
 	if (on_list(cmd, cmds_h)) {
 		printf("%-24s= {md5|sha1|sha2(56)|sha384|sha512}\n", "-h");
 		printf("%26sset of cryptographic hash functions\n", "");
@@ -1379,10 +1377,11 @@ static void help_for(const char *argv0, const char *cmd)
 		printf("%26sthis option cannot be used with the -t option\n", "");
 	}
 #endif /* ENABLE_CURL */
-	if (on_list(cmd, cmds_untrusted)) {
-		printf("%-24s= set of additional untrusted certificates which may be needed\n", "-untrusted");
-		printf("%26sthe file should contain one or more certificates in PEM format\n", "");
+	if (on_list(cmd, cmds_CAfileTSA)) {
+		printf("%-24s= the file containing one or more Time-Stamp Authority certificates in PEM format\n", "-TSA-CAfile");
 	}
+	if (on_list(cmd, cmds_CRLfileTSA))
+		printf("%-24s= the file containing one or more Time-Stamp Authority CRLs in PEM format\n", "-TSA-CRLfile");
 	if (on_list(cmd, cmds_verbose)) {
 		printf("%-24s= include additional output in the log\n", "-verbose");
 	}
@@ -2636,7 +2635,7 @@ static int verify_timestamp(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 	store = X509_STORE_new();
 	if (!store)
 		goto out;
-	if (load_file_lookup(store, options->untrusted)) {
+	if (load_file_lookup(store, options->tsa_cafile)) {
 		/*
 		 * The TSA signing key MUST be of a sufficient length to allow for a sufficiently
 		 * long lifetime.  Even if this is done, the key will  have a finite lifetime.
@@ -2652,7 +2651,7 @@ static int verify_timestamp(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 				goto out;
 			}
 	} else {
-		printf("Use the \"-untrusted\" option to add the CA cert bundle to verify timestamp server.\n");
+		printf("Use the \"-TSA-CAfile\" option to add the Time-Stamp Authority certificates bundle to verify timestamp server.\n");
 		X509_STORE_free(store);
 		goto out;
 	}
@@ -2678,9 +2677,9 @@ static int verify_timestamp(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 
 	/* verify a Certificate Revocation List */
 	crls = signature->p7->d.sign->crl;
-	if (options->crluntrusted || crls) {
+	if (options->tsa_crlfile || crls) {
 		STACK_OF(X509) *chain = CMS_get1_certs(signature->timestamp);
-		int crlok = verify_crl(options->untrusted, options->crluntrusted, crls, signer, chain);
+		int crlok = verify_crl(options->tsa_cafile, options->tsa_crlfile, crls, signer, chain);
 		sk_X509_pop_free(chain, X509_free);
 		printf("Timestamp Server Signature CRL verification: %s\n", crlok ? "ok" : "failed");
 		if (!crlok)
@@ -2792,10 +2791,10 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 	printf("\nCAfile: %s\n", options->cafile);
 	if (options->crlfile)
 		printf("CRLfile: %s\n", options->crlfile);
-	if (options->untrusted)
-		printf("TSA's certificates file: %s\n", options->untrusted);
-	if (options->crluntrusted)
-		printf("TSA's CRL file: %s\n", options->crluntrusted);
+	if (options->tsa_cafile)
+		printf("TSA's certificates file: %s\n", options->tsa_cafile);
+	if (options->tsa_crlfile)
+		printf("TSA's CRL file: %s\n", options->tsa_crlfile);
 	url = get_clrdp_url(signer);
 	if (url) {
 		printf("CRL distribution point: %s\n", url);
@@ -5178,9 +5177,9 @@ static void free_options(GLOBAL_OPTIONS *options)
 {
 	/* If memory has not been allocated nothing is done */
 	OPENSSL_free(options->cafile);
-	OPENSSL_free(options->untrusted);
+	OPENSSL_free(options->tsa_cafile);
 	OPENSSL_free(options->crlfile);
-	OPENSSL_free(options->crluntrusted);
+	OPENSSL_free(options->tsa_crlfile);
 }
 
 static char *get_cafile(void)
@@ -5488,7 +5487,7 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 
 	if (*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) {
 		options->cafile = get_cafile();
-		options->untrusted = get_cafile();
+		options->tsa_cafile = get_cafile();
 	}
 	for (argc--,argv++; argc >= 1; argc--,argv++) {
 		if (!strcmp(*argv, "-in")) {
@@ -5601,13 +5600,13 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 		} else if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && !strcmp(*argv, "-CRLfile")) {
 			if (--argc < 1) usage(argv0, "all");
 			options->crlfile = OPENSSL_strdup(*++argv);
-		} else if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && !strcmp(*argv, "-CRLuntrusted")) {
+		} else if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && (!strcmp(*argv, "-untrusted") || !strcmp(*argv, "-TSA-CAfile"))) {
 			if (--argc < 1) usage(argv0, "all");
-			options->crluntrusted = OPENSSL_strdup(*++argv);
-		} else if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && !strcmp(*argv, "-untrusted")) {
+			OPENSSL_free(options->tsa_cafile);
+			options->tsa_cafile = OPENSSL_strdup(*++argv);
+		} else if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && (!strcmp(*argv, "-CRLuntrusted") || !strcmp(*argv, "-TSA-CRLfile"))) {
 			if (--argc < 1) usage(argv0, "all");
-			OPENSSL_free(options->untrusted);
-			options->untrusted = OPENSSL_strdup(*++argv);
+			options->tsa_crlfile = OPENSSL_strdup(*++argv);
 		} else if ((*cmd == CMD_VERIFY) && !strcmp(*argv, "-require-leaf-hash")) {
 			if (--argc < 1) usage(argv0, "all");
 			options->leafhash = (*++argv);
