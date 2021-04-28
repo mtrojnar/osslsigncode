@@ -2298,6 +2298,19 @@ static void get_signed_attributes(SIGNATURE *signature, STACK_OF(X509_ATTRIBUTE)
 	}
 }
 
+void signature_free(SIGNATURE *signature)
+{
+	if (signature->timestamp) {
+		CMS_ContentInfo_free(signature->timestamp);
+		ERR_clear_error();
+	}
+	PKCS7_free(signature->p7);
+	/* If memory has not been allocated nothing is done */
+	OPENSSL_free(signature->url);
+	OPENSSL_free(signature->desc);
+	OPENSSL_free(signature);
+}
+
 static int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allownest);
 
 static void get_unsigned_attributes(STACK_OF(SIGNATURE) **signatures, SIGNATURE *signature,
@@ -2417,20 +2430,7 @@ static int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, in
 		get_unsigned_attributes(signatures, signature, unauth_attr, p7, allownest);
 
 	if (!sk_SIGNATURE_unshift(*signatures, signature)) {
-		if (signature->timestamp) {
-			CMS_ContentInfo_free(signature->timestamp);
-			ERR_clear_error();
-		}
-		if (signature->url) {
-			OPENSSL_free(signature->url);
-		}
-		if (signature->desc) {
-			OPENSSL_free(signature->desc);
-		}
-		PKCS7_free(signature->p7);
-		OPENSSL_free(signature->url);
-		OPENSSL_free(signature->desc);
-		OPENSSL_free(signature);
+		signature_free(signature);
 		return 0; /* FAILED */
 	}
 	return 1; /* OK */
@@ -3008,18 +3008,10 @@ static int msi_verify_file(MSI_PARAMS *msiparams, GLOBAL_OPTIONS *options)
 		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
 		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
 		ret &= msi_verify_pkcs7(signature, msiparams->msi, msiparams->dirent, exdata, exlen, options);
-		if (signature->timestamp) {
-			CMS_ContentInfo_free(signature->timestamp);
-			ERR_clear_error();
-		}
-		PKCS7_free(signature->p7);
-		OPENSSL_free(signature->url);
-		OPENSSL_free(signature->desc);
-		OPENSSL_free(signature);
 	}
 	printf("Number of verified signatures: %d\n", i);
 out:
-	sk_SIGNATURE_free(signatures);
+	sk_SIGNATURE_pop_free(signatures, signature_free);
 	OPENSSL_free(indata);
 	OPENSSL_free(exdata);
 	return ret;
@@ -3380,7 +3372,6 @@ static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 		printf("Failed to extract PKCS7 data\n\n");
 		goto out;
 	}
-
 	if (!append_signature_list(&signatures, p7, 1)) {
 		printf("Failed to create signature list\n\n");
 		PKCS7_free(p7);
@@ -3390,18 +3381,10 @@ static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
 		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
 		ret &= pe_verify_pkcs7(signature, indata, header, options);
-		if (signature->timestamp) {
-			CMS_ContentInfo_free(signature->timestamp);
-			ERR_clear_error();
-		}
-		PKCS7_free(signature->p7);
-		OPENSSL_free(signature->url);
-		OPENSSL_free(signature->desc);
-		OPENSSL_free(signature);
 	}
 	printf("Number of verified signatures: %d\n", i);
 out:
-	sk_SIGNATURE_free(signatures);
+	sk_SIGNATURE_pop_free(signatures, signature_free);
 	return ret;
 }
 
@@ -3769,7 +3752,6 @@ static int cab_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *op
 		printf("Failed to extract PKCS7 data\n\n");
 		goto out;
 	}
-
 	if (!append_signature_list(&signatures, p7, 1)) {
 		printf("Failed to create signature list\n\n");
 		PKCS7_free(p7);
@@ -3779,18 +3761,10 @@ static int cab_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *op
 		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
 		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
 		ret &= cab_verify_pkcs7(signature, indata, header, options);
-		if (signature->timestamp) {
-			CMS_ContentInfo_free(signature->timestamp);
-			ERR_clear_error();
-		}
-		PKCS7_free(signature->p7);
-		OPENSSL_free(signature->url);
-		OPENSSL_free(signature->desc);
-		OPENSSL_free(signature);
 	}
 	printf("Number of verified signatures: %d\n", i);
 out:
-	sk_SIGNATURE_free(signatures);
+	sk_SIGNATURE_pop_free(signatures, signature_free);
 	return ret;
 }
 
@@ -4249,24 +4223,15 @@ static int cat_verify_file(char *catdata, FILE_HEADER *catheader,
 		PKCS7_free(p7);
 		goto out;
 	}
-
 	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
 		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
 		if (!options->catalog)
 			printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
 		ret &= cat_verify_pkcs7(signature, indata, header, filetype, options);
-		if (signature->timestamp) {
-			CMS_ContentInfo_free(signature->timestamp);
-			ERR_clear_error();
-		}
-		PKCS7_free(signature->p7);
-		OPENSSL_free(signature->url);
-		OPENSSL_free(signature->desc);
-		OPENSSL_free(signature);
 	}
 	printf("Number of verified signatures: %d\n", i);
 out:
-	sk_SIGNATURE_free(signatures);
+	sk_SIGNATURE_pop_free(signatures, signature_free);
 	return ret;
 }
 
