@@ -42,7 +42,7 @@ This build technique works on Linux and macOS, if you have the necessary tools i
 
 * On macOS with Homebrew, you probably need to do these things before bootstrap and configure:
 ```
-  brew install openssl@1.1 automake pkg-config libtool
+  brew install openssl@1.1 autoconf automake pkg-config libtool
   export PKG_CONFIG_PATH="/usr/local/opt/openssl@1.1/lib/pkgconfig"
 ```
 
