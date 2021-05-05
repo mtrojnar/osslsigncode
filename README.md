@@ -38,7 +38,7 @@ This build technique works on Linux and macOS, if you have the necessary tools i
 * On Linux, (tested on Debian/Ubuntu) you may need `sudo apt-get update && sudo apt-get install build-essential autoconf libtool libssl-dev python3-pkgconfig libcurl4-gnutls-dev`
 * On macOS with Homebrew, you probably need to do these things before autogen.sh and configure:
 ```
-  brew install openssl@1.1 automake pkg-config libtool
+  brew install openssl@1.1 autoconf automake pkg-config libtool
   export PKG_CONFIG_PATH="/usr/local/opt/openssl@1.1/lib/pkgconfig"
 ```
 
