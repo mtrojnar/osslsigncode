@@ -755,7 +755,8 @@ static int is_content_type(PKCS7 *p7, const char *objid)
 	indir_objid = OBJ_txt2obj(objid, 1);
 	retval = p7 && PKCS7_type_is_signed(p7) &&
 		!OBJ_cmp(p7->d.sign->contents->type, indir_objid) &&
-		p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE;
+		(p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE ||
+		p7->d.sign->contents->d.other->type == V_ASN1_OCTET_STRING);
 	ASN1_OBJECT_free(indir_objid);
 	return retval;
 }
@@ -2715,7 +2716,7 @@ static int verify_authenticode(SIGNATURE *signature, GLOBAL_OPTIONS *options, X5
 {
 	X509_STORE *store;
 	STACK_OF(X509_CRL) *crls;
-	size_t seqhdrlen;
+	size_t seqhdrlen = 0;
 	BIO *bio = NULL;
 	int verok = 0;
 
@@ -2734,8 +2735,10 @@ static int verify_authenticode(SIGNATURE *signature, GLOBAL_OPTIONS *options, X5
 	}
 
 	/* verify a PKCS#7 signedData structure */
-	seqhdrlen = asn1_simple_hdr_len(signature->p7->d.sign->contents->d.other->value.sequence->data,
-		signature->p7->d.sign->contents->d.other->value.sequence->length);
+	if (signature->p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
+		seqhdrlen = asn1_simple_hdr_len(signature->p7->d.sign->contents->d.other->value.sequence->data,
+			signature->p7->d.sign->contents->d.other->value.sequence->length);
+	}
 	bio = BIO_new_mem_buf(signature->p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
 		signature->p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
 	if (!PKCS7_verify(signature->p7, NULL, store, bio, NULL, 0)) {
