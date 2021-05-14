@@ -717,6 +717,9 @@ static SpcSpOpusInfo *createOpus(const char *desc, const char *url)
 	return info;
 }
 
+/*
+ * Return the header length (tag and length octets) of the ASN.1 type
+ */
 static size_t asn1_simple_hdr_len(const unsigned char *p, size_t len)
 {
 	if (len <= 2 || p[0] > 0x31)
@@ -2716,7 +2719,6 @@ static int verify_authenticode(SIGNATURE *signature, GLOBAL_OPTIONS *options, X5
 {
 	X509_STORE *store;
 	STACK_OF(X509_CRL) *crls;
-	size_t seqhdrlen = 0;
 	BIO *bio = NULL;
 	int verok = 0;
 
@@ -2736,11 +2738,17 @@ static int verify_authenticode(SIGNATURE *signature, GLOBAL_OPTIONS *options, X5
 
 	/* verify a PKCS#7 signedData structure */
 	if (signature->p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
+		/* only verify the contents of the sequence */
+		size_t seqhdrlen;
 		seqhdrlen = asn1_simple_hdr_len(signature->p7->d.sign->contents->d.other->value.sequence->data,
 			signature->p7->d.sign->contents->d.other->value.sequence->length);
+		bio = BIO_new_mem_buf(signature->p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
+			signature->p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
+	} else {
+		/* verify the entire value */
+		bio = BIO_new_mem_buf(signature->p7->d.sign->contents->d.other->value.sequence->data,
+			signature->p7->d.sign->contents->d.other->value.sequence->length);
 	}
-	bio = BIO_new_mem_buf(signature->p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
-		signature->p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
 	if (!PKCS7_verify(signature->p7, NULL, store, bio, NULL, 0)) {
 		printf("\nPKCS7_verify error\n");
 		X509_STORE_free(store);
