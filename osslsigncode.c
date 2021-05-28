@@ -4334,6 +4334,8 @@ static PKCS7 *create_new_signature(file_type_t type,
 		 * the consistency of a private key with the public key in an X509 certificate
 		 */
 		si = PKCS7_add_signature(sig, cparams->cert, cparams->pkey, options->md);
+		if (si == NULL)
+			return NULL; /* FAILED */
 	} else {
 		/* find the signer's certificate located somewhere in the whole certificate chain */
 		for (i=0; i<sk_X509_num(cparams->certs); i++) {
@@ -4344,10 +4346,11 @@ static PKCS7 *create_new_signature(file_type_t type,
 				break;
 			}
 		}
-	}
-	if (si == NULL) {
-		printf("PKCS7_add_signature failed\n");
-		return NULL; /* FAILED */
+		if (si == NULL) {
+		    printf("Failed to checking the consistency of a private key: %s\n", options->keyfile);
+		    printf("          with a public key in any X509 certificate: %s\n\n", options->certfile);
+		    return NULL; /* FAILED */
+		}
 	}
 	pkcs7_add_signing_time(si, options->signing_time);
 	if (type == FILE_TYPE_CAT) {
@@ -5996,8 +5999,10 @@ err_cleanup:
 	if (hash)
 		BIO_free_all(hash);
 	if (outdata) {
-		BIO_free_all(outdata);
-		outdata = NULL;
+		if (type == FILE_TYPE_MSI) {
+			BIO_free_all(outdata);
+			outdata = NULL;
+		}
 		unlink(options.outfile);
 	}
 #ifdef WIN32
