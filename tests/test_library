@@ -41,6 +41,7 @@ modify_blob() {
   ../../osslsigncode verify \
       -CAfile "${script_path}/../certs/CACert.pem" \
       -CRLfile "${script_path}/../certs/CACertCRL.pem" \
+      -TSA-CAfile "${script_path}/../certs/ca-bundle.crt" \
       -in "changed_$1.$2" 2>> "verify.log" 1>&2
   result=$?
 
@@ -97,6 +98,7 @@ verify_signature() {
           ../../osslsigncode verify \
               -CAfile "${script_path}/../certs/CACert.pem" \
               -CRLfile "${script_path}/../certs/CACertCRL.pem" \
+              -TSA-CAfile "${script_path}/../certs/ca-bundle.crt" \
               -in "test_tmp.tmp" 2>> "verify.log" 1>&2'
       result=$?
       rm -f "test_tmp.tmp"
@@ -107,7 +109,7 @@ verify_signature() {
           result=$?
         fi
 
-      if test "$result" -eq 0 -a "$8" == "MODIFY"
+      if test "$result" -eq 0 -a "$8" = "MODIFY"
         then
           modify_blob "$2" "$3" "$7"
           result=$?
@@ -154,6 +156,7 @@ verify_leaf_hash() {
           ../../osslsigncode verify \
               -CAfile "${script_path}/../certs/CACert.pem" \
               -CRLfile "${script_path}/../certs/CACertCRL.pem" \
+              -TSA-CAfile "${script_path}/../certs/ca-bundle.crt" \
               -require-leaf-hash SHA256:$(sha256sum "${script_path}/../certs/cert.der" | cut -d" " -f1) \
               -in "test_tmp.tmp" 2>> "verify.log" 1>&2'
       result=$?

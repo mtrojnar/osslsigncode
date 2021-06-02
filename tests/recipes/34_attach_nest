@@ -32,6 +32,7 @@ for file in ${script_path}/../logs/notsigned/*.*
       -nest \
       -CAfile "${script_path}/../certs/CACert.pem" \
       -CRLfile "${script_path}/../certs/CACertCRL.pem" \
+      -TSA-CAfile "${script_path}/../certs/ca-bundle.crt" \
       -in "signed_$number.$ext" -out "test_$number.$ext"
     result=$?
 
