@@ -19,24 +19,28 @@ tool  would fail. And, so, osslsigncode was born.
 
 ## WHAT CAN IT DO?
 
-It can sign and timestamp PE (EXE/SYS/DLL/etc), CAB and MSI files. It supports
-the equivalent of signtool.exe's "-j javasign.dll -jp low", i.e. add a
-valid signature for a CAB file containing Java files. It supports getting
-the timestamp through a proxy as well. It also supports signature verification,
-removal and extraction.
+It can sign and timestamp PE (EXE/SYS/DLL/etc), CAB, CAT and MSI files.
+It supports the equivalent of signtool.exe's "-j javasign.dll -jp low",
+i.e. add a valid signature for a CAB file containing Java files.
+It supports getting the timestamp through a proxy as well. It also
+supports signature verification, removal and extraction.
 
 ## BUILDING
 
 This build technique works on Linux and macOS, if you have the necessary tools installed:
 ```
-  ./autogen.sh
+  ./bootstrap
   ./configure
   make
   make install
 ```
 
-* On Linux, (tested on Debian/Ubuntu) you may need `sudo apt-get update && sudo apt-get install build-essential autoconf libtool libssl-dev python3-pkgconfig libcurl4-gnutls-dev`
-* On macOS with Homebrew, you probably need to do these things before autogen.sh and configure:
+* On Linux, (tested on Debian/Ubuntu) you may need
+```
+   sudo apt-get update && sudo apt-get install autoconf libtool python3-pkgconfig libssl-dev libcurl4-openssl-dev
+```
+
+* On macOS with Homebrew, you probably need to do these things before bootstrap and configure:
 ```
   brew install openssl@1.1 automake pkg-config libtool
   export PKG_CONFIG_PATH="/usr/local/opt/openssl@1.1/lib/pkgconfig"
@@ -99,11 +103,10 @@ An example of using osslsigncode with SoftHSM:
   osslsigncode sign \
     -pkcs11engine /usr/lib64/engines-1.1/pkcs11.so \
     -pkcs11module /usr/lib64/pkcs11/libsofthsm2.so \
-    -certs <cert-file> \
+    -pkcs11cert 'pkcs11:token=softhsm-token;object=cert' \
     -key 'pkcs11:token=softhsm-token;object=key' \
     -in yourapp.exe -out yourapp-signed.exe
 ```
-osslsigncode currently does not support reading certificates from engines.
 
 You can check that the signed file is correct by right-clicking
 on it in Windows and choose Properties --> Digital Signatures,
