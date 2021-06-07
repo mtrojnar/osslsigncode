@@ -6015,7 +6015,9 @@ err_cleanup:
 	free_options(&options);
 	if (ret)
 		ERR_print_errors_fp(stdout);
-	if (cmd != CMD_HELP)
+	if (cmd == CMD_HELP)
+		ret = 0; /* OK */
+	else
 		printf(ret ? "Failed\n" : "Succeeded\n");
 	return ret;
 }
