@@ -27,23 +27,45 @@ supports signature verification, removal and extraction.
 
 ## BUILDING
 
-This build technique works on Linux and macOS, if you have the necessary tools installed:
+This section covers building osslsigncode for [Unix-like](https://en.wikipedia.org/wiki/Unix-like) operating systems.
+See [INSTALL.W32.md](https://github.com/mtrojnar/osslsigncode/blob/master/INSTALL.W32.md) for Windows notes.
+
+### Generate the ./configure script
+
+This step is only needed if osslsigncode was cloned from a git repository.
+We highly recommend downloading a [release tarball](https://github.com/mtrojnar/osslsigncode/releases) instead.
+
+* Install prerequisites on a Debian-based distributions, such as Ubuntu:
+```
+  sudo apt update && sudo apt install automake pkg-config
+```
+
+* Install prerequisites on macOS with Homebrew:
+```
+  brew install automake pkg-config
+```
+
+* Generate the ./configure script:
 ```
   ./bootstrap
-  ./configure
-  make
-  make install
 ```
 
-* On Linux, (tested on Debian/Ubuntu) you may need
+### Configure, build and install osslsigncode
+
+* Install prerequisites on a Debian-based distributions, such as Ubuntu:
 ```
-   sudo apt-get update && sudo apt-get install autoconf libtool python3-pkgconfig libssl-dev libcurl4-openssl-dev
+  sudo apt update && sudo apt install build-essential pkg-config libssl-dev libcurl4-openssl-dev
 ```
 
-* On macOS with Homebrew, you probably need to do these things before bootstrap and configure:
+* Install prerequisites on macOS with Homebrew:
 ```
-  brew install openssl@1.1 autoconf automake pkg-config libtool
+  brew install pkg-config openssl@1.1
   export PKG_CONFIG_PATH="/usr/local/opt/openssl@1.1/lib/pkgconfig"
+```
+
+* Configure, build and install osslsigncode:
+```
+  ./configure && make && sudo make install
 ```
 
 ## USAGE
