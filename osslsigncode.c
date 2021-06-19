@@ -5051,7 +5051,7 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine, CRYPTO_PARAMS *cp
 		return 0; /* FAILED */
 	}
 	if (!ENGINE_init(engine)) {
-		printf("Failed to initialized pkcs11 engine\n");
+		printf("Failed to initialize pkcs11 engine\n");
 		ENGINE_free(engine);
 		return 0; /* FAILED */
 	}
