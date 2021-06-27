@@ -87,7 +87,7 @@ if grep -q "no libgsf available" "results.log"
         rm -f "FoobarAppl10.exe"
       else
         printf "%s\n" "wixl not found in \$PATH"
-        printf "%s\n" "tests for MSI files skipped, please install msitools package"
+        printf "%s\n" "tests for MSI files skipped, please install wixl or msitools package depending on your OS"
       fi
   fi
 

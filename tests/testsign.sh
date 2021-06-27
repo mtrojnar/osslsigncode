@@ -1,5 +1,11 @@
 #!/bin/sh
 
+if [ -z "$(command -v keytool)" ]; then
+    printf "%s\n" "keytool was not found in the \$PATH"
+    printf "%s\n" "Please install the default-jre-headless package"
+    exit 1
+fi
+
 rm -f putty*.exe
 
 PUTTY_URL="http://the.earth.li/~sgtatham/putty/0.64/x86/putty.exe"
@@ -14,7 +20,12 @@ fi
 rm -f cert.pem cert.spc key.der key.p12 key.pem key.pvk keyp.pem
 
 keytool -genkey \
-	-alias selfsigned -keysize 2048 -keyalg RSA -keypass passme -storepass passme -keystore key.ks << EOF
+    -alias selfsigned \
+    -keysize 2048 \
+    -keyalg RSA \
+    -keypass passme \
+    -storepass passme \
+    -keystore key.ks << EOF
 John Doe
 ACME In
 ACME
@@ -24,11 +35,17 @@ SE
 yes
 EOF
 
-
 echo "Converting key/cert to PKCS12 container"
 keytool -importkeystore \
-	-srckeystore key.ks -srcstoretype JKS -srckeypass passme -srcstorepass passme -srcalias selfsigned \
-	-destkeystore key.p12 -deststoretype PKCS12 -destkeypass passme -deststorepass passme
+    -srckeystore key.ks \
+    -srcstoretype JKS \
+    -srckeypass passme \
+    -srcstorepass passme \
+    -srcalias selfsigned \
+    -destkeystore key.p12 \
+    -deststoretype PKCS12 \
+    -destkeypass passme \
+    -deststorepass passme
 
 rm -f key.ks
 
@@ -46,7 +63,7 @@ openssl pkcs12 -in key.p12 -passin pass:passme -nokeys -out cert.pem
 echo "Converting cert to SPC format"
 openssl crl2pkcs7 -nocrl -certfile cert.pem -outform DER -out cert.spc
 
-
+make -C ..
 ../osslsigncode sign -spc cert.spc -key key.pem putty.exe putty1.exe
 ../osslsigncode sign -certs cert.spc -key keyp.pem -pass passme putty.exe putty2.exe
 ../osslsigncode sign -certs cert.pem -key keyp.pem -pass passme putty.exe putty3.exe
@@ -56,20 +73,18 @@ openssl crl2pkcs7 -nocrl -certfile cert.pem -outform DER -out cert.spc
 
 rm -f cert.pem cert.spc key.der key.p12 key.pem key.pvk keyp.pem
 
-echo ""
-echo ""
+echo
 
 check=`sha1sum putty[1-9]*.exe | cut -d' ' -f1 | uniq | wc -l`
 cmp putty1.exe putty2.exe && \
-	cmp putty2.exe putty3.exe && \
-	cmp putty3.exe putty4.exe && \
-	cmp putty4.exe putty5.exe && \
-	cmp putty5.exe putty6.exe
+    cmp putty2.exe putty3.exe && \
+    cmp putty3.exe putty4.exe && \
+    cmp putty4.exe putty5.exe && \
+    cmp putty5.exe putty6.exe
 if [ $? -ne 0 ]; then
-	echo "Failure is not an option."
-	exit 1
+    echo "Failure is not an option."
+    exit 1
 else
-	echo "Yes, it works."
+    echo "Yes, it works."
 fi
-
 
