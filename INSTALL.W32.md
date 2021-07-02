@@ -12,7 +12,7 @@
 2) Run "MSYS2 MinGW 64-bit" and build 64-bit Windows executables.
 ```
   cd osslsigncode-folder
-  x86_64-w64-mingw32-gcc osslsigncode.c  -o osslsigncode.exe \
+  x86_64-w64-mingw32-gcc osslsigncode.c msi.c -o osslsigncode.exe \
     -lcrypto -lssl -lcurl -lgsf-1 -lgobject-2.0 -lglib-2.0 -lxml2 \
     -I 'C:/msys64/mingw64/include/libgsf-1' \
     -I 'C:/msys64/mingw64/include/glib-2.0' \
