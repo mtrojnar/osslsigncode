@@ -1,10 +1,11 @@
-### 2.2 (unreleased)
+### 2.2 (2021.08.15)
 
-- CAT files support
-  (Thanks to James McKenzie)
-- libgsf library dependency remove
-- unlimited support for MsiDigitalSignatureEx signature
-  through handling all MSI metadata
+- CAT files support (thanks to James McKenzie)
+- MSI support rewritten without libgsf dependency, which allows
+  for handling of all the needed MSI metadata, such as dates
+- "-untrusted" option renamed to "-TSA-CAfile"
+- "-CRLuntrusted" option renamed to "-TSA-CRLfile"
+- numerous bug fixes and improvements
 
 ### 2.1 (2020-10-11)
 
