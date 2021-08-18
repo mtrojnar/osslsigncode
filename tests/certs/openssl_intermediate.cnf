@@ -11,6 +11,7 @@ crl_dir                         = $dir/demoCA
 new_certs_dir                   = $dir/demoCA
 database                        = $dir/demoCA/index.txt
 serial                          = $dir/demoCA/serial
+rand_serial                     = yes
 private_key                     = $dir/demoCA/intermediate.key
 certificate                     = $dir/tmp/intermediate.pem
 crl_extensions                  = crl_ext
@@ -20,6 +21,8 @@ policy                          = policy_loose
 default_startdate               = 180101000000Z
 default_enddate                 = 241231000000Z
 x509_extensions                 = v3_req
+email_in_dn                     = yes
+default_days                    = 2200
 
 [ req ]
 # Options for the `req` tool
