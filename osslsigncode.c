@@ -1127,7 +1127,8 @@ static void usage(const char *argv0, const char *cmd)
 	}
 	if (on_list(cmd, cmds_sign)) {
 		printf("%1s[ sign ] ( -certs | -spc <certfile> -key <keyfile> | -pkcs12 <pkcs12file> |\n", "");
-		printf("%12s  [ -pkcs11engine <engine> ] -pkcs11module <module> -certs <certfile> -key <pkcs11 key id>)\n", "");
+		printf("%12s  [ -pkcs11engine <engine> ] -pkcs11module <module> -pkcs11cert <pkcs11 cert id> |\n", "");
+		printf("%12s  -certs <certfile> -key <pkcs11 key id>)\n", "");
 		printf("%12s[ -pass <password>", "");
 #ifdef PROVIDE_ASKPASS
 		printf("%1s [ -askpass ]", "");
@@ -5116,7 +5117,7 @@ static int read_crypto_params(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 			goto out; /* FAILED */
 		printf("Engine \"%s\" set.\n", ENGINE_get_id(engine));
 
-		/* Load the private key and the signer certificate from the security token*/
+		/* Load the private key and the signer certificate from the security token */
 		if (!read_token(options, engine, cparams))
 			goto out; /* FAILED */
 
