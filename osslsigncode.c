@@ -2015,7 +2015,7 @@ static int verify_callback(int ok, X509_STORE_CTX *ctx)
 			return 1;
 		} else {
 			X509 *current_cert = X509_STORE_CTX_get_current_cert(ctx);
-			printf("\nErrror: Expired CA certificate:\n");
+			printf("\nError: Expired CA certificate:\n");
 			print_cert(current_cert, 0);
 			printf("\n");
 		}
