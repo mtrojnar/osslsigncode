@@ -25,8 +25,9 @@ make_tests() {
       fail=$(grep -c "Test failed" "results.log")
       printf "%s\n" "testall.sh finished"
       printf "%s\n" "summary: success $count, skip $skip, fail $fail"
+      return $fail
     else # no test was done
-      result=1
+      return 1
     fi
 }
 
