@@ -19,15 +19,11 @@ make_tests() {
       /bin/sh $plik 3>&1 2>> "results.log" 1>&2
     done
     count=$(grep -c "Test succeeded" "results.log")
-  if test $count -ne 0
-    then
-      skip=$(grep -c "Test skipped" "results.log")
-      fail=$(grep -c "Test failed" "results.log")
-      printf "%s\n" "testall.sh finished"
-      printf "%s\n" "summary: success $count, skip $skip, fail $fail"
-    else # no test was done
-      result=1
-    fi
+    skip=$(grep -c "Test skipped" "results.log")
+    fail=$(grep -c "Test failed" "results.log")
+    printf "%s\n" "testall.sh finished"
+    printf "%s\n" "summary: success $count, skip $skip, fail $fail"
+    return $fail
 }
 
 rm -rf "${result_path}"
