@@ -118,8 +118,6 @@ fi
 AC_SUBST([OPTIONAL_LIBCURL_CFLAGS])
 AC_SUBST([OPTIONAL_LIBCURL_LIBS])
 
-AC_DEFINE_UNQUOTED([CA_BUNDLE_PATH], ["$(curl-config --ca 2>/dev/null)"], [CA bundle install path])
-
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
 

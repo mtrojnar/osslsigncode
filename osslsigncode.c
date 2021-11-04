@@ -5177,28 +5177,24 @@ static void free_options(GLOBAL_OPTIONS *options)
 
 static char *get_cafile(void)
 {
-	const char *sslpart1, *sslpart2;
-	char *cafile, *openssl_dir, *str_begin, *str_end;
+#ifndef WIN32
+    const char *files[] = {
+	    "/etc/ssl/certs/ca-certificates.crt",
+	    "/etc/pki/tls/certs/ca-bundle.crt",
+	    "/usr/share/ssl/certs/ca-bundle.crt",
+	    "/usr/local/share/certs/ca-root-nss.crt",
+	    "/etc/ssl/cert.pem",
+	    NULL
+	};
+    int i;
 
-#ifdef CA_BUNDLE_PATH
-	if (strcmp(CA_BUNDLE_PATH, ""))
-		return OPENSSL_strdup(CA_BUNDLE_PATH);
-#endif
-	sslpart1 = OpenSSL_version(OPENSSL_DIR);
-	sslpart2 = "/certs/ca-bundle.crt";
-	str_begin = strchr(sslpart1, '"');
-	str_end = strrchr(sslpart1, '"');
-	if (str_begin && str_end && str_begin < str_end) {
-		openssl_dir = OPENSSL_strndup(str_begin + 1, str_end - str_begin - 1);
-	} else {
-		openssl_dir = OPENSSL_strdup("/etc");
+	for (i=0; files[i]; i++) {
+	    if (!access(files[i], R_OK)) {
+	        return OPENSSL_strdup(files[i]);
+	    }
 	}
-	cafile = OPENSSL_malloc(strlen(sslpart1) + strlen(sslpart2) + 1);
-	strcpy(cafile, openssl_dir);
-	strcat(cafile, sslpart2);
-
-	OPENSSL_free(openssl_dir);
-	return cafile;
+#endif
+	return NULL;
 }
 
 static PKCS7 *get_sigfile(char *sigfile, file_type_t type)
