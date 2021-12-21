@@ -109,7 +109,13 @@ PKG_CHECK_MODULES(
 )
 
 if test "${with_curl}" = "yes"; then
-	test -z "${LIBCURL_LIBS}" && AC_MSG_ERROR([Curl 7.12.0 or later is required for timestamping support. http://curl.haxx.se/])
+	test -z "${LIBCURL_LIBS}" && AC_MSG_ERROR(m4_normalize([
+		Curl 7.12.0 or later required for timestamping support http://curl.haxx.se/
+		m4_newline() or libcurl development package not found, try installing:
+		m4_newline() * libcurl4-openssl-dev (Debian, Ubuntu)
+		m4_newline() * libcurl-devel (Fedora, CentOS, RHEL)
+		m4_newline() * libcurl_dev (Solaris)
+		]))
 	OPTIONAL_LIBCURL_CFLAGS="${LIBCURL_CFLAGS}"
 	OPTIONAL_LIBCURL_LIBS="${LIBCURL_LIBS}"
 	AC_DEFINE([ENABLE_CURL], [1], [libcurl is enabled])
