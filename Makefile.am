@@ -14,3 +14,7 @@ bin_PROGRAMS = osslsigncode
 
 osslsigncode_SOURCES = osslsigncode.c msi.c msi.h
 osslsigncode_LDADD = $(OPENSSL_LIBS) $(OPTIONAL_LIBCURL_LIBS)
+
+# bash completion script
+bashcompdir = @bashcompdir@
+dist_bashcomp_DATA = osslsigncode.bash
