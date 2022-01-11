@@ -1,3 +1,7 @@
+# osslsigncode change log
+- added bash completion script
+- added CA bundle auto-detection
+
 ### 2.2 (2021.08.15)
 
 - CAT files support (thanks to James McKenzie)
