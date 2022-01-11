@@ -16,5 +16,6 @@ osslsigncode_SOURCES = osslsigncode.c msi.c msi.h
 osslsigncode_LDADD = $(OPENSSL_LIBS) $(OPTIONAL_LIBCURL_LIBS)
 
 # bash completion script
+AM_DISTCHECK_CONFIGURE_FLAGS = --with-bashcompdir='$$(datarootdir)/bash-completion/completions'
 bashcompdir = @bashcompdir@
 dist_bashcomp_DATA = osslsigncode.bash

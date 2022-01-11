@@ -8,9 +8,13 @@ AM_INIT_AUTOMAKE
 AC_CONFIG_SRCDIR([osslsigncode.c])
 
 # bash completion support
-PKG_CHECK_VAR(bashcompdir, [bash-completion], [completionsdir], ,
-    bashcompdir="${sysconfdir}/bash_completion.d")
-AC_SUBST(bashcompdir)
+AC_ARG_WITH([bashcompdir],
+    AS_HELP_STRING([--with-bashcompdir=DIR], [directory for bash completions]), ,
+    [PKG_CHECK_VAR([with_bashcompdir], [bash-completion], [completionsdir], ,
+        [with_bashcompdir="${datarootdir}/bash-completion/completions"])])
+AC_MSG_CHECKING([for bashcompdir])
+AC_MSG_RESULT([$with_bashcompdir])
+AC_SUBST([bashcompdir], [$with_bashcompdir])
 
 dnl Checks for programs.
 AC_PROG_CC
