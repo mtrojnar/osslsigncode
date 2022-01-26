@@ -170,8 +170,8 @@
 #define PKCS9_SIGNING_TIME           "1.2.840.113549.1.9.5"
 #define PKCS9_COUNTER_SIGNATURE      "1.2.840.113549.1.9.6"
 
-
-#define WIN_CERT_REVISION_2             0x0200
+/* WIN_CERTIFICATE structure declared in Wintrust.h */
+#define WIN_CERT_REVISION_2_0           0x0200
 #define WIN_CERT_TYPE_PKCS_SIGNED_DATA  0x0002
 
 /*
@@ -3350,7 +3350,7 @@ static PKCS7 *pe_extract_existing_pkcs7(char *indata, FILE_HEADER *header)
 		uint32_t l = GET_UINT32_LE(indata + header->sigpos + pos);
 		uint16_t certrev  = GET_UINT16_LE(indata + header->sigpos + pos + 4);
 		uint16_t certtype = GET_UINT16_LE(indata + header->sigpos + pos + 6);
-		if (certrev == WIN_CERT_REVISION_2 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
+		if (certrev == WIN_CERT_REVISION_2_0 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
 			const unsigned char *blob = (unsigned char*)indata + header->sigpos + pos + 8;
 			p7 = d2i_PKCS7(NULL, &blob, l - 8);
 		}
@@ -3370,7 +3370,7 @@ static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 	STACK_OF(SIGNATURE) *signatures = sk_SIGNATURE_new_null();
 
 	if (header->siglen == 0)
-		header->siglen = header->fileend;
+		header->sigpos = header->fileend;
 
 	/* check PE checksum */
 	printf("Current PE checksum   : %08X\n", header->pe_checksum);
@@ -3381,8 +3381,12 @@ static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 		peok = 0;
 	printf("Calculated PE checksum: %08X%s\n\n", real_pe_checksum, peok ? "" : "    MISMATCH!!!");
 
-	if (header->sigpos == 0) {
+	if (header->siglen == 0) {
 		printf("No signature found\n\n");
+		goto out;
+	}
+	if (header->siglen != GET_UINT32_LE(indata + header->sigpos)) {
+		printf("Invalid signature\n\n");
 		goto out;
 	}
 	p7 = pe_extract_existing_pkcs7(indata, header);
@@ -4458,7 +4462,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 
 	if (type == FILE_TYPE_PE) {
 		PUT_UINT32_LE(*len + 8 + *padlen, buf);
-		PUT_UINT16_LE(WIN_CERT_REVISION_2, buf + 4);
+		PUT_UINT16_LE(WIN_CERT_REVISION_2_0, buf + 4);
 		PUT_UINT16_LE(WIN_CERT_TYPE_PKCS_SIGNED_DATA, buf + 6);
 		BIO_write(outdata, buf, 8);
 	}
