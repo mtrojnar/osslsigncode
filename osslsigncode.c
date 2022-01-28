@@ -3381,7 +3381,7 @@ static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 		peok = 0;
 	printf("Calculated PE checksum: %08X%s\n\n", real_pe_checksum, peok ? "" : "    MISMATCH!!!");
 
-	if (header->siglen == 0) {
+	if (header->sigpos == 0 || header->siglen == 0) {
 		printf("No signature found\n\n");
 		goto out;
 	}
