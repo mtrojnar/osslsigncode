@@ -16,7 +16,7 @@
 #define MIN(a,b) ((a) < (b) ? a : b)
 
 /* Get absolute address from sector and offset */
-static const u_char *sector_offset_to_address(MSI_FILE *msi, size_t sector, size_t offset)
+static const u_char *sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset)
 {
 	if (sector >= MAXREGSECT || offset >= msi->m_sectorSize ||
 			msi->m_bufferLen <= msi->m_sectorSize * sector + msi->m_sectorSize + offset) {
@@ -25,9 +25,9 @@ static const u_char *sector_offset_to_address(MSI_FILE *msi, size_t sector, size
 	return msi->m_buffer + msi->m_sectorSize + msi->m_sectorSize * sector + offset;
 }
 
-static size_t get_fat_sector_location(MSI_FILE *msi, size_t fatSectorNumber)
+static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber)
 {
-	size_t entriesPerSector, difatSectorLocation;
+	uint32_t entriesPerSector, difatSectorLocation;
 	const u_char *address;
 
 	if (fatSectorNumber < DIFAT_IN_HEADER) {
@@ -46,16 +46,16 @@ static size_t get_fat_sector_location(MSI_FILE *msi, size_t fatSectorNumber)
 }
 
 /* Lookup FAT */
-static size_t get_next_sector(MSI_FILE *msi, size_t sector)
+static uint32_t get_next_sector(MSI_FILE *msi, uint32_t sector)
 {
-	size_t entriesPerSector = msi->m_sectorSize / 4;
-	size_t fatSectorNumber = sector / entriesPerSector;
-	size_t fatSectorLocation = get_fat_sector_location(msi, fatSectorNumber);
+	uint32_t entriesPerSector = msi->m_sectorSize / 4;
+	uint32_t fatSectorNumber = sector / entriesPerSector;
+	uint32_t fatSectorLocation = get_fat_sector_location(msi, fatSectorNumber);
 	return GET_UINT32_LE(sector_offset_to_address(msi, fatSectorLocation, sector % entriesPerSector * 4));
 }
 
 /* Locate the final sector/offset when original offset expands multiple sectors */
-static void locate_final_sector(MSI_FILE *msi, size_t sector, size_t offset, size_t *finalSector, size_t *finalOffset)
+static void locate_final_sector(MSI_FILE *msi, uint32_t sector, uint32_t offset, uint32_t *finalSector, uint32_t *finalOffset)
 {
 	while (offset >= msi->m_sectorSize) {
 		offset -= msi->m_sectorSize;
@@ -66,7 +66,7 @@ static void locate_final_sector(MSI_FILE *msi, size_t sector, size_t offset, siz
 }
 
 /* Get absolute address from mini sector and offset */
-static const u_char *mini_sector_offset_to_address(MSI_FILE *msi, size_t sector, size_t offset)
+static const u_char *mini_sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset)
 {
 	if (sector >= MAXREGSECT || offset >= msi->m_minisectorSize ||
 		msi->m_bufferLen <= msi->m_minisectorSize * sector + offset) {
@@ -80,12 +80,12 @@ static const u_char *mini_sector_offset_to_address(MSI_FILE *msi, size_t sector,
  * Copy as many as possible in each step
  * copylen typically iterate as: msi->m_sectorSize - offset --> msi->m_sectorSize --> msi->m_sectorSize --> ... --> remaining
  */
-static int read_stream(MSI_FILE *msi, size_t sector, size_t offset, char *buffer, size_t len)
+static int read_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *buffer, uint32_t len)
 {
 	locate_final_sector(msi, sector, offset, &sector, &offset);
 	while (len > 0) {
 		const u_char *address = sector_offset_to_address(msi, sector, offset);
-		size_t copylen = MIN(len, msi->m_sectorSize - offset);
+		uint32_t copylen = MIN(len, msi->m_sectorSize - offset);
 		if (msi->m_buffer + msi->m_bufferLen < address + copylen) {
 			return 0; /* FAILED */
 		}
@@ -99,14 +99,14 @@ static int read_stream(MSI_FILE *msi, size_t sector, size_t offset, char *buffer
 }
 
 /* Lookup miniFAT */
-static size_t get_next_mini_sector(MSI_FILE *msi, size_t miniSector)
+static uint32_t get_next_mini_sector(MSI_FILE *msi, uint32_t miniSector)
 {
-	size_t sector, offset;
+	uint32_t sector, offset;
 	locate_final_sector(msi, msi->m_hdr->firstMiniFATSectorLocation, miniSector * 4, &sector, &offset);
 	return GET_UINT32_LE(sector_offset_to_address(msi, sector, offset));
 }
 
-static void locate_final_mini_sector(MSI_FILE *msi, size_t sector, size_t offset, size_t *finalSector, size_t *finalOffset)
+static void locate_final_mini_sector(MSI_FILE *msi, uint32_t sector, uint32_t offset, uint32_t *finalSector, uint32_t *finalOffset)
 {
 	while (offset >= msi->m_minisectorSize) {
 		offset -= msi->m_minisectorSize;
@@ -117,12 +117,12 @@ static void locate_final_mini_sector(MSI_FILE *msi, size_t sector, size_t offset
 }
 
 /* Same logic as "read_stream" except that use mini stream functions instead */
-static int read_mini_stream(MSI_FILE *msi, size_t sector, size_t offset, char *buffer, size_t len)
+static int read_mini_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *buffer, uint32_t len)
 {
 	locate_final_mini_sector(msi, sector, offset, &sector, &offset);
 	while (len > 0) {
 		const u_char *address = mini_sector_offset_to_address(msi, sector, offset);
-		size_t copylen = MIN(len, msi->m_minisectorSize - offset);
+		uint32_t copylen = MIN(len, msi->m_minisectorSize - offset);
 		if (!address || msi->m_buffer + msi->m_bufferLen < address + copylen) {
 			return 0; /* FAILED */
 		}
@@ -139,7 +139,7 @@ static int read_mini_stream(MSI_FILE *msi, size_t sector, size_t offset, char *b
   * Get file (stream) data start with "offset".
   * The buffer must have enough space to store "len" bytes. Typically "len" is derived by the steam length.
   */
-int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, size_t offset, char *buffer, size_t len)
+int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer, uint32_t len)
 {
 	if (len < msi->m_hdr->miniStreamCutoffSize) {
 		if (!read_mini_stream(msi, entry->startSectorLocation, offset, buffer, len))
@@ -204,12 +204,17 @@ static MSI_ENTRY *parse_entry(const u_char *data)
  * Pass "0" to get the root directory entry. -- This is the start point to navigate the compound file.
  * Use the returned object to access child entries.
  */
-static MSI_ENTRY *get_entry(MSI_FILE *msi, size_t entryID)
+static MSI_ENTRY *get_entry(MSI_FILE *msi, uint32_t entryID, int is_root)
 {
-	size_t sector = 0;
-	size_t offset = 0;
+	uint32_t sector = 0;
+	uint32_t offset = 0;
 	const u_char *address;
 
+	/* Corrupted file */
+	if (!is_root && entryID == 0) {
+		printf("Corrupted file \n");
+		return NULL; /* FAILED */
+	}
 	/* The special value NOSTREAM (0xFFFFFFFF) is used as a terminator */
 	if (entryID == NOSTREAM) {
 		return NULL; /* FAILED */
@@ -225,11 +230,11 @@ static MSI_ENTRY *get_entry(MSI_FILE *msi, size_t entryID)
 
 MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi)
 {
-	return get_entry(msi, 0);
+	return get_entry(msi, 0, TRUE);
 }
 
 /* Parse MSI_FILE struct */
-MSI_FILE *msi_file_new(char *buffer, size_t len)
+MSI_FILE *msi_file_new(char *buffer, uint32_t len)
 {
 	MSI_FILE *msi;
 	MSI_ENTRY *root;
@@ -242,7 +247,7 @@ MSI_FILE *msi_file_new(char *buffer, size_t len)
 	msi->m_buffer = (const u_char *)(buffer);
 	msi->m_bufferLen = len;
 	msi->m_hdr = parse_header(buffer);
-	msi->m_sectorSize = 1 << msi->m_hdr->sectorShift;;
+	msi->m_sectorSize = 1 << msi->m_hdr->sectorShift;
 	msi->m_minisectorSize = 1 << msi->m_hdr->miniSectorShift;
 	msi->m_miniStreamStartSector = 0;
 
@@ -260,7 +265,6 @@ MSI_FILE *msi_file_new(char *buffer, size_t len)
 	}
 	root = msi_root_entry_get(msi);
 	if (root == NULL) {
-		printf("File corrupted\n");
 		return NULL; /* FAILED */
 	}
 	msi->m_miniStreamStartSector = root->startSectorLocation;
@@ -292,11 +296,11 @@ MSI_DIRENT *msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent)
 		sk_MSI_DIRENT_push(parent->children, dirent);
 	}
 	/* NOTE : These links are a tree, not a linked list */
-	msi_dirent_new(msi, get_entry(msi, entry->leftSiblingID), parent);
-	msi_dirent_new(msi, get_entry(msi, entry->rightSiblingID), parent);
+	msi_dirent_new(msi, get_entry(msi, entry->leftSiblingID, FALSE), parent);
+	msi_dirent_new(msi, get_entry(msi, entry->rightSiblingID, FALSE), parent);
 
 	if (entry->type != DIR_STREAM) {
-		msi_dirent_new(msi, get_entry(msi, entry->childID), dirent);
+		msi_dirent_new(msi, get_entry(msi, entry->childID, FALSE), dirent);
 	}
 	return dirent;
 }
@@ -476,15 +480,19 @@ out:
 }
 
 /* Compute a simple sha1/sha256 message digest of the MSI file */
-void msi_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, size_t fileend)
+int msi_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, uint32_t fileend)
 {
 	BIO *bio = NULL;
 	EVP_MD_CTX *mdctx;
-	size_t n;
+	uint32_t n;
+	int ret = 0;
 
 	bio = BIO_new_mem_buf(indata, fileend);
 	mdctx = EVP_MD_CTX_new();
-	EVP_DigestInit(mdctx, md);
+	if (!EVP_DigestInit(mdctx, md)) {
+		printf("Unable to set up the digest context\n");
+		goto out;
+	}
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 	(void)BIO_seek(bio, 0);
 
@@ -492,7 +500,7 @@ void msi_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, size_t filee
 	while (n < fileend) {
 		int l;
 		static u_char bfb[16*1024*1024];
-		size_t want = fileend - n;
+		uint32_t want = fileend - n;
 		if (want > sizeof bfb)
 			want = sizeof bfb;
 		l = BIO_read(bio, bfb, want);
@@ -502,13 +510,16 @@ void msi_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, size_t filee
 		n += l;
 	}
 	EVP_DigestFinal(mdctx, mdbuf, NULL);
+	ret = 1; /* OK */
+out:
 	EVP_MD_CTX_free(mdctx);
 	BIO_free(bio);
+	return ret;
 }
 
 static void ministream_append(MSI_OUT *out, char *buf, int len)
 {
-	int needSectors = (len + out->sectorSize - 1) / out->sectorSize;
+	uint32_t needSectors = (int)((len + out->sectorSize - 1) / out->sectorSize);
 	if (out->miniStreamLen + len >= out->ministreamsMemallocCount * out->sectorSize) {
 		out->ministreamsMemallocCount += needSectors;
 		out->ministream = OPENSSL_realloc(out->ministream, out->ministreamsMemallocCount * out->sectorSize);
@@ -680,7 +691,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, int l
 					out->miniSectorNum += 1;
 					PUT_UINT32_LE(out->miniSectorNum, buf);
 					minifat_append(out, buf, 4);
-					inlen -= msi->m_minisectorSize;
+					inlen -= (uint32_t)msi->m_minisectorSize;
 				}
 				PUT_UINT32_LE(ENDOFCHAIN, buf);
 				minifat_append(out, buf, 4);
@@ -701,7 +712,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, int l
 					out->sectorNum += 1;
 					PUT_UINT32_LE(out->sectorNum, buf);
 					fat_append(out, buf, 4);
-					inlen -= out->sectorSize;
+					inlen -= (uint32_t)out->sectorSize;
 				}
 				PUT_UINT32_LE(ENDOFCHAIN, buf);
 				fat_append(out, buf, 4);
@@ -856,15 +867,15 @@ static int dirents_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out, int *str
 	out->dirtreeLen += DIRENT_SIZE;
 	for (i = 0; i < childenNum; i++) {
 		MSI_DIRENT *child = sk_MSI_DIRENT_value(children, i);
-		int last = i == childenNum - 1 ? 1 : 0;
+		int last_dir = i == childenNum - 1 ? 1 : 0;
 		*streamId += 1;
 		if (child->type == DIR_STORAGE) {
-			count += dirents_save(child, outdata, out, streamId, count, last);
+			count += dirents_save(child, outdata, out, streamId, count, last_dir);
 		} else { /* DIR_STREAM */
 			count = 0;
 			child->entry->colorFlag = BLACK_COLOR;
 			child->entry->leftSiblingID = NOSTREAM;
-			if (last) {
+			if (last_dir) {
 				child->entry->rightSiblingID = NOSTREAM;
 			} else {
 				child->entry->rightSiblingID = *streamId + 1;

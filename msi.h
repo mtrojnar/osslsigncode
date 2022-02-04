@@ -74,9 +74,9 @@
 
 #define GET_UINT8_LE(p) ((u_char*)(p))[0]
 
-#define GET_UINT16_LE(p) (((u_char*)(p))[0] | (((u_char*)(p))[1]<<8))
+#define GET_UINT16_LE(p) (uint16_t)(((u_char*)(p))[0] | (((u_char*)(p))[1]<<8))
 
-#define GET_UINT32_LE(p) (((u_char*)(p))[0] | (((u_char*)(p))[1]<<8) | \
+#define GET_UINT32_LE(p) (uint32_t)(((u_char*)(p))[0] | (((u_char*)(p))[1]<<8) | \
 			(((u_char*)(p))[2]<<16) | (((u_char*)(p))[3]<<24))
 
 #define PUT_UINT8_LE(i,p) \
@@ -91,6 +91,14 @@
 	((u_char*)(p))[1] = ((i)>>8) & 0xff; \
 	((u_char*)(p))[2] = ((i)>>16) & 0xff; \
 	((u_char*)(p))[3] = ((i)>>24) & 0xff
+
+#ifndef FALSE
+#define FALSE 0
+#endif
+
+#ifndef TRUE
+#define TRUE 1
+#endif
 
 typedef unsigned char u_char;
 
@@ -143,11 +151,11 @@ DEFINE_STACK_OF(MSI_DIRENT)
 
 typedef struct {
 	const u_char *m_buffer;
-	size_t m_bufferLen;
+	uint32_t m_bufferLen;
 	MSI_FILE_HDR *m_hdr;
-	size_t m_sectorSize;
-	size_t m_minisectorSize;
-	size_t m_miniStreamStartSector;
+	uint32_t m_sectorSize;
+	uint32_t m_minisectorSize;
+	uint32_t m_miniStreamStartSector;
 } MSI_FILE;
 
 typedef struct {
@@ -167,7 +175,7 @@ typedef struct {
 	int fatSectorsCount;
 	int miniSectorNum;
 	int sectorNum;
-	size_t sectorSize;
+	uint32_t sectorSize;
 } MSI_OUT;
 
 static u_char msi_magic[] = {
@@ -191,8 +199,8 @@ static const u_char digital_signature_ex[] = {
 	0x45, 0x00, 0x78, 0x00, 0x00, 0x00
 };
 
-int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, size_t offset, char *buffer, size_t len);
-MSI_FILE *msi_file_new(char *buffer, size_t len);
+int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer, uint32_t len);
+MSI_FILE *msi_file_new(char *buffer, uint32_t len);
 void msi_file_free(MSI_FILE *msi);
 MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi);
 MSI_DIRENT *msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent);
@@ -201,6 +209,6 @@ void msi_dirent_free(MSI_DIRENT *dirent);
 MSI_FILE_HDR *msi_header_get(MSI_FILE *msi);
 int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root);
 int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root);
-void msi_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, size_t fileend);
+int msi_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, uint32_t fileend);
 int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen);
 int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p, int len, u_char *p_msiex, int len_msiex, BIO *outdata);
