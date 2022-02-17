@@ -203,7 +203,7 @@ int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer
 MSI_FILE *msi_file_new(char *buffer, uint32_t len);
 void msi_file_free(MSI_FILE *msi);
 MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi);
-MSI_DIRENT *msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent);
+int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT **ret);
 MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse);
 void msi_dirent_free(MSI_DIRENT *dirent);
 MSI_FILE_HDR *msi_header_get(MSI_FILE *msi);

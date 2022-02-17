@@ -2908,6 +2908,7 @@ static int msi_verify_header(char *indata, uint32_t filesize, MSI_PARAMS *msipar
 	int ret = 1;
 	MSI_ENTRY *root;
 	MSI_FILE_HDR *hdr;
+	MSI_DIRENT *root_dir = NULL;
 
 	msiparams->msi = msi_file_new(indata, filesize);
 	if (!msiparams->msi) {
@@ -2915,9 +2916,15 @@ static int msi_verify_header(char *indata, uint32_t filesize, MSI_PARAMS *msipar
 	}
 	root = msi_root_entry_get(msiparams->msi);
 	if (!root) {
+		printf("Failed to get file entry\n");
 		return 0; /* FAILED */
 	}
-	msiparams->dirent = msi_dirent_new(msiparams->msi, root, NULL);
+	if (!msi_dirent_new(msiparams->msi, root, NULL, &root_dir)) {
+		printf("Failed to parse MSI_DIRENT struct\n");
+		OPENSSL_free(root);
+		return 0; /* FAILED */
+	}
+	msiparams->dirent = root_dir;
 	hdr = msi_header_get(msiparams->msi);
 
 	/* Minor Version field SHOULD be set to 0x003E.
@@ -3002,8 +3009,15 @@ static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIRENT *dir
 	BIO_push(hash, BIO_new(BIO_s_null()));
 	if (exdata) {
 		BIO *prehash = BIO_new(BIO_f_md());
+		if (EVP_MD_size(md) != (int)exlen) {
+			printf("Incorrect MsiDigitalSignatureEx stream data length\n\n");
+			BIO_free_all(hash);
+			BIO_free_all(prehash);
+			goto out;
+		}
 		if (!BIO_set_md(prehash, md)) {
 			printf("Unable to set the message digest of BIO\n");
+			BIO_free_all(hash);
 			BIO_free_all(prehash);
 			goto out;
 		}
@@ -3525,6 +3539,10 @@ static int pe_verify_header(char *indata, char *infile, uint32_t filesize, FILE_
 	/* SizeOfHeaders field specifies the combined size of an MS-DOS stub, PE header,
 	 * and section headers rounded up to a multiple of FileAlignment. */
 	header->header_size = GET_UINT32_LE(indata + 60);
+	if (filesize < header->header_size) {
+		printf("Unexpected SizeOfHeaders field: 0x%08X\n", header->header_size);
+		return 0; /* FAILED */
+	}
 	if (filesize < header->header_size + 160) {
 		printf("Corrupt DOS file - too short: %s\n", infile);
 		return 0; /* FAILED */
