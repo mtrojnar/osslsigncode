@@ -162,20 +162,28 @@ static uint32_t get_next_mini_sector(MSI_FILE *msi, uint32_t miniSector)
 	return GET_UINT32_LE(address);
 }
 
-static void locate_final_mini_sector(MSI_FILE *msi, uint32_t sector, uint32_t offset, uint32_t *finalSector, uint32_t *finalOffset)
+static int locate_final_mini_sector(MSI_FILE *msi, uint32_t sector, uint32_t offset, uint32_t *finalSector, uint32_t *finalOffset)
 {
 	while (offset >= msi->m_minisectorSize) {
 		offset -= msi->m_minisectorSize;
 		sector = get_next_mini_sector(msi, sector);
+		if (sector == 0) {
+			printf("Failed to get a next mini sector\n");
+			return 0; /* FAILED */
+		}
 	}
 	*finalSector = sector;
 	*finalOffset = offset;
+	return 1; /* OK */
 }
 
 /* Same logic as "read_stream" except that use mini stream functions instead */
 static int read_mini_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *buffer, uint32_t len)
 {
-	locate_final_mini_sector(msi, sector, offset, &sector, &offset);
+	if (!locate_final_mini_sector(msi, sector, offset, &sector, &offset)) {
+		printf("Failed to locate a final mini sector\n");
+		return 0; /* FAILED */
+	}
 	while (len > 0) {
 		const u_char *address;
 		uint32_t copylen;
@@ -193,6 +201,10 @@ static int read_mini_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, cha
 		buffer += copylen;
 		len -= copylen;
 		sector = get_next_mini_sector(msi, sector);
+		if (sector == 0) {
+			printf("Failed to get a next mini sector\n");
+			return 0; /* FAILED */
+		}
 		offset = 0;
 	}
 	return 1; /* OK */
@@ -273,7 +285,8 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data)
 		return NULL; /* FAILED */
 	}
 	memcpy(entry->size, data + DIRENT_FILE_SIZE, 8);
-	/* For a version 3 compound file 512-byte sector size, the value of this field MUST be less than or equal to 0x80000000 */
+	/* For a version 3 compound file 512-byte sector size, the value of this field
+	   MUST be less than or equal to 0x80000000 */
 	inlen = GET_UINT32_LE(entry->size);
 	if ((msi->m_sectorSize == 0x0200 && inlen > 0x80000000)
 			|| (msi->m_bufferLen <= inlen)) {
@@ -295,17 +308,23 @@ static int get_entry(MSI_FILE *msi, uint32_t entryID, int is_root, MSI_ENTRY **e
 	uint32_t offset = 0;
 	const u_char *address;
 
+	/* The special value NOSTREAM (0xFFFFFFFF) is used as a terminator */
+	if (entryID == NOSTREAM) {
+		return 1; /* OK */
+	}
 	/* Corrupted file */
 	if (!is_root && entryID == 0) {
 		printf("Corrupted file\n");
 		return 0; /* FAILED */
 	}
-	/* The special value NOSTREAM (0xFFFFFFFF) is used as a terminator */
-	if (entryID == NOSTREAM) {
-		return 1; /* OK */
-	}
 	if (msi->m_bufferLen / sizeof(MSI_ENTRY) <= entryID) {
 		printf("Invalid argument entryID\n");
+		return 0; /* FAILED */
+	}
+	/* The first entry in the first sector of the directory chain is known as
+	   the root directory entry so it can not contain the directory stream */
+	if (msi->m_hdr->firstDirectorySectorLocation == 0 && entryID == 0) {
+		printf("Corrupted First Directory Sector Location\n");
 		return 0; /* FAILED */
 	}
 	if (!locate_final_sector(msi, msi->m_hdr->firstDirectorySectorLocation, entryID * sizeof(MSI_ENTRY), &sector, &offset)) {
@@ -387,7 +406,7 @@ MSI_FILE_HDR *msi_header_get(MSI_FILE *msi)
 int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT **ret)
 {
 	MSI_DIRENT *dirent, *unused = NULL;
-	MSI_ENTRY *node = NULL;
+	MSI_ENTRY *lnode = NULL, *rnode = NULL, *cnode = NULL;
 
 	if (!entry) {
 		return 1; /* OK */
@@ -410,39 +429,39 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 		return 0; /* FAILED */
 	}
 	/* NOTE : These links are a tree, not a linked list */
-	if (!get_entry(msi, entry->leftSiblingID, FALSE, &node)) {
+	if (!get_entry(msi, entry->leftSiblingID, FALSE, &lnode)) {
 		printf("Corrupted leftSiblingID: 0x%08X\n", entry->leftSiblingID);
 		sk_MSI_DIRENT_free(dirent->children);
 		OPENSSL_free(dirent);
 		return 0; /* FAILED */
 	}
-	if (!msi_dirent_new(msi, node, parent, &unused)) {
-		OPENSSL_free(node);
+	if (!msi_dirent_new(msi, lnode, parent, &unused)) {
+		OPENSSL_free(lnode);
 		sk_MSI_DIRENT_free(dirent->children);
 		OPENSSL_free(dirent);
 		return 0; /* FAILED */	
 	}
-	if (!get_entry(msi, entry->rightSiblingID, FALSE, &node)) {
+	if (!get_entry(msi, entry->rightSiblingID, FALSE, &rnode)) {
 		printf("Corrupted rightSiblingID: 0x%08X\n", entry->rightSiblingID);
 		sk_MSI_DIRENT_free(dirent->children);
 		OPENSSL_free(dirent);
 		return 0; /* FAILED */
 	}
-	if (!msi_dirent_new(msi, node, parent, &unused)) {
-		OPENSSL_free(node);
+	if (!msi_dirent_new(msi, rnode, parent, &unused)) {
+		OPENSSL_free(rnode);
 		sk_MSI_DIRENT_free(dirent->children);
 		OPENSSL_free(dirent);
 		return 0; /* FAILED */	
 	}
 	if (entry->type != DIR_STREAM) {
-		if (!get_entry(msi, entry->childID, FALSE, &node)) {
+		if (!get_entry(msi, entry->childID, FALSE, &cnode)) {
 			printf("Corrupted childID: 0x%08X\n", entry->childID);
 			sk_MSI_DIRENT_free(dirent->children);
 			OPENSSL_free(dirent);
 			return 0; /* FAILED */
 		}			
-		if (!msi_dirent_new(msi, node, dirent, &unused)) {
-			OPENSSL_free(node);
+		if (!msi_dirent_new(msi, cnode, dirent, &unused)) {
+			OPENSSL_free(cnode);
 			sk_MSI_DIRENT_free(dirent->children);
 			OPENSSL_free(dirent);
 			return 0; /* FAILED */	
