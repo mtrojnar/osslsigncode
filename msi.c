@@ -404,9 +404,9 @@ MSI_FILE_HDR *msi_header_get(MSI_FILE *msi)
 }
 
 /* Recursively parse MSI_DIRENT struct */
-int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT **ret, int verbose)
+int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT *prev, MSI_DIRENT **ret, int verbose)
 {
-	MSI_DIRENT *dirent, *unused = NULL;
+	MSI_DIRENT *dirent;
 	MSI_ENTRY *lnode = NULL, *rnode = NULL, *cnode = NULL;
 
 	if (!entry) {
@@ -416,12 +416,22 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 		if (verbose) printf("Corrupted Directory Entry Name Length\n");
 		return 0; /* FAILED */
 	}
+	/* detect loops in previously visited entries (parents, siblings) */
+	if (entry->childID != NOSTREAM) {
+		for (dirent = prev; dirent; dirent = dirent->prev) {
+			if (dirent->entry->childID == entry->childID) {
+				printf("Entry loop at ID: 0x%08X\n", entry->childID);
+				return 0; /* FAILED */
+			}
+		}
+	}
 	dirent = (MSI_DIRENT *)OPENSSL_malloc(sizeof(MSI_DIRENT));
 	memcpy(dirent->name, entry->name, entry->nameLen);
 	dirent->nameLen = entry->nameLen;
 	dirent->type = entry->type;
 	dirent->entry = entry;
 	dirent->children = sk_MSI_DIRENT_new_null();
+	dirent->prev = prev;
 
 	if (parent && !sk_MSI_DIRENT_push(parent->children, dirent)) {
 		if (verbose) printf("Failed to insert MSI_DIRENT\n");
@@ -430,45 +440,51 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 		return 0; /* FAILED */
 	}
 	/* NOTE : These links are a tree, not a linked list */
-	if (!get_entry(msi, entry->leftSiblingID, FALSE, &lnode, verbose)) {
-		if (verbose) printf("Corrupted Left Sibling ID: 0x%08X\n", entry->leftSiblingID);
-		sk_MSI_DIRENT_free(dirent->children);
-		OPENSSL_free(dirent);
-		return 0; /* FAILED */
+	/* The special value NOSTREAM (0xFFFFFFFF) is used as a terminator */
+	if (entry->leftSiblingID != NOSTREAM) {
+		if (!get_entry(msi, entry->leftSiblingID, FALSE, &lnode, verbose)) {
+			if (verbose) printf("Corrupted Left Sibling ID: 0x%08X\n", entry->leftSiblingID);
+			sk_MSI_DIRENT_free(dirent->children);
+			OPENSSL_free(dirent);
+			return 0; /* FAILED */
+		}
+		if (!msi_dirent_new(msi, lnode, parent, dirent, NULL, verbose)) {
+			OPENSSL_free(lnode);
+			sk_MSI_DIRENT_free(dirent->children);
+			OPENSSL_free(dirent);
+			return 0; /* FAILED */
+		}
 	}
-	if (!msi_dirent_new(msi, lnode, parent, &unused, verbose)) {
-		OPENSSL_free(lnode);
-		sk_MSI_DIRENT_free(dirent->children);
-		OPENSSL_free(dirent);
-		return 0; /* FAILED */	
+	if (entry->rightSiblingID != NOSTREAM) {
+		if (!get_entry(msi, entry->rightSiblingID, FALSE, &rnode, verbose)) {
+			if (verbose) printf("Corrupted Right Sibling ID: 0x%08X\n", entry->rightSiblingID);
+			sk_MSI_DIRENT_free(dirent->children);
+			OPENSSL_free(dirent);
+			return 0; /* FAILED */
+		}
+		if (!msi_dirent_new(msi, rnode, parent, dirent, NULL, verbose)) {
+			OPENSSL_free(rnode);
+			sk_MSI_DIRENT_free(dirent->children);
+			OPENSSL_free(dirent);
+			return 0; /* FAILED */
+		}
 	}
-	if (!get_entry(msi, entry->rightSiblingID, FALSE, &rnode, verbose)) {
-		if (verbose) printf("Corrupted Right Sibling ID: 0x%08X\n", entry->rightSiblingID);
-		sk_MSI_DIRENT_free(dirent->children);
-		OPENSSL_free(dirent);
-		return 0; /* FAILED */
-	}
-	if (!msi_dirent_new(msi, rnode, parent, &unused, verbose)) {
-		OPENSSL_free(rnode);
-		sk_MSI_DIRENT_free(dirent->children);
-		OPENSSL_free(dirent);
-		return 0; /* FAILED */	
-	}
-	if (entry->type != DIR_STREAM) {
+	if (entry->type != DIR_STREAM && entry->childID != NOSTREAM) {
 		if (!get_entry(msi, entry->childID, FALSE, &cnode, verbose)) {
 			if (verbose) printf("Corrupted Child ID: 0x%08X\n", entry->childID);
 			sk_MSI_DIRENT_free(dirent->children);
 			OPENSSL_free(dirent);
 			return 0; /* FAILED */
-		}			
-		if (!msi_dirent_new(msi, cnode, dirent, &unused, verbose)) {
+		}
+		if (!msi_dirent_new(msi, cnode, dirent, dirent, NULL, verbose)) {
 			OPENSSL_free(cnode);
 			sk_MSI_DIRENT_free(dirent->children);
 			OPENSSL_free(dirent);
-			return 0; /* FAILED */	
+			return 0; /* FAILED */
 		}
 	}
-	*ret = dirent;
+	if (ret)
+		*ret = dirent;
 	return 1; /* OK */
 }
 
@@ -845,7 +861,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, int l
 			/* set the size of the user-defined data if this is a stream object */
 			PUT_UINT32_LE(inlen, buf);
 			memcpy(child->entry->size, buf, sizeof child->entry->size);
-			
+
 			if (inlen < MINI_STREAM_CUTOFF_SIZE) {
 				/* set the index into the mini FAT to track the chain of sectors through the mini stream */
 				child->entry->startSectorLocation = out->miniSectorNum;
@@ -926,7 +942,7 @@ static void minifat_save(BIO *outdata, MSI_OUT *out)
 {
 	char buf[MAX_SECTOR_SIZE];
 	int i,remain;
-	
+
 	/* set Mini FAT Starting Sector Location in the header */
 	if (out->minifatLen == 0) {
 		PUT_UINT32_LE(ENDOFCHAIN, buf);
@@ -1029,7 +1045,7 @@ static int dirents_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out, int *str
 	} else { /* DIR_ROOT */
 		dirent->entry->rightSiblingID = NOSTREAM;
 	}
-	dirent->entry->childID = *streamId + 1;	
+	dirent->entry->childID = *streamId + 1;
 	entry = msi_dirent_get(dirent->entry);
 	BIO_write(outdata, entry, DIRENT_SIZE);
 	OPENSSL_free(entry);
@@ -1104,7 +1120,7 @@ static int fat_save(BIO *outdata, MSI_OUT *out)
 {
 	char buf[MAX_SECTOR_SIZE];
 	int i, remain;
-	
+
 	remain = (out->fatLen + out->sectorSize - 1) / out->sectorSize;
 	out->fatSectorsCount = (out->fatLen + remain * 4 + out->sectorSize - 1) / out->sectorSize;
 
@@ -1182,7 +1198,7 @@ static char *header_new(MSI_FILE_HDR *hdr, MSI_OUT *out)
 	} else {
 		PUT_UINT16_LE(0x0003, buf);
 	}
-	memcpy(data + HEADER_MAJOR_VER, buf, 2);	
+	memcpy(data + HEADER_MAJOR_VER, buf, 2);
 	PUT_UINT16_LE(hdr->byteOrder, buf);
 	memcpy(data + HEADER_BYTE_ORDER, buf, 2);
 	PUT_UINT16_LE(hdr->sectorShift, buf);
@@ -1238,7 +1254,7 @@ static int msiout_set(MSI_FILE *msi, int len_msi, int len_msiex, MSI_OUT *out)
 		return 0;/* FAILED */
 	}
 	out->header = header_new(hdr, out);
-	out->minifatMemallocCount = hdr->numMiniFATSector;	
+	out->minifatMemallocCount = hdr->numMiniFATSector;
 	out->fatMemallocCount = hdr->numFATSector;
 	out->ministream = NULL;
 	out->minifat = OPENSSL_malloc(out->minifatMemallocCount * out->sectorSize);
@@ -1254,7 +1270,7 @@ int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, int len_msi
 	MSI_OUT out;
 	int ret = 0;
 
-	memset(&out, 0, sizeof(MSI_OUT));	
+	memset(&out, 0, sizeof(MSI_OUT));
 	if (!msiout_set(msi, len_msi, len_msiex, &out)) {
 		goto out; /* FAILED */
 	}

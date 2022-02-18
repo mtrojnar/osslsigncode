@@ -139,12 +139,13 @@ typedef struct {
 	u_char size[8];
 } MSI_ENTRY;
 
-typedef struct {
+typedef struct msi_dirent_struct {
 	u_char name[DIRENT_MAX_NAME_SIZE];
 	uint16_t nameLen;
 	uint8_t type;
 	MSI_ENTRY *entry;
 	STACK_OF(MSI_DIRENT) *children;
+	struct msi_dirent_struct *prev; /* detect loops */
 } MSI_DIRENT;
 
 DEFINE_STACK_OF(MSI_DIRENT)
@@ -203,7 +204,7 @@ int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer
 MSI_FILE *msi_file_new(char *buffer, uint32_t len, int verbose);
 void msi_file_free(MSI_FILE *msi);
 MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi, int verbose);
-int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT **ret, int verbose);
+int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT *prev, MSI_DIRENT **ret, int verbose);
 MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse);
 void msi_dirent_free(MSI_DIRENT *dirent);
 MSI_FILE_HDR *msi_header_get(MSI_FILE *msi);
