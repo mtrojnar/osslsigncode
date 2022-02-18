@@ -3624,18 +3624,17 @@ static void pe_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *
 
 static int cab_verify_header(char *indata, char *infile, uint32_t filesize, FILE_HEADER *header)
 {
-	int ret = 1;
 	uint32_t reserved;
 
 	if (filesize < 44) {
 		printf("Corrupt cab file - too short: %s\n", infile);
-		ret = 0; /* FAILED */
+		return 0; /* FAILED */
 	}
 	header->fileend = filesize;
 	reserved = GET_UINT32_LE(indata + 4);
 	if (reserved) {
 		printf("Reserved1: 0x%08X\n", reserved);
-		ret = 0; /* FAILED */
+		return 0; /* FAILED */
 	}
 	/* flags specify bit-mapped values that indicate the presence of optional data */
 	header->flags = GET_UINT16_LE(indata + 30);
@@ -3643,7 +3642,7 @@ static int cab_verify_header(char *indata, char *infile, uint32_t filesize, FILE
 	if (header->flags & FLAG_PREV_CABINET) {
 		/* FLAG_NEXT_CABINET works */
 		printf("Multivolume cabinet file is unsupported: flags 0x%04X\n", header->flags);
-		ret = 0; /* FAILED */
+		return 0; /* FAILED */
 	}
 #endif
 	if (header->flags & FLAG_RESERVE_PRESENT) {
@@ -3654,12 +3653,12 @@ static int cab_verify_header(char *indata, char *infile, uint32_t filesize, FILE
 		header->header_size = GET_UINT32_LE(indata + 36);
 		if (header->header_size != 20) {
 			printf("Additional header size: 0x%08X\n", header->header_size);
-			ret = 0; /* FAILED */
+			return 0; /* FAILED */
 		}
 		reserved = GET_UINT32_LE(indata + 40);
 		if (reserved != 0x00100000) {
 			printf("abReserved: 0x%08X\n", reserved);
-			ret = 0; /* FAILED */
+			return 0; /* FAILED */
 		}
 		/*
 		* File size is defined at offset 8, however if additional header exists, this size is not valid.
@@ -3672,14 +3671,19 @@ static int cab_verify_header(char *indata, char *infile, uint32_t filesize, FILE
 		*/
 		header->sigpos = GET_UINT32_LE(indata + 44);
 		header->siglen = GET_UINT32_LE(indata + 48);
-		if (header->sigpos < filesize && header->sigpos + header->siglen != filesize) {
+		if ((header->sigpos < filesize && header->sigpos + header->siglen != filesize)
+				|| (header->sigpos >= filesize)) {
 			printf("Additional data offset:\t%u bytes\nAdditional data size:\t%u bytes\n",
-					header->sigpos, header->siglen);
+				header->sigpos, header->siglen);
 			printf("File size:\t\t%u bytes\n", filesize);
-			ret = 0; /* FAILED */
+			return 0; /* FAILED */
+		}
+		if ((header->sigpos > 0 && header->siglen == 0) || (header->sigpos == 0 && header->siglen > 0)) {
+			printf("Corrupt signature\n");
+			return 0; /* FAILED */
 		}
 	}
-	return ret;
+	return 1; /* OK */
 }
 
 /* Compute a message digest value of the signed or unsigned CAB file */
@@ -3712,6 +3716,7 @@ static int cab_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, FILE_H
 	BIO_read(bio, bfb, 4);
 	if (header->sigpos) {
 		uint16_t nfolders, flags;
+		uint32_t pos = 60;
 		/*
 		 * u4 cbCabinet - size of this cabinet file in bytes: 8-11
 		 * u4 reserved2 00000000: 12-15
@@ -3756,31 +3761,34 @@ static int cab_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, FILE_H
 		/* u22 abReserve: 56-59 */
 		BIO_read(bio, bfb, 4);
 		EVP_DigestUpdate(mdctx, bfb, 4);
-
 		/* TODO */
 		if (flags & FLAG_PREV_CABINET) {
 			/* szCabinetPrev */
 			do {
 				BIO_read(bio, bfb, 1);
 				EVP_DigestUpdate(mdctx, bfb, 1);
-			} while (bfb[0]);
+				pos++;
+			} while (bfb[0] && pos < offset);
 			/* szDiskPrev */
 			do {
 				BIO_read(bio, bfb, 1);
 				EVP_DigestUpdate(mdctx, bfb, 1);
-			} while (bfb[0]);
+				pos++;
+			} while (bfb[0] && pos < offset);
 		}
 		if (flags & FLAG_NEXT_CABINET) {
 			/* szCabinetNext */
 			do {
 				BIO_read(bio, bfb, 1);
 				EVP_DigestUpdate(mdctx, bfb, 1);
-			} while (bfb[0]);
+				pos++;
+			} while (bfb[0] && pos < offset);
 			/* szDiskNext */
 			do {
 				BIO_read(bio, bfb, 1);
 				EVP_DigestUpdate(mdctx, bfb, 1);
-			} while (bfb[0]);
+				pos++;
+			} while (bfb[0] && pos < offset);
 		}
 		/*
 		 * (u8 * cFolders) CFFOLDER - structure contains information about
