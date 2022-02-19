@@ -1293,3 +1293,13 @@ out:
 	OPENSSL_free(out.minifat);
 	return ret;
 }
+
+/*
+Local Variables:
+   c-basic-offset: 4
+   tab-width: 4
+   indent-tabs-mode: t
+End:
+
+  vim: set ts=4 noexpandtab:
+*/

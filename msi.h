@@ -213,3 +213,13 @@ int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root, int 
 int msi_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, uint32_t fileend);
 int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen);
 int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p, int len, u_char *p_msiex, int len_msiex, BIO *outdata);
+
+/*
+Local Variables:
+   c-basic-offset: 4
+   tab-width: 4
+   indent-tabs-mode: t
+End:
+
+  vim: set ts=4 noexpandtab:
+*/
