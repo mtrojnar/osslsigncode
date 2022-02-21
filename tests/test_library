@@ -38,7 +38,7 @@ modify_blob() {
       sed "s/$initial_blob$zero_blob/$initial_blob$modified_blob/" | \
       xxd -p -r > "changed_$1.$2"
 
-  ../../osslsigncode verify \
+  ../../osslsigncode verify -verbose \
       -CAfile "${script_path}/../certs/CACert.pem" \
       -CRLfile "${script_path}/../certs/CACertCRL.pem" \
       -TSA-CAfile "${script_path}/../certs/ca-bundle.crt" \
@@ -95,7 +95,7 @@ verify_signature() {
       TZ=GMT faketime -f "$5" /bin/bash -c '
           printf "Verify time: " >> "verify.log" && date >> "verify.log" && printf "\n" >> "verify.log"
           script_path=$(pwd)
-          ../../osslsigncode verify \
+          ../../osslsigncode verify -verbose \
               -CAfile "${script_path}/../certs/CACert.pem" \
               -CRLfile "${script_path}/../certs/CACertCRL.pem" \
               -TSA-CAfile "${script_path}/../certs/ca-bundle.crt" \
@@ -153,7 +153,7 @@ verify_leaf_hash() {
       TZ=GMT faketime -f "$4" /bin/bash -c '
           printf "Verify time: " >> "verify.log" && date >> "verify.log" && printf "\n" >> "verify.log"
           script_path=$(pwd)
-          ../../osslsigncode verify \
+          ../../osslsigncode verify -verbose \
               -CAfile "${script_path}/../certs/CACert.pem" \
               -CRLfile "${script_path}/../certs/CACertCRL.pem" \
               -TSA-CAfile "${script_path}/../certs/ca-bundle.crt" \

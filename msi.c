@@ -18,10 +18,8 @@
 /* Get absolute address from sector and offset */
 static const u_char *sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset, int verbose)
 {
-	if ((sector >= MAXREGSECT) || (offset >= msi->m_sectorSize)
-			|| (msi->m_sectorSize == 0x0200 && sector + 1 >= 0x00800000)
-			|| (msi->m_sectorSize == 0x1000 && sector + 1 >= 0x00100000)
-			|| (msi->m_bufferLen <= (sector + 1) * msi->m_sectorSize + offset)) {
+	if (sector >= MAXREGSECT || offset >= msi->m_sectorSize
+			|| (msi->m_bufferLen - offset) / msi->m_sectorSize <= sector) {
 		if (verbose) printf("Corrupted file\n");
 		return NULL; /* FAILED */
 	}
@@ -60,16 +58,10 @@ static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber,
 /* Lookup FAT */
 static uint32_t get_next_sector(MSI_FILE *msi, uint32_t sector, int verbose)
 {
-	const u_char *address;
 	uint32_t entriesPerSector = msi->m_sectorSize / 4;
 	uint32_t fatSectorNumber = sector / entriesPerSector;
 	uint32_t fatSectorLocation = get_fat_sector_location(msi, fatSectorNumber, verbose);
-
-	if (fatSectorLocation == 0) {
-		if (verbose) printf("Failed to get a fat sector location\n");
-		return 0; /* FAILED */
-	}
-	address = sector_offset_to_address(msi, fatSectorLocation, sector % entriesPerSector * 4, verbose);
+	const u_char *address = sector_offset_to_address(msi, fatSectorLocation, sector % entriesPerSector * 4, verbose);
 	if (!address) {
 		if (verbose) printf("Failed to get a next sector address\n");
 		return 0; /* FAILED */
@@ -97,7 +89,7 @@ static int locate_final_sector(MSI_FILE *msi, uint32_t sector, uint32_t offset, 
 static const u_char *mini_sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset, int verbose)
 {
 	if (sector >= MAXREGSECT || offset >= msi->m_minisectorSize ||
-			msi->m_bufferLen <= msi->m_minisectorSize * sector + offset) {
+			(msi->m_bufferLen - offset) / msi->m_minisectorSize <= sector) {
 		if (verbose) printf("Corrupted file\n");
 		return NULL; /* FAILED */
 	}
@@ -227,30 +219,85 @@ int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer
 }
 
 /* Parse MSI_FILE_HDR struct */
-static MSI_FILE_HDR *parse_header(char *data)
+static MSI_FILE_HDR *parse_header(char *data, int verbose)
 {
 	MSI_FILE_HDR *header = (MSI_FILE_HDR *)OPENSSL_malloc(HEADER_SIZE);
-	if (!data) {
-		/* initialise 512 bytes */
-		memset(header, 0, sizeof(MSI_FILE_HDR));
-	} else {
-		memcpy(header->signature, data + HEADER_SIGNATURE, sizeof header->signature);
-		header->minorVersion = GET_UINT16_LE(data + HEADER_MINOR_VER);
-		header->majorVersion = GET_UINT16_LE(data + HEADER_MAJOR_VER);
-		header->byteOrder = GET_UINT16_LE(data + HEADER_BYTE_ORDER);
-		header->sectorShift = GET_UINT16_LE(data + HEADER_SECTOR_SHIFT);
-		header->miniSectorShift = GET_UINT16_LE(data + HEADER_MINI_SECTOR_SHIFT);
-		header->numDirectorySector = GET_UINT32_LE(data + HEADER_DIR_SECTORS_NUM);
-		header->numFATSector = GET_UINT32_LE(data + HEADER_FAT_SECTORS_NUM);
-		header->firstDirectorySectorLocation = GET_UINT32_LE(data + HEADER_DIR_SECTOR_LOC);
-		header->transactionSignatureNumber = GET_UINT32_LE(data + HEADER_TRANSACTION);
-		header->miniStreamCutoffSize = GET_UINT32_LE(data + HEADER_MINI_STREAM_CUTOFF);
-		header->firstMiniFATSectorLocation = GET_UINT32_LE(data + HEADER_MINI_FAT_SECTOR_LOC);
-		header->numMiniFATSector = GET_UINT32_LE(data + HEADER_MINI_FAT_SECTORS_NUM);
-		header->firstDIFATSectorLocation = GET_UINT32_LE(data + HEADER_DIFAT_SECTOR_LOC);
-		header->numDIFATSector = GET_UINT32_LE(data + HEADER_DIFAT_SECTORS_NUM);
-		memcpy(header->headerDIFAT, data + HEADER_DIFAT, sizeof header->headerDIFAT);
+
+	/* initialise 512 bytes */
+	memset(header, 0, sizeof(MSI_FILE_HDR));
+	memcpy(header->signature, data + HEADER_SIGNATURE, sizeof header->signature);
+	/* Minor Version field SHOULD be set to 0x003E. */
+	header->minorVersion = GET_UINT16_LE(data + HEADER_MINOR_VER);
+	if (header->minorVersion !=0x003E ) {
+		if (verbose)
+			printf("Warning: Minor Version field SHOULD be 0x003E, but is: 0x%04X\n", header->minorVersion);
 	}
+	/* Major Version field MUST be set to either 0x0003 (version 3) or 0x0004 (version 4). */
+	header->majorVersion = GET_UINT16_LE(data + HEADER_MAJOR_VER);
+	if (header->majorVersion != 0x0003 && header->majorVersion != 0x0004) {
+		if (verbose)
+			printf("Unknown Major Version: 0x%04X\n", header->majorVersion);
+		OPENSSL_free(header);
+		return NULL; /* FAILED */
+	}
+	/* Byte Order field MUST be set to 0xFFFE, specifies little-endian byte order. */
+	header->byteOrder = GET_UINT16_LE(data + HEADER_BYTE_ORDER);
+	if (header->byteOrder != 0xFFFE) {
+		if (verbose)
+			printf("Unknown Byte Order: 0x%04X\n", header->byteOrder);
+		OPENSSL_free(header);
+		return NULL; /* FAILED */
+	}
+	/* Sector Shift field MUST be set to 0x0009, or 0x000c, depending on the Major Version field.
+	 * This field specifies the sector size of the compound file as a power of 2. */
+	header->sectorShift = GET_UINT16_LE(data + HEADER_SECTOR_SHIFT);
+	if ((header->majorVersion == 0x0003 && header->sectorShift != 0x0009) ||
+			(header->majorVersion == 0x0004 && header->sectorShift != 0x000C)) {
+		if (verbose)
+			printf("Unknown Sector Shift: 0x%04X\n", header->sectorShift);
+		OPENSSL_free(header);
+		return NULL; /* FAILED */
+	}
+	/* Mini Sector Shift field MUST be set to 0x0006.
+	 * This field specifies the sector size of the Mini Stream as a power of 2.
+	 * The sector size of the Mini Stream MUST be 64 bytes. */
+	header->miniSectorShift = GET_UINT16_LE(data + HEADER_MINI_SECTOR_SHIFT);
+	if (header->miniSectorShift != 0x0006) {
+		if (verbose)
+			printf("Unknown Mini Sector Shift: 0x%04X\n", header->miniSectorShift);
+		OPENSSL_free(header);
+		return NULL; /* FAILED */
+	}
+	/* Number of Directory Sectors field contains the count of the number
+	 * of directory sectors in the compound file.
+	 * If Major Version is 3, the Number of Directory Sectors MUST be zero. */
+	header->numDirectorySector = GET_UINT32_LE(data + HEADER_DIR_SECTORS_NUM);
+	if (header->majorVersion == 0x0003 && header->numDirectorySector != 0x00000000) {
+		if (verbose)
+			printf("Unsupported Number of Directory Sectors: 0x%08X\n", header->numDirectorySector);
+		OPENSSL_free(header);
+		return NULL; /* FAILED */
+	}
+	header->numFATSector = GET_UINT32_LE(data + HEADER_FAT_SECTORS_NUM);
+	header->firstDirectorySectorLocation = GET_UINT32_LE(data + HEADER_DIR_SECTOR_LOC);
+	header->transactionSignatureNumber = GET_UINT32_LE(data + HEADER_TRANSACTION);
+	/* Mini Stream Cutoff Size field MUST be set to 0x00001000.
+	 * This field specifies the maximum size of a user-defined data stream that is allocated
+	 * from the mini FAT and mini stream, and that cutoff is 4,096 bytes.
+	 * Any user-defined data stream that is greater than or equal to this cutoff size
+	 * must be allocated as normal sectors from the FAT. */
+	header->miniStreamCutoffSize = GET_UINT32_LE(data + HEADER_MINI_STREAM_CUTOFF);
+	if (header->miniStreamCutoffSize != 0x00001000) {
+		if (verbose)
+			printf("Unsupported Mini Stream Cutoff Size: 0x%08X\n", header->miniStreamCutoffSize);
+		OPENSSL_free(header);
+		return NULL; /* FAILED */
+	}
+	header->firstMiniFATSectorLocation = GET_UINT32_LE(data + HEADER_MINI_FAT_SECTOR_LOC);
+	header->numMiniFATSector = GET_UINT32_LE(data + HEADER_MINI_FAT_SECTORS_NUM);
+	header->firstDIFATSectorLocation = GET_UINT32_LE(data + HEADER_DIFAT_SECTOR_LOC);
+	header->numDIFATSector = GET_UINT32_LE(data + HEADER_DIFAT_SECTORS_NUM);
+	memcpy(header->headerDIFAT, data + HEADER_DIFAT, sizeof header->headerDIFAT);
 	return header;
 }
 
@@ -259,6 +306,9 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int verbose)
 {
 	uint32_t inlen;
 	MSI_ENTRY *entry = (MSI_ENTRY *)OPENSSL_malloc(sizeof(MSI_ENTRY));
+
+	/* initialise 128 bytes */
+	memset(entry, 0, sizeof(MSI_ENTRY));
 	entry->nameLen = GET_UINT16_LE(data + DIRENT_NAME_LEN);
 	/* This length MUST NOT exceed 64, the maximum size of the Directory Entry Name field */
 	if (entry->nameLen == 0 || entry->nameLen > 64) {
@@ -277,13 +327,6 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int verbose)
 	memcpy(entry->creationTime, data + DIRENT_CREATE_TIME, 8);
 	memcpy(entry->modifiedTime, data + DIRENT_MODIFY_TIME, 8);
 	entry->startSectorLocation = GET_UINT32_LE(data + DIRENT_START_SECTOR_LOC);
-	if ((entry->startSectorLocation >= MAXREGSECT)
-			|| (msi->m_sectorSize == 0x0200 && entry->startSectorLocation + 1 >= 0x00800000)
-			|| (msi->m_sectorSize == 0x1000 && entry->startSectorLocation + 1 >= 0x00100000)) {
-		if (verbose) printf("Corrupted Starting Sector Location 0x%08X\n", entry->startSectorLocation);
-		OPENSSL_free(entry);
-		return NULL; /* FAILED */
-	}
 	memcpy(entry->size, data + DIRENT_FILE_SIZE, 8);
 	/* For a version 3 compound file 512-byte sector size, the value of this field
 	   MUST be less than or equal to 0x80000000 */
@@ -360,15 +403,21 @@ MSI_FILE *msi_file_new(char *buffer, uint32_t len, int verbose)
 {
 	MSI_FILE *msi;
 	MSI_ENTRY *root;
+	MSI_FILE_HDR *header;
 
 	if (buffer == NULL || len == 0) {
 		if (verbose) printf("Invalid argument\n");
 		return NULL; /* FAILED */
 	}
+	header = parse_header(buffer, verbose);
+	if (!header) {
+		if (verbose) printf("Failed to parse MSI_FILE_HDR struct\n");
+		return NULL; /* FAILED */
+	}
 	msi = (MSI_FILE *)OPENSSL_malloc(sizeof(MSI_FILE));
 	msi->m_buffer = (const u_char *)(buffer);
 	msi->m_bufferLen = len;
-	msi->m_hdr = parse_header(buffer);
+	msi->m_hdr = header;
 	msi->m_sectorSize = 1 << msi->m_hdr->sectorShift;
 	msi->m_minisectorSize = 1 << msi->m_hdr->miniSectorShift;
 	msi->m_miniStreamStartSector = 0;
@@ -379,7 +428,6 @@ MSI_FILE *msi_file_new(char *buffer, uint32_t len, int verbose)
 		msi_file_free(msi);
 		return NULL; /* FAILED */
 	}
-	msi->m_sectorSize = msi->m_hdr->majorVersion == 3 ? 512 : 4096;
 
 	/* The file must contains at least 3 sectors */
 	if (msi->m_bufferLen < msi->m_sectorSize * 3) {
@@ -396,11 +444,6 @@ MSI_FILE *msi_file_new(char *buffer, uint32_t len, int verbose)
 	msi->m_miniStreamStartSector = root->startSectorLocation;
 	OPENSSL_free(root);
 	return msi;
-}
-
-MSI_FILE_HDR *msi_header_get(MSI_FILE *msi)
-{
-	return msi->m_hdr;
 }
 
 /* Recursively parse MSI_DIRENT struct */
@@ -704,7 +747,7 @@ out:
 
 static void ministream_append(MSI_OUT *out, char *buf, int len)
 {
-	uint32_t needSectors = (int)((len + out->sectorSize - 1) / out->sectorSize);
+	uint32_t needSectors = (len + out->sectorSize - 1) / out->sectorSize;
 	if (out->miniStreamLen + len >= out->ministreamsMemallocCount * out->sectorSize) {
 		out->ministreamsMemallocCount += needSectors;
 		out->ministream = OPENSSL_realloc(out->ministream, out->ministreamsMemallocCount * out->sectorSize);
@@ -1231,7 +1274,6 @@ static char *header_new(MSI_FILE_HDR *hdr, MSI_OUT *out)
 
 static int msiout_set(MSI_FILE *msi, int len_msi, int len_msiex, MSI_OUT *out)
 {
-	MSI_FILE_HDR *hdr = msi_header_get(msi);
 	int msi_size, msiex_size;
 
 	out->sectorSize = msi->m_sectorSize;
@@ -1253,9 +1295,9 @@ static int msiout_set(MSI_FILE *msi, int len_msi, int len_msiex, MSI_OUT *out)
 		printf("DIFAT sectors are not supported\n");
 		return 0;/* FAILED */
 	}
-	out->header = header_new(hdr, out);
-	out->minifatMemallocCount = hdr->numMiniFATSector;
-	out->fatMemallocCount = hdr->numFATSector;
+	out->header = header_new(msi->m_hdr, out);
+	out->minifatMemallocCount = msi->m_hdr->numMiniFATSector;
+	out->fatMemallocCount = msi->m_hdr->numFATSector;
 	out->ministream = NULL;
 	out->minifat = OPENSSL_malloc(out->minifatMemallocCount * out->sectorSize);
 	out->fat = OPENSSL_malloc(out->fatMemallocCount * out->sectorSize);

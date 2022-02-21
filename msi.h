@@ -207,7 +207,6 @@ MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi, int verbose);
 int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT *prev, MSI_DIRENT **ret, int verbose);
 MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse);
 void msi_dirent_free(MSI_DIRENT *dirent);
-MSI_FILE_HDR *msi_header_get(MSI_FILE *msi);
 int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root);
 int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root, int verbose);
 int msi_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, uint32_t fileend);

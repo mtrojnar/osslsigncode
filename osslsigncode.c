@@ -2907,11 +2907,11 @@ static int msi_verify_header(char *indata, uint32_t filesize, MSI_PARAMS *msipar
 {
 	int ret = 1;
 	MSI_ENTRY *root;
-	MSI_FILE_HDR *hdr;
 	MSI_DIRENT *root_dir = NULL;
 
 	msiparams->msi = msi_file_new(indata, filesize, verbose);
 	if (!msiparams->msi) {
+		printf("Failed to parse MSI_FILE struct\n");
 		return 0; /* FAILED */
 	}
 	root = msi_root_entry_get(msiparams->msi, verbose);
@@ -2925,49 +2925,6 @@ static int msi_verify_header(char *indata, uint32_t filesize, MSI_PARAMS *msipar
 		return 0; /* FAILED */
 	}
 	msiparams->dirent = root_dir;
-	hdr = msi_header_get(msiparams->msi);
-
-	/* Minor Version field SHOULD be set to 0x003E.
-	 * Major Version field MUST be set to either 0x0003 (version 3) or 0x0004 (version 4). */
-	if (hdr->majorVersion != 0x0003 && hdr->majorVersion != 0x0004) {
-		printf("Unknown Major Version: 0x%04X\n", hdr->majorVersion);
-		ret = 0; /* FAILED */
-	}
-	/* Byte Order field MUST be set to 0xFFFE, specifies little-endian byte order. */
-	if (hdr->byteOrder != 0xFFFE) {
-		printf("Unknown Byte Order: 0x%04X\n", hdr->byteOrder);
-		ret = 0; /* FAILED */
-	}
-	/* Sector Shift field MUST be set to 0x0009, or 0x000c, depending on the Major Version field.
-	 * This field specifies the sector size of the compound file as a power of 2. */
-	if ((hdr->majorVersion == 0x0003 && hdr->sectorShift != 0x0009) ||
-			(hdr->majorVersion == 0x0004 && hdr->sectorShift != 0x000C)) {
-		printf("Unknown Sector Shift: 0x%04X\n", hdr->sectorShift);
-		ret = 0; /* FAILED */
-	}
-	/* Mini Sector Shift field MUST be set to 0x0006.
-	 * This field specifies the sector size of the Mini Stream as a power of 2.
-	 * The sector size of the Mini Stream MUST be 64 bytes. */
-	if (hdr->miniSectorShift != 0x0006) {
-		printf("Unknown Mini Sector Shift: 0x%04X\n", hdr->miniSectorShift);
-		ret = 0; /* FAILED */
-	}
-	/* Number of Directory Sectors field contains the count of the number
-	 * of directory sectors in the compound file.
-	 * If Major Version is 3, the Number of Directory Sectors MUST be zero. */
-	if (hdr->majorVersion == 0x0003 && hdr->numDirectorySector != 0x00000000) {
-		printf("Unsupported Number of Directory Sectors: 0x%08X\n", hdr->numDirectorySector);
-		ret = 0; /* FAILED */
-	}
-	/* Mini Stream Cutoff Size field MUST be set to 0x00001000.
-	 * This field specifies the maximum size of a user-defined data stream that is allocated
-	 * from the mini FAT and mini stream, and that cutoff is 4,096 bytes.
-	 * Any user-defined data stream that is greater than or equal to this cutoff size
-	 * must be allocated as normal sectors from the FAT. */
-	if (hdr->miniStreamCutoffSize != 0x00001000) {
-		printf("Unsupported Mini Stream Cutoff Size: 0x%08X\n", hdr->miniStreamCutoffSize);
-		ret = 0; /* FAILED */
-	}
 	return ret;
 }
 
@@ -5985,7 +5942,7 @@ int main(int argc, char **argv)
 	header.fileend = filesize;
 
 	indata = map_file(options.infile, filesize);
-	if (indata == NULL)
+	if (!indata)
 		DO_EXIT_1("Failed to open file: %s\n", options.infile);
 
 	if (!get_file_type(indata, options.infile, &type)) {
@@ -6171,11 +6128,13 @@ err_cleanup:
 #endif /* WIN32 */
 		}
 	}
+	if (indata) {
 #ifdef WIN32
-	UnmapViewOfFile(indata);
+		UnmapViewOfFile(indata);
 #else
-	munmap(indata, filesize);
+		munmap(indata, filesize);
 #endif /* WIN32 */
+	}
 	free_msi_params(&msiparams);
 	free_crypto_params(&cparams);
 	free_options(&options);
