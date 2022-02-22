@@ -435,7 +435,7 @@ MSI_FILE *msi_file_new(char *buffer, uint32_t len)
 /* Recursively create a tree of MSI_DIRENT structures */
 int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT *prev, MSI_DIRENT **ret)
 {
-	MSI_DIRENT *dirent;
+	MSI_DIRENT *d, *dirent;
 
 	if (!entry) {
 		return 1; /* OK */
@@ -444,15 +444,17 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 		printf("Corrupted Directory Entry Name Length\n");
 		return 0; /* FAILED */
 	}
+
 	/* detect loops in previously visited entries (parents, siblings) */
-	if (entry->childID != NOSTREAM) {
-		for (dirent = prev; dirent; dirent = dirent->prev) {
-			if (dirent->entry->childID == entry->childID) {
-				printf("Entry loop at ID: 0x%08X\n", entry->childID);
-				return 0; /* FAILED */
-			}
+	for (d = prev; d; d = d->prev) {
+		if ((entry->leftSiblingID != NOSTREAM && d->entry->leftSiblingID == entry->leftSiblingID)
+				|| (entry->rightSiblingID != NOSTREAM && d->entry->rightSiblingID == entry->rightSiblingID)
+				|| (entry->childID != NOSTREAM && d->entry->childID == entry->childID)) {
+			printf("Entry loop at ID: 0x%08X\n", entry->childID);
+			return 0; /* FAILED */
 		}
 	}
+
 	dirent = (MSI_DIRENT *)OPENSSL_malloc(sizeof(MSI_DIRENT));
 	memcpy(dirent->name, entry->name, entry->nameLen);
 	dirent->nameLen = entry->nameLen;
