@@ -2903,23 +2903,23 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
  * https://msdn.microsoft.com/en-us/library/dd942138.aspx
  */
 
-static int msi_verify_header(char *indata, uint32_t filesize, MSI_PARAMS *msiparams, int verbose)
+static int msi_verify_header(char *indata, uint32_t filesize, MSI_PARAMS *msiparams)
 {
 	int ret = 1;
 	MSI_ENTRY *root;
 	MSI_DIRENT *root_dir = NULL;
 
-	msiparams->msi = msi_file_new(indata, filesize, verbose);
+	msiparams->msi = msi_file_new(indata, filesize);
 	if (!msiparams->msi) {
 		printf("Failed to parse MSI_FILE struct\n");
 		return 0; /* FAILED */
 	}
-	root = msi_root_entry_get(msiparams->msi, verbose);
+	root = msi_root_entry_get(msiparams->msi);
 	if (!root) {
 		printf("Failed to get file entry\n");
 		return 0; /* FAILED */
 	}
-	if (!msi_dirent_new(msiparams->msi, root, NULL, NULL, &root_dir, verbose)) {
+	if (!msi_dirent_new(msiparams->msi, root, NULL, NULL, &root_dir)) {
 		printf("Failed to parse MSI_DIRENT struct\n");
 		OPENSSL_free(root);
 		return 0; /* FAILED */
@@ -2996,7 +2996,7 @@ static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIRENT *dir
 		printf("Calculated MsiDigitalSignatureEx : %s\n", hexbuf);
 	}
 
-	if (!msi_hash_dir(msi, dirent, hash, 1, options->verbose)) {
+	if (!msi_hash_dir(msi, dirent, hash, 1)) {
 		printf("Failed to calculate DigitalSignature\n\n");
 		BIO_free_all(hash);
 		goto out;
@@ -3038,7 +3038,7 @@ static int msi_verify_file(MSI_PARAMS *msiparams, GLOBAL_OPTIONS *options)
 	}
 	inlen = GET_UINT32_LE(ds->size);
 	indata = OPENSSL_malloc(inlen);
-	if (!msi_file_read(msiparams->msi, ds, 0, indata, inlen, options->verbose)) {
+	if (!msi_file_read(msiparams->msi, ds, 0, indata, inlen)) {
 		printf("DigitalSignature stream data error\n\n");
 		goto out;
 	}
@@ -3047,7 +3047,7 @@ static int msi_verify_file(MSI_PARAMS *msiparams, GLOBAL_OPTIONS *options)
 	} else {
 		exlen = GET_UINT32_LE(dse->size);
 		exdata = OPENSSL_malloc(exlen);
-		if (!msi_file_read(msiparams->msi, dse, 0, exdata, exlen, options->verbose)) {
+		if (!msi_file_read(msiparams->msi, dse, 0, exdata, exlen)) {
 			printf("MsiDigitalSignatureEx stream data error\n\n");
 			goto out;
 		}
@@ -3076,12 +3076,12 @@ out:
 	return ret;
 }
 
-static PKCS7 *msi_extract_existing_pkcs7(MSI_PARAMS *msiparams, MSI_ENTRY *ds, char **data, uint32_t len, int verbose)
+static PKCS7 *msi_extract_existing_pkcs7(MSI_PARAMS *msiparams, MSI_ENTRY *ds, char **data, uint32_t len)
 {
 	PKCS7 *p7 = NULL;
 	const u_char *blob;
 
-	if (!msi_file_read(msiparams->msi, ds, 0, *data, len, verbose)) {
+	if (!msi_file_read(msiparams->msi, ds, 0, *data, len)) {
 		printf("DigitalSignature stream data error\n");
 		return NULL;
 	}
@@ -3094,7 +3094,7 @@ static PKCS7 *msi_extract_existing_pkcs7(MSI_PARAMS *msiparams, MSI_ENTRY *ds, c
 	return p7;
 }
 
-static int msi_extract_file(MSI_PARAMS *msiparams, BIO *outdata, GLOBAL_OPTIONS *options)
+static int msi_extract_file(MSI_PARAMS *msiparams, BIO *outdata, int output_pkcs7)
 {
 	int ret;
 	PKCS7 *sig;
@@ -3109,12 +3109,12 @@ static int msi_extract_file(MSI_PARAMS *msiparams, BIO *outdata, GLOBAL_OPTIONS 
 	len = GET_UINT32_LE(ds->size);
 	data = OPENSSL_malloc(len);
 	(void)BIO_reset(outdata);
-	sig = msi_extract_existing_pkcs7(msiparams, ds, &data, len, options->verbose);
+	sig = msi_extract_existing_pkcs7(msiparams, ds, &data, len);
 	if (!sig) {
 		printf("Unable to extract existing signature\n");
 		return 1; /* FAILED */
 	}
-	if (options->output_pkcs7) {
+	if (output_pkcs7) {
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
 	} else {
 		ret = !BIO_write(outdata, data, len);
@@ -4730,7 +4730,7 @@ static int input_validation(file_type_t type, GLOBAL_OPTIONS *options, FILE_HEAD
 			printf("Warning: -ph option is only valid for PE files\n");
 		if (options->jp >= 0)
 			printf("Warning: -jp option is only valid for CAB files\n");
-		if (!msi_verify_header(indata, filesize, msiparams, options->verbose)) {
+		if (!msi_verify_header(indata, filesize, msiparams)) {
 			printf("Corrupt MSI file: %s\n", options->infile);
 			return 0; /* FAILED */
 		}
@@ -4793,7 +4793,7 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 			printf("Error verifying result\n");
 			return 1; /* FAILED */
 		}
-		if (!msi_verify_header(outdata, filesize, msiparams, options->verbose)) {
+		if (!msi_verify_header(outdata, filesize, msiparams)) {
 			printf("Corrupt MSI file: %s\n", options->outfile);
 			return 1; /* FAILED */
 		}
@@ -5423,7 +5423,7 @@ static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 		printf("Unable to calc MsiDigitalSignatureEx\n");
 		return NULL; /* FAILED */
 	}
-	if (!msi_hash_dir(msiparams->msi, msiparams->dirent, hash, 1, options->verbose)) {
+	if (!msi_hash_dir(msiparams->msi, msiparams->dirent, hash, 1)) {
 		printf("Unable to msi_handle_dir()\n");
 		return NULL; /* FAILED */
 	}
@@ -5442,7 +5442,7 @@ static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 		}
 		len = GET_UINT32_LE(ds->size);
 		data = OPENSSL_malloc(len);
-		*cursig = msi_extract_existing_pkcs7(msiparams, ds, &data, len, options->verbose);
+		*cursig = msi_extract_existing_pkcs7(msiparams, ds, &data, len);
 		OPENSSL_free(data);
 		if (!*cursig) {
 			printf("Unable to extract existing signature\n");
@@ -5999,7 +5999,7 @@ int main(int argc, char **argv)
 
 	if (type == FILE_TYPE_MSI) {
 		if (cmd == CMD_EXTRACT) {
-			ret = msi_extract_file(&msiparams, outdata, &options);
+			ret = msi_extract_file(&msiparams, outdata, options.output_pkcs7);
 			goto skip_signing;
 		} else if (cmd == CMD_VERIFY) {
 			ret = msi_verify_file(&msiparams, &options);
