@@ -3278,8 +3278,13 @@ static int pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 		return 0; /* FAILED */
 	blob = obj->value->value.sequence->data;
 	id = d2i_SpcPeImageData(NULL, &blob, obj->value->value.sequence->length);
-	if (id == NULL)
+	if (!id) {
 		return 0; /* FAILED */
+	}
+	if (!id->file) {
+		SpcPeImageData_free(id);
+		return 0; /* FAILED */
+	}
 	if (id->file->type != 1) {
 		SpcPeImageData_free(id);
 		return 1; /* OK - this is not SpcSerializedObject structure that contains page hashes */
