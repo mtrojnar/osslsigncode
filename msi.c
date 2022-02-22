@@ -15,20 +15,20 @@
 
 #define MIN(a,b) ((a) < (b) ? a : b)
 
-static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent, MSI_DIRENT *prev, int verbose);
+static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent, MSI_DIRENT *prev);
 
 /* Get absolute address from sector and offset */
-static const u_char *sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset, int verbose)
+static const u_char *sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset)
 {
 	if (sector >= MAXREGSECT || offset >= msi->m_sectorSize
 			|| (msi->m_bufferLen - offset) / msi->m_sectorSize <= sector) {
-		if (verbose) printf("Corrupted file\n");
+		printf("Corrupted file\n");
 		return NULL; /* FAILED */
 	}
 	return msi->m_buffer + (sector + 1) * msi->m_sectorSize + offset;
 }
 
-static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber, int verbose)
+static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber)
 {
 	uint32_t entriesPerSector, difatSectorLocation;
 	const u_char *address;
@@ -41,16 +41,16 @@ static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber,
 		difatSectorLocation = msi->m_hdr->firstDIFATSectorLocation;
 		while (fatSectorNumber >= entriesPerSector) {
 			fatSectorNumber -= entriesPerSector;
-			address = sector_offset_to_address(msi, difatSectorLocation, msi->m_sectorSize - 4, verbose);
+			address = sector_offset_to_address(msi, difatSectorLocation, msi->m_sectorSize - 4);
 			if (!address) {
-				if (verbose) printf("Failed to get a next sector address\n");
+				printf("Failed to get a next sector address\n");
 				return 0; /* FAILED */
 			}
 			difatSectorLocation = GET_UINT32_LE(address);
 		}
-		address = sector_offset_to_address(msi, difatSectorLocation, fatSectorNumber * 4, verbose);
+		address = sector_offset_to_address(msi, difatSectorLocation, fatSectorNumber * 4);
 		if (!address) {
-			if (verbose) printf("Failed to get a next sector address\n");
+			printf("Failed to get a next sector address\n");
 			return 0; /* FAILED */
 		}
 		return GET_UINT32_LE(address);
@@ -58,27 +58,27 @@ static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber,
 }
 
 /* Lookup FAT */
-static uint32_t get_next_sector(MSI_FILE *msi, uint32_t sector, int verbose)
+static uint32_t get_next_sector(MSI_FILE *msi, uint32_t sector)
 {
 	uint32_t entriesPerSector = msi->m_sectorSize / 4;
 	uint32_t fatSectorNumber = sector / entriesPerSector;
-	uint32_t fatSectorLocation = get_fat_sector_location(msi, fatSectorNumber, verbose);
-	const u_char *address = sector_offset_to_address(msi, fatSectorLocation, sector % entriesPerSector * 4, verbose);
+	uint32_t fatSectorLocation = get_fat_sector_location(msi, fatSectorNumber);
+	const u_char *address = sector_offset_to_address(msi, fatSectorLocation, sector % entriesPerSector * 4);
 	if (!address) {
-		if (verbose) printf("Failed to get a next sector address\n");
+		printf("Failed to get a next sector address\n");
 		return 0; /* FAILED */
 	}
 	return GET_UINT32_LE(address);
 }
 
 /* Locate the final sector/offset when original offset expands multiple sectors */
-static int locate_final_sector(MSI_FILE *msi, uint32_t sector, uint32_t offset, uint32_t *finalSector, uint32_t *finalOffset, int verbose)
+static int locate_final_sector(MSI_FILE *msi, uint32_t sector, uint32_t offset, uint32_t *finalSector, uint32_t *finalOffset)
 {
 	while (offset >= msi->m_sectorSize) {
 		offset -= msi->m_sectorSize;
-		sector = get_next_sector(msi, sector, verbose);
+		sector = get_next_sector(msi, sector);
 		if (sector == 0) {
-			if (verbose) printf("Failed to get a next sector\n");
+			printf("Failed to get a next sector\n");
 			return 0; /* FAILED */
 		}
 	}
@@ -88,49 +88,49 @@ static int locate_final_sector(MSI_FILE *msi, uint32_t sector, uint32_t offset, 
 }
 
 /* Get absolute address from mini sector and offset */
-static const u_char *mini_sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset, int verbose)
+static const u_char *mini_sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset)
 {
 	if (sector >= MAXREGSECT || offset >= msi->m_minisectorSize ||
 			(msi->m_bufferLen - offset) / msi->m_minisectorSize <= sector) {
-		if (verbose) printf("Corrupted file\n");
+		printf("Corrupted file\n");
 		return NULL; /* FAILED */
 	}
-	if (!locate_final_sector(msi, msi->m_miniStreamStartSector, sector * msi->m_minisectorSize + offset, &sector, &offset, verbose)) {
-		if (verbose) printf("Failed to locate a final sector\n");
+	if (!locate_final_sector(msi, msi->m_miniStreamStartSector, sector * msi->m_minisectorSize + offset, &sector, &offset)) {
+		printf("Failed to locate a final sector\n");
 		return NULL; /* FAILED */
 	}
-	return sector_offset_to_address(msi, sector, offset, verbose);
+	return sector_offset_to_address(msi, sector, offset);
 }
 
 /*
  * Copy as many as possible in each step
  * copylen typically iterate as: msi->m_sectorSize - offset --> msi->m_sectorSize --> msi->m_sectorSize --> ... --> remaining
  */
-static int read_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *buffer, uint32_t len, int verbose)
+static int read_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *buffer, uint32_t len)
 {
-	if (!locate_final_sector(msi, sector, offset, &sector, &offset, verbose)) {
-		if (verbose) printf("Failed to locate a final sector\n");
+	if (!locate_final_sector(msi, sector, offset, &sector, &offset)) {
+		printf("Failed to locate a final sector\n");
 		return 0; /* FAILED */
 	}
 	while (len > 0) {
 		const u_char *address;
 		uint32_t copylen;
-		address = sector_offset_to_address(msi, sector, offset, verbose);
+		address = sector_offset_to_address(msi, sector, offset);
 		if (!address) {
-			if (verbose) printf("Failed to get a next sector address\n");
+			printf("Failed to get a next sector address\n");
 			return 0; /* FAILED */
 		}
 		copylen = MIN(len, msi->m_sectorSize - offset);
 		if (msi->m_buffer + msi->m_bufferLen < address + copylen) {
-			if (verbose) printf("Corrupted stream size\n");
+			printf("Corrupted file\n");
 			return 0; /* FAILED */
 		}
 		memcpy(buffer, address, copylen);
 		buffer += copylen;
 		len -= copylen;
-		sector = get_next_sector(msi, sector, verbose);
+		sector = get_next_sector(msi, sector);
 		if (sector == 0) {
-			if (verbose) printf("Failed to get a next sector\n");
+			printf("Failed to get a next sector\n");
 			return 0; /* FAILED */
 		}
 		offset = 0;
@@ -139,30 +139,30 @@ static int read_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *bu
 }
 
 /* Lookup miniFAT */
-static uint32_t get_next_mini_sector(MSI_FILE *msi, uint32_t miniSector, int verbose)
+static uint32_t get_next_mini_sector(MSI_FILE *msi, uint32_t miniSector)
 {
 	uint32_t sector, offset;
 	const u_char *address;
 
-	if (!locate_final_sector(msi, msi->m_hdr->firstMiniFATSectorLocation, miniSector * 4, &sector, &offset, verbose)) {
-		if (verbose) printf("Failed to locate a final sector\n");
+	if (!locate_final_sector(msi, msi->m_hdr->firstMiniFATSectorLocation, miniSector * 4, &sector, &offset)) {
+		printf("Failed to locate a final sector\n");
 		return 0; /* FAILED */
 	}
-	address = sector_offset_to_address(msi, sector, offset, verbose);
+	address = sector_offset_to_address(msi, sector, offset);
 	if (!address) {
-		if (verbose) printf("Failed to get a next mini sector address\n");
+		printf("Failed to get a next mini sector address\n");
 		return 0; /* FAILED */
 	}
 	return GET_UINT32_LE(address);
 }
 
-static int locate_final_mini_sector(MSI_FILE *msi, uint32_t sector, uint32_t offset, uint32_t *finalSector, uint32_t *finalOffset, int verbose)
+static int locate_final_mini_sector(MSI_FILE *msi, uint32_t sector, uint32_t offset, uint32_t *finalSector, uint32_t *finalOffset)
 {
 	while (offset >= msi->m_minisectorSize) {
 		offset -= msi->m_minisectorSize;
-		sector = get_next_mini_sector(msi, sector, verbose);
+		sector = get_next_mini_sector(msi, sector);
 		if (sector == 0) {
-			if (verbose) printf("Failed to get a next mini sector\n");
+			printf("Failed to get a next mini sector\n");
 			return 0; /* FAILED */
 		}
 	}
@@ -172,31 +172,31 @@ static int locate_final_mini_sector(MSI_FILE *msi, uint32_t sector, uint32_t off
 }
 
 /* Same logic as "read_stream" except that use mini stream functions instead */
-static int read_mini_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *buffer, uint32_t len, int verbose)
+static int read_mini_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *buffer, uint32_t len)
 {
-	if (!locate_final_mini_sector(msi, sector, offset, &sector, &offset, verbose)) {
-		if (verbose) printf("Failed to locate a final mini sector\n");
+	if (!locate_final_mini_sector(msi, sector, offset, &sector, &offset)) {
+		printf("Failed to locate a final mini sector\n");
 		return 0; /* FAILED */
 	}
 	while (len > 0) {
 		const u_char *address;
 		uint32_t copylen;
-		address = mini_sector_offset_to_address(msi, sector, offset, verbose);
+		address = mini_sector_offset_to_address(msi, sector, offset);
 		if (!address) {
-			if (verbose) printf("Failed to get a next mini sector address\n");
+			printf("Failed to get a next mini sector address\n");
 			return 0; /* FAILED */
 		}
 		copylen = MIN(len, msi->m_minisectorSize - offset);
 		if (msi->m_buffer + msi->m_bufferLen < address + copylen) {
-			if (verbose) printf("Corrupted stream size\n");
+			printf("Corrupted file\n");
 			return 0; /* FAILED */
 		}
 		memcpy(buffer, address, copylen);
 		buffer += copylen;
 		len -= copylen;
-		sector = get_next_mini_sector(msi, sector, verbose);
+		sector = get_next_mini_sector(msi, sector);
 		if (sector == 0) {
-			if (verbose) printf("Failed to get a next mini sector\n");
+			printf("Failed to get a next mini sector\n");
 			return 0; /* FAILED */
 		}
 		offset = 0;
@@ -208,20 +208,20 @@ static int read_mini_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, cha
   * Get file (stream) data start with "offset".
   * The buffer must have enough space to store "len" bytes. Typically "len" is derived by the steam length.
   */
-int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer, uint32_t len, int verbose)
+int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer, uint32_t len)
 {
 	if (len < msi->m_hdr->miniStreamCutoffSize) {
-		if (!read_mini_stream(msi, entry->startSectorLocation, offset, buffer, len, verbose))
+		if (!read_mini_stream(msi, entry->startSectorLocation, offset, buffer, len))
 			return 0; /* FAILED */
 	} else {
-		if (!read_stream(msi, entry->startSectorLocation, offset, buffer, len, verbose))
+		if (!read_stream(msi, entry->startSectorLocation, offset, buffer, len))
 			return 0; /* FAILED */
 	}
 	return 1; /* OK */
 }
 
 /* Parse MSI_FILE_HDR struct */
-static MSI_FILE_HDR *parse_header(char *data, int verbose)
+static MSI_FILE_HDR *parse_header(char *data)
 {
 	MSI_FILE_HDR *header = (MSI_FILE_HDR *)OPENSSL_malloc(HEADER_SIZE);
 
@@ -231,22 +231,19 @@ static MSI_FILE_HDR *parse_header(char *data, int verbose)
 	/* Minor Version field SHOULD be set to 0x003E. */
 	header->minorVersion = GET_UINT16_LE(data + HEADER_MINOR_VER);
 	if (header->minorVersion !=0x003E ) {
-		if (verbose)
-			printf("Warning: Minor Version field SHOULD be 0x003E, but is: 0x%04X\n", header->minorVersion);
+		printf("Warning: Minor Version field SHOULD be 0x003E, but is: 0x%04X\n", header->minorVersion);
 	}
 	/* Major Version field MUST be set to either 0x0003 (version 3) or 0x0004 (version 4). */
 	header->majorVersion = GET_UINT16_LE(data + HEADER_MAJOR_VER);
 	if (header->majorVersion != 0x0003 && header->majorVersion != 0x0004) {
-		if (verbose)
-			printf("Unknown Major Version: 0x%04X\n", header->majorVersion);
+		printf("Unknown Major Version: 0x%04X\n", header->majorVersion);
 		OPENSSL_free(header);
 		return NULL; /* FAILED */
 	}
 	/* Byte Order field MUST be set to 0xFFFE, specifies little-endian byte order. */
 	header->byteOrder = GET_UINT16_LE(data + HEADER_BYTE_ORDER);
 	if (header->byteOrder != 0xFFFE) {
-		if (verbose)
-			printf("Unknown Byte Order: 0x%04X\n", header->byteOrder);
+		printf("Unknown Byte Order: 0x%04X\n", header->byteOrder);
 		OPENSSL_free(header);
 		return NULL; /* FAILED */
 	}
@@ -255,8 +252,7 @@ static MSI_FILE_HDR *parse_header(char *data, int verbose)
 	header->sectorShift = GET_UINT16_LE(data + HEADER_SECTOR_SHIFT);
 	if ((header->majorVersion == 0x0003 && header->sectorShift != 0x0009) ||
 			(header->majorVersion == 0x0004 && header->sectorShift != 0x000C)) {
-		if (verbose)
-			printf("Unknown Sector Shift: 0x%04X\n", header->sectorShift);
+		printf("Unknown Sector Shift: 0x%04X\n", header->sectorShift);
 		OPENSSL_free(header);
 		return NULL; /* FAILED */
 	}
@@ -265,8 +261,7 @@ static MSI_FILE_HDR *parse_header(char *data, int verbose)
 	 * The sector size of the Mini Stream MUST be 64 bytes. */
 	header->miniSectorShift = GET_UINT16_LE(data + HEADER_MINI_SECTOR_SHIFT);
 	if (header->miniSectorShift != 0x0006) {
-		if (verbose)
-			printf("Unknown Mini Sector Shift: 0x%04X\n", header->miniSectorShift);
+		printf("Unknown Mini Sector Shift: 0x%04X\n", header->miniSectorShift);
 		OPENSSL_free(header);
 		return NULL; /* FAILED */
 	}
@@ -275,8 +270,7 @@ static MSI_FILE_HDR *parse_header(char *data, int verbose)
 	 * If Major Version is 3, the Number of Directory Sectors MUST be zero. */
 	header->numDirectorySector = GET_UINT32_LE(data + HEADER_DIR_SECTORS_NUM);
 	if (header->majorVersion == 0x0003 && header->numDirectorySector != 0x00000000) {
-		if (verbose)
-			printf("Unsupported Number of Directory Sectors: 0x%08X\n", header->numDirectorySector);
+		printf("Unsupported Number of Directory Sectors: 0x%08X\n", header->numDirectorySector);
 		OPENSSL_free(header);
 		return NULL; /* FAILED */
 	}
@@ -290,8 +284,7 @@ static MSI_FILE_HDR *parse_header(char *data, int verbose)
 	 * must be allocated as normal sectors from the FAT. */
 	header->miniStreamCutoffSize = GET_UINT32_LE(data + HEADER_MINI_STREAM_CUTOFF);
 	if (header->miniStreamCutoffSize != 0x00001000) {
-		if (verbose)
-			printf("Unsupported Mini Stream Cutoff Size: 0x%08X\n", header->miniStreamCutoffSize);
+		printf("Unsupported Mini Stream Cutoff Size: 0x%08X\n", header->miniStreamCutoffSize);
 		OPENSSL_free(header);
 		return NULL; /* FAILED */
 	}
@@ -304,7 +297,7 @@ static MSI_FILE_HDR *parse_header(char *data, int verbose)
 }
 
 /* Parse MSI_ENTRY struct */
-static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int verbose)
+static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data)
 {
 	uint32_t inlen;
 	MSI_ENTRY *entry = (MSI_ENTRY *)OPENSSL_malloc(sizeof(MSI_ENTRY));
@@ -314,7 +307,7 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int verbose)
 	entry->nameLen = GET_UINT16_LE(data + DIRENT_NAME_LEN);
 	/* This length MUST NOT exceed 64, the maximum size of the Directory Entry Name field */
 	if (entry->nameLen == 0 || entry->nameLen > 64) {
-		if (verbose) printf("Corrupted Directory Entry Name Length\n");
+		printf("Corrupted Directory Entry Name Length\n");
 		OPENSSL_free(entry);
 		return NULL; /* FAILED */
 	}
@@ -335,7 +328,7 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int verbose)
 	inlen = GET_UINT32_LE(entry->size);
 	if ((msi->m_sectorSize == 0x0200 && inlen > 0x80000000)
 			|| (msi->m_bufferLen <= inlen)) {
-		if (verbose) printf("Corrupted Stream Size 0x%08X\n", inlen);
+		printf("Corrupted Stream Size 0x%08X\n", inlen);
 		OPENSSL_free(entry);
 		return NULL; /* FAILED */
 	}
@@ -347,7 +340,7 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int verbose)
  * Pass "0" to get the root directory entry. -- This is the start point to navigate the compound file.
  * Use the returned object to access child entries.
  */
-static MSI_ENTRY *get_entry(MSI_FILE *msi, uint32_t entryID, int is_root, int verbose)
+static MSI_ENTRY *get_entry(MSI_FILE *msi, uint32_t entryID, int is_root)
 {
 	uint32_t sector = 0;
 	uint32_t offset = 0;
@@ -355,51 +348,51 @@ static MSI_ENTRY *get_entry(MSI_FILE *msi, uint32_t entryID, int is_root, int ve
 
 	/* Corrupted file */
 	if (!is_root && entryID == 0) {
-		if (verbose) printf("Corrupted entryID\n");
+		printf("Corrupted entryID\n");
 		return NULL; /* FAILED */
 	}
 	if (msi->m_bufferLen / sizeof(MSI_ENTRY) <= entryID) {
-		if (verbose) printf("Invalid argument entryID\n");
+		printf("Invalid argument entryID\n");
 		return NULL; /* FAILED */
 	}
 	/* The first entry in the first sector of the directory chain is known as
 	   the root directory entry so it can not contain the directory stream */
 	if (msi->m_hdr->firstDirectorySectorLocation == 0 && entryID == 0) {
-		if (verbose) printf("Corrupted First Directory Sector Location\n");
+		printf("Corrupted First Directory Sector Location\n");
 		return NULL; /* FAILED */
 	}
 	if (!locate_final_sector(msi, msi->m_hdr->firstDirectorySectorLocation,
-			entryID * sizeof(MSI_ENTRY), &sector, &offset, verbose)) {
-		if (verbose) printf("Failed to locate a final sector\n");
+			entryID * sizeof(MSI_ENTRY), &sector, &offset)) {
+		printf("Failed to locate a final sector\n");
 		return NULL; /* FAILED */
 	}
-	address = sector_offset_to_address(msi, sector, offset, verbose);
+	address = sector_offset_to_address(msi, sector, offset);
 	if (!address) {
-		if (verbose) printf("Failed to get a final address\n");
+		printf("Failed to get a final address\n");
 		return NULL; /* FAILED */
 	}
-	return parse_entry(msi, address, verbose);
+	return parse_entry(msi, address);
 }
 
-MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi, int verbose)
+MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi)
 {
-	return get_entry(msi, 0, TRUE, verbose);
+	return get_entry(msi, 0, TRUE);
 }
 
 /* Parse MSI_FILE struct */
-MSI_FILE *msi_file_new(char *buffer, uint32_t len, int verbose)
+MSI_FILE *msi_file_new(char *buffer, uint32_t len)
 {
 	MSI_FILE *msi;
 	MSI_ENTRY *root;
 	MSI_FILE_HDR *header;
 
 	if (buffer == NULL || len == 0) {
-		if (verbose) printf("Invalid argument\n");
+		printf("Invalid argument\n");
 		return NULL; /* FAILED */
 	}
-	header = parse_header(buffer, verbose);
+	header = parse_header(buffer);
 	if (!header) {
-		if (verbose) printf("Failed to parse MSI_FILE_HDR struct\n");
+		printf("Failed to parse MSI_FILE_HDR struct\n");
 		return NULL; /* FAILED */
 	}
 	msi = (MSI_FILE *)OPENSSL_malloc(sizeof(MSI_FILE));
@@ -412,20 +405,20 @@ MSI_FILE *msi_file_new(char *buffer, uint32_t len, int verbose)
 
 	if (msi->m_bufferLen < sizeof *(msi->m_hdr) ||
 			memcmp(msi->m_hdr->signature, msi_magic, sizeof msi_magic)) {
-		if (verbose) printf("Wrong file format\n");
+		printf("Wrong file format\n");
 		msi_file_free(msi);
 		return NULL; /* FAILED */
 	}
 
 	/* The file must contains at least 3 sectors */
 	if (msi->m_bufferLen < msi->m_sectorSize * 3) {
-		if (verbose) printf("The file must contains at least 3 sectors\n");
+		printf("The file must contains at least 3 sectors\n");
 		msi_file_free(msi);
 		return NULL; /* FAILED */
 	}
-	root = msi_root_entry_get(msi, verbose);
+	root = msi_root_entry_get(msi);
 	if (!root) {
-		if (verbose) printf("Failed to get msi root entry\n");
+		printf("Failed to get msi root entry\n");
 		msi_file_free(msi);
 		return NULL; /* FAILED */
 	}
@@ -435,7 +428,7 @@ MSI_FILE *msi_file_new(char *buffer, uint32_t len, int verbose)
 }
 
 /* Recursively create a tree of MSI_DIRENT structures */
-int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT *prev, MSI_DIRENT **ret, int verbose)
+int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT *prev, MSI_DIRENT **ret)
 {
 	MSI_DIRENT *dirent;
 
@@ -443,7 +436,7 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 		return 1; /* OK */
 	}
 	if (entry->nameLen == 0 || entry->nameLen > 64) {
-		if (verbose) printf("Corrupted Directory Entry Name Length\n");
+		printf("Corrupted Directory Entry Name Length\n");
 		return 0; /* FAILED */
 	}
 	/* detect loops in previously visited entries (parents, siblings) */
@@ -464,15 +457,15 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 	dirent->prev = prev;
 
 	if (parent && !sk_MSI_DIRENT_push(parent->children, dirent)) {
-		if (verbose) printf("Failed to insert MSI_DIRENT\n");
+		printf("Failed to insert MSI_DIRENT\n");
 		sk_MSI_DIRENT_free(dirent->children);
 		OPENSSL_free(dirent);
 		return 0; /* FAILED */
 	}
 
-	if (!recurse_entry(msi, entry->leftSiblingID, parent, dirent, verbose)
-			|| !recurse_entry(msi, entry->rightSiblingID, parent, dirent, verbose)
-			|| !recurse_entry(msi, entry->childID, dirent, dirent, verbose)) {
+	if (!recurse_entry(msi, entry->leftSiblingID, parent, dirent)
+			|| !recurse_entry(msi, entry->rightSiblingID, parent, dirent)
+			|| !recurse_entry(msi, entry->childID, dirent, dirent)) {
 		sk_MSI_DIRENT_free(dirent->children);
 		OPENSSL_free(dirent);
 		return 0; /* FAILED */
@@ -485,7 +478,7 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 }
 
 /* Add a sibling or a child to the tree */
-static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent, MSI_DIRENT *dirent, int verbose) {
+static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent, MSI_DIRENT *dirent) {
 	/* NOTE : These links are a tree, not a linked list */
 	MSI_ENTRY *node;
 
@@ -493,13 +486,13 @@ static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent, MS
 	if (entryID == NOSTREAM) /* stop condition */
 		return 1; /* OK */
 
-	node = get_entry(msi, entryID, FALSE, verbose);
+	node = get_entry(msi, entryID, FALSE);
 	if (!node) {
-		if (verbose) printf("Corrupted ID: 0x%08X\n", entryID);
+		printf("Corrupted ID: 0x%08X\n", entryID);
 		return 0; /* FAILED */
 	}
 
-	if (!msi_dirent_new(msi, node, parent, dirent, NULL, verbose)) {
+	if (!msi_dirent_new(msi, node, parent, dirent, NULL)) {
 		OPENSSL_free(node);
 		return 0; /* FAILED */
 	}
@@ -640,7 +633,7 @@ out:
 }
 
 /* Recursively hash a MSI directory (storage) */
-int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root, int verbose)
+int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root)
  {
 	int i, ret = 0;
 
@@ -661,8 +654,8 @@ int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root, int 
 				continue;
 			}
 			indata = (char *)OPENSSL_malloc(inlen);
-			if (!msi_file_read(msi, child->entry, 0, indata, inlen, verbose)) {
-				if (verbose) printf("Failed to read stream data\n");
+			if (!msi_file_read(msi, child->entry, 0, indata, inlen)) {
+				printf("Failed to read stream data\n");
 				OPENSSL_free(indata);
 				goto out;
 			}
@@ -670,7 +663,7 @@ int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root, int 
 			OPENSSL_free(indata);
 		}
 		if (child->type == DIR_STORAGE) {
-			if (!msi_hash_dir(msi, child, hash, 0, verbose)) {
+			if (!msi_hash_dir(msi, child, hash, 0)) {
 				printf("Failed to hash a MSI storage\n");
 				goto out;
 			}
@@ -840,7 +833,7 @@ static int stream_read(MSI_FILE *msi, MSI_ENTRY *entry, u_char *p_msi, int len_m
 		*indata = (char *)p_msiex;
 		inlen = len_msiex;
 	} else {
-		if (!msi_file_read(msi, entry, 0, *indata, inlen, 1)) {
+		if (!msi_file_read(msi, entry, 0, *indata, inlen)) {
 			printf("Failed to read stream data\n");
 			return 0; /* FAILED */
 		}
