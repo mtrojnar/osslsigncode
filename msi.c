@@ -470,7 +470,8 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 
 	if (!recurse_entry(msi, entry->leftSiblingID, parent, dirent)
 			|| !recurse_entry(msi, entry->rightSiblingID, parent, dirent)
-			|| !recurse_entry(msi, entry->childID, dirent, dirent)) {
+			|| (entry->type != DIR_STREAM && !recurse_entry(msi, entry->childID, dirent, dirent))) {
+		printf("Failed to add a sibling or a child to the tree\n");
 		sk_MSI_DIRENT_free(dirent->children);
 		OPENSSL_free(dirent);
 		return 0; /* FAILED */
