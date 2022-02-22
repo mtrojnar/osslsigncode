@@ -15,6 +15,8 @@
 
 #define MIN(a,b) ((a) < (b) ? a : b)
 
+static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent, MSI_DIRENT *prev, int verbose);
+
 /* Get absolute address from sector and offset */
 static const u_char *sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset, int verbose)
 {
@@ -345,57 +347,43 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int verbose)
  * Pass "0" to get the root directory entry. -- This is the start point to navigate the compound file.
  * Use the returned object to access child entries.
  */
-static int get_entry(MSI_FILE *msi, uint32_t entryID, int is_root, MSI_ENTRY **entry, int verbose)
+static MSI_ENTRY *get_entry(MSI_FILE *msi, uint32_t entryID, int is_root, int verbose)
 {
 	uint32_t sector = 0;
 	uint32_t offset = 0;
 	const u_char *address;
 
-	/* The special value NOSTREAM (0xFFFFFFFF) is used as a terminator */
-	if (entryID == NOSTREAM) {
-		return 1; /* OK */
-	}
 	/* Corrupted file */
 	if (!is_root && entryID == 0) {
 		if (verbose) printf("Corrupted entryID\n");
-		return 0; /* FAILED */
+		return NULL; /* FAILED */
 	}
 	if (msi->m_bufferLen / sizeof(MSI_ENTRY) <= entryID) {
 		if (verbose) printf("Invalid argument entryID\n");
-		return 0; /* FAILED */
+		return NULL; /* FAILED */
 	}
 	/* The first entry in the first sector of the directory chain is known as
 	   the root directory entry so it can not contain the directory stream */
 	if (msi->m_hdr->firstDirectorySectorLocation == 0 && entryID == 0) {
 		if (verbose) printf("Corrupted First Directory Sector Location\n");
-		return 0; /* FAILED */
+		return NULL; /* FAILED */
 	}
 	if (!locate_final_sector(msi, msi->m_hdr->firstDirectorySectorLocation,
 			entryID * sizeof(MSI_ENTRY), &sector, &offset, verbose)) {
 		if (verbose) printf("Failed to locate a final sector\n");
-		return 0; /* FAILED */
+		return NULL; /* FAILED */
 	}
 	address = sector_offset_to_address(msi, sector, offset, verbose);
 	if (!address) {
 		if (verbose) printf("Failed to get a final address\n");
-		return 0; /* FAILED */
+		return NULL; /* FAILED */
 	}
-	*entry = parse_entry(msi, address, verbose);
-	if (!*entry) {
-		if (verbose) printf("Failed to parse MSI_ENTRY struct\n");
-		return 0; /* FAILED */
-	}
-	return 1; /* OK */
+	return parse_entry(msi, address, verbose);
 }
 
 MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi, int verbose)
 {
-	MSI_ENTRY *entry = NULL;
-
-	if (!get_entry(msi, 0, TRUE, &entry, verbose)) {
-		return NULL;
-	}
-	return entry;
+	return get_entry(msi, 0, TRUE, verbose);
 }
 
 /* Parse MSI_FILE struct */
@@ -446,11 +434,10 @@ MSI_FILE *msi_file_new(char *buffer, uint32_t len, int verbose)
 	return msi;
 }
 
-/* Recursively parse MSI_DIRENT struct */
+/* Recursively create a tree of MSI_DIRENT structures */
 int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT *prev, MSI_DIRENT **ret, int verbose)
 {
 	MSI_DIRENT *dirent;
-	MSI_ENTRY *lnode = NULL, *rnode = NULL, *cnode = NULL;
 
 	if (!entry) {
 		return 1; /* OK */
@@ -482,52 +469,41 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 		OPENSSL_free(dirent);
 		return 0; /* FAILED */
 	}
-	/* NOTE : These links are a tree, not a linked list */
-	/* The special value NOSTREAM (0xFFFFFFFF) is used as a terminator */
-	if (entry->leftSiblingID != NOSTREAM) {
-		if (!get_entry(msi, entry->leftSiblingID, FALSE, &lnode, verbose)) {
-			if (verbose) printf("Corrupted Left Sibling ID: 0x%08X\n", entry->leftSiblingID);
-			sk_MSI_DIRENT_free(dirent->children);
-			OPENSSL_free(dirent);
-			return 0; /* FAILED */
-		}
-		if (!msi_dirent_new(msi, lnode, parent, dirent, NULL, verbose)) {
-			OPENSSL_free(lnode);
-			sk_MSI_DIRENT_free(dirent->children);
-			OPENSSL_free(dirent);
-			return 0; /* FAILED */
-		}
+
+	if (!recurse_entry(msi, entry->leftSiblingID, parent, dirent, verbose)
+			|| !recurse_entry(msi, entry->rightSiblingID, parent, dirent, verbose)
+			|| !recurse_entry(msi, entry->childID, dirent, dirent, verbose)) {
+		sk_MSI_DIRENT_free(dirent->children);
+		OPENSSL_free(dirent);
+		return 0; /* FAILED */
 	}
-	if (entry->rightSiblingID != NOSTREAM) {
-		if (!get_entry(msi, entry->rightSiblingID, FALSE, &rnode, verbose)) {
-			if (verbose) printf("Corrupted Right Sibling ID: 0x%08X\n", entry->rightSiblingID);
-			sk_MSI_DIRENT_free(dirent->children);
-			OPENSSL_free(dirent);
-			return 0; /* FAILED */
-		}
-		if (!msi_dirent_new(msi, rnode, parent, dirent, NULL, verbose)) {
-			OPENSSL_free(rnode);
-			sk_MSI_DIRENT_free(dirent->children);
-			OPENSSL_free(dirent);
-			return 0; /* FAILED */
-		}
-	}
-	if (entry->type != DIR_STREAM && entry->childID != NOSTREAM) {
-		if (!get_entry(msi, entry->childID, FALSE, &cnode, verbose)) {
-			if (verbose) printf("Corrupted Child ID: 0x%08X\n", entry->childID);
-			sk_MSI_DIRENT_free(dirent->children);
-			OPENSSL_free(dirent);
-			return 0; /* FAILED */
-		}
-		if (!msi_dirent_new(msi, cnode, dirent, dirent, NULL, verbose)) {
-			OPENSSL_free(cnode);
-			sk_MSI_DIRENT_free(dirent->children);
-			OPENSSL_free(dirent);
-			return 0; /* FAILED */
-		}
-	}
+
 	if (ret)
 		*ret = dirent;
+
+	return 1; /* OK */
+}
+
+/* Add a sibling or a child to the tree */
+static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent, MSI_DIRENT *dirent, int verbose) {
+	/* NOTE : These links are a tree, not a linked list */
+	MSI_ENTRY *node;
+
+	/* The special value NOSTREAM (0xFFFFFFFF) is used as a terminator */
+	if (entryID == NOSTREAM) /* stop condition */
+		return 1; /* OK */
+
+	node = get_entry(msi, entryID, FALSE, verbose);
+	if (!node) {
+		if (verbose) printf("Corrupted ID: 0x%08X\n", entryID);
+		return 0; /* FAILED */
+	}
+
+	if (!msi_dirent_new(msi, node, parent, dirent, NULL, verbose)) {
+		OPENSSL_free(node);
+		return 0; /* FAILED */
+	}
+
 	return 1; /* OK */
 }
 
