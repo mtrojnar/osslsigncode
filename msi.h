@@ -145,7 +145,7 @@ typedef struct msi_dirent_struct {
 	uint8_t type;
 	MSI_ENTRY *entry;
 	STACK_OF(MSI_DIRENT) *children;
-	struct msi_dirent_struct *prev; /* detect loops */
+	struct msi_dirent_struct *next; /* for cycle detection */
 } MSI_DIRENT;
 
 DEFINE_STACK_OF(MSI_DIRENT)
@@ -204,7 +204,7 @@ int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer
 MSI_FILE *msi_file_new(char *buffer, uint32_t len);
 void msi_file_free(MSI_FILE *msi);
 MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi);
-int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT *prev, MSI_DIRENT **ret);
+int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT **ret);
 MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse);
 void msi_dirent_free(MSI_DIRENT *dirent);
 int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root);

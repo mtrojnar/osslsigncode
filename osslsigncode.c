@@ -2919,7 +2919,7 @@ static int msi_verify_header(char *indata, uint32_t filesize, MSI_PARAMS *msipar
 		printf("Failed to get file entry\n");
 		return 0; /* FAILED */
 	}
-	if (!msi_dirent_new(msiparams->msi, root, NULL, NULL, &root_dir)) {
+	if (!msi_dirent_new(msiparams->msi, root, NULL, &root_dir)) {
 		printf("Failed to parse MSI_DIRENT struct\n");
 		OPENSSL_free(root);
 		return 0; /* FAILED */

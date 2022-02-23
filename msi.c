@@ -15,7 +15,7 @@
 
 #define MIN(a,b) ((a) < (b) ? a : b)
 
-static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent, MSI_DIRENT *prev);
+static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent);
 
 /* Get absolute address from sector and offset */
 static const u_char *sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset)
@@ -433,9 +433,11 @@ MSI_FILE *msi_file_new(char *buffer, uint32_t len)
 }
 
 /* Recursively create a tree of MSI_DIRENT structures */
-int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT *prev, MSI_DIRENT **ret)
+int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT **ret)
 {
-	MSI_DIRENT *d, *dirent;
+	MSI_DIRENT *dirent;
+	static int cnt;
+	static MSI_DIRENT *tortoise, *hare;
 
 	if (!entry) {
 		return 1; /* OK */
@@ -445,12 +447,12 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 		return 0; /* FAILED */
 	}
 
-	/* detect loops in previously visited entries (parents, siblings) */
-	for (d = prev; d; d = d->prev) {
-		if ((entry->leftSiblingID != NOSTREAM && d->entry->leftSiblingID == entry->leftSiblingID)
-				|| (entry->rightSiblingID != NOSTREAM && d->entry->rightSiblingID == entry->rightSiblingID)
-				|| (entry->childID != NOSTREAM && d->entry->childID == entry->childID)) {
-			printf("Entry loop at ID: 0x%08X\n", entry->childID);
+	/* detect cycles in previously visited entries (parents, siblings) */
+	if (!ret) { /* initialized (non-root entry) */
+		if ((entry->leftSiblingID != NOSTREAM && tortoise->entry->leftSiblingID == entry->leftSiblingID)
+				|| (entry->rightSiblingID != NOSTREAM && tortoise->entry->rightSiblingID == entry->rightSiblingID)
+				|| (entry->childID != NOSTREAM && tortoise->entry->childID == entry->childID)) {
+			printf("MSI_ENTRY cycle detected at level %d\n", cnt);
 			return 0; /* FAILED */
 		}
 	}
@@ -461,7 +463,19 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 	dirent->type = entry->type;
 	dirent->entry = entry;
 	dirent->children = sk_MSI_DIRENT_new_null();
-	dirent->prev = prev;
+	dirent->next = NULL; /* fail-safe */
+
+	/* Floyd's cycle-finding algorithm */
+	if (!ret) { /* initialized (non-root entry) */
+		if (cnt++ & 1) /* move the tortoise every other invocation of msi_dirent_new() */
+			tortoise = tortoise->next;
+		hare->next = dirent; /* build a linked list of visited entries */
+		hare = dirent; /* move the hare every time */
+	} else { /* initialization needed (root entry) */
+		cnt = 0;
+		tortoise = dirent;
+		hare = dirent;
+	}
 
 	if (parent && !sk_MSI_DIRENT_push(parent->children, dirent)) {
 		printf("Failed to insert MSI_DIRENT\n");
@@ -470,9 +484,9 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 		return 0; /* FAILED */
 	}
 
-	if (!recurse_entry(msi, entry->leftSiblingID, parent, dirent)
-			|| !recurse_entry(msi, entry->rightSiblingID, parent, dirent)
-			|| (entry->type != DIR_STREAM && !recurse_entry(msi, entry->childID, dirent, dirent))) {
+	if (!recurse_entry(msi, entry->leftSiblingID, parent)
+			|| !recurse_entry(msi, entry->rightSiblingID, parent)
+			|| !recurse_entry(msi, entry->childID, dirent)) {
 		printf("Failed to add a sibling or a child to the tree\n");
 		sk_MSI_DIRENT_free(dirent->children);
 		OPENSSL_free(dirent);
@@ -486,11 +500,12 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 }
 
 /* Add a sibling or a child to the tree */
-static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent, MSI_DIRENT *dirent) {
-	/* NOTE : These links are a tree, not a linked list */
+/* NOTE: These links are a tree, not a linked list */
+static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent)
+{
 	MSI_ENTRY *node;
 
-	/* The special value NOSTREAM (0xFFFFFFFF) is used as a terminator */
+	/* The special NOSTREAM (0xFFFFFFFF) value is used as a terminator */
 	if (entryID == NOSTREAM) /* stop condition */
 		return 1; /* OK */
 
@@ -500,7 +515,7 @@ static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent, MS
 		return 0; /* FAILED */
 	}
 
-	if (!msi_dirent_new(msi, node, parent, dirent, NULL)) {
+	if (!msi_dirent_new(msi, node, parent, NULL)) {
 		OPENSSL_free(node);
 		return 0; /* FAILED */
 	}
