@@ -6071,9 +6071,11 @@ int main(int argc, char **argv)
 #ifdef ENABLE_CURL
 	/* add counter-signature/timestamp */
 	if (options.nturl && add_timestamp_authenticode(sig, &options))
-		DO_EXIT_0("Authenticode timestamping failed\n");
+		DO_EXIT_2("%s\n%s\n", "Authenticode timestamping failed",
+			"Use the \"-ts\" option to add the RFC3161 Time-Stamp Authority or choose another one Authenticode Time-Stamp Authority");
 	if (options.ntsurl && add_timestamp_rfc3161(sig, &options))
-		DO_EXIT_0("RFC 3161 timestamping failed\n");
+		DO_EXIT_2("%s\n%s\n", "RFC 3161 timestamping failed",
+			"Use the \"-t\" option to add the Authenticode Time-Stamp Authority or choose another one RFC3161 Time-Stamp Authority");
 #endif /* ENABLE_CURL */
 
 	if (options.addBlob && !add_unauthenticated_blob(sig))
