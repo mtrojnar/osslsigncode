@@ -2905,7 +2905,6 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 
 static int msi_verify_header(char *indata, uint32_t filesize, MSI_PARAMS *msiparams)
 {
-	int ret = 1;
 	MSI_ENTRY *root;
 	MSI_DIRENT *root_dir = NULL;
 
@@ -2925,7 +2924,8 @@ static int msi_verify_header(char *indata, uint32_t filesize, MSI_PARAMS *msipar
 		return 0; /* FAILED */
 	}
 	msiparams->dirent = root_dir;
-	return ret;
+	
+	return 1; /* OK */
 }
 
 static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIRENT *dirent,

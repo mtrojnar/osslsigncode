@@ -302,7 +302,7 @@ static MSI_FILE_HDR *parse_header(char *data)
 }
 
 /* Parse MSI_ENTRY struct */
-static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data)
+static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int is_root)
 {
 	uint32_t inlen;
 	MSI_ENTRY *entry = (MSI_ENTRY *)OPENSSL_malloc(sizeof(MSI_ENTRY));
@@ -317,6 +317,13 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data)
 		return NULL; /* FAILED */
 	}
 	memcpy(entry->name, data + DIRENT_NAME, entry->nameLen);
+	/* The root directory entry's Name field MUST contain the null-terminated
+	 * string "Root Entry" in Unicode UTF-16. */
+	if (is_root && memcmp(entry->name, root_entry, entry->nameLen)) {
+		printf("Corrupted Root Directory Entry's Name\n");
+		OPENSSL_free(entry);
+		return NULL; /* FAILED */
+	}
 	entry->type = GET_UINT8_LE(data + DIRENT_TYPE);
 	entry->colorFlag = GET_UINT8_LE(data + DIRENT_COLOUR);
 	entry->leftSiblingID = GET_UINT32_LE(data + DIRENT_LEFT_SIBLING_ID);
@@ -325,6 +332,13 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data)
 	memcpy(entry->clsid, data + DIRENT_CLSID, 16);
 	memcpy(entry->stateBits, data + DIRENT_STATE_BITS, 4);
 	memcpy(entry->creationTime, data + DIRENT_CREATE_TIME, 8);
+	/* The Creation Time field in the root storage directory entry MUST be all zeroes
+	   but the Modified Time field in the root storage directory entry MAY be all zeroes */
+	if (is_root && memcmp(entry->creationTime, zeroes, 8)) {
+		printf("Corrupted Root Directory Entry's Creation Time\n");
+		OPENSSL_free(entry);
+		return NULL; /* FAILED */
+	}
 	memcpy(entry->modifiedTime, data + DIRENT_MODIFY_TIME, 8);
 	entry->startSectorLocation = GET_UINT32_LE(data + DIRENT_START_SECTOR_LOC);
 	memcpy(entry->size, data + DIRENT_FILE_SIZE, 8);
@@ -376,7 +390,7 @@ static MSI_ENTRY *get_entry(MSI_FILE *msi, uint32_t entryID, int is_root)
 		printf("Failed to get a final address\n");
 		return NULL; /* FAILED */
 	}
-	return parse_entry(msi, address);
+	return parse_entry(msi, address, is_root);
 }
 
 MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi)
@@ -446,7 +460,6 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 		printf("Corrupted Directory Entry Name Length\n");
 		return 0; /* FAILED */
 	}
-
 	/* detect cycles in previously visited entries (parents, siblings) */
 	if (!ret) { /* initialized (non-root entry) */
 		if ((entry->leftSiblingID != NOSTREAM && tortoise->entry->leftSiblingID == entry->leftSiblingID)
