@@ -492,22 +492,18 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 
 	if (parent && !sk_MSI_DIRENT_push(parent->children, dirent)) {
 		printf("Failed to insert MSI_DIRENT\n");
-		sk_MSI_DIRENT_free(dirent->children);
-		OPENSSL_free(dirent);
-		return 0; /* FAILED */
-	}
-
-	if (!recurse_entry(msi, entry->leftSiblingID, parent)
-			|| !recurse_entry(msi, entry->rightSiblingID, parent)
-			|| !recurse_entry(msi, entry->childID, dirent)) {
-		printf("Failed to add a sibling or a child to the tree\n");
-		sk_MSI_DIRENT_free(dirent->children);
-		OPENSSL_free(dirent);
 		return 0; /* FAILED */
 	}
 
 	if (ret)
 		*ret = dirent;
+
+	if (!recurse_entry(msi, entry->leftSiblingID, parent)
+			|| !recurse_entry(msi, entry->rightSiblingID, parent)
+			|| !recurse_entry(msi, entry->childID, dirent)) {
+		printf("Failed to add a sibling or a child to the tree\n");
+		return 0; /* FAILED */
+	}
 
 	return 1; /* OK */
 }
@@ -529,7 +525,6 @@ static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent)
 	}
 
 	if (!msi_dirent_new(msi, node, parent, NULL)) {
-		OPENSSL_free(node);
 		return 0; /* FAILED */
 	}
 
