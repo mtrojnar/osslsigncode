@@ -2906,7 +2906,6 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 static int msi_verify_header(char *indata, uint32_t filesize, MSI_PARAMS *msiparams)
 {
 	MSI_ENTRY *root;
-	MSI_DIRENT *root_dir = NULL;
 
 	msiparams->msi = msi_file_new(indata, filesize);
 	if (!msiparams->msi) {
@@ -2918,12 +2917,10 @@ static int msi_verify_header(char *indata, uint32_t filesize, MSI_PARAMS *msipar
 		printf("Failed to get file entry\n");
 		return 0; /* FAILED */
 	}
-	if (!msi_dirent_new(msiparams->msi, root, NULL, &root_dir)) {
+	if (!msi_dirent_new(msiparams->msi, root, NULL, &(msiparams->dirent))) {
 		printf("Failed to parse MSI_DIRENT struct\n");
-		OPENSSL_free(root);
 		return 0; /* FAILED */
 	}
-	msiparams->dirent = root_dir;
 	
 	return 1; /* OK */
 }
