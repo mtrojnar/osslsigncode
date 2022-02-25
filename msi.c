@@ -466,6 +466,7 @@ int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRE
 				|| (entry->rightSiblingID != NOSTREAM && tortoise->entry->rightSiblingID == entry->rightSiblingID)
 				|| (entry->childID != NOSTREAM && tortoise->entry->childID == entry->childID)) {
 			printf("MSI_ENTRY cycle detected at level %d\n", cnt);
+			OPENSSL_free(entry);
 			return 0; /* FAILED */
 		}
 	}
