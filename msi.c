@@ -319,7 +319,7 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int is_root)
 	memcpy(entry->name, data + DIRENT_NAME, entry->nameLen);
 	/* The root directory entry's Name field MUST contain the null-terminated
 	 * string "Root Entry" in Unicode UTF-16. */
-	if (is_root && memcmp(entry->name, root_entry, entry->nameLen)) {
+	if (is_root && memcmp(entry->name, msi_root_entry, entry->nameLen)) {
 		printf("Corrupted Root Directory Entry's Name\n");
 		OPENSSL_free(entry);
 		return NULL; /* FAILED */
@@ -334,7 +334,7 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int is_root)
 	memcpy(entry->creationTime, data + DIRENT_CREATE_TIME, 8);
 	/* The Creation Time field in the root storage directory entry MUST be all zeroes
 	   but the Modified Time field in the root storage directory entry MAY be all zeroes */
-	if (is_root && memcmp(entry->creationTime, zeroes, 8)) {
+	if (is_root && memcmp(entry->creationTime, msi_zeroes, 8)) {
 		printf("Corrupted Root Directory Entry's Creation Time\n");
 		OPENSSL_free(entry);
 		return NULL; /* FAILED */
