@@ -1,4 +1,8 @@
 # osslsigncode change log
+
+### 2.3 (unreleased)
+
+- fixed memory safety
 - added bash completion script
 - added CA bundle auto-detection
 
