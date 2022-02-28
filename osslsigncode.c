@@ -1780,10 +1780,11 @@ static int set_indirect_data_blob(PKCS7 *sig, BIO *hash, file_type_t type,
 static uint32_t pe_calc_checksum(BIO *bio, FILE_HEADER *header)
 {
 	uint32_t checkSum = 0, size = 0;
-	static u_char buf[65536]; /* 2^16 */
+	unsigned short *buf;
 	int nread;
 
 	/* recalculate the checksum */
+	buf = OPENSSL_malloc(65536); /* 2^16 */
 	(void)BIO_seek(bio, 0);
 	while ((nread = BIO_read(bio, buf, 65536)) > 0) {
 		unsigned short val;
@@ -1797,6 +1798,7 @@ static uint32_t pe_calc_checksum(BIO *bio, FILE_HEADER *header)
 			size += 2;
 		}
 	}
+	OPENSSL_free(buf);
 	checkSum = 0xffff & (checkSum + (checkSum >> 0x10));
 	checkSum += size;
 	return checkSum;
