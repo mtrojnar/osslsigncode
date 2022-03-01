@@ -664,7 +664,7 @@ IMPLEMENT_ASN1_FUNCTIONS(TimeStampToken)
  * 2:d=1  hl=2 l=   2 prim:  BIT STRING
  * 6:d=1  hl=2 l=   0 cons:  SEQUENCE
 */
-static const u_char java_attrs_low[] = {
+const u_char java_attrs_low[] = {
 	0x30, 0x06, 0x03, 0x02, 0x00, 0x01, 0x30, 0x00
 };
 
@@ -673,9 +673,9 @@ static const u_char java_attrs_low[] = {
  * 0:d=0  hl=2 l=  12 cons: SEQUENCE
  * 2:d=1  hl=2 l=  10 prim:  OBJECT     :Microsoft Individual Code Signing
 */
-static u_char purpose_ind[] = {
-	0x30, 0x0c,
-	0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x15
+const u_char purpose_ind[] = {
+	0x30, 0x0c, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04,
+	0x01, 0x82, 0x37, 0x02, 0x01, 0x15
 };
 
 /*
@@ -683,9 +683,14 @@ static u_char purpose_ind[] = {
  * 0:d=0  hl=2 l=  12 cons: SEQUENCE
  * 2:d=1  hl=2 l=  10 prim:  OBJECT     :Microsoft Commercial Code Signing
 */
-static u_char purpose_comm[] = {
-	0x30, 0x0c,
-	0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x16
+const u_char purpose_comm[] = {
+	0x30, 0x0c, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04,
+	0x01, 0x82, 0x37, 0x02, 0x01, 0x16
+};
+
+const u_char classid_page_hash[] = {
+	0xA6, 0xB5, 0x86, 0xD5, 0xB4, 0xA1, 0x24, 0x66,
+	0xAE, 0x05, 0xA2, 0x17, 0xDA, 0x8E, 0x60, 0xD6
 };
 
 static SpcSpOpusInfo *createOpus(const char *desc, const char *url)
@@ -1448,10 +1453,11 @@ typedef enum {
 
 static SpcLink *get_obsolete_link(void)
 {
-	static const u_char obsolete[] = {
-		0x00, 0x3c, 0x00, 0x3c, 0x00, 0x3c, 0x00, 0x4f, 0x00, 0x62,
-		0x00, 0x73, 0x00, 0x6f, 0x00, 0x6c, 0x00, 0x65, 0x00, 0x74,
-		0x00, 0x65, 0x00, 0x3e, 0x00, 0x3e, 0x00, 0x3e
+	u_char obsolete[] = {
+		0x00, 0x3c, 0x00, 0x3c, 0x00, 0x3c, 0x00, 0x4f,
+		0x00, 0x62, 0x00, 0x73, 0x00, 0x6f, 0x00, 0x6c,
+		0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3e,
+		0x00, 0x3e, 0x00, 0x3e
 	};
 	SpcLink *link = SpcLink_new();
 	link->type = 2;
@@ -1461,11 +1467,6 @@ static SpcLink *get_obsolete_link(void)
 	ASN1_STRING_set(link->value.file->value.unicode, obsolete, sizeof obsolete);
 	return link;
 }
-
-static const u_char classid_page_hash[] = {
-	0xA6, 0xB5, 0x86, 0xD5, 0xB4, 0xA1, 0x24, 0x66,
-	0xAE, 0x05, 0xA2, 0x17, 0xDA, 0x8E, 0x60, 0xD6
-};
 
 static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	int pe32plus, uint32_t sigpos, int phtype, int *rphlen)
@@ -1609,7 +1610,7 @@ static int get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *optio
 	void *hash;
 	ASN1_OBJECT *dtype;
 	SpcIndirectDataContent *idc;
-	static const u_char msistr[] = {
+	u_char msistr[] = {
 		0xf1, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46
 	};
@@ -1764,29 +1765,32 @@ int set_content_blob(PKCS7 *sig, PKCS7 *cursig)
 static int set_indirect_data_blob(PKCS7 *sig, BIO *hash, file_type_t type,
 				char *indata, GLOBAL_OPTIONS *options, FILE_HEADER *header)
 {
-	static u_char buf[64*1024];
-	u_char *p = NULL;
 	int len = 0;
+	u_char *p = NULL;
+	u_char *buf = OPENSSL_malloc(SIZE_64K);
 
 	if (!get_indirect_data_blob(&p, &len, options, header, type, indata))
 		return 0; /* FAILED */
 	memcpy(buf, p, len);
 	OPENSSL_free(p);
-	if (!set_signing_blob(sig, hash, buf, len))
+	if (!set_signing_blob(sig, hash, buf, len)) {
+		OPENSSL_free(buf);
 		return 0; /* FAILED */
+	}
+	OPENSSL_free(buf);
+
 	return 1; /* OK */
 }
 
 static uint32_t pe_calc_checksum(BIO *bio, FILE_HEADER *header)
 {
 	uint32_t checkSum = 0, size = 0;
-	unsigned short *buf;
 	int nread;
+	unsigned short *buf = OPENSSL_malloc(SIZE_64K);
 
 	/* recalculate the checksum */
-	buf = OPENSSL_malloc(65536); /* 2^16 */
 	(void)BIO_seek(bio, 0);
-	while ((nread = BIO_read(bio, buf, 65536)) > 0) {
+	while ((nread = BIO_read(bio, buf, SIZE_64K)) > 0) {
 		unsigned short val;
 		int i;
 		for (i = 0; i < nread / 2; i++) {
@@ -3208,7 +3212,7 @@ static int msi_calc_MsiDigitalSignatureEx(MSI_PARAMS *msiparams, const EVP_MD *m
 static int pe_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, FILE_HEADER *header)
 {
 	BIO *bio = NULL;
-	static u_char bfb[16*1024*1024];
+	u_char *bfb;
 	EVP_MD_CTX *mdctx;
 	uint32_t n, offset;
 	int ret = 0;
@@ -3226,6 +3230,8 @@ static int pe_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, FILE_HE
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 	bio = BIO_new_mem_buf(indata, offset);
 	(void)BIO_seek(bio, 0);
+
+	bfb = OPENSSL_malloc(SIZE_16M);
 
 	BIO_read(bio, bfb, header->header_size + 88);
 	EVP_DigestUpdate(mdctx, bfb, header->header_size + 88);
@@ -3255,6 +3261,7 @@ static int pe_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, FILE_HE
 			EVP_DigestUpdate(mdctx, bfb, len);
 		}
 	}
+	OPENSSL_free(bfb);
 	BIO_free(bio);
 	EVP_DigestFinal(mdctx, mdbuf, NULL);
 	ret = 1; /* OK */
@@ -3555,7 +3562,7 @@ static int pe_verify_header(char *indata, char *infile, uint32_t filesize, FILE_
 static void pe_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
 {
 	int len = 0, i;
-	static char buf[64*1024];
+	char *buf = OPENSSL_malloc(SIZE_64K);
 
 	i = header->header_size + 88;
 	BIO_write(hash, indata, i);
@@ -3576,6 +3583,7 @@ static void pe_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *
 		BIO_write(hash, buf, len);
 		header->fileend += len;
 	}
+	OPENSSL_free(buf);
 }
 
 /*
@@ -3651,7 +3659,7 @@ static int cab_verify_header(char *indata, char *infile, uint32_t filesize, FILE
 static int cab_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, FILE_HEADER *header)
 {
 	BIO *bio;
-	static u_char bfb[16*1024*1024];
+	u_char *bfb;
 	EVP_MD_CTX *mdctx;
 	uint32_t offset, coffFiles;
 	int ret = 0;
@@ -3669,6 +3677,8 @@ static int cab_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, FILE_H
 	bio = BIO_new_mem_buf(indata, offset);
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 	(void)BIO_seek(bio, 0);
+
+	bfb = OPENSSL_malloc(SIZE_16M);
 
 	/* u1 signature[4] 4643534D MSCF: 0-3 */
 	BIO_read(bio, bfb, 4);
@@ -3776,6 +3786,7 @@ static int cab_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, FILE_H
 		EVP_DigestUpdate(mdctx, bfb, l);
 		coffFiles += l;
 	}
+	OPENSSL_free(bfb);
 	BIO_free(bio);
 	EVP_DigestFinal(mdctx, mdbuf, NULL);
 	ret = 1; /* OK */
@@ -3944,7 +3955,7 @@ static int cab_remove_file(char *indata, FILE_HEADER *header, uint32_t filesize,
 	int i;
 	uint32_t tmp;
 	uint16_t nfolders, flags;
-	static char buf[64*1024];
+	char *buf = OPENSSL_malloc(SIZE_64K);
 
 	/*
 	 * u1 signature[4] 4643534D MSCF: 0-3
@@ -3996,6 +4007,7 @@ static int cab_remove_file(char *indata, FILE_HEADER *header, uint32_t filesize,
 	}
 	/* Write what's left - the compressed data bytes */
 	BIO_write(outdata, indata + i, filesize - header->siglen - i);
+	OPENSSL_free(buf);
 
 	return 0; /* OK */
 }
@@ -4004,7 +4016,7 @@ static void cab_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO 
 {
 	int i;
 	uint16_t nfolders, flags;
-	static char buf[64*1024];
+	static char buf[2];
 
 	/* u1 signature[4] 4643534D MSCF: 0-3 */
 	BIO_write(hash, indata, 4);
@@ -4061,14 +4073,15 @@ static void cab_add_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *ou
 	int i;
 	uint32_t tmp;
 	uint16_t nfolders, flags;
-	static char buf[64*1024];
 	u_char cabsigned[] = {
 		0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
 		0xde, 0xad, 0xbe, 0xef, /* size of cab file */
 		0xde, 0xad, 0xbe, 0xef, /* size of asn1 blob */
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 	};
+	char *buf = OPENSSL_malloc(SIZE_64K);
 
+	memset(buf, 0, SIZE_64K);
 	/* u1 signature[4] 4643534D MSCF: 0-3 */
 	BIO_write(hash, indata, 4);
 	/* u4 reserved1 00000000: 4-7 */
@@ -4120,6 +4133,7 @@ static void cab_add_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *ou
 	}
 	/* Write what's left - the compressed data bytes */
 	BIO_write(hash, indata + i, header->fileend - i);
+	OPENSSL_free(buf);
 }
 
 /*
@@ -4535,7 +4549,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 			GLOBAL_OPTIONS *options, MSI_PARAMS *msiparams, int *padlen, int *len, BIO *outdata)
 {
 	u_char *p = NULL;
-	static char buf[64*1024];
+	char buf[8];
 	PKCS7 *outsig = NULL;
 
 	if (type != FILE_TYPE_CAT && options->nest) {
@@ -4592,7 +4606,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 static void update_data_size(file_type_t type, cmd_type_t cmd, FILE_HEADER *header,
 		int padlen, int len, BIO *outdata)
 {
-	static char buf[64*1024];
+	char buf[8];
 
 	if (type == FILE_TYPE_PE) {
 		if (cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) {
@@ -4814,8 +4828,9 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 
 static int get_file_type(char *indata, char *infile, file_type_t *type)
 {
-	static u_char pkcs7_signed_data[] = {
-		0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02,
+	u_char pkcs7_signed_data[] = {
+		0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d,
+		0x01, 0x07, 0x02
 	};
 
 	if (!memcmp(indata, "MSCF", 4)) {
@@ -4874,7 +4889,7 @@ static int read_password(GLOBAL_OPTIONS *options)
 {
 	char passbuf[4096];
 	int passfd, passlen;
-	static const u_char utf8_bom[] = {0xef, 0xbb, 0xbf};
+	u_char utf8_bom[] = {0xef, 0xbb, 0xbf};
 
 	if (options->readpass) {
 		passfd = open(options->readpass, O_RDONLY);
@@ -5318,7 +5333,7 @@ static PKCS7 *get_sigfile(char *sigfile, file_type_t type)
 	char *insigdata;
 	FILE_HEADER header;
 	BIO *sigbio;
-	const char pemhdr[] = "-----BEGIN PKCS7-----";
+	char pemhdr[] = "-----BEGIN PKCS7-----";
 
 	sigfilesize = get_file_size(sigfile);
 	if (!sigfilesize) {
