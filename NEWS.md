@@ -1,10 +1,19 @@
 # osslsigncode change log
 
-### 2.3 (unreleased)
+### 2.3 (2022.03.06)
 
-- fixed memory safety
-- added bash completion script
-- added CA bundle auto-detection
+**CRITICAL SECURITY VULNERABILITIES**
+
+This release fixes several critical memory corruption vulnerabilities.
+A malicious attacker could create a file, which, when processed with
+osslsigncode, triggers arbitrary code execution.  Any previous version
+of osslsigncode should be immediately upgraded if the tool is used for
+processing of untrusted files.
+
+- fixed several memory safety issues
+- fixed non-interactive PVK (MSBLOB) key decryption
+- added a bash completion script
+- added CA bundle path auto-detection
 
 ### 2.2 (2021.08.15)
 
