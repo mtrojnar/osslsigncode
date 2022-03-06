@@ -173,42 +173,6 @@ version you expect.  You should consider using asymmetrical encryption for the
 data you put in the blob, such that the executable contains the public key to
 decrypt the data.  Basically, be VERY careful.
 
-## CONVERTING FROM PVK TO DER
-
-(This guide was written by Ryan Rubley)
-
-If you've managed to finally find osslsigncode from some searches,
-you're most likely going to have a heck of a time getting your SPC
-and PVK files into the formats osslsigncode wants.
-
-On the computer where you originally purchased your certificate, you
-probably had to use IE to get it. Run IE and select Tools/Internet
-Options from the menu, then under the Content tab, click the Certificates
-button. Under the Personal tab, select your certificate and click the
-Export button. On the second page of the wizard, select the PKCS #7
-Certificate (.P7B) format. This file you export as a *.p7b is what you
-use instead of your *.spc file. It's the same basic thing, in a different format.
-
-For your PVK file, you will need to download a little utility called
-PVK.EXE. This can currently be downloaded at
-
-  https://www.globalsign.com/support/code-signing/PVK.zip
-
-Run:
-```
-  pvk -in foo.pvk -nocrypt -out foo.pem
-```
-
-This will convert your PVK file to a PEM file.
-From there, you can copy the PEM file to a Linux box, and run:
-```
-  openssl rsa -outform der -in foo.pem -out foo.der
-```
-This will convert your PEM file to a DER file.
-
-You need the *.p7b and *.der files to use osslsigncode, instead of your
-*.spc and *.pvk files.
-
 ## BUGS, QUESTIONS etc.
 
 Check whether your your question or suspected bug was already
