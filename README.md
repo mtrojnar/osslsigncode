@@ -136,6 +136,43 @@ and then choose the signature from the list, and click on
 Details. You should then be presented with a dialog that says
 amongst other things that "This digital signature is OK".
 
+## UNAUTHENTICATED BLOBS
+
+The "-addUnauthenticatedBlob" parameter adds a 1024-byte unauthenticated blob
+of data to the signature in the same area as the timestamp.  This can be used
+while signing, while timestamping, after a file has been code signed, or by
+itself.  This technique (but not this project) is used by Dropbox, GoToMeeting,
+and Summit Route.
+
+### Example 1. Sign and add blob to unsigned file
+
+```shell
+osslsigncode sign -addUnauthenticatedBlob -pkcs12 yourcert.pfx -pass your_password -n "Your Company" -i https://YourSite.com/ -in srepp.msi -out srepp_added.msi
+```
+
+### Example 2. Timestamp and add blob to signed file
+
+```shell
+osslsigncode.exe add -addUnauthenticatedBlob -t http://timestamp.digicert.com -in your_signed_file.exe -out out.exe
+```
+
+### Example 3. Add blob to signed and time-stamped file
+
+```shell
+osslsigncode.exe add -addUnauthenticatedBlob -in your_signed_file.exe -out out.exe
+```
+
+### WARNING
+
+This feature allows for doing dumb things.  Be very careful with what you put
+in the unauthenticated blob, as an attacker could modify this.  Do NOT, under
+any circumstances, put a URL here that you will use to download an additional
+file.  If you do do that, you would need to check the newly downloaded file is
+code signed AND that it has been signed with your cert AND that it is the
+version you expect.  You should consider using asymmetrical encryption for the
+data you put in the blob, such that the executable contains the public key to
+decrypt the data.  Basically, be VERY careful.
+
 ## CONVERTING FROM PVK TO DER
 
 (This guide was written by Ryan Rubley)
