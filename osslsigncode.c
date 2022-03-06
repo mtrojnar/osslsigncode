@@ -832,7 +832,7 @@ static BIO *encode_rfc3161_request(PKCS7 *sig, const EVP_MD *md)
 	u_char *p;
 	int len;
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(sig);
-	
+
 	if (!signer_info)
 		return NULL; /* FAILED */
 	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
@@ -881,7 +881,7 @@ static BIO *encode_authenticode_request(PKCS7 *sig)
 	u_char *p;
 	int len;
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(sig);
-	
+
 	if (!signer_info)
 		return 0; /* FAILED */
 	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
@@ -922,7 +922,7 @@ static int decode_rfc3161_response(PKCS7 *sig, BIO *bin, int verbose)
 	u_char *p;
 	int len;
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(sig);
-	
+
 	if (!signer_info)
 		return 1; /* FAILED */
 	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
@@ -2599,7 +2599,7 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 	int len = 0;
 	PKCS7_SIGNER_INFO *si;
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
-	
+
 	if (!signer_info)
 		return 0; /* FAILED */
 	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
@@ -2927,7 +2927,7 @@ static int msi_verify_header(char *indata, uint32_t filesize, MSI_PARAMS *msipar
 		printf("Failed to parse MSI_DIRENT struct\n");
 		return 0; /* FAILED */
 	}
-	
+
 	return 1; /* OK */
 }
 
@@ -3191,7 +3191,7 @@ static int msi_calc_MsiDigitalSignatureEx(MSI_PARAMS *msiparams, const EVP_MD *m
 		BIO_free_all(prehash);
 		return 0; /* FAILED */
 	}
-	BIO_push(prehash, BIO_new(BIO_s_null()));	
+	BIO_push(prehash, BIO_new(BIO_s_null()));
 
 	if (!msi_prehash_dir(msiparams->dirent, prehash, 1)) {
 		printf("Unable to calculate MSI pre-hash ('metadata') hash\n");
@@ -3230,7 +3230,7 @@ static int pe_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, FILE_HE
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 	bio = BIO_new_mem_buf(indata, offset);
 	(void)BIO_seek(bio, 0);
-	
+
 	bfb = OPENSSL_malloc(SIZE_16M);
 
 	BIO_read(bio, bfb, header->header_size + 88);
@@ -3677,7 +3677,7 @@ static int cab_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, FILE_H
 	bio = BIO_new_mem_buf(indata, offset);
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 	(void)BIO_seek(bio, 0);
-	
+
 	bfb = OPENSSL_malloc(SIZE_16M);
 
 	/* u1 signature[4] 4643534D MSCF: 0-3 */
@@ -4522,7 +4522,7 @@ static int add_unauthenticated_blob(PKCS7 *sig)
 	const char prefix[] = "\x0c\x82\x04\x00---BEGIN_BLOB---";
 	const char postfix[] = "---END_BLOB---";
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(sig);
-	
+
 	if (!signer_info)
 		return 0; /* FAILED */
 	si = sk_PKCS7_SIGNER_INFO_value(sig->d.sign->signer_info, 0);
@@ -4912,7 +4912,7 @@ static int read_password(GLOBAL_OPTIONS *options)
 		}
 		passbuf[passlen] = 0x00;
 		if (!memcmp(passbuf, utf8_bom, sizeof utf8_bom)) {
-			options->pass = OPENSSL_strdup(passbuf + sizeof utf8_bom);	
+			options->pass = OPENSSL_strdup(passbuf + sizeof utf8_bom);
 		} else {
 			options->pass = OPENSSL_strdup(passbuf);
 		}
@@ -6107,7 +6107,7 @@ int main(int argc, char **argv)
 	ret = append_signature(sig, cursig, type, &options, &msiparams, &padlen, &len, outdata);
 	if (ret)
 		DO_EXIT_0("Append signature to outfile failed\n");
-		
+
 skip_signing:
 
 	update_data_size(type, cmd, &header, padlen, len, outdata);

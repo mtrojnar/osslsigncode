@@ -81,7 +81,7 @@
 
 #define PUT_UINT8_LE(i,p) \
 	((u_char*)(p))[0] = (i) & 0xff;
-	
+
 #define PUT_UINT16_LE(i,p) \
 	((u_char*)(p))[0] = (i) & 0xff; \
 	((u_char*)(p))[1] = ((i)>>8) & 0xff
