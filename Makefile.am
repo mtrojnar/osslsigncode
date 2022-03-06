@@ -6,7 +6,7 @@ MAINTAINERCLEANFILES = \
 	$(srcdir)/install-sh $(srcdir)/ltmain.sh $(srcdir)/missing \
 	$(srcdir)/depcomp $(srcdir)/aclocal.m4 $(srcdir)/ylwrap \
 	$(srcdir)/config.guess $(srcdir)/config.sub
-EXTRA_DIST = .gitignore
+EXTRA_DIST = .gitignore INSTALL.W32.md  NEWS.md  README.md  README.unauthblob.md  TODO.md
 
 AM_CFLAGS = $(OPENSSL_CFLAGS) $(OPTIONAL_LIBCURL_CFLAGS)
 
