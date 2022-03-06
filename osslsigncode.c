@@ -5119,23 +5119,23 @@ static char *find_pvk_key(GLOBAL_OPTIONS *options)
 static int read_pvk_key(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 {
 	BIO *btmp;
-	int ret = 0;
 
 	btmp = BIO_new_file(options->pvkfile, "rb");
 	if (!btmp) {
 		printf("Failed to read private key file: %s\n", options->pvkfile);
 		return 0; /* FAILED */
 	}
-	if (((cparams->pkey = b2i_PVK_bio(btmp, NULL, options->pass ? options->pass : "")) == NULL &&
-			(BIO_seek(btmp, 0) == 0) &&
-			(cparams->pkey = b2i_PVK_bio(btmp, NULL, NULL)) == NULL)) {
-		printf("Failed to decode private key file: %s\n", options->pvkfile);
-		goto out; /* FAILED */
+	cparams->pkey = b2i_PVK_bio(btmp, NULL, options->pass ? options->pass : "");
+	if (!cparams->pkey && options->askpass) {
+		(void)BIO_seek(btmp, 0);
+		cparams->pkey = b2i_PVK_bio(btmp, NULL, NULL);
 	}
-	ret = 1; /* OK */
-out:
 	BIO_free(btmp);
-	return ret;
+	if (!cparams->pkey) {
+		printf("Failed to decode private key file: %s\n", options->pvkfile);
+		return 0; /* FAILED */
+	}
+	return 1; /* OK */
 }
 
 #ifndef OPENSSL_NO_ENGINE
