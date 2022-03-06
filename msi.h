@@ -100,6 +100,9 @@
 #define TRUE 1
 #endif
 
+#define SIZE_64K 65536			/* 2^16 */
+#define SIZE_16M 16777216		/* 2^24 */
+
 typedef unsigned char u_char;
 
 typedef struct {
@@ -179,7 +182,7 @@ typedef struct {
 	uint32_t sectorSize;
 } MSI_OUT;
 
-static u_char msi_magic[] = {
+static const u_char msi_magic[] = {
 	0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1
 };
 
