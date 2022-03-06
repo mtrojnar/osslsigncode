@@ -1,6 +1,6 @@
 AC_PREREQ(2.60)
 
-AC_INIT([osslsigncode], [2.3.0], [Michal.Trojnara@stunnel.org])
+AC_INIT([osslsigncode], [2.4.0-dev], [Michal.Trojnara@stunnel.org])
 AC_CONFIG_AUX_DIR([.])
 AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE
