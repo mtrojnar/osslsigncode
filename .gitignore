@@ -43,6 +43,7 @@ COPYING
 *~
 *.gz
 *.bz2
+*.asc
 
 **/*.log
 !myapp.exe
