@@ -920,7 +920,7 @@ static int decode_rfc3161_response(PKCS7 *sig, BIO *bin, int verbose)
 	STACK_OF(X509_ATTRIBUTE) *attrs;
 	TimeStampResp *reply;
 	u_char *p;
-	int len;
+	int i, len;
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(sig);
 
 	if (!signer_info)
@@ -931,11 +931,16 @@ static int decode_rfc3161_response(PKCS7 *sig, BIO *bin, int verbose)
 
 	reply = ASN1_item_d2i_bio(ASN1_ITEM_rptr(TimeStampResp), bin, NULL);
 	BIO_free_all(bin);
-	if (!reply)
+	if (!reply || !reply->status)
 		return 1; /* FAILED */
 	if (ASN1_INTEGER_get(reply->status->status) != 0) {
-		if (verbose)
-			printf("Timestamping failed: %ld\n", ASN1_INTEGER_get(reply->status->status));
+		if (verbose) {
+			printf("Timestamping failed: status %ld\n", ASN1_INTEGER_get(reply->status->status));
+			for (i = 0; i < sk_ASN1_UTF8STRING_num(reply->status->statusString); i++) {
+				ASN1_UTF8STRING *status = sk_ASN1_UTF8STRING_value(reply->status->statusString, i);
+				printf("%s\n", ASN1_STRING_get0_data(status));
+			}
+		}
 		TimeStampResp_free(reply);
 		return 1; /* FAILED */
 	}
