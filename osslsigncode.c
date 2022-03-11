@@ -5602,7 +5602,7 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 		argv++;
 		argc--;
 	}
-	options->md = EVP_sha1();
+	options->md = EVP_sha256();
 	options->signing_time = INVALID_TIME;
 	options->jp = -1;
 
