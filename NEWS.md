@@ -3,6 +3,9 @@
 ### 2.4 (unreleased)
 
 - set the default message digest to sha256
+- enable "-h {md5,sha1,sha2(56),sha384,sha512}" option
+  for "attach -signature" and "add" commands
+- enable "-require-leaf-hash" option for "attach-signature" command
 
 ### 2.3 (2022.03.06)
 

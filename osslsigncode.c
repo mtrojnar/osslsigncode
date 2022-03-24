@@ -1196,6 +1196,7 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
 		printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
 #endif /* ENABLE_CURL */
+		printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
 		printf("%12s[ -verbose ]\n", "");
 		printf("%12s[ -add-msi-dse ]\n", "");
 		printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
@@ -1206,6 +1207,8 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -CRLfile <infile> ]\n", "");
 		printf("%12s[ -TSA-CAfile <infile> ]\n", "");
 		printf("%12s[ -TSA-CRLfile <infile> ]\n", "");
+		printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
+		printf("%12s[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n", "");
 		printf("%12s[ -nest ]\n", "");
 		printf("%12s[ -add-msi-dse ]\n", "");
 		printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
@@ -5723,7 +5726,8 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 				return 0; /* FAILED */
 			}
 			options->desc = *(++argv);
-		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-h")) {
+		} else if ((*cmd == CMD_SIGN|| *cmd == CMD_ADD || *cmd == CMD_ATTACH)
+				&& !strcmp(*argv, "-h")) {
 			if (--argc < 1) {
 				usage(argv0, "all");
 				return 0; /* FAILED */
@@ -5819,7 +5823,7 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 				return 0; /* FAILED */
 			}
 			options->tsa_crlfile = OPENSSL_strdup(*++argv);
-		} else if ((*cmd == CMD_VERIFY) && !strcmp(*argv, "-require-leaf-hash")) {
+		} else if ((*cmd == CMD_VERIFY || *cmd == CMD_ATTACH) && !strcmp(*argv, "-require-leaf-hash")) {
 			if (--argc < 1) {
 				usage(argv0, "all");
 				return 0; /* FAILED */
