@@ -238,7 +238,7 @@ typedef struct {
 #endif /* ENABLE_CURL */
 	int addBlob;
 	int nest;
-	int timestamp_expiration;
+	int ignore_timestamp;
 	int verbose;
 	int add_msi_dse;
 	char *catalog;
@@ -1227,9 +1227,9 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -CRLfile <infile> ]\n", "");
 		printf("%12s[ -TSA-CAfile <infile> ]\n", "");
 		printf("%12s[ -TSA-CRLfile <infile> ]\n", "");
+		printf("%12s[ -ignore_timestamp ]\n", "");
 		printf("%12s[ -time <unix-time> ]\n", "");
 		printf("%12s[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n", "");
-		printf("%12s[ -timestamp-expiration ]\n", "");
 		printf("%12s[ -verbose ]\n\n", "");
 	}
 }
@@ -1280,7 +1280,7 @@ static void help_for(const char *argv0, const char *cmd)
 	const char *cmds_require_leaf_hash[] = {"attach-signature", "verify", NULL};
 	const char *cmds_sigin[] = {"attach-signature", NULL};
 	const char *cmds_time[] = {"attach-signature", "sign", "verify", NULL};
-	const char *cmds_timestamp_expiration[] = {"verify", NULL};
+	const char *cmds_ignore_timestamp[] = {"verify", NULL};
 #ifdef ENABLE_CURL
 	const char *cmds_t[] = {"add", "sign", NULL};
 	const char *cmds_ts[] = {"add", "sign", NULL};
@@ -1412,8 +1412,8 @@ static void help_for(const char *argv0, const char *cmd)
 	}
 	if (on_list(cmd, cmds_sigin))
 		printf("%-24s= a file containing the signature to be attached\n", "-sigin");
-	if (on_list(cmd, cmds_timestamp_expiration))
-		printf("%-24s= verify a finite lifetime of the TSA private key\n", "-timestamp-expiration");
+	if (on_list(cmd, cmds_ignore_timestamp))
+		printf("%-24s= disable verification of the Timestamp Server signature\n", "-ignore-timestamp");
 #ifdef ENABLE_CURL
 	if (on_list(cmd, cmds_t)) {
 		printf("%-24s= specifies that the digital signature will be timestamped\n", "-t");
@@ -2719,22 +2719,14 @@ static int verify_timestamp(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 	if (!store)
 		goto out;
 	if (load_file_lookup(store, options->tsa_cafile)) {
-		/*
-		 * The TSA signing key MUST be of a sufficient length to allow for a sufficiently
-		 * long lifetime.  Even if this is done, the key will  have a finite lifetime.
-		 * Thus, any token signed by the TSA SHOULD  be time-stamped again or notarized
-		 * at a later date to renew the trust that exists in the TSA's signature.
-		 * https://tools.ietf.org/html/rfc3161
-		*/
-		if (!options->timestamp_expiration)
-			/* verify timestamp against the time of its creation */
-			if (!set_store_time(store, signature->time)) {
-				printf("Failed to set store time\n");
-				X509_STORE_free(store);
-				goto out;
-			}
+		/* verify timestamp against the time of its creation */
+		if (!set_store_time(store, signature->time)) {
+			printf("Failed to set store time\n");
+			X509_STORE_free(store);
+			goto out;
+		}
 	} else {
-		printf("Use the \"-TSA-CAfile\" option to add the Time-Stamp Authority certificates bundle to verify timestamp server.\n");
+		printf("Use the \"-TSA-CAfile\" option to add the Time-Stamp Authority certificates bundle to verify the Timestamp Server.\n");
 		X509_STORE_free(store);
 		goto out;
 	}
@@ -2807,15 +2799,7 @@ static int verify_authenticode(SIGNATURE *signature, GLOBAL_OPTIONS *options, X5
 		X509_STORE_free(store);
 		goto out;
 	}
-	if (options->time != INVALID_TIME) {
-		printf("Signature verification time: ");
-		print_time_t(options->time);
-		if (!set_store_time(store, options->time)) {
-			printf("Failed to set verifying time\n");
-			X509_STORE_free(store);
-			goto out;
-		}
-	} else if (signature->time != INVALID_TIME) {
+	if (signature->time != INVALID_TIME) {
 		printf("Signature verification time: ");
 		print_time_t(signature->time);
 		if (!set_store_time(store, signature->time)) {
@@ -2823,8 +2807,15 @@ static int verify_authenticode(SIGNATURE *signature, GLOBAL_OPTIONS *options, X5
 			X509_STORE_free(store);
 			goto out;
 		}
+	} else if (options->time != INVALID_TIME) {
+		printf("Signature verification time: ");
+		print_time_t(options->time);
+		if (!set_store_time(store, options->time)) {
+			printf("Failed to set verifying time\n");
+			X509_STORE_free(store);
+			goto out;
+		}
 	}
-
 	/* verify a PKCS#7 signedData structure */
 	if (signature->p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
 		/* only verify the contents of the sequence */
@@ -2908,9 +2899,14 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 	}
 
 	if (signature->timestamp) {
-		int timeok = verify_timestamp(signature, options);
-		printf("Timestamp Server Signature verification: %s\n", timeok ? "ok" : "failed");
-		if (!timeok) {
+		if (!options->ignore_timestamp) {
+			int timeok = verify_timestamp(signature, options);
+			printf("Timestamp Server Signature verification: %s\n", timeok ? "ok" : "failed");
+			if (!timeok) {
+				signature->time = INVALID_TIME;
+			}			
+		} else {
+			printf("\nTimestamp Server Signature verification is disabled\n\n");
 			signature->time = INVALID_TIME;
 		}
 	} else
@@ -5797,8 +5793,8 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 			options->addBlob = 1;
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ATTACH) && !strcmp(*argv, "-nest")) {
 			options->nest = 1;
-		} else if ((*cmd == CMD_VERIFY) && !strcmp(*argv, "-timestamp-expiration")) {
-			options->timestamp_expiration = 1;
+		} else if ((*cmd == CMD_VERIFY) && !strcmp(*argv, "-ignore-timestamp")) {
+			options->ignore_timestamp = 1;
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD || *cmd == CMD_VERIFY) && !strcmp(*argv, "-verbose")) {
 			options->verbose = 1;
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD || *cmd == CMD_ATTACH) && !strcmp(*argv, "-add-msi-dse")) {
