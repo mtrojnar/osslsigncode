@@ -227,7 +227,7 @@ typedef struct {
 	char *desc;
 	const EVP_MD *md;
 	char *url;
-	time_t signing_time;
+	time_t time;
 #ifdef ENABLE_CURL
 	char *turl[MAX_TS_SERVERS];
 	int nturl;
@@ -731,13 +731,13 @@ static int asn1_simple_hdr_len(const u_char *p, int len)
  * behaviour closer to signtool.exe (which doesn't include any non-trusted
  * time in this case.)
  */
-static int pkcs7_add_signing_time(PKCS7_SIGNER_INFO *si, time_t signing_time)
+static int pkcs7_add_signing_time(PKCS7_SIGNER_INFO *si, time_t time)
 {
-	if (signing_time == INVALID_TIME) /* -st option was not specified */
+	if (time == INVALID_TIME) /* -time option was not specified */
 		return 1; /* success */
 	return PKCS7_add_signed_attribute(si,
 		NID_pkcs9_signingTime, V_ASN1_UTCTIME,
-		ASN1_TIME_adj(NULL, signing_time, 0, 0));
+		ASN1_TIME_adj(NULL, time, 0, 0));
 }
 
 static void tohex(const u_char *v, char *b, int len)
@@ -1183,7 +1183,7 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
 		printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
 #endif /* ENABLE_CURL */
-		printf("%12s[ -st <unix-time> ]\n", "");
+		printf("%12s[ -time <unix-time> ]\n", "");
 		printf("%12s[ -addUnauthenticatedBlob ]\n", "");
 		printf("%12s[ -nest ]\n", "");
 		printf("%12s[ -verbose ]\n", "");
@@ -1207,6 +1207,7 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -CRLfile <infile> ]\n", "");
 		printf("%12s[ -TSA-CAfile <infile> ]\n", "");
 		printf("%12s[ -TSA-CRLfile <infile> ]\n", "");
+		printf("%12s[ -time <unix-time> ]\n", "");
 		printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
 		printf("%12s[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n", "");
 		printf("%12s[ -nest ]\n", "");
@@ -1226,6 +1227,7 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -CRLfile <infile> ]\n", "");
 		printf("%12s[ -TSA-CAfile <infile> ]\n", "");
 		printf("%12s[ -TSA-CRLfile <infile> ]\n", "");
+		printf("%12s[ -time <unix-time> ]\n", "");
 		printf("%12s[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n", "");
 		printf("%12s[ -timestamp-expiration ]\n", "");
 		printf("%12s[ -verbose ]\n\n", "");
@@ -1242,7 +1244,7 @@ static void help_for(const char *argv0, const char *cmd)
 	const char *cmds_sign[] = {"sign", NULL};
 	const char *cmds_verify[] = {"verify", NULL};
 	const char *cmds_ac[] = {"sign", NULL};
-	const char *cmds_add_msi_dse[] = {"sign", NULL};
+	const char *cmds_add_msi_dse[] = {"add", "attach-signature", "sign", NULL};
 	const char *cmds_addUnauthenticatedBlob[] = {"sign", "add", NULL};
 #ifdef PROVIDE_ASKPASS
 	const char *cmds_askpass[] = {"sign", NULL};
@@ -1253,7 +1255,7 @@ static void help_for(const char *argv0, const char *cmd)
 	const char *cmds_comm[] = {"sign", NULL};
 	const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
 	const char *cmds_CRLfileTSA[] = {"attach-signature", "verify", NULL};
-	const char *cmds_h[] = {"sign", NULL};
+	const char *cmds_h[] = {"add", "attach-signature", "sign", NULL};
 	const char *cmds_i[] = {"sign", NULL};
 	const char *cmds_in[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", "verify", NULL};
 	const char *cmds_jp[] = {"sign", NULL};
@@ -1275,9 +1277,9 @@ static void help_for(const char *argv0, const char *cmd)
 	const char *cmds_pkcs11module[] = {"sign", NULL};
 	const char *cmds_pkcs12[] = {"sign", NULL};
 	const char *cmds_readpass[] = {"sign", NULL};
-	const char *cmds_require_leaf_hash[] = {"verify", NULL};
+	const char *cmds_require_leaf_hash[] = {"attach-signature", "verify", NULL};
 	const char *cmds_sigin[] = {"attach-signature", NULL};
-	const char *cmds_st[] = {"sign", NULL};
+	const char *cmds_time[] = {"attach-signature", "sign", "verify", NULL};
 	const char *cmds_timestamp_expiration[] = {"verify", NULL};
 #ifdef ENABLE_CURL
 	const char *cmds_t[] = {"add", "sign", NULL};
@@ -1395,9 +1397,9 @@ static void help_for(const char *argv0, const char *cmd)
 	if (on_list(cmd, cmds_pkcs11cert))
 		printf("%-24s= PKCS#11 URI identifies a certificate in the token\n", "-pkcs11cert");
 	if (on_list(cmd, cmds_pkcs11engine))
-		printf("%-24s= PKCS11 engine\n", "-pkcs11engine");
+		printf("%-24s= PKCS#11 engine\n", "-pkcs11engine");
 	if (on_list(cmd, cmds_pkcs11module))
-		printf("%-24s= PKCS11 module\n", "-pkcs11module");
+		printf("%-24s= PKCS#11 module\n", "-pkcs11module");
 	if (on_list(cmd, cmds_pkcs12))
 		printf("%-24s= PKCS#12 container with the certificate and the private key\n", "-pkcs12");
 	if (on_list(cmd, cmds_readpass))
@@ -1410,8 +1412,6 @@ static void help_for(const char *argv0, const char *cmd)
 	}
 	if (on_list(cmd, cmds_sigin))
 		printf("%-24s= a file containing the signature to be attached\n", "-sigin");
-	if (on_list(cmd, cmds_st))
-		printf("%-24s= the unix-time to set the signing time\n", "-st");
 	if (on_list(cmd, cmds_timestamp_expiration))
 		printf("%-24s= verify a finite lifetime of the TSA private key\n", "-timestamp-expiration");
 #ifdef ENABLE_CURL
@@ -1425,14 +1425,14 @@ static void help_for(const char *argv0, const char *cmd)
 		printf("%26sthis option cannot be used with the -t option\n", "");
 	}
 #endif /* ENABLE_CURL */
-	if (on_list(cmd, cmds_CAfileTSA)) {
+	if (on_list(cmd, cmds_time))
+		printf("%-24s= the unix-time to set the signing and/or verifying time\n", "-time");
+	if (on_list(cmd, cmds_CAfileTSA))
 		printf("%-24s= the file containing one or more Time-Stamp Authority certificates in PEM format\n", "-TSA-CAfile");
-	}
 	if (on_list(cmd, cmds_CRLfileTSA))
 		printf("%-24s= the file containing one or more Time-Stamp Authority CRLs in PEM format\n", "-TSA-CRLfile");
-	if (on_list(cmd, cmds_verbose)) {
+	if (on_list(cmd, cmds_verbose))
 		printf("%-24s= include additional output in the log\n", "-verbose");
-	}
 	usage(argv0, cmd);
 }
 
@@ -2601,7 +2601,7 @@ static int append_nested_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_cha
  * pkcs7_set_nested_signature adds the p7nest signature to p7
  * as a nested signature (SPC_NESTED_SIGNATURE).
  */
-static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_time)
+static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t time)
 {
 	u_char *p = NULL;
 	int len = 0;
@@ -2619,7 +2619,7 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t signing_t
 	i2d_PKCS7(p7nest, &p);
 	p -= len;
 
-	pkcs7_add_signing_time(si, signing_time);
+	pkcs7_add_signing_time(si, time);
 	if (!append_nested_signature(&(si->unauth_attr), p, len)) {
 		OPENSSL_free(p);
 		return 0; /* FAILED */
@@ -2756,7 +2756,6 @@ static int verify_timestamp(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 		printf("TSA's CRL distribution point: %s\n", url);
 		OPENSSL_free(url);
 	}
-	printf("\n");
 
 	/* verify a Certificate Revocation List */
 	crls = signature->p7->d.sign->crl;
@@ -2808,10 +2807,22 @@ static int verify_authenticode(SIGNATURE *signature, GLOBAL_OPTIONS *options, X5
 		X509_STORE_free(store);
 		goto out;
 	}
-	if (signature->time != INVALID_TIME && !set_store_time(store, signature->time)) {
-		printf("Failed to set store time\n");
-		X509_STORE_free(store);
-		goto out;
+	if (options->time != INVALID_TIME) {
+		printf("Signature verification time: ");
+		print_time_t(options->time);
+		if (!set_store_time(store, options->time)) {
+			printf("Failed to set verifying time\n");
+			X509_STORE_free(store);
+			goto out;
+		}
+	} else if (signature->time != INVALID_TIME) {
+		printf("Signature verification time: ");
+		print_time_t(signature->time);
+		if (!set_store_time(store, signature->time)) {
+			printf("Failed to set signature time\n");
+			X509_STORE_free(store);
+			goto out;
+		}
 	}
 
 	/* verify a PKCS#7 signedData structure */
@@ -4473,7 +4484,7 @@ static PKCS7 *create_new_signature(file_type_t type,
 		    return NULL; /* FAILED */
 		}
 	}
-	pkcs7_add_signing_time(si, options->signing_time);
+	pkcs7_add_signing_time(si, options->time);
 	if (type == FILE_TYPE_CAT) {
 		PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
 			V_ASN1_OBJECT, OBJ_txt2obj(MS_CTL_OBJID, 1));
@@ -4567,7 +4578,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 			printf("Internal error: No 'cursig' was extracted\n");
 			return 1; /* FAILED */
 		}
-		if (pkcs7_set_nested_signature(cursig, sig, options->signing_time) == 0) {
+		if (pkcs7_set_nested_signature(cursig, sig, options->time) == 0) {
 			printf("Unable to append the nested signature to the current signature\n");
 			return 1; /* FAILED */
 		}
@@ -5612,7 +5623,7 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 		argc--;
 	}
 	options->md = EVP_sha256();
-	options->signing_time = INVALID_TIME;
+	options->time = INVALID_TIME;
 	options->jp = -1;
 
 	if (*cmd == CMD_HELP) {
@@ -5753,12 +5764,13 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 				return 0; /* FAILED */
 			}
 			options->url = *(++argv);
-		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-st")) {
+		} else if ((*cmd == CMD_ATTACH || *cmd == CMD_SIGN || *cmd == CMD_VERIFY)
+				&& (!strcmp(*argv, "-time") || !strcmp(*argv, "-st"))) {
 			if (--argc < 1) {
 				usage(argv0, "all");
 				return 0; /* FAILED */
 			}
-			options->signing_time = (time_t)strtoul(*(++argv), NULL, 10);
+			options->time = (time_t)strtoul(*(++argv), NULL, 10);
 #ifdef ENABLE_CURL
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD) && !strcmp(*argv, "-t")) {
 			if (--argc < 1) {
