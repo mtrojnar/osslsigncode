@@ -3,9 +3,15 @@
 ### 2.4 (unreleased)
 
 - set the default message digest to sha256
-- enable "-h {md5,sha1,sha2(56),sha384,sha512}" option
-  for "attach -signature" and "add" commands
-- enable "-require-leaf-hash" option for "attach-signature" command
+- set of cryptographic hash functions for "attach -signature"
+  and "add" commands ("-h" option)
+- compute and compare the leaf certificate hash for "attach-signature"
+  command ("-require-leaf-hash" option)
+- "-st" option renamed to "-time"
+- user-specified signing and/or verifying time ("-time" option)
+- remove "-timestamp-expiration" option
+- disable verification of the Timestamp Server signature
+  ("-ignore-timestamp" option)
 
 ### 2.3 (2022.03.06)
 
