@@ -64,7 +64,7 @@
     --disable-telnet --disable-imap --disable-smb --disable-smtp \
     --disable-gopher --disable-pop --disable-pop3 --disable-rtsp \
     --disable-ldap --disable-ldaps --disable-unix-sockets \
-    --disable-pthreads --without-zstd
+    --disable-pthreads --without-zstd --without-zlib
   make && make install
 ```
 
@@ -87,10 +87,9 @@
   copy C:\OpenSSL\bin\libssl-1_1-x64.dll
   copy C:\OpenSSL\bin\libcrypto-1_1-x64.dll
   copy C:\curl\bin\libcurl-4.dll
-  copy C:\msys64\mingw64\bin\zlib1.dll
 
   osslsigncode.exe -v
   osslsigncode 2.4, using:
         OpenSSL 1.1.1k  25 Mar 2021 (Library: OpenSSL 1.1.1k  25 Mar 2021)
-        libcurl/7.78.0 OpenSSL/1.1.1k zlib/1.2.11
+        libcurl/7.78.0 OpenSSL/1.1.1k
 ```
