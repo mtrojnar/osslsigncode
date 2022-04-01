@@ -4715,26 +4715,30 @@ static char *map_file(const char *infile, const off_t size)
 {
 	char *indata = NULL;
 #ifdef WIN32
-	HANDLE fh, fm;
+	HANDLE fhandle, fmap;
 	(void)size;
-	fh = CreateFile(infile, GENERIC_READ, FILE_SHARE_READ , NULL, OPEN_EXISTING, 0, NULL);
-	if (fh == INVALID_HANDLE_VALUE)
+	fhandle = CreateFile(infile, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (fhandle == INVALID_HANDLE_VALUE) {
 		return NULL;
-	fm = CreateFileMapping(fh, NULL, PAGE_READONLY, 0, 0, NULL);
-	if (fm == NULL)
+	}
+	fmap = CreateFileMapping(fhandle, NULL, PAGE_READONLY, 0, 0, NULL);
+	if (fmap == NULL) {
 		return NULL;
-	indata = MapViewOfFile(fm, FILE_MAP_READ, 0, 0, 0);
+	}
+	indata = (char *)MapViewOfFile(fmap, FILE_MAP_READ, 0, 0, 0);
 #else
 	int fd = open(infile, O_RDONLY);
-	if (fd < 0)
+	if (fd < 0) {
 		return NULL;
+	}
 #ifdef HAVE_SYS_MMAN_H
 	indata = mmap(0, size, PROT_READ, MAP_PRIVATE, fd, 0);
-	if (indata == MAP_FAILED)
+	if (indata == MAP_FAILED) {
 		return NULL;
+	}
 #else
 	printf("No file mapping function\n");
-	return NULL
+	return NULL;
 #endif /* HAVE_SYS_MMAN_H */
 #endif /* WIN32 */
 	return indata;
@@ -4920,19 +4924,38 @@ static char *getpassword(const char *prompt)
 static int read_password(GLOBAL_OPTIONS *options)
 {
 	char passbuf[4096];
-	int passfd, passlen;
+	int passlen;
 	const u_char utf8_bom[] = {0xef, 0xbb, 0xbf};
 
 	if (options->readpass) {
-		passfd = open(options->readpass, O_RDONLY);
+#ifdef WIN32
+		HANDLE fhandle, fmap;
+		LPVOID faddress;
+		fhandle = CreateFile(options->readpass, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+		if (fhandle == INVALID_HANDLE_VALUE) {
+			return 0; /* FAILED */
+		}
+		fmap = CreateFileMapping(fhandle, NULL, PAGE_READONLY, 0, 0, NULL);
+		if (fmap == NULL) {
+			return 0; /* FAILED */
+		}
+		faddress = MapViewOfFile(fmap, FILE_MAP_READ, 0, 0, 0);
+		if (faddress == NULL) {
+			return 0; /* FAILED */
+		}
+		passlen = (int)GetFileSize(fhandle, NULL);
+		memcpy(passbuf, faddress, passlen);
+		UnmapViewOfFile(faddress);
+		CloseHandle(fhandle);
+#else
+		int passfd = open(options->readpass, O_RDONLY);
 		if (passfd < 0) {
-			printf("Failed to open password file: %s\n", options->readpass);
 			return 0; /* FAILED */
 		}
 		passlen = read(passfd, passbuf, sizeof passbuf - 1);
 		close(passfd);
+#endif /* WIN32 */
 		if (passlen <= 0) {
-			printf("Failed to read password from file: %s\n", options->readpass);
 			return 0; /* FAILED */
 		}
 		while (passlen > 0 && (passbuf[passlen-1] == 0x0a || passbuf[passlen-1] == 0x0d)) {
@@ -4948,7 +4971,7 @@ static int read_password(GLOBAL_OPTIONS *options)
 #ifdef PROVIDE_ASKPASS
 	} else if (options->askpass) {
 		options->pass = getpassword("Password: ");
-#endif
+#endif /* PROVIDE_ASKPASS */
 	}
 	return 1; /* OK */
 }
@@ -5978,8 +6001,10 @@ int main(int argc, char **argv)
 	/* commands and options initialization */
 	if (!main_configure(argc, argv, &cmd, &options))
 		goto err_cleanup;
-	if (!read_password(&options))
+	if (!read_password(&options)) {
+		printf("Failed to read password from file: %s\n", options.readpass);
 		goto err_cleanup;
+	}
 
 	/* read key and certificates */
 	if (cmd == CMD_SIGN && !read_crypto_params(&options, &cparams))
