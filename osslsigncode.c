@@ -745,7 +745,7 @@ static void tohex(const u_char *v, char *b, int len)
 	int i;
 	for(i=0; i<len; i++)
 #ifdef WIN32
-		sprintf_s(b+i*2, sizeof(b+i*2), "%02X", v[i]);
+		sprintf_s(b+i*2, 8, "%02X", v[i]);
 #else
 		sprintf(b+i*2, "%02X", v[i]);
 #endif /* WIN32 */
@@ -1541,7 +1541,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 {
 	u_char *ph, *p, *tmp;
 	int l, phlen;
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	char *hexbuf;
 	ASN1_TYPE *tostr;
 	SpcAttributeTypeAndOptionalValue *aval;
 	ASN1_TYPE *taval;
@@ -1555,8 +1555,10 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 		printf("Failed to calculate page hash\n");
 		return NULL; /* FAILED */
 	}
+	hexbuf = OPENSSL_malloc(64);
 	tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
 	printf("Calculated page hash            : %s ...\n", hexbuf);
+	OPENSSL_free(hexbuf);
 
 	tostr = ASN1_TYPE_new();
 	tostr->type = V_ASN1_OCTET_STRING;
@@ -1832,7 +1834,6 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 	int ret = 1;
 	u_char *mdbuf = NULL, *certbuf, *tmp;
 	u_char cmdbuf[EVP_MAX_MD_SIZE];
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	const EVP_MD *md;
 	long mdlen = 0;
 	EVP_MD_CTX *ctx;
@@ -1875,8 +1876,10 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 
 	/* compare the provided hash against the computed hash */
 	if (memcmp(mdbuf, cmdbuf, EVP_MD_size(md))) {
+		char *hexbuf = OPENSSL_malloc(EVP_MAX_MD_SIZE*2);
 		tohex(cmdbuf, hexbuf, EVP_MD_size(md));
 		printf("\nHash value mismatch: %s computed\n", hexbuf);
+		OPENSSL_free(hexbuf);
 		goto out;
 	}
 
@@ -2240,7 +2243,7 @@ out:
  */
 static int print_attributes(SIGNATURE *signature, int verbose)
 {
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	char *hexbuf;
 	u_char *mdbuf;
 	int len;
 
@@ -2252,8 +2255,10 @@ static int print_attributes(SIGNATURE *signature, int verbose)
 		(signature->md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2sn(signature->md_nid));
 	mdbuf = (u_char *)ASN1_STRING_get0_data(signature->digest);
 	len = ASN1_STRING_length(signature->digest);
+	hexbuf = OPENSSL_malloc(EVP_MAX_MD_SIZE*2);
 	tohex(mdbuf, hexbuf, len);
 	printf("\tMessage digest: %s\n", hexbuf);
+	OPENSSL_free(hexbuf);
 	printf("\tSigning time: ");
 	print_time_t(signature->signtime);
 
@@ -2518,7 +2523,6 @@ static int TST_verify(CMS_ContentInfo *timestamp, PKCS7_SIGNER_INFO *si)
 	TimeStampToken *token = NULL;
 	const u_char *p = NULL;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	const EVP_MD *md;
 	EVP_MD_CTX *mdctx;
 	int md_nid;
@@ -2545,6 +2549,7 @@ static int TST_verify(CMS_ContentInfo *timestamp, PKCS7_SIGNER_INFO *si)
 			hash = token->messageImprint->digest;
 			/* hash->length == EVP_MD_size(md) */
 			if (memcmp(mdbuf, hash->data, hash->length)) {
+				char *hexbuf = OPENSSL_malloc(EVP_MAX_MD_SIZE*2);
 				tohex(mdbuf, hexbuf, EVP_MD_size(md));
 				printf("Hash value mismatch:\n\tMessage digest algorithm: %s\n",
 						(md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2ln(md_nid));
@@ -2552,6 +2557,7 @@ static int TST_verify(CMS_ContentInfo *timestamp, PKCS7_SIGNER_INFO *si)
 				tohex(hash->data, hexbuf, hash->length);
 				printf("\tReceived message digest : %s\n" , hexbuf);
 				printf("File's message digest verification: failed\n");
+				OPENSSL_free(hexbuf);
 				TimeStampToken_free(token);
 				return 0; /* FAILED */
 			} /* else Computed and received message digests matched */
@@ -2953,9 +2959,9 @@ static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIRENT *dir
 	u_char mdbuf[EVP_MAX_MD_SIZE];
 	u_char cmdbuf[EVP_MAX_MD_SIZE];
 	u_char cexmdbuf[EVP_MAX_MD_SIZE];
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	const EVP_MD *md;
 	BIO *hash;
+	char *hexbuf = OPENSSL_malloc(EVP_MAX_MD_SIZE*2);
 
 	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
 		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
@@ -3034,6 +3040,7 @@ static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIRENT *dir
 out:
 	if (ret)
 		ERR_print_errors_fp(stdout);
+	OPENSSL_free(hexbuf);
 	return ret;
 }
 
@@ -3353,10 +3360,10 @@ static int pe_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *head
 	int ret = 1, mdok, mdtype = -1, phtype = -1;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
 	u_char cmdbuf[EVP_MAX_MD_SIZE];
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	u_char *ph = NULL;
 	int phlen = 0;
 	const EVP_MD *md;
+	char *hexbuf = OPENSSL_malloc(EVP_MAX_MD_SIZE*2);
 
 	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
 		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
@@ -3417,6 +3424,7 @@ out:
 	if (ret)
 		ERR_print_errors_fp(stdout);
 	OPENSSL_free(ph);
+	OPENSSL_free(hexbuf);
 	return ret;
 }
 
@@ -3816,8 +3824,8 @@ static int cab_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *hea
 	int ret = 1, mdok, mdtype = -1;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
 	u_char cmdbuf[EVP_MAX_MD_SIZE];
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	const EVP_MD *md;
+	char *hexbuf = OPENSSL_malloc(EVP_MAX_MD_SIZE*2);
 
 	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
 		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
@@ -3856,6 +3864,7 @@ static int cab_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *hea
 out:
 	if (ret)
 		ERR_print_errors_fp(stdout);
+	OPENSSL_free(hexbuf);
 	return ret;
 }
 
@@ -4209,7 +4218,6 @@ static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEAD
 		int mdok, mdtype = -1, phtype = -1;
 		u_char mdbuf[EVP_MAX_MD_SIZE];
 		u_char cmdbuf[EVP_MAX_MD_SIZE];
-		char hexbuf[EVP_MAX_MD_SIZE*2+1];
 		int phlen = 0;
 		const EVP_MD *md;
 		ASN1_TYPE *content;
@@ -4267,17 +4275,20 @@ static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEAD
 			}
 		mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
 		if (mdok) {
+			char *hexbuf = OPENSSL_malloc(EVP_MAX_MD_SIZE*2);
 			printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
 			tohex(mdbuf, hexbuf, EVP_MD_size(md));
 			printf("Current message digest    : %s\n", hexbuf);
 			tohex(cmdbuf, hexbuf, EVP_MD_size(md));
 			printf("Calculated message digest : %s\n\n", hexbuf);
+			OPENSSL_free(hexbuf);
 		} else {
 			goto out;
 		}
 
 		if (phlen > 0) {
 			int cphlen = 0;
+			char *hexbuf = OPENSSL_malloc(EVP_MAX_MD_SIZE*2);
 			u_char *cph;
 			cph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &cphlen);
 			tohex(cph, hexbuf, (cphlen < 32) ? cphlen : 32);
@@ -4289,8 +4300,10 @@ static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEAD
 				printf("Page hash            : %s\n", hexbuf);
 				printf("Calculated page hash : %s\n\n", hexbuf);
 			} else {
+				OPENSSL_free(hexbuf);
 				goto out;
 			}
+			OPENSSL_free(hexbuf);
 		}
 		ret = 0; /* OK */
 	}
