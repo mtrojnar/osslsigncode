@@ -61,9 +61,9 @@
 #define OPENSSL_API_COMPAT 0x10100000L
 #define OPENSSL_NO_DEPRECATED
 
-#ifdef __MINGW32__
+#if defined(_MSC_VER) || defined(MINGW32)
 #define HAVE_WINDOWS_H
-#endif /* __MINGW32__ */
+#endif /* _MSC_VER || MINGW32 */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -2910,7 +2910,7 @@ static int verify_signature(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 			printf("Timestamp Server Signature verification: %s\n", timeok ? "ok" : "failed");
 			if (!timeok) {
 				signature->time = INVALID_TIME;
-			}			
+			}
 		} else {
 			printf("\nTimestamp Server Signature verification is disabled\n\n");
 			signature->time = INVALID_TIME;
