@@ -742,13 +742,37 @@ static int pkcs7_add_signing_time(PKCS7_SIGNER_INFO *si, time_t time)
 
 static void tohex(const u_char *v, char *b, int len)
 {
-	int i;
-	for(i=0; i<len; i++)
+	int i, j = 0;
+	for(i=0; i<len; i++) {
 #ifdef WIN32
-		sprintf_s(b+i*2, sizeof(b+i*2), "%02X", v[i]);
+		int size = EVP_MAX_MD_SIZE*2+1;
+		j += sprintf_s(b+j, size-j, "%02X", v[i]);
 #else
-		sprintf(b+i*2, "%02X", v[i]);
+		j += sprintf(b+j, "%02X", v[i]);
 #endif /* WIN32 */
+	}
+}
+
+void print_hash(char *descript1, char *descript2, u_char *hashbuf, int length)
+{
+    char hexbuf[EVP_MAX_MD_SIZE*2+1];
+
+    if (length > EVP_MAX_MD_SIZE) {
+        printf("Invalid message digest size\n");
+        return;
+    }
+    tohex(hashbuf, hexbuf, length);
+    printf("%s: %s %s\n", descript1, hexbuf, descript2);
+}
+
+static int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype)
+{
+	int mdlen = EVP_MD_size(EVP_get_digestbynid(mdtype));
+	int mdok = !memcmp(mdbuf, cmdbuf, mdlen);
+	printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
+	print_hash("Current message digest    ", "", mdbuf, mdlen);
+	print_hash("Calculated message digest ", mdok ? "\n" : "    MISMATCH!!!\n", cmdbuf, mdlen);
+	return mdok;
 }
 
 static int is_content_type(PKCS7 *p7, const char *objid)
@@ -1541,7 +1565,6 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 {
 	u_char *ph, *p, *tmp;
 	int l, phlen;
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	ASN1_TYPE *tostr;
 	SpcAttributeTypeAndOptionalValue *aval;
 	ASN1_TYPE *taval;
@@ -1555,8 +1578,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 		printf("Failed to calculate page hash\n");
 		return NULL; /* FAILED */
 	}
-	tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
-	printf("Calculated page hash            : %s ...\n", hexbuf);
+	print_hash("Calculated page hash            ", "...", ph, (phlen < 32) ? phlen : 32);
 
 	tostr = ASN1_TYPE_new();
 	tostr->type = V_ASN1_OCTET_STRING;
@@ -1832,7 +1854,6 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 	int ret = 1;
 	u_char *mdbuf = NULL, *certbuf, *tmp;
 	u_char cmdbuf[EVP_MAX_MD_SIZE];
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	const EVP_MD *md;
 	long mdlen = 0;
 	EVP_MD_CTX *ctx;
@@ -1875,8 +1896,7 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 
 	/* compare the provided hash against the computed hash */
 	if (memcmp(mdbuf, cmdbuf, EVP_MD_size(md))) {
-		tohex(cmdbuf, hexbuf, EVP_MD_size(md));
-		printf("\nHash value mismatch: %s computed\n", hexbuf);
+		print_hash("\nLeaf hash value mismatch", "computed", cmdbuf, EVP_MD_size(md));
 		goto out;
 	}
 
@@ -2240,7 +2260,6 @@ out:
  */
 static int print_attributes(SIGNATURE *signature, int verbose)
 {
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	u_char *mdbuf;
 	int len;
 
@@ -2252,8 +2271,7 @@ static int print_attributes(SIGNATURE *signature, int verbose)
 		(signature->md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2sn(signature->md_nid));
 	mdbuf = (u_char *)ASN1_STRING_get0_data(signature->digest);
 	len = ASN1_STRING_length(signature->digest);
-	tohex(mdbuf, hexbuf, len);
-	printf("\tMessage digest: %s\n", hexbuf);
+	print_hash("\tMessage digest", "", mdbuf, len);
 	printf("\tSigning time: ");
 	print_time_t(signature->signtime);
 
@@ -2518,7 +2536,6 @@ static int TST_verify(CMS_ContentInfo *timestamp, PKCS7_SIGNER_INFO *si)
 	TimeStampToken *token = NULL;
 	const u_char *p = NULL;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	const EVP_MD *md;
 	EVP_MD_CTX *mdctx;
 	int md_nid;
@@ -2545,13 +2562,11 @@ static int TST_verify(CMS_ContentInfo *timestamp, PKCS7_SIGNER_INFO *si)
 			hash = token->messageImprint->digest;
 			/* hash->length == EVP_MD_size(md) */
 			if (memcmp(mdbuf, hash->data, hash->length)) {
-				tohex(mdbuf, hexbuf, EVP_MD_size(md));
 				printf("Hash value mismatch:\n\tMessage digest algorithm: %s\n",
 						(md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2ln(md_nid));
-				printf("\tComputed message digest : %s\n", hexbuf);
-				tohex(hash->data, hexbuf, hash->length);
-				printf("\tReceived message digest : %s\n" , hexbuf);
-				printf("File's message digest verification: failed\n");
+				print_hash("\tComputed message digest", "", mdbuf, EVP_MD_size(md));
+				print_hash("\tReceived message digest", "", hash->data, hash->length);
+				printf("\nFile's message digest verification: failed\n");
 				TimeStampToken_free(token);
 				return 0; /* FAILED */
 			} /* else Computed and received message digests matched */
@@ -2953,7 +2968,6 @@ static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIRENT *dir
 	u_char mdbuf[EVP_MAX_MD_SIZE];
 	u_char cmdbuf[EVP_MAX_MD_SIZE];
 	u_char cexmdbuf[EVP_MAX_MD_SIZE];
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	const EVP_MD *md;
 	BIO *hash;
 
@@ -2998,9 +3012,7 @@ static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIRENT *dir
 		}
 		BIO_push(prehash, BIO_new(BIO_s_null()));
 
-		tohex((u_char *)exdata, hexbuf, exlen);
-		printf("Current MsiDigitalSignatureEx    : %s\n", hexbuf);
-
+		print_hash("Current MsiDigitalSignatureEx    ", "", (u_char *)exdata, exlen);
 		if (!msi_prehash_dir(dirent, prehash, 1)) {
 			printf("Failed to calculate pre-hash used for MsiDigitalSignatureEx\n\n");
 			BIO_free_all(hash);
@@ -3010,8 +3022,7 @@ static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIRENT *dir
 		BIO_gets(prehash, (char*)cexmdbuf, EVP_MAX_MD_SIZE);
 		BIO_free_all(prehash);
 		BIO_write(hash, (char*)cexmdbuf, EVP_MD_size(md));
-		tohex(cexmdbuf, hexbuf, EVP_MD_size(md));
-		printf("Calculated MsiDigitalSignatureEx : %s\n", hexbuf);
+		print_hash("Calculated MsiDigitalSignatureEx ", "", cexmdbuf, EVP_MD_size(md));
 	}
 
 	if (!msi_hash_dir(msi, dirent, hash, 1)) {
@@ -3019,13 +3030,11 @@ static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIRENT *dir
 		BIO_free_all(hash);
 		goto out;
 	}
-	tohex(mdbuf, hexbuf, EVP_MD_size(md));
-	printf("Current DigitalSignature         : %s\n", hexbuf);
+	print_hash("Current DigitalSignature         ", "", mdbuf, EVP_MD_size(md));
 	BIO_gets(hash, (char*)cmdbuf, EVP_MAX_MD_SIZE);
 	BIO_free_all(hash);
-	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
 	mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
-	printf("Calculated DigitalSignature      : %s%s\n\n", hexbuf, mdok ? "" : "    MISMATCH!!!");
+	print_hash("Calculated DigitalSignature      ", mdok ? "\n" : "    MISMATCH!!!\n", cmdbuf, EVP_MD_size(md));
 	if (!mdok) {
 		printf("Signature verification: failed\n\n");
 		goto out;
@@ -3224,13 +3233,14 @@ static int msi_calc_MsiDigitalSignatureEx(MSI_PARAMS *msiparams, const EVP_MD *m
  */
 
 /* Compute a message digest value of the signed or unsigned PE file */
-static int pe_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, FILE_HEADER *header)
+static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *header)
 {
 	BIO *bio = NULL;
 	u_char *bfb;
 	EVP_MD_CTX *mdctx;
 	uint32_t n, offset;
 	int ret = 0;
+	const EVP_MD *md = EVP_get_digestbynid(mdtype);
 
 	if (header->sigpos)
 		offset = header->sigpos;
@@ -3347,16 +3357,28 @@ static int pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	return 1; /* OK */
 }
 
+static int pe_page_hash(char *indata, FILE_HEADER *header, u_char *ph, int phlen, int phtype)
+{
+	int mdok, cphlen = 0;
+	u_char *cph;
+
+	printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
+	print_hash("Page hash            ", "...", ph, (phlen < 32) ? phlen : 32);
+	cph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &cphlen);
+	mdok = (phlen == cphlen) && !memcmp(ph, cph, phlen);
+	print_hash("Calculated page hash ", mdok ? "...\n" : "... MISMATCH!!!\n", cph, (cphlen < 32) ? cphlen : 32);
+	OPENSSL_free(cph);
+	return mdok;
+}
+
 static int pe_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *header,
 			GLOBAL_OPTIONS *options)
 {
-	int ret = 1, mdok, mdtype = -1, phtype = -1;
+	int ret = 1, mdtype = -1, phtype = -1;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
 	u_char cmdbuf[EVP_MAX_MD_SIZE];
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
 	u_char *ph = NULL;
 	int phlen = 0;
-	const EVP_MD *md;
 
 	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
 		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
@@ -3379,37 +3401,17 @@ static int pe_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *head
 		printf("Failed to extract current message digest\n\n");
 		goto out;
 	}
-	printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
-
-	md = EVP_get_digestbynid(mdtype);
-	tohex(mdbuf, hexbuf, EVP_MD_size(md));
-	printf("Current message digest    : %s\n", hexbuf);
-	if (!pe_calc_digest(indata, md, cmdbuf, header))
+	if (!pe_calc_digest(indata, mdtype, cmdbuf, header)) {
+		printf("Failed to calculate message digest\n\n");
 		goto out;
-	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
-	mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
-	printf("Calculated message digest : %s%s\n\n", hexbuf, mdok ? "" : "    MISMATCH!!!");
-	if (!mdok) {
+	}
+	if (!compare_digests(mdbuf, cmdbuf, mdtype)) {
 		printf("Signature verification: failed\n\n");
 		goto out;
 	}
-
-	if (phlen > 0) {
-		int cphlen = 0;
-		u_char *cph;
-
-		printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
-		tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
-		printf("Page hash            : %s ...\n", hexbuf);
-		cph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &cphlen);
-		tohex(cph, hexbuf, (cphlen < 32) ? cphlen : 32);
-		mdok = (phlen == cphlen) && !memcmp(ph, cph, phlen);
-		OPENSSL_free(cph);
-		printf("Calculated page hash : %s ...%s\n\n", hexbuf, mdok ? "" : "    MISMATCH!!!");
-		if (!mdok) {
-			printf("Signature verification: failed\n\n");
-			goto out;
-		}
+	if (phlen > 0 && !pe_page_hash(indata, header, ph, phlen, phtype)) {
+		printf("Signature verification: failed\n\n");
+		goto out;
 	}
 
 	ret = verify_signature(signature, options);
@@ -3671,13 +3673,14 @@ static int cab_verify_header(char *indata, char *infile, uint32_t filesize, FILE
 }
 
 /* Compute a message digest value of the signed or unsigned CAB file */
-static int cab_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, FILE_HEADER *header)
+static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *header)
 {
 	BIO *bio;
 	u_char *bfb;
 	EVP_MD_CTX *mdctx;
 	uint32_t offset, coffFiles;
 	int ret = 0;
+	const EVP_MD *md = EVP_get_digestbynid(mdtype);
 
 	if (header->sigpos)
 		offset = header->sigpos;
@@ -3813,11 +3816,9 @@ err:
 static int cab_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *header,
 			GLOBAL_OPTIONS *options)
 {
-	int ret = 1, mdok, mdtype = -1;
+	int ret = 1, mdtype = -1;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
 	u_char cmdbuf[EVP_MAX_MD_SIZE];
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
-	const EVP_MD *md;
 
 	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
 		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
@@ -3835,19 +3836,11 @@ static int cab_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *hea
 		printf("Failed to extract current message digest\n\n");
 		goto out;
 	}
-	printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
-
-	md = EVP_get_digestbynid(mdtype);
-	tohex(mdbuf, hexbuf, EVP_MD_size(md));
-	printf("Current message digest    : %s\n", hexbuf);
-
-	if (!cab_calc_digest(indata, md, cmdbuf, header))
+	if (!cab_calc_digest(indata, mdtype, cmdbuf, header)) {
+		printf("Failed to calculate message digest\n\n");
 		goto out;
-
-	tohex(cmdbuf, hexbuf, EVP_MD_size(md));
-	mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
-	printf("Calculated message digest : %s%s\n\n", hexbuf, mdok ? "" : "    MISMATCH!!!");
-	if (!mdok) {
+	}
+	if (!compare_digests(mdbuf, cmdbuf, mdtype)) {
 		printf("Signature verification: failed\n\n");
 		goto out;
 	}
@@ -4206,12 +4199,10 @@ static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEAD
 	ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
 
 	if (attribute && !OBJ_cmp(attribute->type, indir_objid)) {
-		int mdok, mdtype = -1, phtype = -1;
+		int mdlen, mdtype = -1, phtype = -1;
 		u_char mdbuf[EVP_MAX_MD_SIZE];
 		u_char cmdbuf[EVP_MAX_MD_SIZE];
-		char hexbuf[EVP_MAX_MD_SIZE*2+1];
 		int phlen = 0;
-		const EVP_MD *md;
 		ASN1_TYPE *content;
 		SpcIndirectDataContent *idc;
 
@@ -4247,50 +4238,34 @@ static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEAD
 			printf("Failed to extract current message digest\n\n");
 			goto out;
 		}
-		md = EVP_get_digestbynid(mdtype);
 		/* compute a message digest of the input file */
 		switch (filetype) {
 			case FILE_TYPE_CAB:
-				if (cab_calc_digest(indata, md, cmdbuf, header))
+				if (cab_calc_digest(indata, mdtype, cmdbuf, header))
 					goto out;
 				break;
 			case FILE_TYPE_PE:
-				if (!pe_calc_digest(indata, md, cmdbuf, header))
+				if (!pe_calc_digest(indata, mdtype, cmdbuf, header))
 					goto out;
 				break;
 			case FILE_TYPE_MSI:
-				if (!msi_calc_digest(indata, md, cmdbuf, header->fileend))
+				if (!msi_calc_digest(indata, mdtype, cmdbuf, header->fileend))
 					goto out;
 				break;
 			default:
 				break;
 			}
-		mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
-		if (mdok) {
+		mdlen = EVP_MD_size(EVP_get_digestbynid(mdtype));
+		if (!memcmp(mdbuf, cmdbuf, mdlen)) {
 			printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
-			tohex(mdbuf, hexbuf, EVP_MD_size(md));
-			printf("Current message digest    : %s\n", hexbuf);
-			tohex(cmdbuf, hexbuf, EVP_MD_size(md));
-			printf("Calculated message digest : %s\n\n", hexbuf);
+			print_hash("Current message digest    ", "", mdbuf, mdlen);
+			print_hash("Calculated message digest ", "\n", cmdbuf, mdlen);
 		} else {
 			goto out;
 		}
-
-		if (phlen > 0) {
-			int cphlen = 0;
-			u_char *cph;
-			cph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &cphlen);
-			tohex(cph, hexbuf, (cphlen < 32) ? cphlen : 32);
-			mdok = (phlen == cphlen) && !memcmp(ph, cph, phlen);
-			OPENSSL_free(cph);
-			if (mdok) {
-				printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
-				tohex(ph, hexbuf, (phlen < 32) ? phlen : 32);
-				printf("Page hash            : %s\n", hexbuf);
-				printf("Calculated page hash : %s\n\n", hexbuf);
-			} else {
-				goto out;
-			}
+		if (phlen > 0 && !pe_page_hash(indata, header, ph, phlen, phtype)) {
+			printf("Signature verification: failed\n\n");
+			goto out;
 		}
 		ret = 0; /* OK */
 	}
