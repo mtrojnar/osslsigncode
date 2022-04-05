@@ -709,15 +709,14 @@ out:
 }
 
 /* Compute a simple sha1/sha256 message digest of the MSI file */
-int msi_calc_digest(char *indata, const EVP_MD *md, u_char *mdbuf, uint32_t fileend)
+int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, uint32_t fileend)
 {
-	BIO *bio = NULL;
-	EVP_MD_CTX *mdctx;
 	uint32_t n;
 	int ret = 0;
+	const EVP_MD *md = EVP_get_digestbynid(mdtype);
+	BIO *bio = BIO_new_mem_buf(indata, fileend);
+	EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
 
-	bio = BIO_new_mem_buf(indata, fileend);
-	mdctx = EVP_MD_CTX_new();
 	if (!EVP_DigestInit(mdctx, md)) {
 		printf("Unable to set up the digest context\n");
 		goto out;
