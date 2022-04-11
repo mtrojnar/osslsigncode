@@ -2734,7 +2734,15 @@ static int verify_timestamp(SIGNATURE *signature, GLOBAL_OPTIONS *options)
 	if (!store)
 		goto out;
 	if (load_file_lookup(store, options->tsa_cafile)) {
-		/* verify timestamp against the time of its creation */
+		/*
+		 * The TSA signing key MUST be of a sufficient length to allow for a sufficiently
+		 * long lifetime.  Even if this is done, the key will  have a finite lifetime.
+		 * Thus, any token signed by the TSA SHOULD  be time-stamped again or notarized
+		 * at a later date to renew the trust that exists in the TSA's signature.
+		 * https://datatracker.ietf.org/doc/html/rfc3161#section-4
+		 * Signtool does not respect this RFC and neither we do.
+		 * So verify timestamp against the time of its creation.
+		 */
 		if (!set_store_time(store, signature->time)) {
 			printf("Failed to set store time\n");
 			X509_STORE_free(store);
