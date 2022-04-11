@@ -3,6 +3,7 @@ AC_PREREQ(2.60)
 AC_INIT([osslsigncode], [2.4.0-dev], [Michal.Trojnara@stunnel.org])
 AC_CONFIG_AUX_DIR([.])
 AC_CONFIG_HEADERS([config.h])
+AC_CANONICAL_HOST
 AM_INIT_AUTOMAKE
 
 AC_CONFIG_SRCDIR([osslsigncode.c])
@@ -69,11 +70,18 @@ AC_CHECK_HEADERS(
 	)],
 	[have_mmap=no]
 )
+
+case "${host_os}" in
+  cygwin*)
+    ;;
+  *)
 AC_CHECK_HEADERS(
 	[windows.h],
 	[],
 	[have_MapViewOfFile=no]
 )
+esac
+
 AS_IF([test "x$have_mmap$have_MapViewOfFile" = "xnono"],
 	[AC_MSG_ERROR([Need file mapping function to buid.])])
 

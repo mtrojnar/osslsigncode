@@ -4635,6 +4635,7 @@ static STACK_OF(X509) *PEM_read_certs_with_pass(BIO *bin, char *certpass)
 		sk_X509_push(certs, x509);
 		x509 = PEM_read_bio_X509(bin, NULL, NULL, certpass);
 	}
+	ERR_clear_error();
 	if (!sk_X509_num(certs)) {
 		sk_X509_free(certs);
 		return NULL;
@@ -4649,7 +4650,6 @@ static STACK_OF(X509) *PEM_read_certs(BIO *bin, char *certpass)
 		certs = PEM_read_certs_with_pass(bin, NULL);
 	return certs;
 }
-
 
 static off_t get_file_size(const char *infile)
 {
@@ -5254,6 +5254,7 @@ static int read_crypto_params(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 	/* PKCS11 engine and module support */
 	} else if ((options->p11engine) || (options->p11module)) {
 		ENGINE *engine;
+
 		if (options->p11engine)
 			engine = dynamic_engine(options);
 		else
