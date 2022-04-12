@@ -29,43 +29,47 @@ supports signature verification, removal and extraction.
 
 This section covers building osslsigncode for [Unix-like](https://en.wikipedia.org/wiki/Unix-like) operating systems.
 See [INSTALL.W32.md](https://github.com/mtrojnar/osslsigncode/blob/master/INSTALL.W32.md) for Windows notes.
+We highly recommend downloading a [release tarball](https://github.com/mtrojnar/osslsigncode/releases) instead of cloning from a git repository.
 
-### Generate the ./configure script
-
-This step is only needed if osslsigncode was cloned from a git repository.
-We highly recommend downloading a [release tarball](https://github.com/mtrojnar/osslsigncode/releases) instead.
+### Configure, build, make tests and install osslsigncode
 
 * Install prerequisites on a Debian-based distributions, such as Ubuntu:
 ```
-  sudo apt update && sudo apt install automake pkg-config
+  sudo apt update && sudo apt install cmake libssl-dev libcurl4-openssl-dev
 ```
-
-* Install prerequisites on macOS with Homebrew:
-```
-  brew install automake pkg-config
-```
-
-* Generate the ./configure script:
-```
-  ./bootstrap
-```
-
-### Configure, build and install osslsigncode
-
-* Install prerequisites on a Debian-based distributions, such as Ubuntu:
-```
-  sudo apt update && sudo apt install build-essential pkg-config libssl-dev libcurl4-openssl-dev
-```
-
 * Install prerequisites on macOS with Homebrew:
 ```
   brew install pkg-config openssl@1.1
   export PKG_CONFIG_PATH="/usr/local/opt/openssl@1.1/lib/pkgconfig"
 ```
-
-* Configure, build and install osslsigncode:
+* Navigate to the build directory and run CMake to configure the osslsigncode project
+  and generate a native build system:
 ```
-  ./configure && make && sudo make install
+  mkdir build && cd build && cmake ..
+```
+  with specific compile options:
+```
+  -Denable-strict=ON
+  -Denable-pedantic=ON
+  -Dssl-path=/opt/openssl-3.0.2/
+  -Dcurl-path=/opt/curl-7.82/
+  -Dwith-curl=OFF
+```
+* Then call that build system to actually compile/link the osslsigncode project (alias `make`):
+```
+  cmake --build .
+```
+* Make test:
+```
+  ctest -C Release
+```
+* Make install:
+```
+  sudo cmake --install . --prefix "/home/myuser/installdir"
+```
+* Make tarball (simulate autotools' `make dist`):
+```
+  cmake --build . --target package_source
 ```
 
 ## USAGE

@@ -6,13 +6,13 @@ default_ca                      = CA_default
 [ CA_default ]
 # Directory and file locations.
 dir                             = .
-certs                           = $dir/demoCA
-crl_dir                         = $dir/demoCA
-new_certs_dir                   = $dir/demoCA
-database                        = $dir/demoCA/index.txt
-serial                          = $dir/demoCA/serial
+certs                           = $dir/CA
+crl_dir                         = $dir/CA
+new_certs_dir                   = $dir/CA
+database                        = $dir/CA/index.txt
+serial                          = $dir/CA/serial
 rand_serial                     = yes
-private_key                     = $dir/demoCA/CA.key
+private_key                     = $dir/CA/CA.key
 certificate                     = $dir/tmp/CACert.pem
 crl_extensions                  = crl_ext
 default_md                      = sha256

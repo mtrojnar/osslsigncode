@@ -1,0 +1,46 @@
+# OpenSSL Timestamp Authority configuration file
+
+oid_section                     = new_oids
+
+[ new_oids ]
+tsa_policy1                     = 1.2.3.4.1
+tsa_policy2                     = 1.2.3.4.5.6
+tsa_policy3                     = 1.2.3.4.5.7
+
+[ req ]
+# Options for the `req` tool
+default_bits                    = 2048
+encrypt_key                     = yes
+default_md                      = sha256
+utf8                            = yes
+string_mask                     = utf8only
+prompt                          = no
+distinguished_name              = ca_distinguished_name
+
+[ ca_distinguished_name ]
+countryName                     = "PL"
+organizationName                = "osslsigncode"
+organizationalUnitName          = "Timestamp Authority"
+commonName                      = "Test TSA"
+
+
+# Time Stamping Authority command "openssl-ts"
+
+[ tsa ]
+default_tsa                     = tsa_config
+
+[ tsa_config ]
+dir                             = ./Testing/certs
+signer_cert                     = $dir/TSA.pem
+signer_key                      = $dir/TSA.key
+certs                           = $dir/tsa-chain.pem
+serial                          = $dir/tsa-serial
+default_policy                  = tsa_policy1
+other_policies                  = tsa_policy2, tsa_policy3
+signer_digest                   = sha256
+digests                         = sha256, sha384, sha512
+accuracy                        = secs:1, millisecs:500, microsecs:100
+ordering                        = yes
+tsa_name                        = yes
+ess_cert_id_chain               = yes
+ess_cert_id_alg                 = sha256

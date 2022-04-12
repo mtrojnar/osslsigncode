@@ -12,6 +12,7 @@
 - remove "-timestamp-expiration" option
 - disable verification of the Timestamp Server signature
   ("-ignore-timestamp" option)
+- use CMake instead of Makefile
 
 ### 2.3 (2022.03.06)
 

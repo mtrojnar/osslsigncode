@@ -1,0 +1,83 @@
+# OpenSSL Root Timestamp Authority configuration file
+
+[ default ]
+name                            = TSACA
+domain_suffix                   = timestampauthority.com
+aia_url                         = http://$name.$domain_suffix/$name.crt
+crl_url                         = http://$name.$domain_suffix/$name.crl
+ocsp_url                        = http://ocsp.$name.$domain_suffix:9080
+name_opt                        = utf8, esc_ctrl, multiline, lname, align
+default_ca                      = CA_default
+
+[ CA_default ]
+dir                             = .
+certs                           = $dir/CA
+crl_dir                         = $dir/CA
+new_certs_dir                   = $dir/CA
+database                        = $dir/CA/index.txt
+serial                          = $dir/CA/serial
+crlnumber                       = $dir/CA/crlnumber
+rand_serial                     = yes
+private_key                     = $dir/CA/$name.key
+certificate                     = $dir/tmp/$name.pem
+default_md                      = sha256
+default_days                    = 3650
+default_crl_days                = 365
+policy                          = policy_match
+default_startdate               = 20180101000000Z
+default_enddate                 = 20280101000000Z
+unique_subject                  = no
+x509_extensions                 = tsa_extensions
+
+[ policy_match ]
+countryName                     = match
+stateOrProvinceName             = optional
+organizationName                = match
+organizationalUnitName          = optional
+commonName                      = supplied
+emailAddress                    = optional
+
+[ tsa_extensions ]
+basicConstraints                = critical, CA:false
+extendedKeyUsage                = critical, timeStamping
+subjectKeyIdentifier            = hash
+authorityKeyIdentifier          = keyid:always
+authorityInfoAccess             = @issuer_info
+crlDistributionPoints           = @crl_info
+nameConstraints                 = @name_constraints
+
+[ issuer_info ]
+caIssuers;URI.0                 = $aia_url
+OCSP;URI.0                      = $ocsp_url
+
+[ crl_info ]
+URI.0                           = $crl_url
+
+[ name_constraints ]
+permitted;DNS.0=test.com
+permitted;DNS.1=test.org
+excluded;IP.0=0.0.0.0/0.0.0.0
+excluded;IP.1=0:0:0:0:0:0:0:0/0:0:0:0:0:0:0:0
+
+[ req ]
+# Options for the `req` tool
+default_bits                    = 2048
+encrypt_key                     = yes
+default_md                      = sha256
+utf8                            = yes
+string_mask                     = utf8only
+prompt                          = no
+distinguished_name              = ca_distinguished_name
+x509_extensions                 = ca_extensions
+
+[ ca_distinguished_name ]
+countryName                     = "PL"
+organizationName                = "osslsigncode"
+organizationalUnitName          = "Timestamp Authority Root CA"
+commonName                      = "TSA Root CA"
+
+[ ca_extensions ]
+# Extension to add when the -x509 option is used
+basicConstraints                = critical, CA:true
+subjectKeyIdentifier            = hash
+keyUsage                        = critical, keyCertSign, cRLSign
