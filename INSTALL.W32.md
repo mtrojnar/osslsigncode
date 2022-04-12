@@ -93,3 +93,53 @@
         OpenSSL 1.1.1k  25 Mar 2021 (Library: OpenSSL 1.1.1k  25 Mar 2021)
         libcurl/7.78.0 OpenSSL/1.1.1k
 ```
+
+### Building OpenSSL, Curl and osslsigncode sources with Microsoft Visual Studio 64-bit:
+
+1) Download and install Strawberry Perl from https://strawberryperl.com/
+
+2) Run "Open Visual Studio 2022 Tools Command Prompt for targeting x64"
+
+3) Build and install OpenSSL.
+```
+  cd openssl-(version)
+  perl Configure VC-WIN64A --prefix=C:\OpenSSL\vc-win64a --openssldir=C:\OpenSSL\SSL no-asm shared
+  nmake && nmake install
+```
+
+4) Build and install curl.
+```
+  cd curl-(version)\winbuild
+  nmake /f Makefile.vc mode=dll WITH_PREFIX=C:\curl SSL_PATH=C:\OpenSSL\vc-win64a \
+    VC=22 MACHINE=x64 DEBUG=no WITH_SSL=dll ENABLE_NGHTTP2=no ENABLE_SSPI=no \
+    ENABLE_IDN=no GEN_PDB=no ENABLE_WINSSL=no USE_ZLIB=no
+```
+
+5) Build 64-bit Windows osslsigncode.
+  Navigate to the build directory and run CMake to configure the osslsigncode project
+  and generate a native build system:
+```
+  mkdir build && cd build && cmake ..
+```
+  with specific compile options:
+```
+  -Denable-strict=ON
+  -Denable-pedantic=ON
+  -Dwith-curl=OFF
+  -Dssl-path=C:\OpenSSL\
+  -Dcurl-path=C:\curl\
+```
+  Then call that build system to actually compile/link the osslsigncode project:
+```
+  cmake --build .
+```
+
+6) Make tests.
+```
+  ctest -C Release
+```
+
+5) Make install (with administrator privileges).
+```
+  cmake --install . --prefix "C:\osslsigncode"
+```

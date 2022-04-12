@@ -4,3 +4,5 @@
 *.p12
 *.spc
 *.txt
+*.log
+tsa-serial
