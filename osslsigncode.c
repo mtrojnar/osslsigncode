@@ -218,6 +218,7 @@ typedef struct {
 	char *p11engine;
 	char *p11module;
 	char *p11cert;
+	char *p11modid;
 #endif /* OPENSSL_NO_ENGINE */
 	int askpass;
 	char *readpass;
@@ -1192,7 +1193,7 @@ static void usage(const char *argv0, const char *cmd)
 	}
 	if (on_list(cmd, cmds_sign)) {
 		printf("%1s[ sign ] ( -certs | -spc <certfile> -key <keyfile> | -pkcs12 <pkcs12file> |\n", "");
-		printf("%12s  [ -pkcs11engine <engine> ] -pkcs11module <module> -pkcs11cert <pkcs11 cert id> |\n", "");
+		printf("%12s  [ -pkcs11engine <engine> ] -pkcs11module <module> -pkcs11cert <pkcs11 cert id> -pkcs11modid <moduleId>|\n", "");
 		printf("%12s  -certs <certfile> -key <pkcs11 key id>)\n", "");
 		printf("%12s[ -pass <password>", "");
 #ifdef PROVIDE_ASKPASS
@@ -1299,6 +1300,7 @@ static void help_for(const char *argv0, const char *cmd)
 	const char *cmds_pkcs11cert[] = {"sign", NULL};
 	const char *cmds_pkcs11engine[] = {"sign", NULL};
 	const char *cmds_pkcs11module[] = {"sign", NULL};
+	const char *cmds_pkcs11modid[] = {"sign", NULL};
 	const char *cmds_pkcs12[] = {"sign", NULL};
 	const char *cmds_readpass[] = {"sign", NULL};
 	const char *cmds_require_leaf_hash[] = {"attach-signature", "verify", NULL};
@@ -1424,6 +1426,8 @@ static void help_for(const char *argv0, const char *cmd)
 		printf("%-24s= PKCS#11 engine\n", "-pkcs11engine");
 	if (on_list(cmd, cmds_pkcs11module))
 		printf("%-24s= PKCS#11 module\n", "-pkcs11module");
+	if (on_list(cmd, cmds_pkcs11modid))
+		printf("%-24s= PKCS#11 module id\n", "-pkcs11modid");
 	if (on_list(cmd, cmds_pkcs12))
 		printf("%-24s= PKCS#12 container with the certificate and the private key\n", "-pkcs12");
 	if (on_list(cmd, cmds_readpass))
@@ -5170,7 +5174,7 @@ ENGINE *dynamic_engine(GLOBAL_OPTIONS *options)
 		return NULL; /* FAILED */
 	}
 	if (!ENGINE_ctrl_cmd_string(engine, "SO_PATH", options->p11engine, 0)
-			|| !ENGINE_ctrl_cmd_string(engine, "ID", "pkcs11", 0)
+			|| !ENGINE_ctrl_cmd_string(engine, "ID", options->p11modid, 0)
 			|| !ENGINE_ctrl_cmd_string(engine, "LIST_ADD", "1", 0)
 			|| !ENGINE_ctrl_cmd_string(engine, "LOAD", NULL, 0)) {
 		printf("Failed to set 'dynamic' engine\n");
@@ -5627,6 +5631,7 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 	options->md = EVP_sha256();
 	options->time = INVALID_TIME;
 	options->jp = -1;
+	options->p11modid = "pkcs11";
 
 	if (*cmd == CMD_HELP) {
 		return 0; /* FAILED */
@@ -5699,6 +5704,12 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 				return 0; /* FAILED */
 			}
 			options->p11module = *(++argv);
+		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11modid")) {
+			if (--argc < 1) {
+				usage(argv0, "all");
+				return 0; /* FAILED */
+			}
+			options->p11modid = *(++argv);
 #endif /* OPENSSL_NO_ENGINE */
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-pass")) {
 			if (options->askpass || options->readpass) {
