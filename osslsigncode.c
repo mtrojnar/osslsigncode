@@ -753,7 +753,7 @@ static void tohex(const u_char *v, char *b, int len)
 	}
 }
 
-void print_hash(char *descript1, char *descript2, u_char *hashbuf, int length)
+static void print_hash(char *descript1, char *descript2, u_char *hashbuf, int length)
 {
     char hexbuf[EVP_MAX_MD_SIZE*2+1];
 
@@ -1761,7 +1761,7 @@ static int set_signing_blob(PKCS7 *sig, BIO *hash, u_char *buf, int len)
 	return 1; /* OK */
 }
 
-int set_content_blob(PKCS7 *sig, PKCS7 *cursig)
+static int set_content_blob(PKCS7 *sig, PKCS7 *cursig)
 {
 	PKCS7 *contents;
 	u_char *content;
@@ -2378,7 +2378,7 @@ static void get_signed_attributes(SIGNATURE *signature, STACK_OF(X509_ATTRIBUTE)
 	}
 }
 
-void signature_free(SIGNATURE *signature)
+static void signature_free(SIGNATURE *signature)
 {
 	if (signature->timestamp) {
 		CMS_ContentInfo_free(signature->timestamp);
@@ -4981,7 +4981,7 @@ out:
 }
 
 /* Obtain a copy of the whole X509_CRL chain */
-STACK_OF(X509_CRL) *X509_CRL_chain_up_ref(STACK_OF(X509_CRL) *chain)
+static STACK_OF(X509_CRL) *X509_CRL_chain_up_ref(STACK_OF(X509_CRL) *chain)
 {
 	STACK_OF(X509_CRL) *ret;
 	int i;
@@ -5162,7 +5162,7 @@ static int read_pvk_key(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 #ifndef OPENSSL_NO_ENGINE
 
 /* Load an engine in a shareable library */
-ENGINE *dynamic_engine(GLOBAL_OPTIONS *options)
+static ENGINE *dynamic_engine(GLOBAL_OPTIONS *options)
 {
 	ENGINE *engine = ENGINE_by_id("dynamic");
 	if (!engine) {
@@ -5181,7 +5181,7 @@ ENGINE *dynamic_engine(GLOBAL_OPTIONS *options)
 }
 
 /* Load a pkcs11 engine */
-ENGINE *pkcs11_engine()
+static ENGINE *pkcs11_engine()
 {
 	ENGINE *engine = ENGINE_by_id("pkcs11");
 	if (!engine) {
