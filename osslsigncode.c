@@ -1644,6 +1644,7 @@ static int get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *optio
 		0xf1, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46
 	};
+	u_char flag[] = {0x00};
 
 	idc = SpcIndirectDataContent_new();
 	idc->data->value = ASN1_TYPE_new();
@@ -1659,7 +1660,7 @@ static int get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *optio
 		SpcLink_free(link);
 	} else if (type == FILE_TYPE_PE) {
 		SpcPeImageData *pid = SpcPeImageData_new();
-		ASN1_BIT_STRING_set(pid->flags, (u_char *)"0", 0);
+		ASN1_BIT_STRING_set(pid->flags, flag, sizeof flag);
 		if (options->pagehash) {
 			SpcLink *link;
 			phtype = NID_sha1;
@@ -4633,7 +4634,7 @@ static void update_data_size(file_type_t type, cmd_type_t cmd, FILE_HEADER *head
 	}
 }
 
-static STACK_OF(X509) *PEM_read_certs_with_pass(BIO *bin, char *certpass)
+static STACK_OF(X509) *PEM_read_certs(BIO *bin, char *certpass)
 {
 	STACK_OF(X509) *certs = sk_X509_new_null();
 	X509 *x509;
@@ -4648,14 +4649,6 @@ static STACK_OF(X509) *PEM_read_certs_with_pass(BIO *bin, char *certpass)
 		sk_X509_free(certs);
 		return NULL;
 	}
-	return certs;
-}
-
-static STACK_OF(X509) *PEM_read_certs(BIO *bin, char *certpass)
-{
-	STACK_OF(X509) *certs = PEM_read_certs_with_pass(bin, certpass);
-	if (!certs)
-		certs = PEM_read_certs_with_pass(bin, NULL);
 	return certs;
 }
 
@@ -5017,7 +5010,7 @@ static int read_certfile(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 		return 0; /* FAILED */
 	}
 	/* .pem certificate file */
-	cparams->certs = PEM_read_certs(btmp, "");
+	cparams->certs = PEM_read_certs(btmp, NULL);
 
 	/* .der certificate file */
 	if (!cparams->certs) {
@@ -5067,7 +5060,7 @@ static int read_xcertfile(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 		printf("Failed to read cross certificates file: %s\n", options->xcertfile);
 		return 0; /* FAILED */
 	}
-	cparams->xcerts = PEM_read_certs(btmp, "");
+	cparams->xcerts = PEM_read_certs(btmp, NULL);
 	if (!cparams->xcerts) {
 		printf("Failed to read cross certificates file: %s\n", options->xcertfile);
 		goto out; /* FAILED */
@@ -5092,7 +5085,7 @@ static int read_keyfile(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 	}
 	if (((cparams->pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
 			(BIO_seek(btmp, 0) == 0) &&
-			(cparams->pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, options->pass ? options->pass : "")) == NULL &&
+			(cparams->pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, options->pass ? options->pass : NULL)) == NULL &&
 			(BIO_seek(btmp, 0) == 0) &&
 			(cparams->pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL)) {
 		printf("Failed to decode private key file: %s (Wrong password?)\n", options->keyfile);
@@ -5146,7 +5139,7 @@ static int read_pvk_key(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 		printf("Failed to read private key file: %s\n", options->pvkfile);
 		return 0; /* FAILED */
 	}
-	cparams->pkey = b2i_PVK_bio(btmp, NULL, options->pass ? options->pass : "");
+	cparams->pkey = b2i_PVK_bio(btmp, NULL, options->pass ? options->pass : NULL);
 	if (!cparams->pkey && options->askpass) {
 		(void)BIO_seek(btmp, 0);
 		cparams->pkey = b2i_PVK_bio(btmp, NULL, NULL);
