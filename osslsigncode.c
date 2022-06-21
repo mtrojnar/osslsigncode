@@ -194,8 +194,8 @@ typedef struct SIGNATURE_st {
 	time_t signtime;
 	char *url;
 	char *desc;
-	char *purpose;
-	char *level;
+	const u_char *purpose;
+	const u_char *level;
 	CMS_ContentInfo *timestamp;
 	time_t time;
 	ASN1_STRING *blob;
@@ -753,7 +753,7 @@ static void tohex(const u_char *v, char *b, int len)
 	}
 }
 
-static void print_hash(char *descript1, char *descript2, u_char *hashbuf, int length)
+static void print_hash(const char *descript1, const char *descript2, const u_char *hashbuf, int length)
 {
     char hexbuf[EVP_MAX_MD_SIZE*2+1];
 
@@ -2260,7 +2260,7 @@ out:
  */
 static int print_attributes(SIGNATURE *signature, int verbose)
 {
-	u_char *mdbuf;
+	const u_char *mdbuf;
 	int len;
 
 	if (!signature->digest)
@@ -2269,7 +2269,7 @@ static int print_attributes(SIGNATURE *signature, int verbose)
 	printf("\nAuthenticated attributes:\n");
 	printf("\tMessage digest algorithm: %s\n",
 		(signature->md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2sn(signature->md_nid));
-	mdbuf = (u_char *)ASN1_STRING_get0_data(signature->digest);
+	mdbuf = ASN1_STRING_get0_data(signature->digest);
 	len = ASN1_STRING_length(signature->digest);
 	print_hash("\tMessage digest", "", mdbuf, len);
 	printf("\tSigning time: ");
@@ -2367,13 +2367,13 @@ static void get_signed_attributes(SIGNATURE *signature, STACK_OF(X509_ATTRIBUTE)
 			value  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
 			if (value == NULL)
 				continue;
-			signature->purpose = (char *)ASN1_STRING_get0_data(value);
+			signature->purpose = ASN1_STRING_get0_data(value);
 		} else if (!strcmp(object_txt, MS_JAVA_SOMETHING)) {
 			/* Microsoft OID: 1.3.6.1.4.1.311.15.1 */
 			value  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
 			if (value == NULL)
 				continue;
-			signature->level = (char *)ASN1_STRING_get0_data(value);
+			signature->level = ASN1_STRING_get0_data(value);
 		}
 	}
 }
