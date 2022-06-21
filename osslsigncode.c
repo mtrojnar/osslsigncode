@@ -5577,14 +5577,15 @@ static PKCS7 *cat_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 
 static void print_version()
 {
+#ifdef ENABLE_CURL
 	printf(PACKAGE_STRING ", using:\n\t%s (Library: %s)\n\t%s\n",
 		OPENSSL_VERSION_TEXT, OpenSSL_version(OPENSSL_VERSION),
-#ifdef ENABLE_CURL
-		curl_version()
+		curl_version());
 #else
-		"no libcurl available"
+	printf(PACKAGE_STRING ", using:\n\t%s (Library: %s)\n\t%s\n",
+		OPENSSL_VERSION_TEXT, OpenSSL_version(OPENSSL_VERSION),
+		"no libcurl available");
 #endif /* ENABLE_CURL */
-		);
 	printf("\nPlease send bug-reports to " PACKAGE_BUGREPORT "\n\n");
 }
 
