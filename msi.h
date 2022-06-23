@@ -72,25 +72,25 @@
 #define DIRENT_START_SECTOR_LOC     0x74
 #define DIRENT_FILE_SIZE            0x78
 
-#define GET_UINT8_LE(p) ((u_char*)(p))[0]
+#define GET_UINT8_LE(p) ((const u_char *)(p))[0]
 
-#define GET_UINT16_LE(p) (uint16_t)(((u_char*)(p))[0] | (((u_char*)(p))[1]<<8))
+#define GET_UINT16_LE(p) (uint16_t)(((const u_char *)(p))[0] | \
+                                   (((const u_char *)(p))[1] << 8))
 
-#define GET_UINT32_LE(p) (uint32_t)(((u_char*)(p))[0] | (((u_char*)(p))[1]<<8) | \
-			(((u_char*)(p))[2]<<16) | (((u_char*)(p))[3]<<24))
+#define GET_UINT32_LE(p) (uint32_t)(((const u_char *)(p))[0] | \
+                                   (((const u_char *)(p))[1] << 8) | \
+			                       (((const u_char *)(p))[2] << 16) | \
+			                       (((const u_char *)(p))[3] << 24))
 
-#define PUT_UINT8_LE(i,p) \
-	((u_char*)(p))[0] = (i) & 0xff;
+#define PUT_UINT8_LE(i, p) ((u_char *)(p))[0] = (u_char)((i) & 0xff);
 
-#define PUT_UINT16_LE(i,p) \
-	((u_char*)(p))[0] = (i) & 0xff; \
-	((u_char*)(p))[1] = ((i)>>8) & 0xff
+#define PUT_UINT16_LE(i,p) ((u_char *)(p))[0] = (u_char)((i) & 0xff); \
+	                       ((u_char *)(p))[1] = (u_char)(((i) >> 8) & 0xff)
 
-#define PUT_UINT32_LE(i,p) \
-	((u_char*)(p))[0] = (i) & 0xff; \
-	((u_char*)(p))[1] = ((i)>>8) & 0xff; \
-	((u_char*)(p))[2] = ((i)>>16) & 0xff; \
-	((u_char*)(p))[3] = ((i)>>24) & 0xff
+#define PUT_UINT32_LE(i,p) ((u_char *)(p))[0] = (u_char)((i) & 0xff); \
+                           ((u_char *)(p))[1] = (u_char)(((i) >> 8) & 0xff); \
+                           ((u_char *)(p))[2] = (u_char)(((i) >> 16) & 0xff); \
+                           ((u_char *)(p))[3] = (u_char)(((i) >> 24) & 0xff)
 
 #ifndef FALSE
 #define FALSE 0
@@ -171,14 +171,14 @@ typedef struct {
 	uint32_t miniStreamLen;
 	uint32_t minifatLen;
 	uint32_t fatLen;
-	int ministreamsMemallocCount;
-	int minifatMemallocCount;
-	int fatMemallocCount;
-	int dirtreeSectorsCount;
-	int minifatSectorsCount;
-	int fatSectorsCount;
-	int miniSectorNum;
-	int sectorNum;
+	uint32_t ministreamsMemallocCount;
+	uint32_t minifatMemallocCount;
+	uint32_t fatMemallocCount;
+	uint32_t dirtreeSectorsCount;
+	uint32_t minifatSectorsCount;
+	uint32_t fatSectorsCount;
+	uint32_t miniSectorNum;
+	uint32_t sectorNum;
 	uint32_t sectorSize;
 } MSI_OUT;
 
@@ -224,7 +224,8 @@ int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root);
 int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root);
 int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, uint32_t fileend);
 int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen);
-int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p, int len, u_char *p_msiex, int len_msiex, BIO *outdata);
+int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p, uint32_t len,
+    u_char *p_msiex, uint32_t len_msiex, BIO *outdata);
 
 /*
 Local Variables:
