@@ -691,7 +691,7 @@ int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root)
 				OPENSSL_free(indata);
 				goto out;
 			}
-			BIO_write(hash, indata, inlen);
+			BIO_write(hash, indata, (int)inlen);
 			OPENSSL_free(indata);
 		}
 		if (child->type == DIR_STORAGE) {
@@ -714,7 +714,7 @@ int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, uint32_t fileend)
 	uint32_t n;
 	int ret = 0;
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
-	BIO *bio = BIO_new_mem_buf(indata, fileend);
+	BIO *bio = BIO_new_mem_buf(indata, (int)fileend);
 	EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
 
 	if (!EVP_DigestInit(mdctx, md)) {
@@ -731,11 +731,11 @@ int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, uint32_t fileend)
 		uint32_t want = fileend - n;
 		if (want > sizeof bfb)
 			want = sizeof bfb;
-		l = BIO_read(bio, bfb, want);
+		l = BIO_read(bio, bfb, (int)want);
 		if (l <= 0)
 			break;
-		EVP_DigestUpdate(mdctx, bfb, l);
-		n += l;
+		EVP_DigestUpdate(mdctx, bfb, (size_t)l);
+		n += (uint32_t)l;
 	}
 	EVP_DigestFinal(mdctx, mdbuf, NULL);
 	ret = 1; /* OK */
@@ -745,34 +745,34 @@ out:
 	return ret;
 }
 
-static void ministream_append(MSI_OUT *out, char *buf, int len)
+static void ministream_append(MSI_OUT *out, char *buf, uint32_t len)
 {
 	uint32_t needSectors = (len + out->sectorSize - 1) / out->sectorSize;
 	if (out->miniStreamLen + len >= out->ministreamsMemallocCount * out->sectorSize) {
 		out->ministreamsMemallocCount += needSectors;
-		out->ministream = OPENSSL_realloc(out->ministream, out->ministreamsMemallocCount * out->sectorSize);
+		out->ministream = OPENSSL_realloc(out->ministream, (size_t)(out->ministreamsMemallocCount * out->sectorSize));
 	}
-	memcpy(out->ministream + out->miniStreamLen, buf, len);
+	memcpy(out->ministream + out->miniStreamLen, buf, (size_t)len);
 	out->miniStreamLen += len;
 }
 
-static void minifat_append(MSI_OUT *out, char *buf, int len)
+static void minifat_append(MSI_OUT *out, char *buf, uint32_t len)
 {
 	if (out->minifatLen == out->minifatMemallocCount * out->sectorSize) {
 		out->minifatMemallocCount += 1;
-		out->minifat = OPENSSL_realloc(out->minifat, out->minifatMemallocCount * out->sectorSize);
+		out->minifat = OPENSSL_realloc(out->minifat, (size_t)(out->minifatMemallocCount * out->sectorSize));
 	}
-	memcpy(out->minifat + out->minifatLen, buf, len);
+	memcpy(out->minifat + out->minifatLen, buf, (size_t)len);
 	out->minifatLen += len;
 }
 
-static void fat_append(MSI_OUT *out, char *buf, int len)
+static void fat_append(MSI_OUT *out, char *buf, uint32_t len)
 {
 	if (out->fatLen == out->fatMemallocCount * out->sectorSize) {
 		out->fatMemallocCount += 1;
-		out->fat = OPENSSL_realloc(out->fat, out->fatMemallocCount * out->sectorSize);
+		out->fat = OPENSSL_realloc(out->fat, (size_t)(out->fatMemallocCount * out->sectorSize));
 	}
-	memcpy(out->fat + out->fatLen, buf, len);
+	memcpy(out->fat + out->fatLen, buf, (size_t)len);
 	out->fatLen += len;
 }
 
@@ -837,7 +837,7 @@ static int dirent_insert(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLe
 	return 1; /* OK */
 }
 
-static int signature_insert(MSI_DIRENT *dirent, int len_msiex)
+static int signature_insert(MSI_DIRENT *dirent, uint32_t len_msiex)
 {
 	if (len_msiex > 0) {
 		if (!dirent_insert(dirent, digital_signature_ex, sizeof digital_signature_ex)) {
@@ -854,8 +854,8 @@ static int signature_insert(MSI_DIRENT *dirent, int len_msiex)
 	return 1; /* OK */
 }
 
-static int stream_read(MSI_FILE *msi, MSI_ENTRY *entry, u_char *p_msi, int len_msi,
-		u_char *p_msiex, int len_msiex, char **indata, int inlen, int is_root)
+static uint32_t stream_read(MSI_FILE *msi, MSI_ENTRY *entry, u_char *p_msi, uint32_t len_msi,
+		u_char *p_msiex, uint32_t len_msiex, char **indata, uint32_t inlen, int is_root)
 {
 	if (is_root && !memcmp(entry->name, digital_signature, sizeof digital_signature)) {
 		*indata = (char *)p_msi;
@@ -873,8 +873,8 @@ static int stream_read(MSI_FILE *msi, MSI_ENTRY *entry, u_char *p_msi, int len_m
 }
 
 /* Recursively handle data from MSI_DIRENT struct */
-static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, int len_msi,
-		u_char *p_msiex, int len_msiex, BIO *outdata, MSI_OUT *out, int is_root)
+static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint32_t len_msi,
+		u_char *p_msiex, uint32_t len_msiex, BIO *outdata, MSI_OUT *out, int is_root)
 {
 	int i;
 
@@ -911,15 +911,15 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, int l
 				ministream_append(out, indata, inlen);
 				/* fill to the end with known data, such as all zeroes */
 				if (inlen % msi->m_minisectorSize > 0) {
-					int remain = msi->m_minisectorSize - inlen % msi->m_minisectorSize;
-					memset(buf, 0, remain);
+					uint32_t remain = msi->m_minisectorSize - inlen % msi->m_minisectorSize;
+					memset(buf, 0, (size_t)remain);
 					ministream_append(out, buf, remain);
 				}
 				while (inlen > msi->m_minisectorSize) {
 					out->miniSectorNum += 1;
 					PUT_UINT32_LE(out->miniSectorNum, buf);
 					minifat_append(out, buf, 4);
-					inlen -= (uint32_t)msi->m_minisectorSize;
+					inlen -= msi->m_minisectorSize;
 				}
 				PUT_UINT32_LE(ENDOFCHAIN, buf);
 				minifat_append(out, buf, 4);
@@ -928,19 +928,19 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, int l
 				/* set the first sector location if this is a stream object */
 				child->entry->startSectorLocation = out->sectorNum;
 				/* stream save */
-				BIO_write(outdata, indata, inlen);
+				BIO_write(outdata, indata, (int)inlen);
 				/* fill to the end with known data, such as all zeroes */
 				if (inlen % out->sectorSize > 0) {
-					int remain = out->sectorSize - inlen % out->sectorSize;
-					memset(buf, 0, remain);
-					BIO_write(outdata, buf, remain);
+					uint32_t remain = out->sectorSize - inlen % out->sectorSize;
+					memset(buf, 0, (size_t)remain);
+					BIO_write(outdata, buf, (int)remain);
 				}
 				/* set a sector chain in the FAT */
 				while (inlen > out->sectorSize) {
 					out->sectorNum += 1;
 					PUT_UINT32_LE(out->sectorNum, buf);
 					fat_append(out, buf, 4);
-					inlen -= (uint32_t)out->sectorSize;
+					inlen -= out->sectorSize;
 				}
 				PUT_UINT32_LE(ENDOFCHAIN, buf);
 				fat_append(out, buf, 4);
@@ -955,19 +955,19 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, int l
 static void ministream_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
 {
 	char buf[MAX_SECTOR_SIZE];
-	int remain, i;
-	int ministreamSectorsCount = (out->miniStreamLen + out->sectorSize - 1) / out->sectorSize;
+	uint32_t i, remain;
+	uint32_t ministreamSectorsCount = (out->miniStreamLen + out->sectorSize - 1) / out->sectorSize;
 
 	/* set the first sector of the mini stream in the entry root object */
 	dirent->entry->startSectorLocation = out->sectorNum;
 	/* ministream save */
-	BIO_write(outdata, out->ministream, out->miniStreamLen);
+	BIO_write(outdata, out->ministream, (int)out->miniStreamLen);
 	OPENSSL_free(out->ministream);
 	/* fill to the end with known data, such as all zeroes */
 	if (out->miniStreamLen % out->sectorSize > 0) {
 		remain = out->sectorSize - out->miniStreamLen % out->sectorSize;
-		memset(buf, 0, remain);
-		BIO_write(outdata, buf, remain);
+		memset(buf, 0, (size_t)remain);
+		BIO_write(outdata, buf, (int)remain);
 	}
 	/* set a sector chain in the FAT */
 	for (i=1; i<ministreamSectorsCount; i++) {
@@ -984,7 +984,7 @@ static void ministream_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
 static void minifat_save(BIO *outdata, MSI_OUT *out)
 {
 	char buf[MAX_SECTOR_SIZE];
-	int i,remain;
+	uint32_t i, remain;
 
 	/* set Mini FAT Starting Sector Location in the header */
 	if (out->minifatLen == 0) {
@@ -995,7 +995,7 @@ static void minifat_save(BIO *outdata, MSI_OUT *out)
 	PUT_UINT32_LE(out->sectorNum, buf);
 	memcpy(out->header + HEADER_MINI_FAT_SECTOR_LOC, buf, 4);
 	/* minifat save */
-	BIO_write(outdata, out->minifat, out->minifatLen);
+	BIO_write(outdata, out->minifat, (int)out->minifatLen);
 	/* marks the end of the stream */
 	PUT_UINT32_LE(ENDOFCHAIN, buf);
 	BIO_write(outdata, buf, 4);
@@ -1003,8 +1003,8 @@ static void minifat_save(BIO *outdata, MSI_OUT *out)
 	/* empty unallocated free sectors in the last Mini FAT sector */
 	if (out->minifatLen % out->sectorSize > 0) {
 		remain = out->sectorSize - out->minifatLen % out->sectorSize;
-		memset(buf, FREESECT, remain);
-		BIO_write(outdata, buf, remain);
+		memset(buf, (int)FREESECT, (size_t)remain);
+		BIO_write(outdata, buf, (int)remain);
 	}
 	/* set a sector chain in the FAT */
 	out->minifatSectorsCount = (out->minifatLen + out->sectorSize - 1) / out->sectorSize;
@@ -1059,13 +1059,13 @@ static char *msi_unused_dirent_get()
 	/* initialise 127 bytes */
 	memset(data, 0, DIRENT_SIZE);
 
-	memset(data + DIRENT_LEFT_SIBLING_ID, NOSTREAM, 4);
-	memset(data + DIRENT_RIGHT_SIBLING_ID, NOSTREAM, 4);
-	memset(data + DIRENT_CHILD_ID, NOSTREAM, 4);
+	memset(data + DIRENT_LEFT_SIBLING_ID, (int)NOSTREAM, 4);
+	memset(data + DIRENT_RIGHT_SIBLING_ID, (int)NOSTREAM, 4);
+	memset(data + DIRENT_CHILD_ID, (int)NOSTREAM, 4);
 	return data;
 }
 
-static int dirents_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out, int *streamId, int count, int last)
+static int dirents_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out, uint32_t *streamId, int count, int last)
 {
 	int i, childenNum;
 	char *entry;
@@ -1083,7 +1083,7 @@ static int dirents_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out, int *str
 		} else {
 			/* make linked list rather than tree, only use next - right sibling */
 			count += childenNum;
-			dirent->entry->rightSiblingID = *streamId + count + 1;
+			dirent->entry->rightSiblingID = *streamId + (uint32_t)count + 1;
 		}
 	} else { /* DIR_ROOT */
 		dirent->entry->rightSiblingID = NOSTREAM;
@@ -1122,8 +1122,7 @@ static void dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
 {
 	char buf[MAX_SECTOR_SIZE];
 	char *unused_entry;
-	int i, remain;
-	int streamId = 0;
+	uint32_t i, remain, streamId = 0;
 
 	/* set Directory Starting Sector Location in the header */
 	PUT_UINT32_LE(out->sectorNum, buf);
@@ -1162,7 +1161,7 @@ static void dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
 static int fat_save(BIO *outdata, MSI_OUT *out)
 {
 	char buf[MAX_SECTOR_SIZE];
-	int i, remain;
+	uint32_t i, remain;
 
 	remain = (out->fatLen + out->sectorSize - 1) / out->sectorSize;
 	out->fatSectorsCount = (out->fatLen + remain * 4 + out->sectorSize - 1) / out->sectorSize;
@@ -1187,17 +1186,17 @@ static int fat_save(BIO *outdata, MSI_OUT *out)
 	/* empty unallocated free sectors in the last FAT sector */
 	if (out->fatLen % out->sectorSize > 0) {
 		remain = out->sectorSize - out->fatLen % out->sectorSize;
-		memset(buf, FREESECT, remain);
+		memset(buf, (int)FREESECT, (size_t)remain);
 		fat_append(out, buf, remain);
 	}
-	BIO_write(outdata, out->fat, out->fatLen);
+	BIO_write(outdata, out->fat, (int)out->fatLen);
 	return 1; /* OK */
 }
 
 static void header_save(BIO *outdata, MSI_OUT *out)
 {
 	char buf[MAX_SECTOR_SIZE];
-	int remain;
+	uint32_t remain;
 
 	/* set Number of FAT sectors in the header */
 	PUT_UINT32_LE(out->fatSectorsCount, buf);
@@ -1216,8 +1215,8 @@ static void header_save(BIO *outdata, MSI_OUT *out)
 	BIO_write(outdata, out->header, HEADER_SIZE);
 
 	remain = out->sectorSize - HEADER_SIZE;
-	memset(buf, 0, remain);
-	BIO_write(outdata, buf, remain);
+	memset(buf, 0, (size_t)remain);
+	BIO_write(outdata, buf, (int)remain);
 }
 
 static char *header_new(MSI_FILE_HDR *hdr, MSI_OUT *out)
@@ -1267,14 +1266,14 @@ static char *header_new(MSI_FILE_HDR *hdr, MSI_OUT *out)
 	memset(data + HEADER_DIFAT_SECTORS_NUM, 0, 4); /* no DIFAT */
 	memcpy(data + HEADER_DIFAT, dead_food, 4);     /* sector number for FAT */
 	for (i = 1; i < DIFAT_IN_HEADER; i++) {
-		memset(data + HEADER_DIFAT + 4*i, FREESECT, 4); /* free FAT sectors */
+		memset(data + HEADER_DIFAT + 4*i, (int)FREESECT, 4); /* free FAT sectors */
 	}
 	return data;
 }
 
-static int msiout_set(MSI_FILE *msi, int len_msi, int len_msiex, MSI_OUT *out)
+static int msiout_set(MSI_FILE *msi, uint32_t len_msi, uint32_t len_msiex, MSI_OUT *out)
 {
-	int msi_size, msiex_size;
+	uint32_t msi_size, msiex_size;
 
 	out->sectorSize = msi->m_sectorSize;
 
@@ -1306,8 +1305,8 @@ static int msiout_set(MSI_FILE *msi, int len_msi, int len_msiex, MSI_OUT *out)
 	return 1; /* OK */
 }
 
-int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, int len_msi,
-		u_char *p_msiex, int len_msiex, BIO *outdata)
+int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint32_t len_msi,
+		u_char *p_msiex, uint32_t len_msiex, BIO *outdata)
 {
 	MSI_OUT out;
 	int ret = 0;

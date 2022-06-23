@@ -252,7 +252,7 @@ typedef struct {
 
 typedef struct {
 	uint32_t header_size;
-	int pe32plus;
+	uint32_t pe32plus;
 	uint16_t magic;
 	uint32_t pe_checksum;
 	uint32_t nrvas;
@@ -469,7 +469,7 @@ IMPLEMENT_ASN1_FUNCTIONS(MsCtlContent)
 
 
 typedef struct {
-	ASN1_BIT_STRING* flags;
+	ASN1_BIT_STRING *flags;
 	SpcLink *file;
 } SpcPeImageData;
 
@@ -768,7 +768,7 @@ static void print_hash(const char *descript1, const char *descript2, const u_cha
 static int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype)
 {
 	int mdlen = EVP_MD_size(EVP_get_digestbynid(mdtype));
-	int mdok = !memcmp(mdbuf, cmdbuf, mdlen);
+	int mdok = !memcmp(mdbuf, cmdbuf, (size_t)mdlen);
 	printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
 	print_hash("Current message digest    ", "", mdbuf, mdlen);
 	print_hash("Calculated message digest ", mdok ? "\n" : "    MISMATCH!!!\n", cmdbuf, mdlen);
@@ -796,7 +796,7 @@ static int blob_has_nl = 0;
 /*
  * Callback for writing received data
  */
-static size_t curl_write(void *ptr, size_t sz, size_t nmemb, void *stream)
+static int curl_write(void *ptr, size_t sz, size_t nmemb, void *stream)
 {
 	if (sz*nmemb > 0 && !blob_has_nl) {
 		if (memchr(ptr, '\n', sz*nmemb))
@@ -869,7 +869,7 @@ static BIO *encode_rfc3161_request(PKCS7 *sig, const EVP_MD *md)
 		printf("Unable to set up the digest context\n");
 		return NULL;  /* FAILED */
 	}
-	EVP_DigestUpdate(mdctx, si->enc_digest->data, si->enc_digest->length);
+	EVP_DigestUpdate(mdctx, si->enc_digest->data, (size_t)si->enc_digest->length);
 	EVP_DigestFinal(mdctx, mdbuf, NULL);
 	EVP_MD_CTX_free(mdctx);
 
@@ -882,7 +882,7 @@ static BIO *encode_rfc3161_request(PKCS7 *sig, const EVP_MD *md)
 	req->certReq = (void*)0x1;
 
 	len = i2d_TimeStampReq(req, NULL);
-	p = OPENSSL_malloc(len);
+	p = OPENSSL_malloc((size_t)len);
 	len = i2d_TimeStampReq(req, &p);
 	p -= len;
 	TimeStampReq_free(req);
@@ -918,7 +918,7 @@ static BIO *encode_authenticode_request(PKCS7 *sig)
 	req->blob->signature = si->enc_digest;
 
 	len = i2d_TimeStampRequest(req, NULL);
-	p = OPENSSL_malloc(len);
+	p = OPENSSL_malloc((size_t)len);
 	len = i2d_TimeStampRequest(req, &p);
 	p -= len;
 	req->blob->signature = NULL;
@@ -938,7 +938,7 @@ static BIO *encode_authenticode_request(PKCS7 *sig)
  * If successful the RFC 3161 timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1].
  */
-static int decode_rfc3161_response(PKCS7 *sig, BIO *bin, int verbose)
+static CURLcode decode_rfc3161_response(PKCS7 *sig, BIO *bin, int verbose)
 {
 	PKCS7_SIGNER_INFO *si;
 	STACK_OF(X509_ATTRIBUTE) *attrs;
@@ -968,7 +968,7 @@ static int decode_rfc3161_response(PKCS7 *sig, BIO *bin, int verbose)
 		TimeStampResp_free(reply);
 		return 1; /* FAILED */
 	}
-	if (((len = i2d_PKCS7(reply->token, NULL)) <= 0) || (p = OPENSSL_malloc(len)) == NULL) {
+	if (((len = i2d_PKCS7(reply->token, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
 		if (verbose) {
 			printf("Failed to convert pkcs7: %d\n", len);
 			ERR_print_errors_fp(stdout);
@@ -994,7 +994,7 @@ static int decode_rfc3161_response(PKCS7 *sig, BIO *bin, int verbose)
  * If successful the authenticode timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1].
  */
-static int decode_authenticode_response(PKCS7 *sig, BIO *bin, int verbose)
+static CURLcode decode_authenticode_response(PKCS7 *sig, BIO *bin, int verbose)
 {
 	PKCS7 *p7;
 	PKCS7_SIGNER_INFO *info, *si;
@@ -1022,7 +1022,7 @@ static int decode_authenticode_response(PKCS7 *sig, BIO *bin, int verbose)
 	info = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
 	if (!info)
 		return 1; /* FAILED */
-	if (((len = i2d_PKCS7_SIGNER_INFO(info, NULL)) <= 0) || (p = OPENSSL_malloc(len)) == NULL) {
+	if (((len = i2d_PKCS7_SIGNER_INFO(info, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
 		if (verbose) {
 			printf("Failed to convert signer info: %d\n", len);
 			ERR_print_errors_fp(stdout);
@@ -1065,7 +1065,7 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	CURLcode res;
 	BIO *bout, *bin;
 	u_char *p = NULL;
-	int len = 0;
+	long len = 0;
 
 	if (!url)
 		return 1; /* FAILED */
@@ -1501,7 +1501,7 @@ static SpcLink *get_obsolete_link(void)
 }
 
 static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
-	int pe32plus, uint32_t sigpos, int phtype, int *rphlen)
+	uint32_t pe32plus, uint32_t sigpos, int phtype, int *rphlen)
 {
 	uint16_t nsections, opthdr_size;
 	uint32_t pagesize, hdrsize;
@@ -1520,10 +1520,10 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	pagesize = GET_UINT32_LE(indata + header_size + 56);
 	hdrsize = GET_UINT32_LE(indata + header_size + 84);
 	pphlen = 4 + EVP_MD_size(md);
-	phlen = pphlen * (3 + nsections + sigpos / pagesize);
+	phlen = pphlen * (3 + (int)nsections + (int)(sigpos / pagesize));
 
-	res = OPENSSL_malloc(phlen);
-	zeroes = OPENSSL_zalloc(pagesize);
+	res = OPENSSL_malloc((size_t)phlen);
+	zeroes = OPENSSL_zalloc((size_t)pagesize);
 
 	EVP_DigestUpdate(mdctx, indata, header_size + 88);
 	EVP_DigestUpdate(mdctx, indata + header_size + 92, 60 + pe32plus*16);
@@ -1554,7 +1554,7 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	}
 	EVP_MD_CTX_free(mdctx);
 	PUT_UINT32_LE(lastpos, res + pi*pphlen);
-	memset(res + pi*pphlen + 4, 0, EVP_MD_size(md));
+	memset(res + pi*pphlen + 4, 0, (size_t)EVP_MD_size(md));
 	pi++;
 	OPENSSL_free(zeroes);
 	*rphlen = pi*pphlen;
@@ -1589,7 +1589,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 	oset = sk_ASN1_TYPE_new_null();
 	sk_ASN1_TYPE_push(oset, tostr);
 	l = i2d_ASN1_SET_ANY(oset, NULL);
-	tmp = p = OPENSSL_malloc(l);
+	tmp = p = OPENSSL_malloc((size_t)l);
 	i2d_ASN1_SET_ANY(oset, &tmp);
 	ASN1_TYPE_free(tostr);
 	sk_ASN1_TYPE_free(oset);
@@ -1603,7 +1603,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 	ASN1_STRING_set(aval->value->value.set, p, l);
 	OPENSSL_free(p);
 	l = i2d_SpcAttributeTypeAndOptionalValue(aval, NULL);
-	tmp = p = OPENSSL_malloc(l);
+	tmp = p = OPENSSL_malloc((size_t)l);
 	i2d_SpcAttributeTypeAndOptionalValue(aval, &tmp);
 	SpcAttributeTypeAndOptionalValue_free(aval);
 
@@ -1616,7 +1616,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, FILE_HEADER *header
 	aset = sk_ASN1_TYPE_new_null();
 	sk_ASN1_TYPE_push(aset, taval);
 	l = i2d_ASN1_SET_ANY(aset, NULL);
-	tmp = p = OPENSSL_malloc(l);
+	tmp = p = OPENSSL_malloc((size_t)l);
 	l = i2d_ASN1_SET_ANY(aset, &tmp);
 	ASN1_TYPE_free(taval);
 	sk_ASN1_TYPE_free(aset);
@@ -1653,7 +1653,7 @@ static int get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *optio
 	if (type == FILE_TYPE_CAB) {
 		SpcLink *link = get_obsolete_link();
 		l = i2d_SpcLink(link, NULL);
-		p = OPENSSL_malloc(l);
+		p = OPENSSL_malloc((size_t)l);
 		i2d_SpcLink(link, &p);
 		p -= l;
 		dtype = OBJ_txt2obj(SPC_CAB_DATA_OBJID, 1);
@@ -1674,7 +1674,7 @@ static int get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *optio
 			pid->file = get_obsolete_link();
 		}
 		l = i2d_SpcPeImageData(pid, NULL);
-		p = OPENSSL_malloc(l);
+		p = OPENSSL_malloc((size_t)l);
 		i2d_SpcPeImageData(pid, &p);
 		p -= l;
 		dtype = OBJ_txt2obj(SPC_PE_IMAGE_DATA_OBJID, 1);
@@ -1689,7 +1689,7 @@ static int get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *optio
 		ASN1_INTEGER_set(si->f, 0);
 		ASN1_OCTET_STRING_set(si->string, msistr, sizeof msistr);
 		l = i2d_SpcSipInfo(si, NULL);
-		p = OPENSSL_malloc(l);
+		p = OPENSSL_malloc((size_t)l);
 		i2d_SpcSipInfo(si, &p);
 		p -= l;
 		dtype = OBJ_txt2obj(SPC_SIPINFO_OBJID, 1);
@@ -1707,13 +1707,13 @@ static int get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *optio
 	idc->messageDigest->digestAlgorithm->parameters->type = V_ASN1_NULL;
 
 	hashlen = EVP_MD_size(options->md);
-	hash = OPENSSL_malloc(hashlen);
-	memset(hash, 0, hashlen);
+	hash = OPENSSL_malloc((size_t)hashlen);
+	memset(hash, 0, (size_t)hashlen);
 	ASN1_OCTET_STRING_set(idc->messageDigest->digest, hash, hashlen);
 	OPENSSL_free(hash);
 
 	*len  = i2d_SpcIndirectDataContent(idc, NULL);
-	*blob = OPENSSL_malloc(*len);
+	*blob = OPENSSL_malloc((size_t)*len);
 	p = *blob;
 	i2d_SpcIndirectDataContent(idc, &p);
 	SpcIndirectDataContent_free(idc);
@@ -1729,7 +1729,7 @@ static int set_signing_blob(PKCS7 *sig, BIO *hash, u_char *buf, int len)
 	PKCS7 *td7;
 
 	mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
-	memcpy(buf+len, mdbuf, mdlen);
+	memcpy(buf+len, mdbuf, (size_t)mdlen);
 	seqhdrlen = asn1_simple_hdr_len(buf, len);
 
 	if ((sigbio = PKCS7_dataInit(sig, NULL)) == NULL) {
@@ -1802,7 +1802,7 @@ static int set_indirect_data_blob(PKCS7 *sig, BIO *hash, file_type_t type,
 
 	if (!get_indirect_data_blob(&p, &len, options, header, type, indata))
 		return 0; /* FAILED */
-	memcpy(buf, p, len);
+	memcpy(buf, p, (size_t)len);
 	OPENSSL_free(p);
 	if (!set_signing_blob(sig, hash, buf, len)) {
 		OPENSSL_free(buf);
@@ -1886,7 +1886,7 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 		printf("Unable to set up the digest context\n");
 		goto out;
 	}
-	certlen = i2d_X509(leaf, NULL);
+	certlen = (size_t)i2d_X509(leaf, NULL);
 	certbuf = OPENSSL_malloc(certlen);
 	tmp = certbuf;
 	i2d_X509(leaf, &tmp);
@@ -1896,7 +1896,7 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 	EVP_MD_CTX_free(ctx);
 
 	/* compare the provided hash against the computed hash */
-	if (memcmp(mdbuf, cmdbuf, EVP_MD_size(md))) {
+	if (memcmp(mdbuf, cmdbuf, (size_t)EVP_MD_size(md))) {
 		print_hash("\nLeaf hash value mismatch", "computed", cmdbuf, EVP_MD_size(md));
 		goto out;
 	}
@@ -2238,7 +2238,7 @@ static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed, PKCS7_SIGNER_
 	}
 
 	/* Convert PKCS7 into CMS_ContentInfo */
-	if (((len = i2d_PKCS7(p7, NULL)) <= 0) || (p = OPENSSL_malloc(len)) == NULL) {
+	if (((len = i2d_PKCS7(p7, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
 		printf("Failed to convert pkcs7: %d\n", len);
 		goto out;
 	}
@@ -2355,7 +2355,7 @@ static void get_signed_attributes(SIGNATURE *signature, STACK_OF(X509_ATTRIBUTE)
 					u_char *desc;
 					int len = ASN1_STRING_to_UTF8(&desc, opus->programName->value.unicode);
 					if (len >= 0) {
-						signature->desc = OPENSSL_strndup((char *)desc, len);
+						signature->desc = OPENSSL_strndup((char *)desc, (size_t)len);
 						OPENSSL_free(desc);
 					}
 				} else {
@@ -2555,14 +2555,14 @@ static int TST_verify(CMS_ContentInfo *timestamp, PKCS7_SIGNER_INFO *si)
 				printf("Unable to set up the digest context\n");
 				return 0; /* FAILED */
 			}
-			EVP_DigestUpdate(mdctx, si->enc_digest->data, si->enc_digest->length);
+			EVP_DigestUpdate(mdctx, si->enc_digest->data, (size_t)si->enc_digest->length);
 			EVP_DigestFinal(mdctx, mdbuf, NULL);
 			EVP_MD_CTX_free(mdctx);
 
 			/* compare the provided hash against the computed hash */
 			hash = token->messageImprint->digest;
 			/* hash->length == EVP_MD_size(md) */
-			if (memcmp(mdbuf, hash->data, hash->length)) {
+			if (memcmp(mdbuf, hash->data, (size_t)hash->length)) {
 				printf("Hash value mismatch:\n\tMessage digest algorithm: %s\n",
 						(md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2ln(md_nid));
 				print_hash("\tComputed message digest", "", mdbuf, EVP_MD_size(md));
@@ -2630,7 +2630,7 @@ static int pkcs7_set_nested_signature(PKCS7 *p7, PKCS7 *p7nest, time_t time)
 	if (!si)
 		return 0; /* FAILED */
 	if (((len = i2d_PKCS7(p7nest, NULL)) <= 0) ||
-		(p = OPENSSL_malloc(len)) == NULL)
+		(p = OPENSSL_malloc((size_t)len)) == NULL)
 		return 0; /* FAILED */
 	i2d_PKCS7(p7nest, &p);
 	p -= len;
@@ -2971,7 +2971,7 @@ static int msi_verify_header(char *indata, uint32_t filesize, MSI_PARAMS *msipar
 }
 
 static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIRENT *dirent,
-		char *exdata, uint32_t exlen, GLOBAL_OPTIONS *options)
+		char *exdata, int exlen, GLOBAL_OPTIONS *options)
 {
 	int ret = 1, mdok, mdtype = -1;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
@@ -2987,7 +2987,7 @@ static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIRENT *dir
 		if (idc) {
 			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
 				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
-				memcpy(mdbuf, idc->messageDigest->digest->data, idc->messageDigest->digest->length);
+				memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
 			}
 			SpcIndirectDataContent_free(idc);
 		}
@@ -3007,7 +3007,7 @@ static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIRENT *dir
 	BIO_push(hash, BIO_new(BIO_s_null()));
 	if (exdata) {
 		BIO *prehash = BIO_new(BIO_f_md());
-		if (EVP_MD_size(md) != (int)exlen) {
+		if (EVP_MD_size(md) != exlen) {
 			printf("Incorrect MsiDigitalSignatureEx stream data length\n\n");
 			BIO_free_all(hash);
 			BIO_free_all(prehash);
@@ -3042,7 +3042,7 @@ static int msi_verify_pkcs7(SIGNATURE *signature, MSI_FILE *msi, MSI_DIRENT *dir
 	print_hash("Current DigitalSignature         ", "", mdbuf, EVP_MD_size(md));
 	BIO_gets(hash, (char*)cmdbuf, EVP_MAX_MD_SIZE);
 	BIO_free_all(hash);
-	mdok = !memcmp(mdbuf, cmdbuf, EVP_MD_size(md));
+	mdok = !memcmp(mdbuf, cmdbuf, (size_t)EVP_MD_size(md));
 	print_hash("Calculated DigitalSignature      ", mdok ? "\n" : "    MISMATCH!!!\n", cmdbuf, EVP_MD_size(md));
 	if (!mdok) {
 		printf("Signature verification: failed\n\n");
@@ -3073,7 +3073,7 @@ static int msi_verify_file(MSI_PARAMS *msiparams, GLOBAL_OPTIONS *options)
 		goto out;
 	}
 	inlen = GET_UINT32_LE(ds->size);
-	indata = OPENSSL_malloc(inlen);
+	indata = OPENSSL_malloc((size_t)inlen);
 	if (!msi_file_read(msiparams->msi, ds, 0, indata, inlen)) {
 		printf("DigitalSignature stream data error\n\n");
 		goto out;
@@ -3082,7 +3082,7 @@ static int msi_verify_file(MSI_PARAMS *msiparams, GLOBAL_OPTIONS *options)
 		printf("Warning: MsiDigitalSignatureEx stream doesn't exist\n");
 	} else {
 		exlen = GET_UINT32_LE(dse->size);
-		exdata = OPENSSL_malloc(exlen);
+		exdata = OPENSSL_malloc((size_t)exlen);
 		if (!msi_file_read(msiparams->msi, dse, 0, exdata, exlen)) {
 			printf("MsiDigitalSignatureEx stream data error\n\n");
 			goto out;
@@ -3102,7 +3102,7 @@ static int msi_verify_file(MSI_PARAMS *msiparams, GLOBAL_OPTIONS *options)
 	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
 		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
 		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-		ret &= msi_verify_pkcs7(signature, msiparams->msi, msiparams->dirent, exdata, exlen, options);
+		ret &= msi_verify_pkcs7(signature, msiparams->msi, msiparams->dirent, exdata, (int)exlen, options);
 	}
 	printf("Number of verified signatures: %d\n", i);
 out:
@@ -3143,7 +3143,7 @@ static int msi_extract_file(MSI_PARAMS *msiparams, BIO *outdata, int output_pkcs
 		return 1; /* FAILED */
 	}
 	len = GET_UINT32_LE(ds->size);
-	data = OPENSSL_malloc(len);
+	data = OPENSSL_malloc((size_t)len);
 	(void)BIO_reset(outdata);
 	sig = msi_extract_existing_pkcs7(msiparams, ds, &data, len);
 	if (!sig) {
@@ -3153,7 +3153,7 @@ static int msi_extract_file(MSI_PARAMS *msiparams, BIO *outdata, int output_pkcs
 	if (output_pkcs7) {
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
 	} else {
-		ret = !BIO_write(outdata, data, len);
+		ret = !BIO_write(outdata, data, (int)len);
 	}
 	PKCS7_free(sig);
 	OPENSSL_free(data);
@@ -3262,15 +3262,15 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *
 		goto err;
 	}
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
-	bio = BIO_new_mem_buf(indata, offset);
+	bio = BIO_new_mem_buf(indata, (int)offset);
 	(void)BIO_seek(bio, 0);
 
 	bfb = OPENSSL_malloc(SIZE_16M);
 
-	BIO_read(bio, bfb, header->header_size + 88);
+	BIO_read(bio, bfb, (int)header->header_size + 88);
 	EVP_DigestUpdate(mdctx, bfb, header->header_size + 88);
 	BIO_read(bio, bfb, 4);
-	BIO_read(bio, bfb, 60 + header->pe32plus * 16);
+	BIO_read(bio, bfb, 60 + (int)header->pe32plus * 16);
 	EVP_DigestUpdate(mdctx, bfb, 60 + header->pe32plus * 16);
 	BIO_read(bio, bfb, 8);
 
@@ -3280,19 +3280,19 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *
 		uint32_t want = offset - n;
 		if (want > sizeof bfb)
 			want = sizeof bfb;
-		l = BIO_read(bio, bfb, want);
+		l = BIO_read(bio, bfb, (int)want);
 		if (l <= 0)
 			break;
-		EVP_DigestUpdate(mdctx, bfb, l);
-		n += l;
+		EVP_DigestUpdate(mdctx, bfb, (size_t)l);
+		n += (uint32_t)l;
 	}
 
 	if (!header->sigpos) {
 		/* pad (with 0's) unsigned PE file to 8 byte boundary */
 		int len = 8 - header->fileend % 8;
 		if (len > 0 && len != 8) {
-			memset(bfb, 0, len);
-			EVP_DigestUpdate(mdctx, bfb, len);
+			memset(bfb, 0, (size_t)len);
+			EVP_DigestUpdate(mdctx, bfb, (size_t)len);
 		}
 	}
 	OPENSSL_free(bfb);
@@ -3360,8 +3360,8 @@ static int pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	l = asn1_simple_hdr_len(obj->value->value.sequence->data + l2, obj->value->value.sequence->length - l2);
 	l += l2;
 	*phlen = obj->value->value.sequence->length - l;
-	*ph = OPENSSL_malloc(*phlen);
-	memcpy(*ph, obj->value->value.sequence->data + l, *phlen);
+	*ph = OPENSSL_malloc((size_t)*phlen);
+	memcpy(*ph, obj->value->value.sequence->data + l, (size_t)*phlen);
 	SpcAttributeTypeAndOptionalValue_free(obj);
 	return 1; /* OK */
 }
@@ -3374,7 +3374,7 @@ static int pe_page_hash(char *indata, FILE_HEADER *header, u_char *ph, int phlen
 	printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
 	print_hash("Page hash            ", "...", ph, (phlen < 32) ? phlen : 32);
 	cph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &cphlen);
-	mdok = (phlen == cphlen) && !memcmp(ph, cph, phlen);
+	mdok = (phlen == cphlen) && !memcmp(ph, cph, (size_t)phlen);
 	print_hash("Calculated page hash ", mdok ? "...\n" : "... MISMATCH!!!\n", cph, (cphlen < 32) ? cphlen : 32);
 	OPENSSL_free(cph);
 	return mdok;
@@ -3401,7 +3401,7 @@ static int pe_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *head
 			}
 			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
 				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
-				memcpy(mdbuf, idc->messageDigest->digest->data, idc->messageDigest->digest->length);
+				memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
 			}
 			SpcIndirectDataContent_free(idc);
 		}
@@ -3468,7 +3468,7 @@ static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 
 	/* check PE checksum */
 	printf("Current PE checksum   : %08X\n", header->pe_checksum);
-	bio = BIO_new_mem_buf(indata, header->fileend);
+	bio = BIO_new_mem_buf(indata, (int)header->fileend);
 	real_pe_checksum = pe_calc_checksum(bio, header);
 	BIO_free(bio);
 	if (header->pe_checksum && header->pe_checksum != real_pe_checksum)
@@ -3519,7 +3519,7 @@ static int pe_extract_file(char *indata, FILE_HEADER *header, BIO *outdata, int 
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
 		PKCS7_free(sig);
 	} else
-		ret = !BIO_write(outdata, indata + header->sigpos, header->siglen);
+		ret = !BIO_write(outdata, indata + header->sigpos, (int)header->siglen);
 
 	return ret;
 }
@@ -3590,24 +3590,24 @@ static void pe_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *
 	int len = 0, i;
 	char *buf = OPENSSL_malloc(SIZE_64K);
 
-	i = header->header_size + 88;
+	i = (int)header->header_size + 88;
 	BIO_write(hash, indata, i);
 	memset(buf, 0, 4);
 	BIO_write(outdata, buf, 4); /* zero out checksum */
 	i += 4;
-	BIO_write(hash, indata + i, 60 + header->pe32plus * 16);
-	i += 60 + header->pe32plus * 16;
+	BIO_write(hash, indata + i, 60 + (int)header->pe32plus * 16);
+	i += 60 + (int)header->pe32plus * 16;
 	memset(buf, 0, 8);
 	BIO_write(outdata, buf, 8); /* zero out sigtable offset + pos */
 	i += 8;
-	BIO_write(hash, indata + i, header->fileend - i);
+	BIO_write(hash, indata + i, (int)header->fileend - i);
 
 	/* pad (with 0's) pe file to 8 byte boundary */
 	len = 8 - header->fileend % 8;
 	if (len > 0 && len != 8) {
-		memset(buf, 0, len);
+		memset(buf, 0, (size_t)len);
 		BIO_write(hash, buf, len);
-		header->fileend += len;
+		header->fileend += (uint32_t)len;
 	}
 	OPENSSL_free(buf);
 }
@@ -3701,7 +3701,7 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER 
 		printf("Unable to set up the digest context\n");
 		goto err;
 	}
-	bio = BIO_new_mem_buf(indata, offset);
+	bio = BIO_new_mem_buf(indata, (int)offset);
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 	(void)BIO_seek(bio, 0);
 
@@ -3807,11 +3807,11 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER 
 		uint32_t want = offset - coffFiles;
 		if (want > sizeof bfb)
 			want = sizeof bfb;
-		l = BIO_read(bio, bfb, want);
+		l = BIO_read(bio, bfb, (int)want);
 		if (l <= 0)
 			break;
-		EVP_DigestUpdate(mdctx, bfb, l);
-		coffFiles += l;
+		EVP_DigestUpdate(mdctx, bfb, (size_t)l);
+		coffFiles += (uint32_t)l;
 	}
 	OPENSSL_free(bfb);
 	BIO_free(bio);
@@ -3836,7 +3836,7 @@ static int cab_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *hea
 		if (idc) {
 			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
 				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
-				memcpy(mdbuf, idc->messageDigest->digest->data, idc->messageDigest->digest->length);
+				memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
 			}
 			SpcIndirectDataContent_free(idc);
 		}
@@ -3921,7 +3921,7 @@ static int cab_extract_file(char *indata, FILE_HEADER *header, BIO *outdata, int
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
 		PKCS7_free(sig);
 	} else
-		ret = !BIO_write(outdata, indata + header->sigpos, header->siglen);
+		ret = !BIO_write(outdata, indata + header->sigpos, (int)header->siglen);
 
 	return ret;
 }
@@ -4023,7 +4023,7 @@ static int cab_remove_file(char *indata, FILE_HEADER *header, uint32_t filesize,
 		nfolders--;
 	}
 	/* Write what's left - the compressed data bytes */
-	BIO_write(outdata, indata + i, filesize - header->siglen - i);
+	BIO_write(outdata, indata + i, (int)(filesize - header->siglen) - i);
 	OPENSSL_free(buf);
 
 	return 0; /* OK */
@@ -4033,7 +4033,7 @@ static void cab_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO 
 {
 	int i;
 	uint16_t nfolders, flags;
-	const char buf[] = {0x00, 0x00};
+	u_char buf[] = {0x00, 0x00};
 
 	/* u1 signature[4] 4643534D MSCF: 0-3 */
 	BIO_write(hash, indata, 4);
@@ -4082,7 +4082,7 @@ static void cab_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO 
 		nfolders--;
 	}
 	/* Write what's left - the compressed data bytes */
-	BIO_write(hash, indata + i, header->sigpos - i);
+	BIO_write(hash, indata + i, (int)header->sigpos - i);
 }
 
 static void cab_add_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
@@ -4149,7 +4149,7 @@ static void cab_add_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *ou
 		nfolders--;
 	}
 	/* Write what's left - the compressed data bytes */
-	BIO_write(hash, indata + i, header->fileend - i);
+	BIO_write(hash, indata + i, (int)header->fileend - i);
 	OPENSSL_free(buf);
 }
 
@@ -4238,7 +4238,7 @@ static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEAD
 			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
 				/* get a digest algorithm a message digest of the file from the content */
 				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
-				memcpy(mdbuf, idc->messageDigest->digest->data, idc->messageDigest->digest->length);
+				memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
 			}
 			SpcIndirectDataContent_free(idc);
 		}
@@ -4265,7 +4265,7 @@ static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEAD
 				break;
 			}
 		mdlen = EVP_MD_size(EVP_get_digestbynid(mdtype));
-		if (!memcmp(mdbuf, cmdbuf, mdlen)) {
+		if (!memcmp(mdbuf, cmdbuf, (size_t)mdlen)) {
 			printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
 			print_hash("Current message digest    ", "", mdbuf, mdlen);
 			print_hash("Calculated message digest ", "\n", cmdbuf, mdlen);
@@ -4415,7 +4415,7 @@ static int add_opus_attribute(PKCS7_SIGNER_INFO *si, char *desc, char *url)
 	u_char *p = NULL;
 
 	opus = createOpus(desc, url);
-	if ((len = i2d_SpcSpOpusInfo(opus, NULL)) <= 0 || (p = OPENSSL_malloc(len)) == NULL) {
+	if ((len = i2d_SpcSpOpusInfo(opus, NULL)) <= 0 || (p = OPENSSL_malloc((size_t)len)) == NULL) {
 		SpcSpOpusInfo_free(opus);
 		return 0; /* FAILED */
 	}
@@ -4527,9 +4527,9 @@ static int add_unauthenticated_blob(PKCS7 *sig)
 	si = sk_PKCS7_SIGNER_INFO_value(sig->d.sign->signer_info, 0);
 	if (!si)
 		return 0; /* FAILED */
-	if ((p = OPENSSL_malloc(len)) == NULL)
+	if ((p = OPENSSL_malloc((size_t)len)) == NULL)
 		return 0; /* FAILED */
-	memset(p, 0, len);
+	memset(p, 0, (size_t)len);
 	memcpy(p, prefix, sizeof prefix);
 	memcpy(p + len - sizeof postfix, postfix, sizeof postfix);
 	astr = ASN1_STRING_new();
@@ -4549,7 +4549,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 {
 	u_char *p = NULL;
 	PKCS7 *outsig = NULL;
-	const char buf[] = {
+	u_char buf[] = {
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 	};
 
@@ -4567,7 +4567,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 		outsig = sig;
 	}
 	/* Append signature to outfile */
-	if (((*len = i2d_PKCS7(outsig, NULL)) <= 0) || (p = OPENSSL_malloc(*len)) == NULL) {
+	if (((*len = i2d_PKCS7(outsig, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)*len)) == NULL) {
 		printf("i2d_PKCS memory allocation failed: %d\n", *len);
 		return 1; /* FAILED */
 	}
@@ -4585,15 +4585,15 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 		BIO_write(outdata, p, *len);
 		/* pad (with 0's) asn1 blob to 8 byte boundary */
 		if (*padlen > 0) {
-			memset(p, 0, *padlen);
+			memset(p, 0, (size_t)*padlen);
 			BIO_write(outdata, p, *padlen);
 		}
 	} else if (type == FILE_TYPE_MSI) {
 		int len_msi = *len;
-		u_char *p_msi = OPENSSL_malloc(len_msi);
-		memcpy(p_msi, p, len_msi);
-		if (!msi_file_write(msiparams->msi, msiparams->dirent, p_msi, len_msi,
-				msiparams->p_msiex, msiparams->len_msiex, outdata)) {
+		u_char *p_msi = OPENSSL_malloc((size_t)len_msi);
+		memcpy(p_msi, p, (size_t)len_msi);
+		if (!msi_file_write(msiparams->msi, msiparams->dirent, p_msi, (uint32_t)len_msi,
+				msiparams->p_msiex, (uint32_t)msiparams->len_msiex, outdata)) {
 			printf("Saving the msi file failed\n");
 			return 1; /* FAILED */
 		}
@@ -4607,7 +4607,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 static void update_data_size(file_type_t type, cmd_type_t cmd, FILE_HEADER *header,
 		int padlen, int len, BIO *outdata)
 {
-	const char buf[] = {
+	u_char buf[] = {
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 	};
 
@@ -4652,7 +4652,7 @@ static STACK_OF(X509) *PEM_read_certs(BIO *bin, char *certpass)
 	return certs;
 }
 
-static off_t get_file_size(const char *infile)
+static uint32_t get_file_size(const char *infile)
 {
 	int ret;
 #ifdef _WIN32
@@ -4671,10 +4671,10 @@ static off_t get_file_size(const char *infile)
 		printf("Unrecognized file type - file is too short: %s\n", infile);
 		return 0;
 	}
-	return st.st_size;
+	return (uint32_t)st.st_size;
 }
 
-static char *map_file(const char *infile, const off_t size)
+static char *map_file(const char *infile, const size_t size)
 {
 	char *indata = NULL;
 #ifdef WIN32
@@ -4860,7 +4860,7 @@ static char *getpassword(const char *prompt)
 
 	tcgetattr(fileno(stdin), &ofl);
 	nfl = ofl;
-	nfl.c_lflag &= ~ECHO;
+	nfl.c_lflag &= ~(unsigned int)ECHO;
 	nfl.c_lflag |= ECHONL;
 
 	if (tcsetattr(fileno(stdin), TCSANOW, &nfl) != 0) {
@@ -4915,7 +4915,7 @@ static int read_password(GLOBAL_OPTIONS *options)
 		if (passfd < 0) {
 			return 0; /* FAILED */
 		}
-		passlen = read(passfd, passbuf, sizeof passbuf - 1);
+		passlen = (int)read(passfd, passbuf, sizeof passbuf - 1);
 		close(passfd);
 #endif /* WIN32 */
 		if (passlen <= 0) {
@@ -4930,7 +4930,7 @@ static int read_password(GLOBAL_OPTIONS *options)
 		} else {
 			options->pass = OPENSSL_strdup(passbuf);
 		}
-		memset(passbuf, 0, sizeof(passbuf));
+		memset(passbuf, 0, sizeof passbuf);
 #ifdef PROVIDE_ASKPASS
 	} else if (options->askpass) {
 		options->pass = getpassword("Password: ");
@@ -5364,7 +5364,7 @@ static PKCS7 *get_sigfile(char *sigfile, file_type_t type)
 		return NULL; /* FAILED */
 	}
 	if (sigfilesize >= sizeof pemhdr && !memcmp(insigdata, pemhdr, sizeof pemhdr - 1)) {
-		sigbio = BIO_new_mem_buf(insigdata, sigfilesize);
+		sigbio = BIO_new_mem_buf(insigdata, (int)sigfilesize);
 		sig = PEM_read_bio_PKCS7(sigbio, NULL, NULL, NULL);
 		BIO_free_all(sigbio);
 	} else {
@@ -5479,7 +5479,7 @@ static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 			return NULL; /* FAILED */
 		}
 		len = GET_UINT32_LE(ds->size);
-		data = OPENSSL_malloc(len);
+		data = OPENSSL_malloc((size_t)len);
 		*cursig = msi_extract_existing_pkcs7(msiparams, ds, &data, len);
 		OPENSSL_free(data);
 		if (!*cursig) {
