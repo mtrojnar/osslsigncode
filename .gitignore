@@ -2,7 +2,9 @@ build/
 CMakeFiles/
 _CPack_Packages/
 Testing/
+.vs/
 
+CMakeSettings.json
 CMakeCache.txt
 cmake_install.cmake
 config.h

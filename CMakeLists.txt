@@ -30,7 +30,7 @@ target_compile_definitions(osslsigncode PRIVATE HAVE_CONFIG_H=1)
 # set sources
 target_sources(osslsigncode PRIVATE osslsigncode.c msi.c)
 if(WIN32)
-target_sources(osslsigncode PRIVATE ${OPENSSL_INCLUDE_DIRS}/applink.c)
+target_sources(osslsigncode PRIVATE applink.c)
 endif(WIN32)
 
 # set include directories
@@ -53,6 +53,8 @@ else(CURL_FOUND)
   message(WARNING "cURL support disabled (library not found)")
 endif(CURL_FOUND)
 
+if(false)
+
 if(WIN32)
   # set output directory
   set_target_properties(osslsigncode PROPERTIES
@@ -62,10 +64,8 @@ if(WIN32)
   # copy the libraries
   file(COPY ${OPENSSL_LIBRARIES} ${CURL_LIBRARIES} DESTINATION ${PROJECT_BINARY_DIR})
 else(WIN32)
-  # set LD_LIBRARY_PATH
-  set_target_properties(osslsigncode PROPERTIES
-    INSTALL_RPATH_USE_LINK_PATH TRUE
-  )
+  # add paths to linker search and installed rpath
+  set_target_properties(osslsigncode PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
 endif(WIN32)
 
 include(CMakeTest)
@@ -75,3 +75,5 @@ include(CMakeInstall)
 if(NOT WIN32)
   include(CMakeDist)
 endif(NOT WIN32)
+
+endif(false)
