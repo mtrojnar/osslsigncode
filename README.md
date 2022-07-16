@@ -54,9 +54,6 @@ You may need to use `cmake3` instead of `cmake` to complete the following steps 
 ```
   -Denable-strict=ON
   -Denable-pedantic=ON
-  -Dssl-path=/opt/openssl-3.0.2/
-  -Dcurl-path=/opt/curl-7.82/
-  -Dwith-curl=OFF
 ```
 * Then call that build system to actually compile/link the osslsigncode project (alias `make`):
 ```

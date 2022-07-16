@@ -12,39 +12,66 @@ set(PACKAGE_BUGREPORT "Michal.Trojnara@stunnel.org")
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# make find modules in cmake dir available
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake")
+# load CMake library modules
+include(FindOpenSSL)
+include(FindCURL)
 
 # load CMake project modules
-include(SetOptions)
-include(FindOpenssl)
-include(FindCurl)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake")
 include(FindMapping)
 
-# use config.h
-target_compile_definitions(osslsigncode PRIVATE HAVE_CONFIG_H=1)
+# define the target
+add_executable(osslsigncode)
+
+# create and use config.h
 configure_file(Config.h.in config.h)
+target_compile_definitions(osslsigncode PRIVATE HAVE_CONFIG_H=1)
 
-# add include directories to osslsigncode
-target_include_directories(osslsigncode PUBLIC "${PROJECT_BINARY_DIR}")
+# set sources
+target_sources(osslsigncode PRIVATE osslsigncode.c msi.c)
+if(WIN32)
+target_sources(osslsigncode PRIVATE ${OPENSSL_INCLUDE_DIRS}/applink.c)
+endif(WIN32)
 
-if(MSVC)
+# set include directories
+target_include_directories(osslsigncode PRIVATE "${PROJECT_BINARY_DIR}")
+
+# set OpenSSL includes/libraries
+if(NOT OPENSSL_FOUND)
+  message(FATAL_ERROR "OpenSSL library not found")
+endif(NOT OPENSSL_FOUND)
+target_include_directories(osslsigncode PRIVATE ${OPENSSL_INCLUDE_DIRS})
+target_link_libraries(osslsigncode PRIVATE ${OPENSSL_LIBRARIES})
+
+# set cURL includes/libraries
+if(CURL_FOUND)
+  target_compile_definitions(osslsigncode PRIVATE ENABLE_CURL=1)
+  target_include_directories(osslsigncode PRIVATE ${CURL_INCLUDE_DIRS})
+  target_link_libraries(osslsigncode PRIVATE ${CURL_LIBRARIES})
+  message(NOTICE "cURL support enabled")
+else(CURL_FOUND)
+  message(WARNING "cURL support disabled (library not found)")
+endif(CURL_FOUND)
+
+if(WIN32)
   # set output directory
   set_target_properties(osslsigncode PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_DEBUG ${PROJECT_BINARY_DIR}
     RUNTIME_OUTPUT_DIRECTORY_RELEASE ${PROJECT_BINARY_DIR}
   )
-  # copy necessary libraries
-  file(COPY ${OPENSSL_LIBS} ${CURL_LIB} DESTINATION ${PROJECT_BINARY_DIR})
-else()
+  # copy the libraries
+  file(COPY ${OPENSSL_LIBRARIES} ${CURL_LIBRARIES} DESTINATION ${PROJECT_BINARY_DIR})
+else(WIN32)
   # set LD_LIBRARY_PATH
   set_target_properties(osslsigncode PROPERTIES
     INSTALL_RPATH_USE_LINK_PATH TRUE
   )
-endif()
+endif(WIN32)
 
 include(CMakeTest)
+
 include(CMakeInstall)
-if(NOT MSVC)
+
+if(NOT WIN32)
   include(CMakeDist)
-endif()
+endif(NOT WIN32)
