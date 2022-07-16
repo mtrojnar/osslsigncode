@@ -53,7 +53,10 @@ else(CURL_FOUND)
   message(WARNING "cURL support disabled (library not found)")
 endif(CURL_FOUND)
 
-if(false)
+# add paths to linker search and installed rpath
+set_target_properties(osslsigncode PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+if(NOT WIN32) # temporarily disable malfunctioning features
 
 if(WIN32)
   # set output directory
@@ -63,9 +66,6 @@ if(WIN32)
   )
   # copy the libraries
   file(COPY ${OPENSSL_LIBRARIES} ${CURL_LIBRARIES} DESTINATION ${PROJECT_BINARY_DIR})
-else(WIN32)
-  # add paths to linker search and installed rpath
-  set_target_properties(osslsigncode PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
 endif(WIN32)
 
 include(CMakeTest)
@@ -76,4 +76,4 @@ if(NOT WIN32)
   include(CMakeDist)
 endif(NOT WIN32)
 
-endif(false)
+endif(NOT WIN32) # temporarily disable malfunctioning features
