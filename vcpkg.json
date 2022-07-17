@@ -2,7 +2,9 @@
     "name": "osslsigncode",
     "version-string": "2.4",
     "dependencies": [
-        "openssl",
-        "curl"
+        "openssl:x86-windows",
+        "curl:x86-windows",
+        "openssl:x64-windows",
+        "curl:x64-windows"
     ]
 }

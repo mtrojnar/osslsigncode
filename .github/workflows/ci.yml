@@ -35,6 +35,10 @@ jobs:
       run: ctest -C ${{env.BUILD_TYPE}}
 
   build-windows:
+    strategy:
+      matrix:
+        platform: [x86 x64]
+
     runs-on: windows-latest
 
     steps:
@@ -51,9 +55,9 @@ jobs:
         runVcpkgInstall: true
 
     - name: Configure CMake
-      # Configure CMake in a 'build' subdirectory
-      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+      # Configure CMake
+      run: cmake -A ${{matrix.platform}} -B ${{github.workspace}}/build-${{matrix.platform}} -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
     - name: Build
       # Build your program with the given configuration
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+      run: cmake --build ${{github.workspace}}/build-${{matrix.platform}} --config ${{env.BUILD_TYPE}}
