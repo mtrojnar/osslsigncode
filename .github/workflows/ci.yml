@@ -42,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [x64, x86]
+        triplet: [x64-windows, x86-windows]
 
     runs-on: windows-latest
 
@@ -57,21 +57,21 @@ jobs:
     - name: Restore artifacts, or setup vcpkg
       uses: lukka/run-vcpkg@v10
       with:
-        appendedCacheKey: "osslsigncode-2-${{matrix.platform}}"
+        appendedCacheKey: "osslsigncode-2-${{matrix.triplet}}"
         runVcpkgInstall: true
 
     - name: Configure CMake
       # Configure CMake
       run: cmake
-        -A ${{matrix.platform}}
-        -B ${{github.workspace}}/build-${{matrix.platform}}
+        -A ${{matrix.triplet}}
+        -B ${{github.workspace}}/build-${{matrix.triplet}}
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
     - name: Build
       # Build your program with the given configuration
       run: cmake
-        --build ${{github.workspace}}/build-${{matrix.platform}}
+        --build ${{github.workspace}}/build-${{matrix.triplet}}
         --config ${{env.BUILD_TYPE}}
 
     env:
-      VCPKG_DEFAULT_TRIPLET: ${{matrix.platform}}-windows
+      VCPKG_DEFAULT_TRIPLET: ${{matrix.triplet}}
