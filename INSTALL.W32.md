@@ -98,9 +98,10 @@
 
 1) Install and integrate vcpkg: https://vcpkg.io/en/getting-started.html
 
-2) Install the prerequisites:
+2) Install the 32-bit and/or 64-bit prerequisites:
 ```
-  vcpkg install openssl curl
+  vcpkg install openssl:x86-windows curl:x86-windows
+  vcpkg install openssl:x64-windows curl:x64-windows
 ```
 
 3) Git clone osslsigncode: https://github.com/mtrojnar/osslsigncode/
