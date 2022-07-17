@@ -23,11 +23,15 @@ jobs:
 
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory
-      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+      run: cmake
+        -B ${{github.workspace}}/build
+        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
     - name: Build
       # Build your program with the given configuration
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+      run: cmake
+        --build ${{github.workspace}}/build
+        --config ${{env.BUILD_TYPE}}
 
     - name: Test
       working-directory: ${{github.workspace}}/build
@@ -37,7 +41,7 @@ jobs:
   build-windows:
     strategy:
       matrix:
-        architecture: [x86, x64]
+        platform: [x64-windows, x86-windows]
 
     runs-on: windows-latest
 
@@ -57,15 +61,15 @@ jobs:
     - name: Configure CMake
       # Configure CMake
       run: cmake
-        -B ${{github.workspace}}/build-${{matrix.architecture}}
+        -B ${{github.workspace}}/build-${{matrix.platform}}
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
     - name: Build
       # Build your program with the given configuration
       run: cmake
-        --build ${{github.workspace}}/build-${{matrix.architecture}}
+        --build ${{github.workspace}}/build-${{matrix.platform}}
         --config ${{env.BUILD_TYPE}}
 
     env:
-      CMAKE_GENERATOR_PLATFORM: ${{matrix.architecture}}
-      VCPKG_TARGET_ARCHITECTURE: ${{matrix.architecture}}
+      CMAKE_GENERATOR_PLATFORM: ${{matrix.platform}}
+      VCPKG_DEFAULT_TRIPLET: ${{matrix.platform}}-windows
