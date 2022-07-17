@@ -72,4 +72,4 @@ jobs:
 
     env:
       CMAKE_GENERATOR_PLATFORM: ${{matrix.platform}}
-      VCPKG_DEFAULT_TRIPLET: ${{matrix.platform}}-windows
+      VCPKG_DEFAULT_TRIPLET: ${{matrix.platform}}
