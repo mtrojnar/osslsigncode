@@ -41,7 +41,7 @@ jobs:
   build-windows:
     strategy:
       matrix:
-        platform: [x64-windows, x86-windows]
+        platform: [x64, x86]
 
     runs-on: windows-latest
 
@@ -72,4 +72,4 @@ jobs:
 
     env:
       CMAKE_GENERATOR_PLATFORM: ${{matrix.platform}}
-      VCPKG_DEFAULT_TRIPLET: ${{matrix.platform}}
+      VCPKG_DEFAULT_TRIPLET: ${{matrix.platform}}-windows
