@@ -40,6 +40,7 @@ jobs:
 
   build-windows:
     strategy:
+      fail-fast: false
       matrix:
         platform: [x64, x86]
 
