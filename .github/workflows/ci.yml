@@ -53,13 +53,10 @@ jobs:
       uses: lukka/run-vcpkg@v10
       with:
         runVcpkgInstall: true
-      env:
-        VCPKG_TARGET_ARCHITECTURE: ${{matrix.architecture}}
 
     - name: Configure CMake
       # Configure CMake
       run: cmake
-        -A ${{matrix.architecture}}
         -B ${{github.workspace}}/build-${{matrix.architecture}}
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
@@ -68,3 +65,7 @@ jobs:
       run: cmake
         --build ${{github.workspace}}/build-${{matrix.architecture}}
         --config ${{env.BUILD_TYPE}}
+
+    env:
+      CMAKE_GENERATOR_PLATFORM: ${{matrix.architecture}}
+      VCPKG_TARGET_ARCHITECTURE: ${{matrix.architecture}}
