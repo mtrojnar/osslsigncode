@@ -37,7 +37,7 @@ jobs:
   build-windows:
     strategy:
       matrix:
-        platform: [x86 x64]
+        architecture: [x86 x64]
 
     runs-on: windows-latest
 
@@ -53,11 +53,18 @@ jobs:
       uses: lukka/run-vcpkg@v10
       with:
         runVcpkgInstall: true
+      env:
+        VCPKG_TARGET_ARCHITECTURE: ${{matrix.architecture}}
 
     - name: Configure CMake
       # Configure CMake
-      run: cmake -A ${{matrix.platform}} -B ${{github.workspace}}/build-${{matrix.platform}} -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+      run: cmake
+        -A ${{matrix.architecture}}
+        -B ${{github.workspace}}/build-${{matrix.architecture}}
+        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
     - name: Build
       # Build your program with the given configuration
-      run: cmake --build ${{github.workspace}}/build-${{matrix.platform}} --config ${{env.BUILD_TYPE}}
+      run: cmake
+        --build ${{github.workspace}}/build-${{matrix.architecture}}
+        --config ${{env.BUILD_TYPE}}
