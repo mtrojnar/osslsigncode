@@ -37,7 +37,7 @@ jobs:
   build-windows:
     strategy:
       matrix:
-        architecture: [x86 x64]
+        architecture: [x86, x64]
 
     runs-on: windows-latest
 
