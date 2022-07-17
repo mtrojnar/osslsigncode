@@ -61,6 +61,7 @@ jobs:
     - name: Configure CMake
       # Configure CMake
       run: cmake
+        -A ${{matrix.platform}}
         -B ${{github.workspace}}/build-${{matrix.platform}}
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
@@ -71,5 +72,4 @@ jobs:
         --config ${{env.BUILD_TYPE}}
 
     env:
-      CMAKE_GENERATOR_PLATFORM: ${{matrix.platform}}
       VCPKG_DEFAULT_TRIPLET: ${{matrix.platform}}-windows
