@@ -40,7 +40,7 @@ target_include_directories(osslsigncode PRIVATE "${PROJECT_BINARY_DIR}")
 if(NOT OPENSSL_FOUND)
   message(FATAL_ERROR "OpenSSL library not found")
 endif(NOT OPENSSL_FOUND)
-target_include_directories(osslsigncode PRIVATE ${OPENSSL_INCLUDE_DIRS})
+target_include_directories(osslsigncode PRIVATE ${OPENSSL_INCLUDE_DIR})
 target_link_libraries(osslsigncode PRIVATE ${OPENSSL_LIBRARIES})
 
 # set cURL includes/libraries
