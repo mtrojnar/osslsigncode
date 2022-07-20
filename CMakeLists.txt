@@ -7,6 +7,8 @@ set(DEV "-dev")
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}${DEV}")
 set(PACKAGE_STRING "${PROJECT_NAME} ${PROJECT_VERSION}")
 set(PACKAGE_BUGREPORT "Michal.Trojnara@stunnel.org")
+set(PACKAGE_URL "https://github.com/mtrojnar/osslsigncode")
+set(PACKAGE_DESCRIPTION "OpenSSL based Authenticode signing for PE, CAB, CAT and MSI files")
 
 # specify the C standard
 set(CMAKE_C_STANDARD 11)
@@ -18,10 +20,14 @@ include(FindCURL)
 
 # load CMake project modules
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake")
-include(FindMapping)
+include(SetBashCompletion)
+include(FindHeaders)
 
 # define the target
 add_executable(osslsigncode)
+
+# add compiler/linker flags
+include(SetCompilerFlags)
 
 # create and use config.h
 configure_file(Config.h.in config.h)
@@ -30,7 +36,7 @@ target_compile_definitions(osslsigncode PRIVATE HAVE_CONFIG_H=1)
 # set sources
 target_sources(osslsigncode PRIVATE osslsigncode.c msi.c)
 if(WIN32)
-target_sources(osslsigncode PRIVATE applink.c)
+  target_sources(osslsigncode PRIVATE applink.c)
 endif(WIN32)
 
 # set include directories
@@ -40,7 +46,7 @@ target_include_directories(osslsigncode PRIVATE "${PROJECT_BINARY_DIR}")
 if(NOT OPENSSL_FOUND)
   message(FATAL_ERROR "OpenSSL library not found")
 endif(NOT OPENSSL_FOUND)
-target_include_directories(osslsigncode PRIVATE ${OPENSSL_INCLUDE_DIRS})
+target_include_directories(osslsigncode PRIVATE ${OPENSSL_INCLUDE_DIR})
 target_link_libraries(osslsigncode PRIVATE ${OPENSSL_LIBRARIES})
 
 # set cURL includes/libraries
@@ -48,32 +54,26 @@ if(CURL_FOUND)
   target_compile_definitions(osslsigncode PRIVATE ENABLE_CURL=1)
   target_include_directories(osslsigncode PRIVATE ${CURL_INCLUDE_DIRS})
   target_link_libraries(osslsigncode PRIVATE ${CURL_LIBRARIES})
-  message(NOTICE "cURL support enabled")
+  message(STATUS "cURL support enabled")
 else(CURL_FOUND)
-  message(WARNING "cURL support disabled (library not found)")
+  message(STATUS "cURL support disabled (library not found)")
 endif(CURL_FOUND)
 
 # add paths to linker search and installed rpath
 set_target_properties(osslsigncode PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
 
-if(NOT WIN32) # temporarily disable malfunctioning features
-
-if(WIN32)
-  # set output directory
-  set_target_properties(osslsigncode PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG ${PROJECT_BINARY_DIR}
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE ${PROJECT_BINARY_DIR}
-  )
-  # copy the libraries
-  file(COPY ${OPENSSL_LIBRARIES} ${CURL_LIBRARIES} DESTINATION ${PROJECT_BINARY_DIR})
-endif(WIN32)
-
+# testing with CTest
 include(CMakeTest)
 
-include(CMakeInstall)
-
-if(NOT WIN32)
+# installation rules for a project
+install(TARGETS osslsigncode RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX})
+if(WIN32)
+  install(FILES
+    "${PROJECT_BINARY_DIR}/libcrypto-3-x64.dll"
+    "${PROJECT_BINARY_DIR}/libcurl.dll"
+    "${PROJECT_BINARY_DIR}/zlib1.dll"
+    DESTINATION ${CMAKE_INSTALL_PREFIX}
+  )
+else()
   include(CMakeDist)
-endif(NOT WIN32)
-
-endif(NOT WIN32) # temporarily disable malfunctioning features
+endif()
