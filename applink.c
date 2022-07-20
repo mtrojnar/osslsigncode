@@ -100,6 +100,7 @@ __stdcall
 # else
 __cdecl
 # endif
+#pragma warning(push, 2)
 OPENSSL_Applink(void)
 {
     static int once = 1;
@@ -137,7 +138,7 @@ OPENSSL_Applink(void)
 
     return OPENSSL_ApplinkTable;
 }
-
+#pragma warning(pop)
 #ifdef __cplusplus
 }
 #endif
