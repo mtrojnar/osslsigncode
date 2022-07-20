@@ -251,8 +251,7 @@ if test -n "$(command -v faketime)"
     make_certs "$1"
     result=$?
   else
-    printf "%s\n" "faketime not found in \$PATH"
-    printf "%s\n" "tests skipped, please install faketime package"
+    printf "%s" "faketime not found in \$PATH, please install faketime package"
     result=1
   fi
 
