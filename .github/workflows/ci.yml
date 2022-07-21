@@ -70,9 +70,7 @@ jobs:
         # CMakePresets.json located elsewhere.
         # cmakeListsTxtPath: '${{github.workspace}}/CMakeLists.txt'
         configurePreset: ninja-multi-vcpkg
-        configurePresetCmdString: ${{env.BUILD_TYPE}}
         buildPreset: ninja-multi-vcpkg
-        buildPresetCmdString: ${{env.BUILD_TYPE}}
         testPreset: ninja-multi-vcpkg
         testPresetCmdString: ${{env.BUILD_TYPE}}
 
