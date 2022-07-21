@@ -61,6 +61,8 @@ jobs:
 
     - name: Restore artifacts or setup vcpkg
       uses: lukka/run-vcpkg@v10
+      with:
+        vcpkgGitCommitId: 'b2a22ff59ab523788a26980f7d38a4e5d4fedb8f'
 
     - name: Configure CMake with CMakePreset.json and vcpkg.json
       uses: lukka/run-cmake@v10
@@ -72,7 +74,7 @@ jobs:
         configurePreset: ninja-multi-vcpkg
         buildPreset: ninja-multi-vcpkg
         testPreset: ninja-multi-vcpkg
-        testPresetCmdString: "-C ${{env.BUILD_TYPE}}"
+        testPresetCmdString: '^"--preset^",^"ninja-multi-vcpkg^"'
 
     - name: List files
       run: ls ${{github.workspace}} -alR
