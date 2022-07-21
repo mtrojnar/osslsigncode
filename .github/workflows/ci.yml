@@ -75,9 +75,6 @@ jobs:
         #testPreset: ninja-multi-vcpkg
         #testPresetCmdString: "[`--preset`, `$[env.TEST_PRESET_NAME]`, `-C`, `${{env.BUILD_TYPE}}`]"
 
-    - name: List files
-      run: dir /s
-
     #- name: Upload the artifacts
     #  uses: actions/upload-artifact@v3
     #  with:
