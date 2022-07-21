@@ -62,7 +62,7 @@ jobs:
     - name: Restore artifacts or setup vcpkg
       uses: lukka/run-vcpkg@v10
 
-    - name: Run CMake consuming CMakePreset.json and vcpkg.json
+    - name: Configure CMake with CMakePreset.json and vcpkg.json
       uses: lukka/run-cmake@v10
       with:
         # This is the default path to the CMakeLists.txt along side the
@@ -71,14 +71,25 @@ jobs:
         # cmakeListsTxtPath: '${{github.workspace}}/CMakeLists.txt'
         configurePreset: ${{matrix.preset}}
 
+    - name: Build
+      # Build your program with the given configuration
+      run: cmake
+        --build ${{github.workspace}}/out/build/${{matrix.preset}}
+        --config ${{env.BUILD_TYPE}}
+
+    - name: Test
+      working-directory: ${{github.workspace}}/out/build/${{matrix.preset}}
+      # Execute tests defined by the CMake configuration
+      run: ctest -C ${{env.BUILD_TYPE}}
+
+    - name: List files
+      run: ls ${{github.workspace}} -alR
+
     #- name: Upload the artifacts
     #  uses: actions/upload-artifact@v3
     #  with:
     #    name: osslsigncode-${{matrix.triplet}}
     #    path: ${{github.workspace}}
-
-    - name: List files
-      run: find ${{github.workspace}} -ls
 
     env:
       VCPKG_DEFAULT_TRIPLET: ${{matrix.triplet}}
