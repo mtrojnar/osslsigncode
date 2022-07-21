@@ -98,36 +98,25 @@
 
 1) Install and integrate vcpkg: https://vcpkg.io/en/getting-started.html
 
-2) Install the 32-bit and/or 64-bit prerequisites:
-```
-  vcpkg install openssl:x86-windows curl:x86-windows
-  vcpkg install openssl:x64-windows curl:x64-windows
-```
+2) Git clone osslsigncode: https://github.com/mtrojnar/osslsigncode/
 
-3) Git clone osslsigncode: https://github.com/mtrojnar/osslsigncode/
-
-4) Build osslsigncode with GUI or cmake.
+3) Build osslsigncode with GUI or cmake.
   Navigate to the build directory and run CMake to configure the osslsigncode project
   and generate a native build system:
 ```
-  mkdir build && cd build && cmake ..
-```
-  with specific compile options:
-```
-  -Denable-strict=ON
-  -Denable-pedantic=ON
+mkdir build && cd build && cmake -S .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=[installation directory] -DCMAKE_TOOLCHAIN_FILE=[path to vcpkg]/scripts/buildsystems/vcpkg.cmake
 ```
   Then call that build system to actually compile/link the osslsigncode project:
 ```
   cmake --build .
 ```
 
-5) Make tests.
+4) Make tests.
 ```
   ctest -C Release
 ```
 
-6) Make install (with administrative privileges).
+5) Make install (with administrative privileges if necessary).
 ```
-  cmake --install . --prefix "C:\osslsigncode"
+  cmake --install .
 ```
