@@ -71,7 +71,7 @@ jobs:
         # located elsewhere.
         # cmakeListsTxtPath: '${{ github.workspace }}/CMakeLists.txt'
         configurePreset: ${{matrix.preset}}
-        buildPreset: ${{matrix.preset}}
+        #buildPreset: ${{matrix.preset}}
 
     env:
       VCPKG_DEFAULT_TRIPLET: ${{matrix.triplet}} 
