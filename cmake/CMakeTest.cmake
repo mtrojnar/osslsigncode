@@ -40,10 +40,10 @@ if(NOT CMAKE_HOST_WIN32)
 else()
   set(makecerts_result 1)
 endif()
-
 if(makecerts_result)
+  message(STATUS "makecerts.sh failed")
   if(makecerts_output)
-    message(STATUS "makecerts.sh failed: ${makecerts_output}")
+    message(STATUS "${makecerts_output}")
   endif()
   file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/tests/certs"
     DESTINATION "${PROJECT_BINARY_DIR}/Testing"
