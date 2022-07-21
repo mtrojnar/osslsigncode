@@ -42,7 +42,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        triplet: [x64-windows, x86-windows]
+        include:
+          - triplet: x64-windows
+            preset: x64-release
+          - triplet: x86-windows
+            preset: x86-release
 
     runs-on: windows-latest
 
@@ -57,7 +61,7 @@ jobs:
     - name: Restore artifacts, or setup vcpkg
       uses: lukka/run-vcpkg@v10
       with:
-        appendedCacheKey: "osslsigncode-2-${{matrix.triplet}}"
+        appendedCacheKey: "osslsigncode-3-${{matrix.triplet}}"
 
     - name: Run CMake consuming CMakePreset.json and vcpkg.json
       uses: lukka/run-cmake@v10
@@ -66,8 +70,8 @@ jobs:
         # CMakePresets.json. Change if you need have CMakeLists.txt and CMakePresets.json
         # located elsewhere.
         # cmakeListsTxtPath: '${{ github.workspace }}/CMakeLists.txt'
-        configurePreset: 'ninja-multi-vcpkg'
-        buildPreset: 'ninja-multi-vcpkg'
+        configurePreset: ${{matrix.preset}}
+        buildPreset: ${{matrix.preset}}
 
     env:
       VCPKG_DEFAULT_TRIPLET: ${{matrix.triplet}} 
