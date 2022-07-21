@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+    branches: [ "master" ]
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
@@ -70,11 +71,14 @@ jobs:
         # cmakeListsTxtPath: '${{github.workspace}}/CMakeLists.txt'
         configurePreset: ${{matrix.preset}}
 
-    - name: Upload the artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: osslsigncode-${{matrix.triplet}}
-        path: ${{github.workspace}}
+    #- name: Upload the artifacts
+    #  uses: actions/upload-artifact@v3
+    #  with:
+    #    name: osslsigncode-${{matrix.triplet}}
+    #    path: ${{github.workspace}}
+
+    - name: List files
+      run: find ${{github.workspace}} -ls
 
     env:
       VCPKG_DEFAULT_TRIPLET: ${{matrix.triplet}}
