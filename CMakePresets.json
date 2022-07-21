@@ -1,8 +1,8 @@
 ﻿{
   "buildPresets": [
     {
-      "configurePreset": "windows-base",
-      "name": "windows-base"
+      "configurePreset": "ninja-multi-vcpkg",
+      "name": "ninja-multi-vcpkg"
     }
   ],
   "configurePresets": [
@@ -62,16 +62,29 @@
       "displayName": "x86 Release",
       "inherits": "x86-debug",
       "name": "x86-release"
+    },
+    {
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": {
+          "type": "FILEPATH",
+          "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        }
+      },
+      "description": "Default build using Ninja Multi-Config generator",
+      "displayName": "Ninja Multi-Config",
+      "generator": "Ninja Multi-Config",
+      "name": "ninja-multi-vcpkg"
     }
   ],
   "testPresets": [
     {
-      "configurePreset": "windows-base",
+      "configurePreset": "ninja-multi-vcpkg",
       "execution": {
         "noTestsAction": "error",
         "stopOnFailure": true
       },
-      "name": "windows-base",
+      "name": "ninja-multi-vcpkg",
       "output": { "outputOnFailure": true }
     }
   ],

@@ -69,9 +69,9 @@ jobs:
         # CMakePresets.json. Change if you need have CMakeLists.txt and
         # CMakePresets.json located elsewhere.
         # cmakeListsTxtPath: '${{github.workspace}}/CMakeLists.txt'
-        configurePreset: ${{matrix.preset}}
-        buildPreset: windows-base
-        testPreset: windows-base
+        configurePreset: ninja-multi-vcpkg
+        buildPreset: ninja-multi-vcpkg
+        testPreset: ninja-multi-vcpkg
 
     - name: List files
       run: ls ${{github.workspace}} -alR
