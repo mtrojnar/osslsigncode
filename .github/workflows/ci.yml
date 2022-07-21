@@ -74,7 +74,7 @@ jobs:
         configurePreset: ninja-multi-vcpkg
         buildPreset: ninja-multi-vcpkg
         testPreset: ninja-multi-vcpkg
-        testPresetCmdString: '^"--preset^",^"ninja-multi-vcpkg^"'
+        testPresetCmdString: "[`--preset`, `$[env.TEST_PRESET_NAME]`, `-C`, `${{env.BUILD_TYPE}}`]"
 
     - name: List files
       run: ls ${{github.workspace}} -alR
