@@ -63,6 +63,7 @@ jobs:
     - name: Configure CMake
       # Configure CMake
       run: cmake
+        -G Ninja
         -A ${{matrix.triplet}}
         -B ${{github.workspace}}/build-${{matrix.triplet}}
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
