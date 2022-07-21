@@ -76,7 +76,7 @@ jobs:
         #testPresetCmdString: "[`--preset`, `$[env.TEST_PRESET_NAME]`, `-C`, `${{env.BUILD_TYPE}}`]"
 
     - name: List files
-      run: ls ${{github.workspace}} -alR
+      run: dir /s ${{github.workspace}}
 
     #- name: Upload the artifacts
     #  uses: actions/upload-artifact@v3
