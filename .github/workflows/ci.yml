@@ -62,6 +62,9 @@ jobs:
       with:
         vcpkgGitCommitId: 'b2a22ff59ab523788a26980f7d38a4e5d4fedb8f'
 
+    - name: List files
+      run: ls ${{github.workspace}} -alR
+
     - name: Configure CMake with CMakePreset.json and vcpkg.json
       uses: lukka/run-cmake@v10
       with:
@@ -74,9 +77,6 @@ jobs:
         buildPresetCmdString: "[`--build`, `--preset`, `$[env.BUILD_PRESET_NAME]`, `-C`, `${{env.BUILD_TYPE}}`]"
         testPreset: ninja-multi-vcpkg
         testPresetCmdString: "[`--preset`, `$[env.TEST_PRESET_NAME]`, `-C`, `${{env.BUILD_TYPE}}`]"
-
-    - name: List files
-      run: ls ${{github.workspace}} -alR
 
     #- name: Upload the artifacts
     #  uses: actions/upload-artifact@v3
