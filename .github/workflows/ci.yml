@@ -70,17 +70,8 @@ jobs:
         # CMakePresets.json located elsewhere.
         # cmakeListsTxtPath: '${{github.workspace}}/CMakeLists.txt'
         configurePreset: ${{matrix.preset}}
-
-    - name: Build
-      # Build your program with the given configuration
-      run: cmake
-        --build ${{github.workspace}}/out/build/${{matrix.preset}}
-        --config ${{env.BUILD_TYPE}}
-
-    - name: Test
-      working-directory: ${{github.workspace}}/out/build/${{matrix.preset}}
-      # Execute tests defined by the CMake configuration
-      run: ctest -C ${{env.BUILD_TYPE}}
+        buildPreset: windows-base
+        testPreset: windows-base
 
     - name: List files
       run: ls ${{github.workspace}} -alR
