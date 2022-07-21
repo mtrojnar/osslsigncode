@@ -58,21 +58,16 @@ jobs:
       uses: lukka/run-vcpkg@v10
       with:
         appendedCacheKey: "osslsigncode-2-${{matrix.triplet}}"
-        runVcpkgInstall: true
 
-    - name: Configure CMake
-      # Configure CMake
-      run: cmake
-        -G Ninja
-        -A ${{matrix.triplet}}
-        -B ${{github.workspace}}/build-${{matrix.triplet}}
-        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
-
-    - name: Build
-      # Build your program with the given configuration
-      run: cmake
-        --build ${{github.workspace}}/build-${{matrix.triplet}}
-        --config ${{env.BUILD_TYPE}}
+    - name: Run CMake consuming CMakePreset.json and vcpkg.json
+      uses: lukka/run-cmake@v10
+      with:
+        # This is the default path to the CMakeLists.txt along side the
+        # CMakePresets.json. Change if you need have CMakeLists.txt and CMakePresets.json
+        # located elsewhere.
+        # cmakeListsTxtPath: '${{ github.workspace }}/CMakeLists.txt'
+        configurePreset: 'ninja-multi-vcpkg'
+        buildPreset: 'ninja-multi-vcpkg'
 
     env:
-      VCPKG_DEFAULT_TRIPLET: ${{matrix.triplet}}
+      VCPKG_DEFAULT_TRIPLET: ${{matrix.triplet}} 
