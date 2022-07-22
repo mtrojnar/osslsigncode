@@ -34,6 +34,12 @@ jobs:
         --build ${{github.workspace}}/build
         --config ${{env.BUILD_TYPE}}
 
+    - name: List files
+      run: |
+        pwd
+        dir -Recurse
+        dir -Recurse {{github.workspace}}
+
     - name: Test
       working-directory: ${{github.workspace}}/build
       # Execute tests defined by the CMake configuration
