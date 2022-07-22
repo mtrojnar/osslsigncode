@@ -78,8 +78,7 @@ jobs:
     - name: List files
       run: |
         pwd
-        dir -Recurse
-        dir -Recurse {{github.workspace}}
+        dir -Recurse ..
 
     #- name: Upload the artifacts
     #  uses: actions/upload-artifact@v3
