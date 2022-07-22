@@ -71,7 +71,6 @@ jobs:
         # cmakeListsTxtPath: '${{github.workspace}}/CMakeLists.txt'
         configurePreset: ninja-multi-vcpkg
         buildPreset: ninja-multi-vcpkg
-        buildPresetCmdString: "[`--build`, `--preset`, `$[env.BUILD_PRESET_NAME]`, `-C`, `${{env.BUILD_TYPE}}`]"
         testPreset: ninja-multi-vcpkg
         testPresetCmdString: "[`--preset`, `$[env.TEST_PRESET_NAME]`, `-C`, `${{env.BUILD_TYPE}}`]"
 
