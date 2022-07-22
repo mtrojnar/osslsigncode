@@ -70,7 +70,7 @@
           "type": "FILEPATH",
           "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
         },
-        "CMAKE_CONFIGURATION_TYPES": "Debug;Release"
+        "CMAKE_CONFIGURATION_TYPES": "Release;Debug"
       },
       "description": "Default build using Ninja Multi-Config generator",
       "displayName": "Ninja Multi-Config",
