@@ -34,12 +34,6 @@ jobs:
         --build ${{github.workspace}}/build
         --config ${{env.BUILD_TYPE}}
 
-    - name: List files
-      run: |
-        pwd
-        dir -Recurse
-        dir -Recurse {{github.workspace}}
-
     - name: Test
       working-directory: ${{github.workspace}}/build
       # Execute tests defined by the CMake configuration
@@ -80,6 +74,12 @@ jobs:
         buildPresetCmdString: "[`--build`, `--preset`, `$[env.BUILD_PRESET_NAME]`, `-C`, `${{env.BUILD_TYPE}}`]"
         #testPreset: ninja-multi-vcpkg
         #testPresetCmdString: "[`--preset`, `$[env.TEST_PRESET_NAME]`, `-C`, `${{env.BUILD_TYPE}}`]"
+
+    - name: List files
+      run: |
+        pwd
+        dir -Recurse
+        dir -Recurse {{github.workspace}}
 
     #- name: Upload the artifacts
     #  uses: actions/upload-artifact@v3
