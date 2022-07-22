@@ -71,13 +71,17 @@ jobs:
         # cmakeListsTxtPath: '${{github.workspace}}/CMakeLists.txt'
         configurePreset: ninja-multi-vcpkg
         buildPreset: ninja-multi-vcpkg
-        #testPreset: ninja-multi-vcpkg
-        #testPresetCmdString: "[`--preset`, `$[env.TEST_PRESET_NAME]`, `-C`, `${{env.BUILD_TYPE}}`]"
+        testPreset: ninja-multi-vcpkg
+        testPresetCmdString: "[`--preset`, `$[env.TEST_PRESET_NAME]`, `-C`, `${{env.BUILD_TYPE}}`]"
 
     - name: List files
-      run: |
-        pwd
-        dir -Recurse ..
+      run: Get-ChildItem -Recurse -Name ..
+
+    - name: Install
+      run: cmake --install ${{github.workspace}}/out/build/ninja-multi-config/${{env.BUILD_TYPE}}
+
+    - name: List files
+      run: Get-ChildItem -Recurse -Name ..
 
     #- name: Upload the artifacts
     #  uses: actions/upload-artifact@v3
