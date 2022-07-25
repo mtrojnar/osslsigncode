@@ -22,13 +22,6 @@ OPENSSL_CONF = os.path.join(CONF_PATH, "./openssl_tsa.cnf")
 REQUEST = os.path.join(FILES_PATH, "./jreq.tsq")
 RESPONS = os.path.join(FILES_PATH, "./jresp.tsr")
 
-if os.path.exists(os.path.join(RESULT_PATH, "./Release/")):
-    OSSLSIGNCODE_FILE = os.path.join(RESULT_PATH, "./Release/osslsigncode")
-elif os.path.exists(os.path.join(RESULT_PATH, "./Debug/")):
-    OSSLSIGNCODE_FILE = os.path.join(RESULT_PATH, "./Debug/osslsigncode")
-else:
-    OSSLSIGNCODE_FILE = os.path.join(RESULT_PATH, "./osslsigncode")
-
 DEFAULT_OPENSSL = ["openssl", "ts",
     "-reply", "-config", OPENSSL_CONF,
     "-passin", "pass:passme",
@@ -87,6 +80,12 @@ def parse_args() -> str:
     """Parse the command-line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--bindir",
+        type=pathlib.Path,
+        default=RESULT_PATH,
+        help="osslsigncode binary"
+    )
+    parser.add_argument(
         "--input",
         type=pathlib.Path,
         default=DEFAULT_IN,
@@ -117,7 +116,8 @@ def parse_args() -> str:
         help="additional certificates"
     )
     args = parser.parse_args()
-    program = [OSSLSIGNCODE_FILE, "sign", "-in", args.input, "-out", args.output,
+    program = [os.path.join(args.bindir, "./osslsigncode"), "sign",
+        "-in", args.input, "-out", args.output,
         "-certs", args.certs, "-key", args.key,
         "-addUnauthenticatedBlob", "-add-msi-dse", "-comm", "-ph", "-jp", "low",
         "-h", "sha384", "-st", "1556668800", "-i", "https://www.osslsigncode.com/",
