@@ -66,13 +66,14 @@ set_target_properties(osslsigncode PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
 include(CMakeTest)
 
 # installation rules for a project
-install(TARGETS osslsigncode RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX})
+set(BINDIR "${CMAKE_INSTALL_PREFIX}/bin")
+install(TARGETS osslsigncode RUNTIME DESTINATION ${BINDIR})
 if(WIN32)
   install(FILES
     "${PROJECT_BINARY_DIR}/libcrypto-3-x64.dll"
     "${PROJECT_BINARY_DIR}/libcurl.dll"
     "${PROJECT_BINARY_DIR}/zlib1.dll"
-    DESTINATION ${CMAKE_INSTALL_PREFIX}
+    DESTINATION ${BINDIR}
   )
 else()
   include(CMakeDist)
