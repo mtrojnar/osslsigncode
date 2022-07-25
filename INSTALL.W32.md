@@ -104,11 +104,11 @@
   Navigate to the build directory and run CMake to configure the osslsigncode project
   and generate a native build system:
 ```
-mkdir build && cd build && cmake -S .. -G "Ninja Multi-Config" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=[installation directory] -DCMAKE_TOOLCHAIN_FILE=[path to vcpkg]/scripts/buildsystems/vcpkg.cmake
+mkdir build && cd build && cmake -S .. -G "Ninja Multi-Config" -CMAKE_DEFAULT_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=[installation directory] -DCMAKE_TOOLCHAIN_FILE=[path to vcpkg]/scripts/buildsystems/vcpkg.cmake
 ```
   Then call that build system to actually compile/link the osslsigncode project:
 ```
-  cmake --build . --config Release
+  cmake --build .
 ```
 
 4) Make tests.

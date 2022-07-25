@@ -206,7 +206,7 @@ if(Python3_FOUND)
       add_test(
         NAME sign_ts_${cert}_${ext}
         COMMAND ${Python3_EXECUTABLE} "${PROJECT_BINARY_DIR}/Testing/tsa_server.py"
-          "--bindir" "${PROJECT_BINARY_DIR}/${CMAKE_BUILD_TYPE}"
+          "--bindir" "${PROJECT_BINARY_DIR}/${CMAKE_DEFAULT_BUILD_TYPE}"
           "--certs" "${CERTS}/${cert}.pem" "--key" "${CERTS}/key.pem"
           "--input" "${FILES}/unsigned.${ext}" "--output" "${FILES}/ts_${cert}.${ext}"
       )
