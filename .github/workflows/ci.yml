@@ -42,11 +42,16 @@ jobs:
       if: ${{matrix.os == 'ubuntu-latest'}}
       run: sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
 
-    - name: Install vcpkg dependencies
-      if: ${{matrix.os != 'ubuntu-latest'}}
-      run: vcpkg install
+    - name: Configure CMake without vcpkg
+      if: ${{matrix.os == 'ubuntu-latest'}}
+      run: cmake
+        -G "${{matrix.generator}}"
+        -B ${{github.workspace}}/build
+        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+        -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
 
-    - name: Configure CMake
+    - name: Configure CMake with vcpkg
+      if: ${{matrix.os != 'ubuntu-latest'}}
       run: cmake
         -G "${{matrix.generator}}"
         -B ${{github.workspace}}/build
