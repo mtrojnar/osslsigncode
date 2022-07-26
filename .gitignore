@@ -30,7 +30,6 @@ stamp-h1
 *.def
 *.dll
 *.gz
-*.key
 *.la
 *.lib
 *.lo

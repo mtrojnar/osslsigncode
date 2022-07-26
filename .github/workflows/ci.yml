@@ -1,10 +1,8 @@
-name: ci
+name: CI
 
 on:
   push:
-    branches: [ "master" ]
   pull_request:
-    branches: [ "master" ]
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
@@ -12,29 +10,99 @@ env:
 
 jobs:
   build:
-    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
-    # You can convert this to a matrix build if you need cross-platform coverage.
-    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - triplet: x64-linux
+            os: ubuntu-latest
+            vcpkg_root: /usr/local/share/vcpkg
+            generator: Unix Makefiles
+          - triplet: x64-osx
+            os: macOS-latest
+            vcpkg_root: /usr/local/share/vcpkg
+            generator: Unix Makefiles
+            cache: /Users/runner/.cache/vcpkg/archives
+          - triplet: x64-windows
+            os: windows-latest
+            vcpkg_root: C:/vcpkg
+            generator: Ninja
+            cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
+          - triplet: x86-windows
+            os: windows-latest
+            vcpkg_root: C:/vcpkg
+            generator: Ninja
+            cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
+
+    runs-on: ${{matrix.os}}
 
     steps:
     - uses: actions/checkout@v3
-    
-    - name: Install dependencies
+
+    - name: Cache the vcpkg archives
+      if: matrix.os != 'ubuntu-latest'
+      uses: actions/cache@v3
+      with:
+        path: ${{matrix.cache}}
+        key: ${{matrix.triplet}}
+
+    - name: Configure VS Toolchain (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Install apt dependencies
+      if: matrix.os == 'ubuntu-latest'
       run: sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
 
-    - name: Configure CMake
-      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
-      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+    - name: Configure CMake without vcpkg
+      if: matrix.os == 'ubuntu-latest'
+      run: cmake
+        -G "${{matrix.generator}}"
+        -B ${{github.workspace}}/build
+        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+        -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
+
+    - name: Configure CMake with vcpkg
+      if: matrix.os != 'ubuntu-latest'
+      run: cmake
+        -G "${{matrix.generator}}"
+        -B ${{github.workspace}}/build
+        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+        -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
+        -DCMAKE_TOOLCHAIN_FILE=${{matrix.vcpkg_root}}/scripts/buildsystems/vcpkg.cmake
 
     - name: Build
-      # Build your program with the given configuration
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+      run: cmake
+        --build ${{github.workspace}}/build
+        --config ${{env.BUILD_TYPE}}
+
+    - name: List files (Unix/Linux)
+      if: matrix.os != 'windows-latest'
+      run: find .. -ls
+
+    - name: List files (Windows)
+      if: matrix.os == 'windows-latest'
+      run: Get-ChildItem -Recurse -Name ..
 
     - name: Test
       working-directory: ${{github.workspace}}/build
-      # Execute tests defined by the CMake configuration.  
-      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
       run: ctest -C ${{env.BUILD_TYPE}}
-      
+
+    - name: Upload the errors
+      uses: actions/upload-artifact@v3
+      if: failure()
+      with:
+        name: errors-${{matrix.triplet}}
+        path: ${{github.workspace}}/build/Testing/Temporary/LastTest.log
+
+    - name: Install
+      run: cmake --install ${{github.workspace}}/build
+
+    - name: Upload the executables
+      uses: actions/upload-artifact@v3
+      with:
+        name: osslsigncode-${{matrix.triplet}}
+        path: ${{github.workspace}}/dist
+
+    env:
+      VCPKG_DEFAULT_TRIPLET: ${{matrix.triplet}}
