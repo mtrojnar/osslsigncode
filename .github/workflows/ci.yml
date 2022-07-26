@@ -38,31 +38,26 @@ jobs:
 
     - uses: actions/checkout@v3
 
-    - name: Configure CMake without vcpkg
+    - name: Install apt dependencies
       if: ${{matrix.os == 'ubuntu-latest'}}
-      run: |
-        sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
-        cmake
-          -G "${{matrix.generator}}"
-          -B ${{github.workspace}}/build
-          -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
-          -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
+      run: sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
 
-    - name: Configure CMake with vcpkg
+    - name: Install vcpkg dependencies
       if: ${{matrix.os != 'ubuntu-latest'}}
-      run: |
-        cmake
-          -G "${{matrix.generator}}"
-          -B ${{github.workspace}}/build
-          -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
-          -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
-          -DCMAKE_TOOLCHAIN_FILE=${{matrix.vcpkg_root}}/scripts/buildsystems/vcpkg.cmake
+      run: vcpkg install
+
+    - name: Configure CMake
+      run: cmake
+        -G "${{matrix.generator}}"
+        -B ${{github.workspace}}/build
+        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+        -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
+        -DCMAKE_TOOLCHAIN_FILE=${{matrix.vcpkg_root}}/scripts/buildsystems/vcpkg.cmake
 
     - name: Build
-      run: |
-        cmake
-          --build ${{github.workspace}}/build
-          --config ${{env.BUILD_TYPE}}
+      run: cmake
+        --build ${{github.workspace}}/build
+        --config ${{env.BUILD_TYPE}}
 
     - name: List files
       if: ${{matrix.os == 'windows-latest'}}
@@ -73,7 +68,7 @@ jobs:
       run: ctest -C ${{env.BUILD_TYPE}}
 
     - name: Install
-      run: cmake --install ${{github.workspace}}/build
+      run: cmake --install
 
     - name: Upload the artifacts
       uses: actions/upload-artifact@v3
