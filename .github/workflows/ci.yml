@@ -22,19 +22,29 @@ jobs:
             os: macOS-latest
             vcpkg_root: /usr/local/share/vcpkg
             generator: Unix Makefiles
+            cache: /Users/runner/.cache/vcpkg/archives
           - triplet: x64-windows
             os: windows-latest
             vcpkg_root: C:/vcpkg
             generator: Ninja
+            cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
           - triplet: x86-windows
             os: windows-latest
             vcpkg_root: C:/vcpkg
             generator: Ninja
+            cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
 
     runs-on: ${{matrix.os}}
 
     steps:
     - uses: actions/checkout@v3
+
+    - name: Cache the vcpkg archives
+      if: ${{matrix.os != 'ubuntu-latest'}}
+      uses: actions/cache@v3
+      with:
+        path: ${{matrix.cache}}
+        key: ${{matrix.triplet}}
 
     - name: Configure VS Toolchain (Windows)
       if: matrix.os == 'windows-latest'
