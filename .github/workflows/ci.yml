@@ -76,7 +76,11 @@ jobs:
         --build ${{github.workspace}}/build
         --config ${{env.BUILD_TYPE}}
 
-    - name: List files
+    - name: List files (Unix/Linux)
+      if: ${{matrix.os != 'windows-latest'}}
+      run: find .. -ls
+
+    - name: List files (Windows)
       if: ${{matrix.os == 'windows-latest'}}
       run: Get-ChildItem -Recurse -Name ..
 
