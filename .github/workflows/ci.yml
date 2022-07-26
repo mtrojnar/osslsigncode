@@ -14,18 +14,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - triplet: 'x64-linux'
-            os: 'ubuntu-latest'
-            generator: 'Unix Makefiles'
-          - triplet: 'x64-osx'
-            os: 'macOS-latest'
-            generator: 'Unix Makefiles'
-          - triplet: 'x64-windows'
-            os: 'windows-latest'
-            generator: 'Ninja'
-          - triplet: 'x86-windows'
-            os: 'windows-latest'
-            generator: 'Ninja'
+          - triplet: x64-linux
+            os: ubuntu-latest
+            generator: Unix Makefiles
+          - triplet: x64-osx
+            os: macOS-latest
+            generator: Unix Makefiles
+          - triplet: x64-windows
+            os: windows-latest
+            generator: Ninja
+          - triplet: x86-windows
+            os: windows-latest
+            generator: Ninja
 
     runs-on: ${{matrix.os}}
 
@@ -42,7 +42,7 @@ jobs:
 
     - name: Configure CMake
       run: cmake
-        -G ${{matrix.generator}}
+        -G "${{matrix.generator}}"
         -B ${{github.workspace}}/build
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
         -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
