@@ -4386,7 +4386,7 @@ static void add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp)
 		}
 	if (attrs) {
 		astr = ASN1_STRING_new();
-		ASN1_STRING_set(astr, attrs, sizeof attrs);
+		ASN1_STRING_set(astr, attrs, sizeof java_attrs_low);
 		PKCS7_add_signed_attribute(si, OBJ_txt2nid(MS_JAVA_SOMETHING),
 				V_ASN1_SEQUENCE, astr);
 	}
