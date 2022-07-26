@@ -138,6 +138,7 @@ def main() -> None:
         ret = err.returncode
     except OSError as err:
         print(f"OSError: {err}")
+        print(f"program: {program}")
         ret = err.errno
     except Exception as err: # pylint: disable=broad-except
         print(f"osslsigncode error: {err}")
