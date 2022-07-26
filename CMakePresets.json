@@ -1,0 +1,93 @@
+﻿{
+  "buildPresets": [
+    {
+      "configurePreset": "ninja-multi-vcpkg",
+      "name": "ninja-multi-vcpkg"
+    }
+  ],
+  "configurePresets": [
+    {
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe",
+        "CMAKE_TOOLCHAIN_FILE": {
+          "type": "FILEPATH",
+          "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        }
+      },
+      "condition": {
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows",
+        "type": "equals"
+      },
+      "description": "Target Windows with the Visual Studio development environment.",
+      "generator": "Ninja",
+      "hidden": true,
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "name": "windows-base"
+    },
+    {
+      "architecture": {
+        "strategy": "external",
+        "value": "x64"
+      },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" },
+      "description": "Target Windows (64-bit) with the Visual Studio development environment. (Debug)",
+      "displayName": "x64 Debug",
+      "inherits": "windows-base",
+      "name": "x64-debug"
+    },
+    {
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" },
+      "description": "Target Windows (64-bit) with the Visual Studio development environment. (RelWithDebInfo)",
+      "displayName": "x64 Release",
+      "inherits": "x64-debug",
+      "name": "x64-release"
+    },
+    {
+      "architecture": {
+        "strategy": "external",
+        "value": "x86"
+      },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" },
+      "description": "Target Windows (32-bit) with the Visual Studio development environment. (Debug)",
+      "displayName": "x86 Debug",
+      "inherits": "windows-base",
+      "name": "x86-debug"
+    },
+    {
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" },
+      "description": "Target Windows (32-bit) with the Visual Studio development environment. (RelWithDebInfo)",
+      "displayName": "x86 Release",
+      "inherits": "x86-debug",
+      "name": "x86-release"
+    },
+    {
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": {
+          "type": "FILEPATH",
+          "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        },
+        "CMAKE_CONFIGURATION_TYPES": "Release;Debug"
+      },
+      "description": "Default build using Ninja Multi-Config generator",
+      "displayName": "Ninja Multi-Config",
+      "generator": "Ninja Multi-Config",
+      "name": "ninja-multi-vcpkg"
+    }
+  ],
+  "testPresets": [
+    {
+      "configurePreset": "ninja-multi-vcpkg",
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": true
+      },
+      "name": "ninja-multi-vcpkg",
+      "output": { "outputOnFailure": true }
+    }
+  ],
+  "version": 3
+}

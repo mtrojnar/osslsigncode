@@ -1,17 +1,15 @@
-name: ci
+name: CI
 
 on:
   push:
-    branches: [ "master" ]
   pull_request:
-    branches: [ "master" ]
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
 
 jobs:
-  build:
+  build-ubuntu:
     # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
     # You can convert this to a matrix build if you need cross-platform coverage.
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
@@ -19,22 +17,77 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    
+
     - name: Install dependencies
       run: sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
 
     - name: Configure CMake
-      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
-      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+      # Configure CMake in a 'build' subdirectory
+      run: cmake
+        -B ${{github.workspace}}/build
+        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
     - name: Build
       # Build your program with the given configuration
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+      run: cmake
+        --build ${{github.workspace}}/build
+        --config ${{env.BUILD_TYPE}}
 
     - name: Test
       working-directory: ${{github.workspace}}/build
-      # Execute tests defined by the CMake configuration.  
-      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      # Execute tests defined by the CMake configuration
       run: ctest -C ${{env.BUILD_TYPE}}
-      
+
+  build-windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - triplet: x64-windows
+            preset: x64-release
+          - triplet: x86-windows
+            preset: x86-release
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install the latest CMake
+      uses: lukka/get-cmake@latest
+
+    - name: Restore artifacts or setup vcpkg
+      uses: lukka/run-vcpkg@v10
+      with:
+        appendedCacheKey: ${{matrix.preset}}
+        vcpkgGitCommitId: b2a22ff59ab523788a26980f7d38a4e5d4fedb8f
+
+    - name: Configure using CMakePreset.json and vcpkg.json, build and test
+      uses: lukka/run-cmake@v10
+      with:
+        # This is the default path to the CMakeLists.txt along side the
+        # CMakePresets.json. Change if you need have CMakeLists.txt and
+        # CMakePresets.json located elsewhere.
+        # cmakeListsTxtPath: '${{github.workspace}}/CMakeLists.txt'
+        configurePreset: ninja-multi-vcpkg
+        buildPreset: ninja-multi-vcpkg
+        testPreset: ninja-multi-vcpkg
+        testPresetCmdString: "[`--preset`, `$[env.TEST_PRESET_NAME]`, `-C`, `${{env.BUILD_TYPE}}`]"
+
+    - name: List files
+      run: Get-ChildItem -Recurse -Name ..
+
+    - name: Install
+      run: cmake --install ${{github.workspace}}/out/build/ninja-multi-config/${{env.BUILD_TYPE}}
+
+    - name: List files
+      run: Get-ChildItem -Recurse -Name ..
+
+    #- name: Upload the artifacts
+    #  uses: actions/upload-artifact@v3
+    #  with:
+    #    name: osslsigncode-${{matrix.triplet}}
+    #    path: ${{github.workspace}}
+
+    env:
+      VCPKG_DEFAULT_TRIPLET: ${{matrix.triplet}}
