@@ -14,18 +14,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            triplet: x64-linux
-            generator: Unix Makefiles
-          - os: macOS-latest
-            triplet: x64-osx
+          - triplet: 'x64-linux'
+            os: 'ubuntu-latest'
             generator: 'Unix Makefiles'
-          - os: windows-latest
-            triplet: x64-windows
-            generator: Ninja
-          - os: windows-latest
-            triplet: x86-windows
-            generator: Ninja
+          - triplet: 'x64-osx'
+            os: 'macOS-latest'
+            generator: 'Unix Makefiles'
+          - triplet: 'x64-windows'
+            os: 'windows-latest'
+            generator: 'Ninja'
+          - triplet: 'x86-windows'
+            os: 'windows-latest'
+            generator: 'Ninja'
 
     runs-on: ${{matrix.os}}
 
