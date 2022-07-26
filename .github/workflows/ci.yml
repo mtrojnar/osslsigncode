@@ -68,7 +68,7 @@ jobs:
       run: ctest -C ${{env.BUILD_TYPE}}
 
     - name: Install
-      run: cmake --install
+      run: cmake --install ${{github.workspace}}/build
 
     - name: Upload the artifacts
       uses: actions/upload-artifact@v3
