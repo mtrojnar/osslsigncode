@@ -84,10 +84,17 @@ jobs:
       working-directory: ${{github.workspace}}/build
       run: ctest -C ${{env.BUILD_TYPE}}
 
+    - name: Upload the errors
+      uses: actions/upload-artifact@v3
+      if: failure()
+      with:
+        name: errors-${{matrix.triplet}}
+        path: ${{github.workspace}}/dist/Testing/Temporary/LastTest.log
+
     - name: Install
       run: cmake --install ${{github.workspace}}/build
 
-    - name: Upload the artifacts
+    - name: Upload the executables
       uses: actions/upload-artifact@v3
       with:
         name: osslsigncode-${{matrix.triplet}}
