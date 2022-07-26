@@ -19,7 +19,7 @@ jobs:
             generator: Unix Makefiles
           - os: macOS-latest
             triplet: x64-osx
-            generator: Unix Makefiles
+            generator: 'Unix Makefiles'
           - os: windows-latest
             triplet: x64-windows
             generator: Ninja
