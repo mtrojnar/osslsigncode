@@ -1,6 +1,10 @@
 osslsigncode
 ============
 
+## BUILD STATUS
+
+[![CI](https://github.com/mtrojnar/osslsigncode/actions/workflows/ci.yml/badge.svg)](https://github.com/mtrojnar/osslsigncode/actions/workflows/ci.yml)
+
 ## WHAT IS IT?
 
 osslsigncode is a small tool that implements part of the functionality
