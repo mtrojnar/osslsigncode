@@ -9,17 +9,32 @@ env:
   BUILD_TYPE: Release
 
 jobs:
-  build-ubuntu:
-    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
-    # You can convert this to a matrix build if you need cross-platform coverage.
-    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            triplet: x64-linux
+          - os: macOS-latest
+            triplet: x64-macOS
+          - os: windows-latest
+            triplet: x64-windows
+          - os: windows-latest
+            triplet: x86-windows
+
+    runs-on: ${{matrix.os}}
 
     steps:
     - uses: actions/checkout@v3
 
-    - name: Install dependencies
+    - name: Install Linux dependencies
+      if: ${{matrix.os == 'ubuntu-latest'}}
       run: sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
+
+    - name: Install other dependencies
+      if: ${{matrix.os != 'ubuntu-latest'}}
+      run: vcpkg install
 
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory
@@ -33,55 +48,21 @@ jobs:
         --build ${{github.workspace}}/build
         --config ${{env.BUILD_TYPE}}
 
+    - name: List files
+      if: ${{matrix.os == 'windows-latest'}}
+      run: Get-ChildItem -Recurse -Name ..
+
     - name: Test
       working-directory: ${{github.workspace}}/build
       # Execute tests defined by the CMake configuration
       run: ctest -C ${{env.BUILD_TYPE}}
 
-  build-windows:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - triplet: x64-windows
-            preset: x64-release
-          - triplet: x86-windows
-            preset: x86-release
-
-    runs-on: windows-latest
-
-    steps:
-    - uses: actions/checkout@v3
-
-    - name: Install the latest CMake
-      uses: lukka/get-cmake@latest
-
-    - name: Restore artifacts or setup vcpkg
-      uses: lukka/run-vcpkg@v10
-      with:
-        appendedCacheKey: ${{matrix.preset}}
-        vcpkgGitCommitId: b2a22ff59ab523788a26980f7d38a4e5d4fedb8f
-
-    - name: Configure using CMakePreset.json and vcpkg.json, build and test
-      uses: lukka/run-cmake@v10
-      with:
-        # This is the default path to the CMakeLists.txt along side the
-        # CMakePresets.json. Change if you need have CMakeLists.txt and
-        # CMakePresets.json located elsewhere.
-        # cmakeListsTxtPath: '${{github.workspace}}/CMakeLists.txt'
-        configurePreset: ninja-multi-vcpkg
-        buildPreset: ninja-multi-vcpkg
-        testPreset: ninja-multi-vcpkg
-        testPresetCmdString: "[`--preset`, `$[env.TEST_PRESET_NAME]`, `-C`, `${{env.BUILD_TYPE}}`]"
-
-    - name: List files
-      run: Get-ChildItem -Recurse -Name ..
-
     - name: Install
       run: cmake --install ${{github.workspace}}/out/build/ninja-multi-config/${{env.BUILD_TYPE}}
 
-    - name: List files
-      run: Get-ChildItem -Recurse -Name ..
+    #- name: List files
+    #  if: ${{matrix.os == 'windows-latest'}}
+    #  run: Get-ChildItem -Recurse -Name ..
 
     #- name: Upload the artifacts
     #  uses: actions/upload-artifact@v3
