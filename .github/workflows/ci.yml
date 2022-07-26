@@ -18,18 +18,22 @@ jobs:
             os: ubuntu-latest
             vcpkg_root: /usr/local/share/vcpkg
             generator: Unix Makefiles
+            compiler: gcc
           - triplet: x64-osx
             os: macOS-latest
             vcpkg_root: /usr/local/share/vcpkg
             generator: Unix Makefiles
+            compiler: clang
           - triplet: x64-windows
             os: windows-latest
             vcpkg_root: C:/vcpkg
             generator: Ninja
+            compiler: cl
           - triplet: x86-windows
             os: windows-latest
             vcpkg_root: C:/vcpkg
             generator: Ninja
+            compiler: cl
 
     runs-on: ${{matrix.os}}
 
@@ -49,6 +53,7 @@ jobs:
         -B ${{github.workspace}}/build
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
         -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
+        -DCMAKE_C_COMPILER=${{matrix.compiler}}
 
     - name: Configure CMake with vcpkg
       if: ${{matrix.os != 'ubuntu-latest'}}
@@ -57,6 +62,7 @@ jobs:
         -B ${{github.workspace}}/build
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
         -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
+        -DCMAKE_C_COMPILER=${{matrix.compiler}}
         -DCMAKE_TOOLCHAIN_FILE=${{matrix.vcpkg_root}}/scripts/buildsystems/vcpkg.cmake
 
     - name: Build
