@@ -28,18 +28,21 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Install dependencies on Linux
+    - name: Install apt dependencies
       if: ${{matrix.os == 'ubuntu-latest'}}
       run: sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
 
-    - name: Install dependencies on non-Linux platforms
+    - name: Install vcpkg dependencies
       if: ${{matrix.os != 'ubuntu-latest'}}
       run: vcpkg install
 
     - name: Configure CMake
       run: cmake
+        -G Ninja
         -B ${{github.workspace}}/build
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+        -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
+        -DCMAKE_TOOLCHAIN_FILE=${{env.VCPKG_ROOT}}/scripts/buildsystems/vcpkg.cmake
 
     - name: Build
       run: cmake
@@ -54,18 +57,14 @@ jobs:
       working-directory: ${{github.workspace}}/build
       run: ctest -C ${{env.BUILD_TYPE}}
 
-    #- name: Install
-    #  run: cmake --install ${{github.workspace}}/out/build/ninja-multi-config/${{env.BUILD_TYPE}}
+    - name: Install
+      run: cmake --install
 
-    #- name: List files
-    #  if: ${{matrix.os == 'windows-latest'}}
-    #  run: Get-ChildItem -Recurse -Name ..
-
-    #- name: Upload the artifacts
-    #  uses: actions/upload-artifact@v3
-    #  with:
-    #    name: osslsigncode-${{matrix.triplet}}
-    #    path: ${{github.workspace}}
+    - name: Upload the artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: osslsigncode-${{matrix.triplet}}
+        path: ${{github.workspace}}/dist
 
     env:
       VCPKG_DEFAULT_TRIPLET: ${{matrix.triplet}}
