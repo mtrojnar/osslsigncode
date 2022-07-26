@@ -89,7 +89,7 @@ jobs:
       if: failure()
       with:
         name: errors-${{matrix.triplet}}
-        path: ${{github.workspace}}/dist/Testing/Temporary/LastTest.log
+        path: ${{github.workspace}}/build/Testing/Temporary/LastTest.log
 
     - name: Install
       run: cmake --install ${{github.workspace}}/build
