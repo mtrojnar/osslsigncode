@@ -17,7 +17,7 @@ jobs:
           - os: ubuntu-latest
             triplet: x64-linux
           - os: macOS-latest
-            triplet: x64-macOS
+            triplet: x64-osx
           - os: windows-latest
             triplet: x64-windows
           - os: windows-latest
@@ -28,22 +28,20 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Install Linux dependencies
+    - name: Install dependencies on Linux
       if: ${{matrix.os == 'ubuntu-latest'}}
       run: sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
 
-    - name: Install other dependencies
+    - name: Install dependencies on non-Linux platforms
       if: ${{matrix.os != 'ubuntu-latest'}}
       run: vcpkg install
 
     - name: Configure CMake
-      # Configure CMake in a 'build' subdirectory
       run: cmake
         -B ${{github.workspace}}/build
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
 
     - name: Build
-      # Build your program with the given configuration
       run: cmake
         --build ${{github.workspace}}/build
         --config ${{env.BUILD_TYPE}}
@@ -54,11 +52,10 @@ jobs:
 
     - name: Test
       working-directory: ${{github.workspace}}/build
-      # Execute tests defined by the CMake configuration
       run: ctest -C ${{env.BUILD_TYPE}}
 
-    - name: Install
-      run: cmake --install ${{github.workspace}}/out/build/ninja-multi-config/${{env.BUILD_TYPE}}
+    #- name: Install
+    #  run: cmake --install ${{github.workspace}}/out/build/ninja-multi-config/${{env.BUILD_TYPE}}
 
     #- name: List files
     #  if: ${{matrix.os == 'windows-latest'}}
