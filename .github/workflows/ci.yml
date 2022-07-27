@@ -17,21 +17,19 @@ jobs:
           - triplet: x64-linux
             os: ubuntu-latest
             vcpkg_root: /usr/local/share/vcpkg
-            generator: Unix Makefiles
           - triplet: x64-osx
             os: macOS-latest
             vcpkg_root: /usr/local/share/vcpkg
-            generator: Unix Makefiles
             cache: /Users/runner/.cache/vcpkg/archives
           - triplet: x64-windows
+            arch: x64
             os: windows-latest
             vcpkg_root: C:/vcpkg
-            generator: Ninja
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
           - triplet: x86-windows
+            arch: x86
             os: windows-latest
             vcpkg_root: C:/vcpkg
-            generator: Ninja
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
 
     runs-on: ${{matrix.os}}
@@ -49,23 +47,32 @@ jobs:
     - name: Configure VS Toolchain (Windows)
       if: matrix.os == 'windows-latest'
       uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: ${{matrix.arch}}
 
     - name: Install apt dependencies
       if: matrix.os == 'ubuntu-latest'
       run: sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
 
-    - name: Configure CMake without vcpkg
+    - name: Configure CMake (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: cmake
-        -G "${{matrix.generator}}"
         -B ${{github.workspace}}/build
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
         -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
 
-    - name: Configure CMake with vcpkg
-      if: matrix.os != 'ubuntu-latest'
+    - name: Configure CMake (macOS)
+      if: matrix.os == 'macOS-latest'
       run: cmake
-        -G "${{matrix.generator}}"
+        -B ${{github.workspace}}/build
+        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+        -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
+        -DCMAKE_TOOLCHAIN_FILE=${{matrix.vcpkg_root}}/scripts/buildsystems/vcpkg.cmake
+
+    - name: Configure CMake (Windows)
+      if: matrix.os == 'windows-latest'
+      run: cmake
+        -G Ninja
         -B ${{github.workspace}}/build
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
         -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
@@ -76,7 +83,7 @@ jobs:
         --build ${{github.workspace}}/build
         --config ${{env.BUILD_TYPE}}
 
-    - name: List files (Unix/Linux)
+    - name: List files (Linux/macOS)
       if: matrix.os != 'windows-latest'
       run: find .. -ls
 
@@ -103,6 +110,3 @@ jobs:
       with:
         name: osslsigncode-${{matrix.triplet}}
         path: ${{github.workspace}}/dist
-
-    env:
-      VCPKG_DEFAULT_TRIPLET: ${{matrix.triplet}}
