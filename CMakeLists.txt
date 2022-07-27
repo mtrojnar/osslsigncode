@@ -73,6 +73,8 @@ if(WIN32)
     FILES_MATCHING
     PATTERN "*.dll"
     PATTERN "vcpkg_installed" EXCLUDE
+    PATTERN "CMakeFiles" EXCLUDE
+    PATTERN "Testing" EXCLUDE
   )
 else(WIN32)
   include(CMakeDist)
