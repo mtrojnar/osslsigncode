@@ -68,12 +68,12 @@ include(CMakeTest)
 # installation rules for a project
 install(TARGETS osslsigncode RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX})
 if(WIN32)
-  install(FILES
-    "${PROJECT_BINARY_DIR}/libcrypto-3-x64.dll"
-    "${PROJECT_BINARY_DIR}/libcurl.dll"
-    "${PROJECT_BINARY_DIR}/zlib1.dll"
-    DESTINATION ${CMAKE_INSTALL_PREFIX}
+  install(
+    DIRECTORY ${PROJECT_BINARY_DIR}/ DESTINATION ${CMAKE_INSTALL_PREFIX}
+    FILES_MATCHING
+    PATTERN "*.dll"
+    PATTERN "vcpkg_installed" EXCLUDE
   )
-else()
+else(WIN32)
   include(CMakeDist)
-endif()
+endif(WIN32)
