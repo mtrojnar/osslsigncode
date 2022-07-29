@@ -1,39 +1,5 @@
 include(CheckCCompilerFlag)
 
-function(add_linker_flag_if_supported flagname targets)
-  check_c_compiler_flag("${flagname}" HAVE_FLAG_${flagname})
-  if (HAVE_FLAG_${flagname})
-    foreach(target ${targets})
-      target_link_options(${target} PRIVATE ${flagname})
-    endforeach()
-  endif()
-endfunction()
-
-function(add_compile_flag_if_supported flagname targets)
-  check_c_compiler_flag("${flagname}" HAVE_FLAG_${flagname})
-  if (HAVE_FLAG_${flagname})
-    foreach(target ${targets})
-      target_compile_options(${target} PRIVATE ${flagname})
-    endforeach()
-  endif()
-endfunction()
-
-function(add_linker_flag_to_targets targets)
-  set(CHECKED_FLAGS
-    "-fstack-protector-all"
-    "-fstack-protector"
-    "-fstack-check"
-    "-fPIE"
-    "-pie"
-    "-Wl,-z,relro"
-    "-Wl,-z,now"
-    "-Wl,-z,noexecstack"
-  )
-  foreach(flag ${CHECKED_FLAGS})
-    add_linker_flag_if_supported(${flag} "${targets}")
-  endforeach()
-endfunction()
-
 function(add_debug_flag_if_supported flagname targets)
   check_c_compiler_flag("${flagname}" HAVE_FLAG_${flagname})
   if (HAVE_FLAG_${flagname})
@@ -44,10 +10,6 @@ function(add_debug_flag_if_supported flagname targets)
 endfunction()
 
 function(add_compile_flag_to_targets targets)
-  set(CHECKED_FLAGS
-    # Support address space layout randomization (ASLR)
-    "-fPIE"
-  )
   set(CHECKED_DEBUG_FLAGS
     "-ggdb"
     "-g"
@@ -82,9 +44,6 @@ function(add_compile_flag_to_targets targets)
     "-Wunused-parameter"
     "-Wunused-function"
   )
-  foreach(flag ${CHECKED_FLAGS})
-    add_compile_flag_if_supported(${flag} ${targets})
-  endforeach()
   foreach(flag ${CHECKED_DEBUG_FLAGS})
     add_debug_flag_if_supported(${flag} ${targets})
   endforeach()
@@ -125,7 +84,24 @@ function(add_compile_flags target)
     # Unrecognized compiler options are errors
     target_compile_options(${target} PRIVATE $<$<CONFIG:DEBUG>:/options:strict>)
   else()
-    add_linker_flag_to_targets(${target})
+    check_c_compiler_flag("-fstack-protector-all"  HAVE_STACK_PROTECTOR_ALL)
+    if(HAVE_STACK_PROTECTOR_ALL)
+      target_link_options(${target} PRIVATE -fstack-protector-all)
+    else()
+      check_c_compiler_flag("-fstack-protector"    HAVE_STACK_PROTECTOR)
+      if(HAVE_STACK_PROTECTOR)
+        target_link_options(${target} PRIVATE -fstack-protector)
+      else()
+        message(WARNING "No stack protection supported")
+      endif()
+    endif()
+    # Support address space layout randomization (ASLR)
+    target_compile_options(${target} PRIVATE $<$<NOT:$<C_COMPILER_ID:AppleClang>>:-fPIE>)
+    target_link_options(${target} PRIVATE $<$<NOT:$<C_COMPILER_ID:AppleClang>>:-fPIE -pie>)
+    target_link_options(${target} PRIVATE $<$<NOT:$<C_COMPILER_ID:AppleClang>>:-Wl,-z,relro>)
+    target_link_options(${target} PRIVATE $<$<NOT:$<C_COMPILER_ID:AppleClang>>:-Wl,-z,now>)
+    target_link_options(${target} PRIVATE $<$<NOT:$<C_COMPILER_ID:AppleClang>>:-Wl,-z,noexecstack>)
+    target_link_options(${target} PRIVATE -fstack-check)
     add_compile_flag_to_targets(${target})
   endif()
 endfunction()
