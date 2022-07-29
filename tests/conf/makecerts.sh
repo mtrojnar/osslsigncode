@@ -18,6 +18,7 @@ make_certs() {
   script_path=$(pwd)
   cd "${result_path}"
   mkdir "tmp/"
+  rm -rf "../certs"
 
 # OpenSSL settings
   CONF="${script_path}/openssl_intermediate.cnf"
