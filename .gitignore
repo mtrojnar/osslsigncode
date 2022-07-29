@@ -2,6 +2,7 @@ build/
 CMakeFiles/
 _CPack_Packages/
 Testing/
+.vs/
 
 CMakeCache.txt
 cmake_install.cmake
@@ -29,7 +30,6 @@ stamp-h1
 *.def
 *.dll
 *.gz
-*.key
 *.la
 *.lib
 *.lo

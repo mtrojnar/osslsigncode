@@ -12,7 +12,7 @@
 2) Run "MSYS2 MinGW 64-bit" and build 64-bit Windows executables.
 ```
   cd osslsigncode-folder
-  x86_64-w64-mingw32-gcc osslsigncode.c msi.c msi.h -o osslsigncode.exe \
+  x86_64-w64-mingw32-gcc osslsigncode.c msi.c -o osslsigncode.exe \
     -lcrypto -lssl -lcurl \
     -D 'PACKAGE_STRING="osslsigncode 2.4"' \
     -D 'PACKAGE_BUGREPORT="Michal.Trojnara@stunnel.org"' \
@@ -71,7 +71,7 @@
 3) Build 64-bit Windows executables.
 ```
   cd osslsigncode-folder
-  x86_64-w64-mingw32-gcc osslsigncode.c msi.c msi.h -o osslsigncode.exe \
+  x86_64-w64-mingw32-gcc osslsigncode.c msi.c -o osslsigncode.exe \
     -L 'C:/OpenSSL/lib/' -lcrypto -lssl \
     -I 'C:/OpenSSL/include/' \
     -L 'C:/curl/lib' -lcurl \
@@ -94,52 +94,29 @@
         libcurl/7.78.0 OpenSSL/1.1.1k
 ```
 
-### Building OpenSSL, Curl and osslsigncode sources with Microsoft Visual Studio 64-bit:
+### Building OpenSSL, Curl and osslsigncode sources with Microsoft Visual Studio:
 
-1) Download and install Strawberry Perl from https://strawberryperl.com/
+1) Install and integrate vcpkg: https://vcpkg.io/en/getting-started.html
 
-2) Run "Open Visual Studio 2022 Tools Command Prompt for targeting x64"
+2) Git clone osslsigncode: https://github.com/mtrojnar/osslsigncode/
 
-3) Build and install OpenSSL.
-```
-  cd openssl-(version)
-  perl Configure VC-WIN64A --prefix=C:\OpenSSL\vc-win64a --openssldir=C:\OpenSSL\SSL no-asm shared
-  nmake && nmake install
-```
-
-4) Build and install curl.
-```
-  cd curl-(version)\winbuild
-  nmake /f Makefile.vc mode=dll WITH_PREFIX=C:\curl SSL_PATH=C:\OpenSSL\vc-win64a \
-    VC=22 MACHINE=x64 DEBUG=no WITH_SSL=dll ENABLE_NGHTTP2=no ENABLE_SSPI=no \
-    ENABLE_IDN=no GEN_PDB=no ENABLE_WINSSL=no USE_ZLIB=no
-```
-
-5) Build 64-bit Windows osslsigncode.
+3) Build osslsigncode with GUI or cmake.
   Navigate to the build directory and run CMake to configure the osslsigncode project
   and generate a native build system:
 ```
-  mkdir build && cd build && cmake ..
-```
-  with specific compile options:
-```
-  -Denable-strict=ON
-  -Denable-pedantic=ON
-  -Dwith-curl=OFF
-  -Dssl-path=C:\OpenSSL\
-  -Dcurl-path=C:\curl\
+mkdir build && cd build && cmake -S .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=[installation directory] -DCMAKE_TOOLCHAIN_FILE=[path to vcpkg]/scripts/buildsystems/vcpkg.cmake
 ```
   Then call that build system to actually compile/link the osslsigncode project:
 ```
   cmake --build .
 ```
 
-6) Make tests.
+4) Make tests.
 ```
   ctest -C Release
 ```
 
-5) Make install (with administrator privileges).
+5) Make install (with administrative privileges if necessary).
 ```
-  cmake --install . --prefix "C:\osslsigncode"
+  cmake --install .
 ```

@@ -1,6 +1,10 @@
 osslsigncode
 ============
 
+## BUILD STATUS
+
+[![CI](https://github.com/mtrojnar/osslsigncode/actions/workflows/ci.yml/badge.svg)](https://github.com/mtrojnar/osslsigncode/actions/workflows/ci.yml)
+
 ## WHAT IS IT?
 
 osslsigncode is a small tool that implements part of the functionality
@@ -54,9 +58,6 @@ You may need to use `cmake3` instead of `cmake` to complete the following steps 
 ```
   -Denable-strict=ON
   -Denable-pedantic=ON
-  -Dssl-path=/opt/openssl-3.0.2/
-  -Dcurl-path=/opt/curl-7.82/
-  -Dwith-curl=OFF
 ```
 * Then call that build system to actually compile/link the osslsigncode project (alias `make`):
 ```

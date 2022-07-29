@@ -4,16 +4,21 @@
 include(FindPython3)
 enable_testing()
 
-file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/tests/tsa_server.py"
-  DESTINATION "${PROJECT_BINARY_DIR}/Testing"
-)
-file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/tests/files"
-  "${CMAKE_CURRENT_SOURCE_DIR}/tests/certs"
+set(FILES "${PROJECT_BINARY_DIR}/Testing/files")
+set(CERTS "${PROJECT_BINARY_DIR}/Testing/certs")
+set(CONF "${PROJECT_BINARY_DIR}/Testing/conf")
+
+file(COPY
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/files"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/conf"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/tsa_server.py"
   DESTINATION "${PROJECT_BINARY_DIR}/Testing"
 )
 
-set(FILES "${PROJECT_BINARY_DIR}/Testing/files")
-set(CERTS "${PROJECT_BINARY_DIR}/Testing/certs")
+file(COPY
+  "${CMAKE_CURRENT_SOURCE_DIR}/tests/certs/ca-bundle.crt"
+  DESTINATION "${CONF}"
+)
 
 set(priv_p12 "-pkcs12" "${CERTS}/cert.p12" "-readpass" "${CERTS}/password.txt")
 set(priv_spc "-certs" "${CERTS}/cert.spc" "-key" "${CERTS}/key.pvk" "-pass" "passme")
@@ -24,12 +29,27 @@ set(sign_opt "-time" "1556708400"
   "-h" "sha512" "-i" "https://www.osslsigncode.com/"
   "-n" "osslsigncode" "-ac" "${CERTS}/crosscert.pem"
 )
-execute_process(
-  COMMAND "${CERTS}/makecerts.sh"
-  WORKING_DIRECTORY ${CERTS}
-  OUTPUT_VARIABLE makecerts
-)
-message(STATUS "makecerts.sh: ${makecerts}")
+
+if(NOT CMAKE_HOST_WIN32)
+  execute_process(
+    COMMAND "${CONF}/makecerts.sh"
+    WORKING_DIRECTORY ${CONF}
+    OUTPUT_VARIABLE makecerts_output
+    RESULT_VARIABLE makecerts_result
+  )
+else()
+  set(makecerts_result 1)
+endif()
+if(makecerts_result)
+  message(STATUS "makecerts.sh failed")
+  if(makecerts_output)
+    message(STATUS "${makecerts_output}")
+  endif()
+  file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/tests/certs"
+    DESTINATION "${PROJECT_BINARY_DIR}/Testing"
+  )
+endif()
+
 execute_process(
   COMMAND ${CMAKE_COMMAND} -E sha256sum "${CERTS}/cert.der"
   OUTPUT_VARIABLE sha256sum

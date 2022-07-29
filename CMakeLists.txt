@@ -7,44 +7,75 @@ set(DEV "-dev")
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}${DEV}")
 set(PACKAGE_STRING "${PROJECT_NAME} ${PROJECT_VERSION}")
 set(PACKAGE_BUGREPORT "Michal.Trojnara@stunnel.org")
+set(PACKAGE_URL "https://github.com/mtrojnar/osslsigncode")
+set(PACKAGE_DESCRIPTION "OpenSSL based Authenticode signing for PE, CAB, CAT and MSI files")
 
-# specify the C++ standard
+# specify the C standard
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# make find modules in cmake dir available
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake")
+# load CMake library modules
+include(FindOpenSSL)
+include(FindCURL)
 
 # load CMake project modules
-include(SetOptions)
-include(FindOpenssl)
-include(FindCurl)
-include(FindMapping)
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake")
+include(SetBashCompletion)
+include(FindHeaders)
 
-# use config.h
-target_compile_definitions(osslsigncode PRIVATE HAVE_CONFIG_H=1)
+# define the target
+add_executable(osslsigncode)
+
+# add compiler/linker flags
+include(SetCompilerFlags)
+
+# create and use config.h
 configure_file(Config.h.in config.h)
+target_compile_definitions(osslsigncode PRIVATE HAVE_CONFIG_H=1)
 
-# add include directories to osslsigncode
-target_include_directories(osslsigncode PUBLIC "${PROJECT_BINARY_DIR}")
+# set sources
+target_sources(osslsigncode PRIVATE osslsigncode.c msi.c)
+if(WIN32)
+  target_sources(osslsigncode PRIVATE applink.c)
+endif(WIN32)
 
-if(MSVC)
-  # set output directory
-  set_target_properties(osslsigncode PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG ${PROJECT_BINARY_DIR}
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE ${PROJECT_BINARY_DIR}
-  )
-  # copy necessary libraries
-  file(COPY ${OPENSSL_LIBS} ${CURL_LIB} DESTINATION ${PROJECT_BINARY_DIR})
-else()
-  # set LD_LIBRARY_PATH
-  set_target_properties(osslsigncode PROPERTIES
-    INSTALL_RPATH_USE_LINK_PATH TRUE
-  )
-endif()
+# set include directories
+target_include_directories(osslsigncode PRIVATE "${PROJECT_BINARY_DIR}")
 
+# set OpenSSL includes/libraries
+if(NOT OPENSSL_FOUND)
+  message(FATAL_ERROR "OpenSSL library not found")
+endif(NOT OPENSSL_FOUND)
+target_include_directories(osslsigncode PRIVATE ${OPENSSL_INCLUDE_DIR})
+target_link_libraries(osslsigncode PRIVATE ${OPENSSL_LIBRARIES})
+
+# set cURL includes/libraries
+if(CURL_FOUND)
+  target_compile_definitions(osslsigncode PRIVATE ENABLE_CURL=1)
+  target_include_directories(osslsigncode PRIVATE ${CURL_INCLUDE_DIRS})
+  target_link_libraries(osslsigncode PRIVATE ${CURL_LIBRARIES})
+  message(STATUS "cURL support enabled")
+else(CURL_FOUND)
+  message(STATUS "cURL support disabled (library not found)")
+endif(CURL_FOUND)
+
+# add paths to linker search and installed rpath
+set_target_properties(osslsigncode PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+# testing with CTest
 include(CMakeTest)
-include(CMakeInstall)
-if(NOT MSVC)
+
+# installation rules for a project
+install(TARGETS osslsigncode RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX})
+if(WIN32)
+  install(
+    DIRECTORY ${PROJECT_BINARY_DIR}/ DESTINATION ${CMAKE_INSTALL_PREFIX}
+    FILES_MATCHING
+    PATTERN "*.dll"
+    PATTERN "vcpkg_installed" EXCLUDE
+    PATTERN "CMakeFiles" EXCLUDE
+    PATTERN "Testing" EXCLUDE
+  )
+else(WIN32)
   include(CMakeDist)
-endif()
+endif(WIN32)

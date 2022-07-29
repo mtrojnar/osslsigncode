@@ -12,15 +12,22 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 RESULT_PATH = os.getcwd()
 FILES_PATH = os.path.join(RESULT_PATH, "./Testing/files/")
 CERTS_PATH = os.path.join(RESULT_PATH, "./Testing/certs/")
-DEFAULT_PATH = os.path.join(RESULT_PATH, "./osslsigncode")
+CONF_PATH = os.path.join(RESULT_PATH, "./Testing/conf/")
 DEFAULT_IN = os.path.join(FILES_PATH, "./unsigned.exe")
 DEFAULT_OUT = os.path.join(FILES_PATH, "./ts.exe")
 DEFAULT_CERT = os.path.join(CERTS_PATH, "./cert.pem")
 DEFAULT_KEY = os.path.join(CERTS_PATH, "./key.pem")
 DEFAULT_CROSSCERT = os.path.join(CERTS_PATH, "./crosscert.pem")
-OPENSSL_CONF = os.path.join(CERTS_PATH, "./openssl_tsa.cnf")
+OPENSSL_CONF = os.path.join(CONF_PATH, "./openssl_tsa.cnf")
 REQUEST = os.path.join(FILES_PATH, "./jreq.tsq")
 RESPONS = os.path.join(FILES_PATH, "./jresp.tsr")
+
+if os.path.exists(os.path.join(RESULT_PATH, "./Release/")):
+    OSSLSIGNCODE_FILE = os.path.join(RESULT_PATH, "./Release/osslsigncode")
+elif os.path.exists(os.path.join(RESULT_PATH, "./Debug/")):
+    OSSLSIGNCODE_FILE = os.path.join(RESULT_PATH, "./Debug/osslsigncode")
+else:
+    OSSLSIGNCODE_FILE = os.path.join(RESULT_PATH, "./osslsigncode")
 
 DEFAULT_OPENSSL = ["openssl", "ts",
     "-reply", "-config", OPENSSL_CONF,
@@ -110,7 +117,7 @@ def parse_args() -> str:
         help="additional certificates"
     )
     args = parser.parse_args()
-    program = [DEFAULT_PATH, "sign", "-in", args.input, "-out", args.output,
+    program = [OSSLSIGNCODE_FILE, "sign", "-in", args.input, "-out", args.output,
         "-certs", args.certs, "-key", args.key,
         "-addUnauthenticatedBlob", "-add-msi-dse", "-comm", "-ph", "-jp", "low",
         "-h", "sha384", "-st", "1556668800", "-i", "https://www.osslsigncode.com/",
@@ -129,8 +136,12 @@ def main() -> None:
         osslsigncode.check_returncode()
     except subprocess.CalledProcessError as err:
         ret = err.returncode
+    except OSError as err:
+        print(f"OSError: {err}")
+        ret = err.errno
     except Exception as err: # pylint: disable=broad-except
         print(f"osslsigncode error: {err}")
+        ret = 1
     finally:
         server.shut_down()
         sys.exit(ret)

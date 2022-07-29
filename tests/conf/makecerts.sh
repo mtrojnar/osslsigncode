@@ -37,7 +37,7 @@ make_certs() {
   echo 1001 > "CA/crlnumber"
   date > "makecerts.log"
   "$OPENSSL" version 2>> "makecerts.log" 1>&2
-  echo -n "$password" > "password.txt"
+  echo -n "$password" > tmp/password.txt
 
   printf "\nGenerate root CA certificate\n" >> "makecerts.log"
   "$OPENSSL" genrsa -out CA/CA.key \
@@ -231,7 +231,8 @@ make_certs() {
       -a -s tmp/crosscert.pem -a -s tmp/expired.pem -a -s tmp/revoked.pem -a -s tmp/revoked.spc \
       -a -s tmp/TSA.pem -a -s tmp/TSA.key -a -s tmp/tsa-chain.pem
   then
-    cp tmp/* ./
+    mkdir "../certs"
+    cp tmp/* ../certs
     printf "%s" "keys & certificates successfully generated"
   else
     printf "%s" "error logs ${result_path}/makecerts.log"
@@ -251,8 +252,7 @@ if test -n "$(command -v faketime)"
     make_certs "$1"
     result=$?
   else
-    printf "%s\n" "faketime not found in \$PATH"
-    printf "%s\n" "tests skipped, please install faketime package"
+    printf "%s" "faketime not found in \$PATH, please install faketime package"
     result=1
   fi
 

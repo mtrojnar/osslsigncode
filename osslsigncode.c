@@ -3537,8 +3537,8 @@ static int pe_verify_header(char *indata, char *infile, uint32_t filesize, FILE_
 		printf("Unexpected SizeOfHeaders field: 0x%08X\n", header->header_size);
 		return 0; /* FAILED */
 	}
-	if (filesize < header->header_size + 160) {
-		printf("Corrupt DOS file - too short: %s\n", infile);
+	if (filesize < header->header_size + 176) {
+		printf("Corrupt PE file - too short: %s\n", infile);
 		return 0; /* FAILED */
 	}
 	if (memcmp(indata + header->header_size, "PE\0\0", 4)) {
@@ -4387,7 +4387,7 @@ static void add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp)
 		}
 	if (attrs) {
 		astr = ASN1_STRING_new();
-		ASN1_STRING_set(astr, attrs, sizeof attrs);
+		ASN1_STRING_set(astr, attrs, sizeof java_attrs_low);
 		PKCS7_add_signed_attribute(si, OBJ_txt2nid(MS_JAVA_SOMETHING),
 				V_ASN1_SEQUENCE, astr);
 	}
