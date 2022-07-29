@@ -31,6 +31,11 @@ jobs:
             os: windows-latest
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
+          - triplet: x64-windows-static
+            arch: x64
+            os: windows-latest
+            vcpkg_root: C:/vcpkg
+            cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
 
     runs-on: ${{matrix.os}}
 
@@ -79,6 +84,7 @@ jobs:
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
         -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
         -DCMAKE_TOOLCHAIN_FILE=${{matrix.vcpkg_root}}/scripts/buildsystems/vcpkg.cmake
+        -DVCPKG_TARGET_TRIPLET=${{matrix.triplet}}
 
     - name: Configure CMake (Windows)
       if: matrix.os == 'windows-latest'
@@ -89,6 +95,7 @@ jobs:
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
         -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
         -DCMAKE_TOOLCHAIN_FILE=${{matrix.vcpkg_root}}/scripts/buildsystems/vcpkg.cmake
+        -DVCPKG_TARGET_TRIPLET=${{matrix.triplet}}
 
     - name: Build
       run: cmake
