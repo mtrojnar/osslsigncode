@@ -1,14 +1,20 @@
 # required cmake version
 cmake_minimum_required(VERSION 3.6)
 
-# set the project name and version
-project(osslsigncode VERSION 2.4 LANGUAGES C)
+# configure basic project information
+project(osslsigncode
+  VERSION 2.4
+  DESCRIPTION "OpenSSL based Authenticode signing for PE, CAB, CAT and MSI files"
+  HOMEPAGE_URL "https://github.com/mtrojnar/osslsigncode"
+  LANGUAGES C)
+
+# force nonstandard version format for development packages
 set(DEV "-dev")
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}${DEV}")
+
+# version and contact information
 set(PACKAGE_STRING "${PROJECT_NAME} ${PROJECT_VERSION}")
 set(PACKAGE_BUGREPORT "Michal.Trojnara@stunnel.org")
-set(PACKAGE_URL "https://github.com/mtrojnar/osslsigncode")
-set(PACKAGE_DESCRIPTION "OpenSSL based Authenticode signing for PE, CAB, CAT and MSI files")
 
 # specify the C standard
 set(CMAKE_C_STANDARD 11)

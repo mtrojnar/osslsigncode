@@ -5570,16 +5570,24 @@ static PKCS7 *cat_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 
 static void print_version()
 {
+	printf("%s, using:\n\t%s (Library: %s)\n\t%s\n",
+#ifdef PACKAGE_STRING
+		PACKAGE_STRING,
+#else /* PACKAGE_STRING */
+		"osslsigncode custom build",
+#endif /* PACKAGE_STRING */
+		OPENSSL_VERSION_TEXT,
+		OpenSSL_version(OPENSSL_VERSION),
 #ifdef ENABLE_CURL
-	printf(PACKAGE_STRING ", using:\n\t%s (Library: %s)\n\t%s\n",
-		OPENSSL_VERSION_TEXT, OpenSSL_version(OPENSSL_VERSION),
-		curl_version());
-#else
-	printf(PACKAGE_STRING ", using:\n\t%s (Library: %s)\n\t%s\n",
-		OPENSSL_VERSION_TEXT, OpenSSL_version(OPENSSL_VERSION),
-		"no libcurl available");
+		curl_version()
+#else /* ENABLE_CURL */
+		"no libcurl available"
 #endif /* ENABLE_CURL */
-	printf("\nPlease send bug-reports to " PACKAGE_BUGREPORT "\n\n");
+	);
+#ifdef PACKAGE_BUGREPORT
+	printf("\nPlease send bug-reports to " PACKAGE_BUGREPORT "\n");
+#endif
+	printf("\n");
 }
 
 static cmd_type_t get_command(char **argv)

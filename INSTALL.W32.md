@@ -14,8 +14,8 @@
   cd osslsigncode-folder
   x86_64-w64-mingw32-gcc osslsigncode.c msi.c -o osslsigncode.exe \
     -lcrypto -lssl -lcurl \
-    -D 'PACKAGE_STRING="osslsigncode 2.4"' \
-    -D 'PACKAGE_BUGREPORT="Michal.Trojnara@stunnel.org"' \
+    -D 'PACKAGE_STRING="osslsigncode x.y"' \
+    -D 'PACKAGE_BUGREPORT="Your.Email@example.com"' \
     -D ENABLE_CURL
 ```
 
@@ -76,8 +76,8 @@
     -I 'C:/OpenSSL/include/' \
     -L 'C:/curl/lib' -lcurl \
     -I 'C:/curl/include' \
-    -D 'PACKAGE_STRING="osslsigncode 2.4"' \
-    -D 'PACKAGE_BUGREPORT="Michal.Trojnara@stunnel.org"' \
+    -D 'PACKAGE_STRING="osslsigncode x.y"' \
+    -D 'PACKAGE_BUGREPORT="Your.Email@example.com"' \
     -D ENABLE_CURL
 ```
 
