@@ -1,5 +1,7 @@
 include(CheckCCompilerFlag)
 
+set(CMAKE_REQUIRED_QUIET ON)
+
 function(add_debug_flag_if_supported flagname targets)
   check_c_compiler_flag("${flagname}" HAVE_FLAG_${flagname})
   if (HAVE_FLAG_${flagname})
