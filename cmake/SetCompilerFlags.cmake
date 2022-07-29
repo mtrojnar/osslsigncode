@@ -74,8 +74,8 @@ function(add_compile_flags target)
       # High entropy ASLR for 64 bits targets (default on)
       target_link_options(${target} PRIVATE /HIGHENTROPYVA)
       # Enable generation of EH Continuation (EHCONT) metadata by the compiler
-      target_compile_options(${target} PRIVATE /guard:ehcont)
-      target_link_options(${target} PRIVATE /guard:ehcont)
+      #target_compile_options(${target} PRIVATE /guard:ehcont)
+      #target_link_options(${target} PRIVATE /guard:ehcont)
     else()
       # Can handle addresses larger than 2 gigabytes
       target_link_options(${target} PRIVATE /LARGEADDRESSAWARE)
