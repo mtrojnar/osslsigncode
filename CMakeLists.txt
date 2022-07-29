@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.6)
 
 # set the project name and version
-project(osslsigncode VERSION 2.4)
+project(osslsigncode VERSION 2.4 LANGUAGES C)
 set(DEV "-dev")
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}${DEV}")
 set(PACKAGE_STRING "${PROJECT_NAME} ${PROJECT_VERSION}")
