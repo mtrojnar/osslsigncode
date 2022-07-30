@@ -63,6 +63,9 @@ jobs:
       with:
         cmake-version: '3.6.0'
 
+    - name: Create the build directory
+      run: mkdir ${{github.workspace}}/build
+
     - name: Configure CMake (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: cmake
