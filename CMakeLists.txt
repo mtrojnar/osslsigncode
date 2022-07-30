@@ -1,5 +1,5 @@
 # required cmake version
-cmake_minimum_required(VERSION 3.6)
+cmake_minimum_required(VERSION 3.13)
 
 # autodetect vcpkg CMAKE_TOOLCHAIN_FILE if VCPKG_ROOT is defined
 # this needs to be configured before the project() directive

@@ -61,10 +61,7 @@ jobs:
       if: matrix.os == 'macOS-latest'
       uses: jwlawson/actions-setup-cmake@v1.12
       with:
-        cmake-version: '3.6.0'
-
-    - name: Create the build directory
-      run: mkdir ${{github.workspace}}/build
+        cmake-version: '3.13.0'
 
     - name: Configure CMake (Linux)
       if: matrix.os == 'ubuntu-latest'
