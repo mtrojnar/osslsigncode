@@ -53,9 +53,15 @@ jobs:
       with:
         arch: ${{matrix.arch}}
 
-    - name: Install apt dependencies
+    - name: Install apt dependencies (Linux)
       if: matrix.os == 'ubuntu-latest'
       run: sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
+
+    - name: Setup the oldest supported version of cmake (macOS)
+      if: matrix.os == 'macOS-latest'
+      uses: jwlawson/actions-setup-cmake@v1.12
+      with:
+        cmake-version: '3.6.0'
 
     - name: Configure CMake (Linux)
       if: matrix.os == 'ubuntu-latest'
