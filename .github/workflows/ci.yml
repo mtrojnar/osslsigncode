@@ -61,7 +61,7 @@ jobs:
       if: matrix.os == 'macOS-latest'
       uses: jwlawson/actions-setup-cmake@v1.12
       with:
-        cmake-version: '3.13.0'
+        cmake-version: '3.17.0'
 
     - name: Configure CMake (Linux)
       if: matrix.os == 'ubuntu-latest'
