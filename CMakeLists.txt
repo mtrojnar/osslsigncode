@@ -1,6 +1,13 @@
 # required cmake version
 cmake_minimum_required(VERSION 3.6)
 
+# autodetect vcpkg CMAKE_TOOLCHAIN_FILE if VCPKG_ROOT is defined
+# this needs to be configured before the project() directive
+if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+  set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+    CACHE STRING "")
+endif(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+
 # configure basic project information
 project(osslsigncode
   VERSION 2.4
