@@ -4,6 +4,9 @@
     "dependencies": [
         "openssl",
         "curl",
-        "python3"
+        {
+            "name": "python3",
+            "platform": "!(windows & static) & !osx"
+        }
     ]
 }
