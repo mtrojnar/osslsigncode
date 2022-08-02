@@ -1,18 +1,23 @@
 # osslsigncode change log
 
-### 2.4 (unreleased)
+### 2.4 (2022.08.02)
 
-- set the default message digest to sha256
-- set of cryptographic hash functions for "attach -signature"
-  and "add" commands ("-h" option)
-- compute and compare the leaf certificate hash for "attach-signature"
-  command ("-require-leaf-hash" option)
-- "-st" option renamed to "-time"
-- user-specified signing and/or verifying time ("-time" option)
-- remove "-timestamp-expiration" option
-- disable verification of the Timestamp Server signature
-  ("-ignore-timestamp" option)
-- use CMake instead of Makefile
+- migrated the build system from GNU Autoconf to CMake
+- added the "-h" option to set the cryptographic hash function
+  for the "attach -signature" and "add" commands
+- set the default hash function to "sha256"
+- added the "attach-signature" option to compute and compare the
+  leaf certificate hash for the "add" command
+- renamed the "-st" option "-time" (the old name is accepted for
+  compatibility)
+- updated the "-time" option to also set explicit verification time
+- added the "-ignore-timestamp" option to disable timestamp server
+  signature verification
+- removed the "-timestamp-expiration" option
+- fixed several bugs
+- updated the included documentation
+- enabled additional compiler/linker hardening options
+- added CI based on GitHub Actions
 
 ### 2.3 (2022.03.06)
 
