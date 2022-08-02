@@ -120,7 +120,7 @@ def parse_args() -> str:
     program = [OSSLSIGNCODE_FILE, "sign", "-in", args.input, "-out", args.output,
         "-certs", args.certs, "-key", args.key,
         "-addUnauthenticatedBlob", "-add-msi-dse", "-comm", "-ph", "-jp", "low",
-        "-h", "sha384", "-st", "1556668800", "-i", "https://www.osslsigncode.com/",
+        "-h", "sha384", "-time", "1556668800", "-i", "https://www.osslsigncode.com/",
         "-n", "osslsigncode", "-ac", args.crosscert, "-ts"]
     return program
 
