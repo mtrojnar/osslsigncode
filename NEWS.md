@@ -1,5 +1,8 @@
 # osslsigncode change log
 
+### 2.5 (unreleased)
+
+
 ### 2.4 (2022.08.02)
 
 - migrated the build system from GNU Autoconf to CMake
