@@ -7,6 +7,7 @@ on:
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
+  version: osslsigncode-2.5-dev
 
 jobs:
   build:
@@ -15,23 +16,34 @@ jobs:
       matrix:
         include:
           - triplet: x64-linux
+            compiler: gcc
             os: ubuntu-latest
             vcpkg_root: /usr/local/share/vcpkg
           - triplet: x64-osx
+            compiler: clang
             os: macOS-latest
             vcpkg_root: /usr/local/share/vcpkg
             cache: /Users/runner/.cache/vcpkg/archives
           - triplet: x64-windows
+            compiler: vs
             arch: x64
             os: windows-latest
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
           - triplet: x86-windows
+            compiler: vs
             arch: x86
             os: windows-latest
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
           - triplet: x64-windows-static
+            compiler: vs
+            arch: x64
+            os: windows-latest
+            vcpkg_root: C:/vcpkg
+            cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
+          - triplet: x64-windows
+            compiler: mingw
             arch: x64
             os: windows-latest
             vcpkg_root: C:/vcpkg
@@ -47,13 +59,13 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{matrix.cache}}
-        key: ${{matrix.triplet}}-${{hashFiles('vcpkg.json')}}
+        key: ${{matrix.triplet}}-${{matrix.compiler}}-${{hashFiles('vcpkg.json')}}
         restore-keys: |
-          ${{matrix.triplet}}-${{hashFiles('vcpkg.json')}}
-          ${{matrix.triplet}}-
+          ${{matrix.triplet}}-${{matrix.compiler}}-${{hashFiles('vcpkg.json')}}
+          ${{matrix.triplet}}-${{matrix.compiler}}-
 
-    - name: Configure VS Toolchain (Windows)
-      if: matrix.os == 'windows-latest'
+    - name: Configure Visual Studio
+      if: matrix.compiler == 'vs'
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: ${{matrix.arch}}
@@ -118,7 +130,7 @@ jobs:
       uses: actions/upload-artifact@v3
       if: failure()
       with:
-        name: errors-${{matrix.triplet}}
+        name: errors-${{matrix.triplet}}-${{matrix.compiler}}
         path: ${{github.workspace}}/build/Testing/Temporary/LastTest.log
 
     - name: Install
@@ -127,5 +139,5 @@ jobs:
     - name: Upload the executables
       uses: actions/upload-artifact@v3
       with:
-        name: osslsigncode-${{matrix.triplet}}
+        name: ${{env.version}}-${{matrix.triplet}}-${{matrix.compiler}}
         path: ${{github.workspace}}/dist
