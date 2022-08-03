@@ -61,9 +61,9 @@
 #define OPENSSL_API_COMPAT 0x10100000L
 #define OPENSSL_NO_DEPRECATED
 
-#if defined(_MSC_VER) || defined(MINGW32)
+#if defined(_MSC_VER) || defined(__MINGW32__)
 #define HAVE_WINDOWS_H
-#endif /* _MSC_VER || MINGW32 */
+#endif /* _MSC_VER || __MINGW32__ */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"

@@ -30,7 +30,7 @@ set(sign_opt "-time" "1556708400"
   "-n" "osslsigncode" "-ac" "${CERTS}/crosscert.pem"
 )
 
-if(NOT CMAKE_HOST_WIN32)
+if(CMAKE_HOST_UNIX)
   execute_process(
     COMMAND "${CONF}/makecerts.sh"
     WORKING_DIRECTORY ${CONF}

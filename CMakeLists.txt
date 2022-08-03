@@ -49,9 +49,9 @@ target_compile_definitions(osslsigncode PRIVATE HAVE_CONFIG_H=1)
 
 # set sources
 target_sources(osslsigncode PRIVATE osslsigncode.c msi.c)
-if(WIN32)
+if(NOT UNIX)
   target_sources(osslsigncode PRIVATE applink.c)
-endif(WIN32)
+endif(NOT UNIX)
 
 # set include directories
 target_include_directories(osslsigncode PRIVATE "${PROJECT_BINARY_DIR}")
@@ -81,7 +81,9 @@ include(CMakeTest)
 
 # installation rules for a project
 install(TARGETS osslsigncode RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX})
-if(WIN32)
+if(UNIX)
+  include(CMakeDist)
+else(UNIX)
   install(
     DIRECTORY ${PROJECT_BINARY_DIR}/ DESTINATION ${CMAKE_INSTALL_PREFIX}
     FILES_MATCHING
@@ -90,6 +92,4 @@ if(WIN32)
     PATTERN "CMakeFiles" EXCLUDE
     PATTERN "Testing" EXCLUDE
   )
-else(WIN32)
-  include(CMakeDist)
-endif(WIN32)
+endif(UNIX)
