@@ -5163,7 +5163,8 @@ static ENGINE *dynamic_engine(GLOBAL_OPTIONS *options)
 		return NULL; /* FAILED */
 	}
 	if (!ENGINE_ctrl_cmd_string(engine, "SO_PATH", options->p11engine, 0)
-			|| !ENGINE_ctrl_cmd_string(engine, "ID", "pkcs11", 0)
+			|| !ENGINE_ctrl_cmd_string(engine, "ID",
+				options->p11engine ? options->p11engine : "pkcs11", 0)
 			|| !ENGINE_ctrl_cmd_string(engine, "LIST_ADD", "1", 0)
 			|| !ENGINE_ctrl_cmd_string(engine, "LOAD", NULL, 0)) {
 		printf("Failed to set 'dynamic' engine\n");
