@@ -18,38 +18,46 @@ jobs:
           - triplet: x64-linux
             compiler: gcc
             os: ubuntu-latest
-            vcpkg_root: /usr/local/share/vcpkg
+            generator: Unix Makefiles
+            vcpkg_root:
           - triplet: x64-osx
             compiler: clang
             os: macOS-latest
+            generator: Unix Makefiles
             vcpkg_root: /usr/local/share/vcpkg
             cache: /Users/runner/.cache/vcpkg/archives
           - triplet: x64-windows
             compiler: vs
             arch: x64
             os: windows-latest
+            generator: Ninja
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
           - triplet: x86-windows
             compiler: vs
             arch: x86
             os: windows-latest
+            generator: Ninja
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
           - triplet: x64-windows-static
             compiler: vs
             arch: x64
             os: windows-latest
+            generator: Ninja
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
           - triplet: x64-windows
             compiler: mingw
-            arch: x64
             os: windows-latest
+            generator: Ninja
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
 
     runs-on: ${{matrix.os}}
+
+    env:
+      VCPKG_ROOT: ${{matrix.vcpkg_root}}
 
     steps:
     - uses: actions/checkout@v3
@@ -80,33 +88,13 @@ jobs:
       with:
         cmake-version: '3.17.0'
 
-    - name: Configure CMake (Linux)
-      if: matrix.os == 'ubuntu-latest'
+    - name: Configure CMake
       run: cmake
+        -G "${{matrix.generator}}"
         -S ${{github.workspace}}
         -B ${{github.workspace}}/build
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
         -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
-
-    - name: Configure CMake (macOS)
-      if: matrix.os == 'macOS-latest'
-      run: cmake
-        -S ${{github.workspace}}
-        -B ${{github.workspace}}/build
-        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
-        -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
-        -DCMAKE_TOOLCHAIN_FILE=${{matrix.vcpkg_root}}/scripts/buildsystems/vcpkg.cmake
-        -DVCPKG_TARGET_TRIPLET=${{matrix.triplet}}
-
-    - name: Configure CMake (Windows)
-      if: matrix.os == 'windows-latest'
-      run: cmake
-        -G Ninja
-        -S ${{github.workspace}}
-        -B ${{github.workspace}}/build
-        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
-        -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
-        -DCMAKE_TOOLCHAIN_FILE=${{matrix.vcpkg_root}}/scripts/buildsystems/vcpkg.cmake
         -DVCPKG_TARGET_TRIPLET=${{matrix.triplet}}
 
     - name: Build
