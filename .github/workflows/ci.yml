@@ -15,39 +15,57 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - triplet: x64-linux
+          - id: ubuntu-22.04
+            triplet: x64-linux
             compiler: gcc
-            os: ubuntu-latest
+            os: ubuntu-22.04
             generator: Unix Makefiles
             vcpkg_root:
-          - triplet: x64-osx
+          - id: ubuntu-20.04
+            triplet: x64-linux
+            compiler: gcc
+            os: ubuntu-20.04
+            generator: Unix Makefiles
+            vcpkg_root:
+          - id: ubuntu-18.04
+            triplet: x64-linux
+            compiler: gcc
+            os: ubuntu-18.04
+            generator: Unix Makefiles
+            vcpkg_root:
+          - id: macOS
+            triplet: x64-osx
             compiler: clang
             os: macOS-latest
             generator: Unix Makefiles
             vcpkg_root: /usr/local/share/vcpkg
             cache: /Users/runner/.cache/vcpkg/archives
-          - triplet: x64-windows
+          - id: windows-x64-vs
+            triplet: x64-windows
             compiler: vs
             arch: x64
             os: windows-latest
             generator: Ninja
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
-          - triplet: x86-windows
+          - id: windows-x86-vs
+            triplet: x86-windows
             compiler: vs
             arch: x86
             os: windows-latest
             generator: Ninja
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
-          - triplet: x64-windows-static
+          - id: windows-x64-vs-static
+            triplet: x64-windows-static
             compiler: vs
             arch: x64
             os: windows-latest
             generator: Ninja
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
-          - triplet: x64-windows
+          - id: windows-x64-mingw
+            triplet: x64-windows
             compiler: mingw
             os: windows-latest
             generator: Ninja
@@ -67,10 +85,10 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{matrix.cache}}
-        key: ${{matrix.triplet}}-${{matrix.compiler}}-${{hashFiles('vcpkg.json')}}
+        key: ${{matrix.id}}-${{hashFiles('vcpkg.json')}}
         restore-keys: |
-          ${{matrix.triplet}}-${{matrix.compiler}}-${{hashFiles('vcpkg.json')}}
-          ${{matrix.triplet}}-${{matrix.compiler}}-
+          ${{matrix.id}}-${{hashFiles('vcpkg.json')}}
+          ${{matrix.id}}-
 
     - name: Configure Visual Studio
       if: matrix.compiler == 'vs'
@@ -118,7 +136,7 @@ jobs:
       uses: actions/upload-artifact@v3
       if: failure()
       with:
-        name: errors-${{matrix.triplet}}-${{matrix.compiler}}
+        name: errors-${{matrix.id}}
         path: ${{github.workspace}}/build/Testing/Temporary/LastTest.log
 
     - name: Install
@@ -127,5 +145,5 @@ jobs:
     - name: Upload the executables
       uses: actions/upload-artifact@v3
       with:
-        name: ${{env.version}}-${{matrix.triplet}}-${{matrix.compiler}}
+        name: ${{env.version}}-${{matrix.id}}
         path: ${{github.workspace}}/dist
