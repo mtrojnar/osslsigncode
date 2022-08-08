@@ -56,7 +56,7 @@ jobs:
             generator: Ninja
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
-          - id: windows-x64-vs-static
+          - id: windows-x64-static-vs
             triplet: x64-windows-static
             compiler: vs
             arch: x64
