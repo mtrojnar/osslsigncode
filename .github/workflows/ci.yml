@@ -106,6 +106,9 @@ jobs:
       with:
         cmake-version: '3.17.0'
 
+    - name: Show OpenSSL version
+      run: openssl version -a
+
     - name: Configure CMake
       run: cmake
         -G "${{matrix.generator}}"
