@@ -46,7 +46,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             post_data = self.rfile.read(content_length)
             with open(REQUEST, mode="wb") as file:
                 file.write(post_data)
-            openssl = subprocess.run(DEFAULT_OPENSSL, check=True, text=True)
+            openssl = subprocess.run(DEFAULT_OPENSSL,
+                check=True, universal_newlines=True)
             openssl.check_returncode()
             self.send_response(200)
             self.send_header("Content-type", "application/timestamp-reply")
