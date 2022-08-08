@@ -133,7 +133,7 @@ def main() -> None:
     hostname, port = server.start_server()
     program.append(f"{hostname}:{port}")
     try:
-        osslsigncode = subprocess.run(program, check=True, text=True)
+        osslsigncode = subprocess.run(program, check=True, universal_newlines=True)
         osslsigncode.check_returncode()
     except subprocess.CalledProcessError as err:
         ret = err.returncode
