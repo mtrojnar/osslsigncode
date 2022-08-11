@@ -79,12 +79,13 @@ set_target_properties(osslsigncode PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
 include(CMakeTest)
 
 # installation rules for a project
-install(TARGETS osslsigncode RUNTIME DESTINATION ${CMAKE_INSTALL_PREFIX})
+set(BINDIR "${CMAKE_INSTALL_PREFIX}/bin")
+install(TARGETS osslsigncode RUNTIME DESTINATION ${BINDIR})
 if(UNIX)
   include(CMakeDist)
 else(UNIX)
   install(
-    DIRECTORY ${PROJECT_BINARY_DIR}/ DESTINATION ${CMAKE_INSTALL_PREFIX}
+    DIRECTORY ${PROJECT_BINARY_DIR}/ DESTINATION ${BINDIR}
     FILES_MATCHING
     PATTERN "*.dll"
     PATTERN "vcpkg_installed" EXCLUDE
