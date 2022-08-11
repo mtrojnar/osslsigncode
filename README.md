@@ -52,12 +52,15 @@ You may need to use `cmake3` instead of `cmake` to complete the following steps 
 * Navigate to the build directory and run CMake to configure the osslsigncode project
   and generate a native build system:
 ```
-  mkdir build && cd build && cmake ..
+  mkdir build && cd build && cmake -S ..
 ```
   with specific compile options:
 ```
-  -Denable-strict=ON
-  -Denable-pedantic=ON
+  -DCMAKE_BUILD_TYPE=Debug
+  -DCMAKE_C_COMPILER=clang
+  -DCMAKE_PREFIX_PATH=[openssl directory];[curl directory]
+  -DCMAKE_INSTALL_PREFIX=[installation directory]
+
 ```
 * Then call that build system to actually compile/link the osslsigncode project (alias `make`):
 ```
@@ -69,7 +72,7 @@ You may need to use `cmake3` instead of `cmake` to complete the following steps 
 ```
 * Make install:
 ```
-  sudo cmake --install . --prefix "/home/myuser/installdir"
+  sudo cmake --install .
 ```
 * Make tarball (simulate autotools' `make dist`):
 ```
