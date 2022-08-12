@@ -5571,23 +5571,20 @@ static PKCS7 *cat_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 
 static void print_version()
 {
-	printf("%s, using:\n\t%s (Library: %s)\n\t%s\n",
 #ifdef PACKAGE_STRING
-		PACKAGE_STRING,
+	printf("%s, using:\n", PACKAGE_STRING);
 #else /* PACKAGE_STRING */
-		"osslsigncode custom build",
+	printf("%s, using:\n", "osslsigncode custom build");
 #endif /* PACKAGE_STRING */
-		OPENSSL_VERSION_TEXT,
-		OpenSSL_version(OPENSSL_VERSION),
+	printf("\t%s (Library: %s)\n", OPENSSL_VERSION_TEXT, OpenSSL_version(OPENSSL_VERSION));
 #ifdef ENABLE_CURL
-		curl_version()
+	printf("\t%s\n", curl_version());
 #else /* ENABLE_CURL */
-		"no libcurl available"
+	printf("\t%s\n", "no libcurl available");
 #endif /* ENABLE_CURL */
-	);
 #ifdef PACKAGE_BUGREPORT
 	printf("\nPlease send bug-reports to " PACKAGE_BUGREPORT "\n");
-#endif
+#endif /* PACKAGE_BUGREPORT */
 	printf("\n");
 }
 
