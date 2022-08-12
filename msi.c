@@ -748,7 +748,7 @@ out:
 static void ministream_append(MSI_OUT *out, char *buf, uint32_t len)
 {
 	uint32_t needSectors = (len + out->sectorSize - 1) / out->sectorSize;
-	if (out->miniStreamLen + len >= out->ministreamsMemallocCount * out->sectorSize) {
+	if (out->miniStreamLen + len >= (uint64_t)out->ministreamsMemallocCount * out->sectorSize) {
 		out->ministreamsMemallocCount += needSectors;
 		out->ministream = OPENSSL_realloc(out->ministream, (size_t)(out->ministreamsMemallocCount * out->sectorSize));
 	}
@@ -758,7 +758,7 @@ static void ministream_append(MSI_OUT *out, char *buf, uint32_t len)
 
 static void minifat_append(MSI_OUT *out, char *buf, uint32_t len)
 {
-	if (out->minifatLen == out->minifatMemallocCount * out->sectorSize) {
+	if (out->minifatLen == (uint64_t)out->minifatMemallocCount * out->sectorSize) {
 		out->minifatMemallocCount += 1;
 		out->minifat = OPENSSL_realloc(out->minifat, (size_t)(out->minifatMemallocCount * out->sectorSize));
 	}
@@ -768,7 +768,7 @@ static void minifat_append(MSI_OUT *out, char *buf, uint32_t len)
 
 static void fat_append(MSI_OUT *out, char *buf, uint32_t len)
 {
-	if (out->fatLen == out->fatMemallocCount * out->sectorSize) {
+	if (out->fatLen == (uint64_t)out->fatMemallocCount * out->sectorSize) {
 		out->fatMemallocCount += 1;
 		out->fat = OPENSSL_realloc(out->fat, (size_t)(out->fatMemallocCount * out->sectorSize));
 	}
