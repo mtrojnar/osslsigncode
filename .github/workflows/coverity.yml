@@ -2,22 +2,23 @@ name: Coverity Scan
 
 on:
   push:
+  pull_request:
 
 jobs:
   coverity:
     runs-on: ubuntu-latest
+    env:
+      token: ${{secrets.COVERITY_SCAN_TOKEN}}
     steps:
     - uses: actions/checkout@v3
-
-    - name: Install dependencies
-      run: sudo apt-get install -y libssl-dev libcurl4-openssl-dev
-
-    - name: Configure CMake
-      run: cmake
-        -S ${{github.workspace}}
-        -B ${{github.workspace}}/build
-
+      if: env.token
+    - name: Get ready for scanning
+      if: env.token
+      run: |
+        sudo apt-get install -y libssl-dev libcurl4-openssl-dev
+        cmake -S ${{github.workspace}} -B ${{github.workspace}}/build
     - uses: vapier/coverity-scan-action@v1
+      if: env.token
       with:
         email: ${{secrets.COVERITY_SCAN_EMAIL}}
         token: ${{secrets.COVERITY_SCAN_TOKEN}}
