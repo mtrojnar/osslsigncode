@@ -3,7 +3,6 @@
 #define VERSION_MINOR "@osslsigncode_VERSION_MINOR@"
 #cmakedefine PACKAGE_STRING "@PACKAGE_STRING@"
 #cmakedefine PACKAGE_BUGREPORT "@PACKAGE_BUGREPORT@"
-#cmakedefine ENABLE_CURL
 #cmakedefine HAVE_TERMIOS_H
 #cmakedefine HAVE_GETPASS
 #cmakedefine HAVE_SYS_MMAN_H
