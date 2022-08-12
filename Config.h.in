@@ -9,4 +9,3 @@
 #cmakedefine HAVE_SYS_MMAN_H
 #cmakedefine HAVE_MMAP
 #cmakedefine HAVE_MAPVIEWOFFILE
-#cmakedefine _WIN32
