@@ -1,7 +1,11 @@
 # osslsigncode change log
 
-### 2.5 (unreleased)
+### 2.5 (2022.08.12)
 
+- fixed the Unix executable install path
+- fixed the hardcoded "pkcs11" engine id
+- fixed building with MinGW
+- fixed testing with the python3 distributed with Ubuntu 18.04
 
 ### 2.4 (2022.08.02)
 
