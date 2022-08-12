@@ -884,7 +884,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
 			return 0; /* FAILED */
 		}
 		out->ministreamsMemallocCount = (GET_UINT32_LE(dirent->entry->size) + out->sectorSize - 1)/out->sectorSize;
-		out->ministream = OPENSSL_malloc(out->ministreamsMemallocCount * out->sectorSize);
+		out->ministream = OPENSSL_malloc((uint64_t)out->ministreamsMemallocCount * out->sectorSize);
 	}
 	for (i = 0; i < sk_MSI_DIRENT_num(dirent->children); i++) {
 		MSI_DIRENT *child = sk_MSI_DIRENT_value(dirent->children, i);
@@ -1298,8 +1298,8 @@ static int msiout_set(MSI_FILE *msi, uint32_t len_msi, uint32_t len_msiex, MSI_O
 	out->minifatMemallocCount = msi->m_hdr->numMiniFATSector;
 	out->fatMemallocCount = msi->m_hdr->numFATSector;
 	out->ministream = NULL;
-	out->minifat = OPENSSL_malloc(out->minifatMemallocCount * out->sectorSize);
-	out->fat = OPENSSL_malloc(out->fatMemallocCount * out->sectorSize);
+	out->minifat = OPENSSL_malloc((uint64_t)out->minifatMemallocCount * out->sectorSize);
+	out->fat = OPENSSL_malloc((uint64_t)out->fatMemallocCount * out->sectorSize);
 	out->miniSectorNum = 0;
 	out->sectorNum = 0;
 	return 1; /* OK */
