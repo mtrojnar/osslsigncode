@@ -1,5 +1,7 @@
 # osslsigncode change log
 
+### 2.6 (unreleased)
+
 ### 2.5 (2022.08.12)
 
 - fixed the Unix executable install path
