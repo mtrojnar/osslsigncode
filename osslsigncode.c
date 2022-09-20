@@ -1817,9 +1817,13 @@ static int set_indirect_data_blob(PKCS7 *sig, BIO *hash, file_type_t type,
 	return 1; /* OK */
 }
 
+/*
+ * A signed PE file is padded (with 0's) to 8 byte boundary.
+ * Ignore any last odd byte in an unsigned file.
+ */
 static uint32_t pe_calc_checksum(BIO *bio, FILE_HEADER *header)
 {
-	uint32_t checksum = 0, size = 0;
+	uint32_t checkSum = 0, offset = 0;
 	int nread;
 	unsigned short *buf = OPENSSL_malloc(SIZE_64K);
 
@@ -1829,18 +1833,18 @@ static uint32_t pe_calc_checksum(BIO *bio, FILE_HEADER *header)
 		unsigned short val;
 		int i;
 		for (i = 0; i < nread / 2; i++) {
-			val = buf[i];
-			if (size == header->header_size + 88 || size == header->header_size + 90)
+			val = LE_UINT16(buf[i]);
+			if (offset == header->header_size + 88 || offset == header->header_size + 90)
 				val = 0;
-			checksum += val;
-			checksum = 0xffff & (checksum + (checksum >> 0x10));
-			size += 2;
+			checkSum += val;
+			checkSum = LOWORD(LOWORD(checkSum) + HIWORD(checkSum));
+			offset += 2;
 		}
 	}
 	OPENSSL_free(buf);
-	checksum = 0xffff & (checksum + (checksum >> 0x10));
-	checksum += size;
-	return checksum;
+	checkSum = LOWORD(LOWORD(checkSum) + HIWORD(checkSum));
+	checkSum += offset;
+	return checkSum;
 }
 
 static void pe_recalc_checksum(BIO *bio, FILE_HEADER *header)

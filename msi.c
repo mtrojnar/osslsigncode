@@ -34,7 +34,7 @@ static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber)
 	const u_char *address;
 
 	if (fatSectorNumber < DIFAT_IN_HEADER) {
-		return msi->m_hdr->headerDIFAT[fatSectorNumber];
+		return LE_UINT32(msi->m_hdr->headerDIFAT[fatSectorNumber]);
 	} else {
 		fatSectorNumber -= DIFAT_IN_HEADER;
 		entriesPerSector = msi->m_sectorSize / 4 - 1;
