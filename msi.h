@@ -103,6 +103,40 @@
 #define SIZE_64K 65536			/* 2^16 */
 #define SIZE_16M 16777216		/* 2^24 */
 
+/*
+ * Macro names:
+ * linux:  __BYTE_ORDER == __LITTLE_ENDIAN | __BIG_ENDIAN
+ *           BYTE_ORDER == LITTLE_ENDIAN | BIG_ENDIAN
+ * bsd:     _BYTE_ORDER == _LITTLE_ENDIAN | _BIG_ENDIAN
+ *           BYTE_ORDER == LITTLE_ENDIAN | BIG_ENDIAN
+ * solaris: _LITTLE_ENDIAN | _BIG_ENDIAN
+ */
+
+#ifndef BYTE_ORDER
+#define LITTLE_ENDIAN    1234
+#define BIG_ENDIAN       4321
+#define BYTE_ORDER       LITTLE_ENDIAN
+#endif /* BYTE_ORDER */
+
+#if !defined(BYTE_ORDER) || !defined(LITTLE_ENDIAN) || !defined(BIG_ENDIAN)
+#error "Cannot determine the endian-ness of this platform"
+#endif
+
+#define LOWORD(x) (x & 0xFFFF)
+#define HIWORD(x) (x >> 16)
+
+#if BYTE_ORDER == BIG_ENDIAN
+#define LE_UINT16(x) ((((x) >> 8) & 0x00FF) | \
+                     (((x) << 8) & 0xFF00))
+#define LE_UINT32(x) (((x) >> 24) | \
+                     (((x) & 0x00FF0000) >> 8) | \
+                     (((x) & 0x0000FF00) << 8) | \
+                     ((x) << 24))
+#else
+#define LE_UINT16(x) (x)
+#define LE_UINT32(x) (x)
+#endif /* BYTE_ORDER == BIG_ENDIAN */
+
 typedef unsigned char u_char;
 
 typedef struct {
