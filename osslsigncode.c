@@ -592,7 +592,7 @@ typedef struct {
 	MessageImprint *messageImprint;
 	ASN1_OBJECT *reqPolicy;
 	ASN1_INTEGER *nonce;
-	ASN1_BOOLEAN *certReq;
+	ASN1_BOOLEAN certReq;
 	STACK_OF(X509_EXTENSION) *extensions;
 } TimeStampReq;
 
@@ -603,7 +603,7 @@ ASN1_SEQUENCE(TimeStampReq) = {
 	ASN1_SIMPLE(TimeStampReq, messageImprint, MessageImprint),
 	ASN1_OPT   (TimeStampReq, reqPolicy, ASN1_OBJECT),
 	ASN1_OPT   (TimeStampReq, nonce, ASN1_INTEGER),
-	ASN1_SIMPLE(TimeStampReq, certReq, ASN1_BOOLEAN),
+	ASN1_SIMPLE(TimeStampReq, certReq, ASN1_FBOOLEAN),
 	ASN1_IMP_SEQUENCE_OF_OPT(TimeStampReq, extensions, X509_EXTENSION, 0)
 } ASN1_SEQUENCE_END(TimeStampReq)
 
@@ -883,7 +883,7 @@ static BIO *encode_rfc3161_request(PKCS7 *sig, const EVP_MD *md)
 	req->messageImprint->digestAlgorithm->parameters = ASN1_TYPE_new();
 	req->messageImprint->digestAlgorithm->parameters->type = V_ASN1_NULL;
 	ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(md));
-	req->certReq = (void*)0x1;
+	req->certReq = 0xFF;
 
 	len = i2d_TimeStampReq(req, NULL);
 	p = OPENSSL_malloc((size_t)len);
