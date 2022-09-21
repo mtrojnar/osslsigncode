@@ -5772,7 +5772,7 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 				usage(argv0, "all");
 				return 0; /* FAILED */
 			}
-			options->time = (time_t)strtoul(*(++argv), NULL, 10);
+			options->time = (time_t)strtoull(*(++argv), NULL, 10);
 #ifdef ENABLE_CURL
 		} else if ((*cmd == CMD_SIGN || *cmd == CMD_ADD) && !strcmp(*argv, "-t")) {
 			if (--argc < 1) {
