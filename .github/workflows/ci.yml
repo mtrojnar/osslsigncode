@@ -27,12 +27,6 @@ jobs:
             os: ubuntu-20.04
             generator: Unix Makefiles
             vcpkg_root:
-          - id: ubuntu-18.04
-            triplet: x64-linux
-            compiler: gcc
-            os: ubuntu-18.04
-            generator: Unix Makefiles
-            vcpkg_root:
           - id: macOS
             triplet: x64-osx
             compiler: clang
