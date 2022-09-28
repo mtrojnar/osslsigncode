@@ -1644,7 +1644,6 @@ static int get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *optio
 		0xf1, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46
 	};
-	u_char flag[] = {0x00};
 
 	idc = SpcIndirectDataContent_new();
 	idc->data->value = ASN1_TYPE_new();
@@ -1660,7 +1659,7 @@ static int get_indirect_data_blob(u_char **blob, int *len, GLOBAL_OPTIONS *optio
 		SpcLink_free(link);
 	} else if (type == FILE_TYPE_PE) {
 		SpcPeImageData *pid = SpcPeImageData_new();
-		ASN1_BIT_STRING_set(pid->flags, flag, sizeof flag);
+		ASN1_BIT_STRING_set_bit(pid->flags, 0, 1);
 		if (options->pagehash) {
 			SpcLink *link;
 			phtype = NID_sha1;
@@ -1815,7 +1814,7 @@ static int set_indirect_data_blob(PKCS7 *sig, BIO *hash, file_type_t type,
 
 static uint32_t pe_calc_checksum(BIO *bio, FILE_HEADER *header)
 {
-	uint32_t checkSum = 0, size = 0;
+	uint32_t checksum = 0, size = 0;
 	int nread;
 	unsigned short *buf = OPENSSL_malloc(SIZE_64K);
 
@@ -1828,26 +1827,62 @@ static uint32_t pe_calc_checksum(BIO *bio, FILE_HEADER *header)
 			val = buf[i];
 			if (size == header->header_size + 88 || size == header->header_size + 90)
 				val = 0;
-			checkSum += val;
-			checkSum = 0xffff & (checkSum + (checkSum >> 0x10));
+			checksum += val;
+			checksum = 0xffff & (checksum + (checksum >> 0x10));
 			size += 2;
 		}
 	}
 	OPENSSL_free(buf);
-	checkSum = 0xffff & (checkSum + (checkSum >> 0x10));
-	checkSum += size;
-	return checkSum;
+	checksum = 0xffff & (checksum + (checksum >> 0x10));
+	checksum += size;
+	return checksum;
 }
 
 static void pe_recalc_checksum(BIO *bio, FILE_HEADER *header)
 {
-	uint32_t checkSum = pe_calc_checksum(bio, header);
+	uint32_t checksum = pe_calc_checksum(bio, header);
 	char buf[4];
 
 	/* write back checksum */
 	(void)BIO_seek(bio, header->header_size + 88);
-	PUT_UINT32_LE(checkSum, buf);
+	PUT_UINT32_LE(checksum, buf);
 	BIO_write(bio, buf, 4);
+}
+
+static uint32_t pe_calc_realchecksum(char *indata, FILE_HEADER *header)
+{
+	uint32_t n = 0, checksum = 0, size = 0;
+	BIO *bio = BIO_new(BIO_s_mem());
+	unsigned short *buf = OPENSSL_malloc(SIZE_64K);
+	
+	/* calculate the checksum */
+	while (n < header->fileend) {
+		size_t i, written, nread;
+		size_t left = header->fileend - n;
+		unsigned short val;
+		if (left > SIZE_64K)
+			left = SIZE_64K;
+		if (!BIO_write_ex(bio, indata + n, left, &written))
+			goto err; /* FAILED */
+		(void)BIO_seek(bio, 0);
+		n += (uint32_t)written;
+		if (!BIO_read_ex(bio, buf, written, &nread))
+			goto err; /* FAILED */
+		for (i = 0; i < nread / 2; i++) {
+			val = buf[i];
+			if (size == header->header_size + 88 || size == header->header_size + 90)
+				val = 0;
+			checksum += val;
+			checksum = 0xffff & (checksum + (checksum >> 0x10));
+			size += 2;
+		}
+	}
+	checksum = 0xffff & (checksum + (checksum >> 0x10));
+	checksum += size;
+err:
+	OPENSSL_free(buf);
+	BIO_free(bio);
+	return checksum;
 }
 
 static int verify_leaf_hash(X509 *leaf, const char *leafhash)
@@ -3247,7 +3282,8 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *
 	BIO *bio = NULL;
 	u_char *bfb;
 	EVP_MD_CTX *mdctx;
-	uint32_t n, offset;
+	size_t written;
+	uint32_t i, n, offset;
 	int ret = 0;
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
 
@@ -3262,11 +3298,13 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *
 		goto err;
 	}
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
-	bio = BIO_new_mem_buf(indata, (int)offset);
+	bio = BIO_new(BIO_s_mem());
+	i = n = header->header_size + 88 + 4 + 60 + header->pe32plus * 16 + 8;
+	if (!BIO_write_ex(bio, indata, i, &written))
+		goto err;
 	(void)BIO_seek(bio, 0);
 
-	bfb = OPENSSL_malloc(SIZE_16M);
-
+	bfb = OPENSSL_malloc(SIZE_64K);
 	BIO_read(bio, bfb, (int)header->header_size + 88);
 	EVP_DigestUpdate(mdctx, bfb, header->header_size + 88);
 	BIO_read(bio, bfb, 4);
@@ -3274,17 +3312,25 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *
 	EVP_DigestUpdate(mdctx, bfb, 60 + header->pe32plus * 16);
 	BIO_read(bio, bfb, 8);
 
-	n = header->header_size + 88 + 4 + 60 + header->pe32plus * 16 + 8;
 	while (n < offset) {
-		int l;
+		size_t nread;
 		uint32_t want = offset - n;
-		if (want > sizeof bfb)
-			want = sizeof bfb;
-		l = BIO_read(bio, bfb, (int)want);
-		if (l <= 0)
-			break;
-		EVP_DigestUpdate(mdctx, bfb, (size_t)l);
-		n += (uint32_t)l;
+
+		if (i <= n) {
+			size_t left = offset - i;
+			if (left > SIZE_64K)
+				left = SIZE_64K;
+			if (!BIO_write_ex(bio, indata + i, left, &written))
+				goto err;
+			(void)BIO_seek(bio, 0);
+			i += (uint32_t)written;
+		}
+		if (want > SIZE_64K)
+			want = SIZE_64K;
+		if (!BIO_read_ex(bio, bfb, want, &nread))
+			goto err; /* FAILED */
+		EVP_DigestUpdate(mdctx, bfb, nread);
+		n += (uint32_t)nread;
 	}
 
 	if (!header->sigpos) {
@@ -3458,7 +3504,6 @@ static PKCS7 *pe_extract_existing_pkcs7(char *indata, FILE_HEADER *header)
 static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *options)
 {
 	int i, peok = 1, ret = 1;
-	BIO *bio;
 	uint32_t real_pe_checksum;
 	PKCS7 *p7;
 	STACK_OF(SIGNATURE) *signatures = sk_SIGNATURE_new_null();
@@ -3468,9 +3513,7 @@ static int pe_verify_file(char *indata, FILE_HEADER *header, GLOBAL_OPTIONS *opt
 
 	/* check PE checksum */
 	printf("Current PE checksum   : %08X\n", header->pe_checksum);
-	bio = BIO_new_mem_buf(indata, (int)header->fileend);
-	real_pe_checksum = pe_calc_checksum(bio, header);
-	BIO_free(bio);
+	real_pe_checksum = pe_calc_realchecksum(indata, header);
 	if (header->pe_checksum && header->pe_checksum != real_pe_checksum)
 		peok = 0;
 	printf("Calculated PE checksum: %08X%s\n\n", real_pe_checksum, peok ? "" : "    MISMATCH!!!");
@@ -3585,31 +3628,40 @@ static int pe_verify_header(char *indata, char *infile, uint32_t filesize, FILE_
 	return 1; /* OK */
 }
 
-static void pe_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
+static int pe_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
 {
-	int len = 0, i;
+	size_t i, len, written;
 	char *buf = OPENSSL_malloc(SIZE_64K);
 
-	i = (int)header->header_size + 88;
-	BIO_write(hash, indata, i);
+	i = len = header->header_size + 88;
+	if (!BIO_write_ex(hash, indata, len, &written) || written != len)
+		return 0; /* FAILED */
 	memset(buf, 0, 4);
 	BIO_write(outdata, buf, 4); /* zero out checksum */
 	i += 4;
-	BIO_write(hash, indata + i, 60 + (int)header->pe32plus * 16);
-	i += 60 + (int)header->pe32plus * 16;
+	len = 60 + header->pe32plus * 16;
+	if (!BIO_write_ex(hash, indata + i, len, &written) || written != len)
+		return 0; /* FAILED */
+	i += 60 + header->pe32plus * 16;
 	memset(buf, 0, 8);
 	BIO_write(outdata, buf, 8); /* zero out sigtable offset + pos */
 	i += 8;
-	BIO_write(hash, indata + i, (int)header->fileend - i);
-
+	len = header->fileend - i;
+	while (len > 0) {
+		BIO_write_ex(hash, indata + i, len, &written);
+		len -= written;
+		i += written;
+	}
 	/* pad (with 0's) pe file to 8 byte boundary */
 	len = 8 - header->fileend % 8;
-	if (len > 0 && len != 8) {
-		memset(buf, 0, (size_t)len);
-		BIO_write(hash, buf, len);
+	if (len != 8) {
+		memset(buf, 0, len);
+		if (!BIO_write_ex(hash, buf, len, &written) || written != len)
+			return 0; /* FAILED */
 		header->fileend += (uint32_t)len;
 	}
 	OPENSSL_free(buf);
+	return 1; /* OK */
 }
 
 /*
@@ -4656,8 +4708,8 @@ static uint32_t get_file_size(const char *infile)
 {
 	int ret;
 #ifdef _WIN32
-	struct _stat st;
-	ret = _stat(infile, &st);
+	struct _stat64 st;
+	ret = _stat64(infile, &st);
 #else
 	struct stat st;
 	ret = stat(infile, &st);
@@ -4669,6 +4721,10 @@ static uint32_t get_file_size(const char *infile)
 
 	if (st.st_size < 4) {
 		printf("Unrecognized file type - file is too short: %s\n", infile);
+		return 0;
+	}
+	if (st.st_size > UINT32_MAX) {
+		printf("Unsupported file - too large: %s\n", infile);
 		return 0;
 	}
 	return (uint32_t)st.st_size;
@@ -5517,7 +5573,10 @@ static PKCS7 *pe_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *hea
 		/* Strip current signature */
 		header->fileend = header->sigpos;
 	}
-	pe_modify_header(indata, header, hash, outdata);
+	if (!pe_modify_header(indata, header, hash, outdata)) {
+		printf("Unable to modify file header\n");
+		return NULL; /* FAILED */	
+	}
 	/* Obtain an existing signature or create a new one */
 	if ((cmd == CMD_ATTACH) || (cmd == CMD_SIGN))
 		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams, NULL);
