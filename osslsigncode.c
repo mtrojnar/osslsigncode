@@ -796,13 +796,17 @@ static int blob_has_nl = 0;
 /*
  * Callback for writing received data
  */
-static int curl_write(void *ptr, size_t sz, size_t nmemb, void *stream)
+static size_t curl_write(void *ptr, size_t sz, size_t nmemb, void *stream)
 {
-	if (sz*nmemb > 0 && !blob_has_nl) {
-		if (memchr(ptr, '\n', sz*nmemb))
+	size_t written, len = sz * nmemb;
+
+	if (len > 0 && !blob_has_nl) {
+		if (memchr(ptr, '\n', len))
 			blob_has_nl = 1;
 	}
-	return BIO_write((BIO*)stream, ptr, (int)(sz*nmemb));
+	if (!BIO_write_ex((BIO*)stream, ptr, len, &written) || written != len)
+		return 0; /* FAILED */
+	return written;
 }
 
 static void print_timestamp_error(const char *url, long http_code)
@@ -3167,10 +3171,11 @@ static PKCS7 *msi_extract_existing_pkcs7(MSI_PARAMS *msiparams, MSI_ENTRY *ds, c
 
 static int msi_extract_file(MSI_PARAMS *msiparams, BIO *outdata, int output_pkcs7)
 {
-	int ret;
+	int ret = 0;
 	PKCS7 *sig;
 	uint32_t len;
 	char *data;
+	size_t written;
 
 	MSI_ENTRY *ds = msi_signatures_get(msiparams->dirent, NULL);
 	if (!ds) {
@@ -3188,7 +3193,8 @@ static int msi_extract_file(MSI_PARAMS *msiparams, BIO *outdata, int output_pkcs
 	if (output_pkcs7) {
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
 	} else {
-		ret = !BIO_write(outdata, data, (int)len);
+		if (!BIO_write_ex(outdata, data, len, &written) || written != len)
+			ret = 1; /* FAILED */
 	}
 	PKCS7_free(sig);
 	OPENSSL_free(data);
@@ -3282,7 +3288,7 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *
 	BIO *bio = NULL;
 	u_char *bfb;
 	EVP_MD_CTX *mdctx;
-	size_t written;
+	size_t written, nread;
 	uint32_t i, n, offset;
 	int ret = 0;
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
@@ -3300,20 +3306,21 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 	bio = BIO_new(BIO_s_mem());
 	i = n = header->header_size + 88 + 4 + 60 + header->pe32plus * 16 + 8;
-	if (!BIO_write_ex(bio, indata, i, &written))
+	if (!BIO_write_ex(bio, indata, i, &written) || written != i)
 		goto err;
 	(void)BIO_seek(bio, 0);
 
 	bfb = OPENSSL_malloc(SIZE_64K);
-	BIO_read(bio, bfb, (int)header->header_size + 88);
+	if (!BIO_read_ex(bio, bfb, header->header_size + 88, &nread))
+		goto err;
 	EVP_DigestUpdate(mdctx, bfb, header->header_size + 88);
 	BIO_read(bio, bfb, 4);
-	BIO_read(bio, bfb, 60 + (int)header->pe32plus * 16);
+	if (!BIO_read_ex(bio, bfb, 60 + header->pe32plus * 16, &nread))
+		goto err;
 	EVP_DigestUpdate(mdctx, bfb, 60 + header->pe32plus * 16);
 	BIO_read(bio, bfb, 8);
 
 	while (n < offset) {
-		size_t nread;
 		uint32_t want = offset - n;
 
 		if (i <= n) {
@@ -3551,6 +3558,7 @@ static int pe_extract_file(char *indata, FILE_HEADER *header, BIO *outdata, int 
 {
 	int ret = 0;
 	PKCS7 *sig;
+	size_t written;
 
 	(void)BIO_reset(outdata);
 	if (output_pkcs7) {
@@ -3562,8 +3570,9 @@ static int pe_extract_file(char *indata, FILE_HEADER *header, BIO *outdata, int 
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
 		PKCS7_free(sig);
 	} else
-		ret = !BIO_write(outdata, indata + header->sigpos, (int)header->siglen);
-
+		if (!BIO_write_ex(outdata, indata + header->sigpos, header->siglen, &written) \
+				|| written != header->siglen)
+			ret = 1; /* FAILED */
 	return ret;
 }
 
@@ -3648,7 +3657,8 @@ static int pe_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *o
 	i += 8;
 	len = header->fileend - i;
 	while (len > 0) {
-		BIO_write_ex(hash, indata + i, len, &written);
+		if (!BIO_write_ex(hash, indata + i, len, &written))
+			return 0; /* FAILED */
 		len -= written;
 		i += written;
 	}
@@ -3736,34 +3746,38 @@ static int cab_verify_header(char *indata, char *infile, uint32_t filesize, FILE
 /* Compute a message digest value of the signed or unsigned CAB file */
 static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *header)
 {
-	BIO *bio;
-	u_char *bfb;
-	EVP_MD_CTX *mdctx;
-	uint32_t offset, coffFiles;
+	size_t left, written;
+	uint32_t i, n, offset, coffFiles;
 	int ret = 0;
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
+	EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+	BIO *bio = BIO_new(BIO_s_mem());
+	u_char *bfb = OPENSSL_malloc(SIZE_64K);
 
 	if (header->sigpos)
 		offset = header->sigpos;
 	else
 		offset = header->fileend;
-
-	mdctx = EVP_MD_CTX_new();
+	
 	if (!EVP_DigestInit(mdctx, md)) {
 		printf("Unable to set up the digest context\n");
 		goto err;
 	}
-	bio = BIO_new_mem_buf(indata, (int)offset);
 	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
+	left = offset;
+	if (left > SIZE_64K)
+		left = SIZE_64K;
+	if (!BIO_write_ex(bio, indata, left, &written))
+		goto err;
 	(void)BIO_seek(bio, 0);
-
-	bfb = OPENSSL_malloc(SIZE_16M);
+	i = (uint32_t)written;
 
 	/* u1 signature[4] 4643534D MSCF: 0-3 */
 	BIO_read(bio, bfb, 4);
 	EVP_DigestUpdate(mdctx, bfb, 4);
 	/* u4 reserved1 00000000: 4-7 */
 	BIO_read(bio, bfb, 4);
+	n = 8;
 	if (header->sigpos) {
 		uint16_t nfolders, flags;
 		uint32_t pos = 60;
@@ -3810,6 +3824,7 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER 
 		BIO_read(bio, bfb, 22);
 		/* u22 abReserve: 56-59 */
 		BIO_read(bio, bfb, 4);
+		n += 52;
 		EVP_DigestUpdate(mdctx, bfb, 4);
 		/* TODO */
 		if (flags & FLAG_PREV_CABINET) {
@@ -3818,12 +3833,14 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER 
 				BIO_read(bio, bfb, 1);
 				EVP_DigestUpdate(mdctx, bfb, 1);
 				pos++;
+				n++;
 			} while (bfb[0] && pos < offset);
 			/* szDiskPrev */
 			do {
 				BIO_read(bio, bfb, 1);
 				EVP_DigestUpdate(mdctx, bfb, 1);
 				pos++;
+				n++;
 			} while (bfb[0] && pos < offset);
 		}
 		if (flags & FLAG_NEXT_CABINET) {
@@ -3832,12 +3849,14 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER 
 				BIO_read(bio, bfb, 1);
 				EVP_DigestUpdate(mdctx, bfb, 1);
 				pos++;
+				n++;
 			} while (bfb[0] && pos < offset);
 			/* szDiskNext */
 			do {
 				BIO_read(bio, bfb, 1);
 				EVP_DigestUpdate(mdctx, bfb, 1);
 				pos++;
+				n++;
 			} while (bfb[0] && pos < offset);
 		}
 		/*
@@ -3848,28 +3867,38 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER 
 			BIO_read(bio, bfb, 8);
 			EVP_DigestUpdate(mdctx, bfb, 8);
 			nfolders--;
+			n += 8;
 		}
 	} else {
-		/* read what's left of the unsigned PE file */
+		/* read what's left of the unsigned CAB file */
 		coffFiles = 8;
 	}
 	/* (variable) ab - the compressed data bytes */
 	while (coffFiles < offset) {
-		int l;
+		size_t nread;
 		uint32_t want = offset - coffFiles;
-		if (want > sizeof bfb)
-			want = sizeof bfb;
-		l = BIO_read(bio, bfb, (int)want);
-		if (l <= 0)
-			break;
-		EVP_DigestUpdate(mdctx, bfb, (size_t)l);
-		coffFiles += (uint32_t)l;
+		if (i <= n) {
+			left = offset - i;
+			if (left > SIZE_64K)
+				left = SIZE_64K;
+			if (!BIO_write_ex(bio, indata + i, left, &written))
+				goto err;
+			(void)BIO_seek(bio, 0);
+			i += (uint32_t)written;
+		}
+		if (want > SIZE_64K)
+			want = SIZE_64K;
+		if (!BIO_read_ex(bio, bfb, want, &nread))
+			goto err; /* FAILED */
+		EVP_DigestUpdate(mdctx, bfb, nread);
+		coffFiles += (uint32_t)nread;
+		n += (uint32_t)nread;
 	}
-	OPENSSL_free(bfb);
-	BIO_free(bio);
 	EVP_DigestFinal(mdctx, mdbuf, NULL);
 	ret = 1; /* OK */
 err:
+	OPENSSL_free(bfb);
+	BIO_free(bio);
 	EVP_MD_CTX_free(mdctx);
 	return ret;
 }
@@ -3962,6 +3991,7 @@ static int cab_extract_file(char *indata, FILE_HEADER *header, BIO *outdata, int
 {
 	int ret = 0;
 	PKCS7 *sig;
+	size_t written;
 
 	(void)BIO_reset(outdata);
 	if (output_pkcs7) {
@@ -3973,16 +4003,16 @@ static int cab_extract_file(char *indata, FILE_HEADER *header, BIO *outdata, int
 		ret = !PEM_write_bio_PKCS7(outdata, sig);
 		PKCS7_free(sig);
 	} else
-		ret = !BIO_write(outdata, indata + header->sigpos, (int)header->siglen);
-
+		if (!BIO_write_ex(outdata, indata + header->sigpos, header->siglen, &written) \
+				|| written != header->siglen)
+			ret = 1; /* FAILED */
 	return ret;
 }
 
-static void cab_optional_names(uint16_t flags, char *indata, BIO *outdata, int *len)
+static void cab_optional_names(uint16_t flags, char *indata, BIO *outdata, size_t *len)
 {
-	int i;
+	size_t i = *len;
 
-	i = *len;
 	/* TODO */
 	if (flags & FLAG_PREV_CABINET) {
 		/* szCabinetPrev */
@@ -4021,7 +4051,7 @@ static void cab_optional_names(uint16_t flags, char *indata, BIO *outdata, int *
 
 static int cab_remove_file(char *indata, FILE_HEADER *header, uint32_t filesize, BIO *outdata)
 {
-	int i;
+	size_t i, written, len;
 	uint32_t tmp;
 	uint16_t nfolders, flags;
 	char *buf = OPENSSL_malloc(SIZE_64K);
@@ -4074,16 +4104,21 @@ static int cab_remove_file(char *indata, FILE_HEADER *header, uint32_t filesize,
 		i+=8;
 		nfolders--;
 	}
-	/* Write what's left - the compressed data bytes */
-	BIO_write(outdata, indata + i, (int)(filesize - header->siglen) - i);
 	OPENSSL_free(buf);
-
+	/* Write what's left - the compressed data bytes */
+	len = filesize - header->siglen - i;
+	while (len > 0) {
+		if (!BIO_write_ex(outdata, indata + i, len, &written))
+			return 1; /* FAILED */
+		len -= written;
+		i += written;
+	}
 	return 0; /* OK */
 }
 
-static void cab_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
+static int cab_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
 {
-	int i;
+	size_t i, written, len;
 	uint16_t nfolders, flags;
 	u_char buf[] = {0x00, 0x00};
 
@@ -4134,12 +4169,19 @@ static void cab_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO 
 		nfolders--;
 	}
 	/* Write what's left - the compressed data bytes */
-	BIO_write(hash, indata + i, (int)header->sigpos - i);
+	len = header->sigpos - i;
+	while (len > 0) {
+		if (!BIO_write_ex(hash, indata + i, len, &written))
+			return 0; /* FAILED */
+		len -= written;
+		i += written;
+	}
+	return 1; /* OK */
 }
 
-static void cab_add_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
+static int cab_add_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
 {
-	int i;
+	size_t i, written, len;
 	uint32_t tmp;
 	uint16_t nfolders, flags;
 	u_char cabsigned[] = {
@@ -4200,9 +4242,16 @@ static void cab_add_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *ou
 		i += 8;
 		nfolders--;
 	}
-	/* Write what's left - the compressed data bytes */
-	BIO_write(hash, indata + i, (int)header->fileend - i);
 	OPENSSL_free(buf);
+	/* Write what's left - the compressed data bytes */
+	len = header->fileend - i;
+	while (len > 0) {
+		if (!BIO_write_ex(hash, indata + i, len, &written))
+			return 0; /* FAILED */
+		len -= written;
+		i += written;
+	}
+	return 1; /* OK */
 }
 
 /*
@@ -5600,11 +5649,14 @@ static PKCS7 *cab_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 		if (cmd == CMD_ADD)
 			sig = *cursig;
 	}
-	if (header->header_size == 20)
+	if (header->header_size == 20) {
 		/* Strip current signature and modify header */
-		cab_modify_header(indata, header, hash, outdata);
-	else
-		cab_add_header(indata, header, hash, outdata);
+		if (!cab_modify_header(indata, header, hash, outdata))
+			return NULL; /* FAILED */
+	} else {
+		if (!cab_add_header(indata, header, hash, outdata))
+			return NULL; /* FAILED */
+	}
 	/* Obtain an existing signature or create a new one */
 	if ((cmd == CMD_ATTACH) || (cmd == CMD_SIGN))
 		sig = get_pkcs7(cmd, hash, type, indata, options, header, cparams, NULL);
