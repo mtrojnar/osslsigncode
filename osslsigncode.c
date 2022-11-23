@@ -1801,10 +1801,11 @@ static int set_indirect_data_blob(PKCS7 *sig, BIO *hash, file_type_t type,
 {
 	u_char *p = NULL;
 	int len = 0;
-	u_char *buf = OPENSSL_malloc(SIZE_64K);
+	u_char *buf;
 
 	if (!get_indirect_data_blob(&p, &len, options, header, type, indata))
 		return 0; /* FAILED */
+	buf = OPENSSL_malloc(SIZE_64K);
 	memcpy(buf, p, (size_t)len);
 	OPENSSL_free(p);
 	if (!set_signing_blob(sig, hash, buf, len)) {
@@ -3640,25 +3641,30 @@ static int pe_verify_header(char *indata, char *infile, uint32_t filesize, FILE_
 static int pe_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *outdata)
 {
 	size_t i, len, written;
-	char *buf = OPENSSL_malloc(SIZE_64K);
+	char *buf;
 
 	i = len = header->header_size + 88;
 	if (!BIO_write_ex(hash, indata, len, &written) || written != len)
 		return 0; /* FAILED */
+	buf = OPENSSL_malloc(SIZE_64K);
 	memset(buf, 0, 4);
 	BIO_write(outdata, buf, 4); /* zero out checksum */
 	i += 4;
 	len = 60 + header->pe32plus * 16;
-	if (!BIO_write_ex(hash, indata + i, len, &written) || written != len)
+	if (!BIO_write_ex(hash, indata + i, len, &written) || written != len) {
+		OPENSSL_free(buf);
 		return 0; /* FAILED */
+	}
 	i += 60 + header->pe32plus * 16;
 	memset(buf, 0, 8);
 	BIO_write(outdata, buf, 8); /* zero out sigtable offset + pos */
 	i += 8;
 	len = header->fileend - i;
 	while (len > 0) {
-		if (!BIO_write_ex(hash, indata + i, len, &written))
+		if (!BIO_write_ex(hash, indata + i, len, &written)) {
+			OPENSSL_free(buf);
 			return 0; /* FAILED */
+		}
 		len -= written;
 		i += written;
 	}
@@ -3666,8 +3672,10 @@ static int pe_modify_header(char *indata, FILE_HEADER *header, BIO *hash, BIO *o
 	len = 8 - header->fileend % 8;
 	if (len != 8) {
 		memset(buf, 0, len);
-		if (!BIO_write_ex(hash, buf, len, &written) || written != len)
+		if (!BIO_write_ex(hash, buf, len, &written) || written != len) {
+			OPENSSL_free(buf);
 			return 0; /* FAILED */
+		}
 		header->fileend += (uint32_t)len;
 	}
 	OPENSSL_free(buf);
@@ -4696,6 +4704,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 		if (!msi_file_write(msiparams->msi, msiparams->dirent, p_msi, (uint32_t)len_msi,
 				msiparams->p_msiex, (uint32_t)msiparams->len_msiex, outdata)) {
 			printf("Saving the msi file failed\n");
+			OPENSSL_free(p);
 			return 1; /* FAILED */
 		}
 	} else if (type == FILE_TYPE_CAT) {
