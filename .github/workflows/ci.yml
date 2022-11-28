@@ -134,7 +134,9 @@ jobs:
       if: failure()
       with:
         name: errors-${{matrix.id}}
-        path: ${{github.workspace}}/build/Testing/Temporary/LastTest.log
+        path: |
+          ${{github.workspace}}/build/Testing/Temporary/LastTest.log
+          ${{github.workspace}}/build/Testing/conf/makecerts.log
 
     - name: Install
       run: cmake --install ${{github.workspace}}/build
