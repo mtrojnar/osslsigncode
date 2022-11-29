@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 result=0
 
@@ -18,7 +18,6 @@ make_certs() {
   script_path=$(pwd)
   cd "${result_path}"
   mkdir "tmp/"
-  rm -rf "../certs"
 
 # OpenSSL settings
   CONF="${script_path}/openssl_intermediate.cnf"
@@ -34,7 +33,7 @@ make_certs() {
   touch "CA/index.txt"
   echo -n "unique_subject = no" > "CA/index.txt.attr"
   $OPENSSL rand -hex 16 > "CA/serial"
-  $OPENSSL rand -hex 16 > "tsa-serial"
+  $OPENSSL rand -hex 16 > "tmp/tsa-serial"
   echo 1001 > "CA/crlnumber"
   date > "makecerts.log"
   "$OPENSSL" version 2>> "makecerts.log" 1>&2
@@ -175,7 +174,25 @@ make_certs() {
       2>> "makecerts.log" 1>&2
   test_result $?
 
-  printf "\nConvert the certificate and the key into a PKCS#12 container\n" >> "makecerts.log"
+  ssl_version=$("$OPENSSL" version)
+  if test "${ssl_version:8:1}" -eq 3
+  then
+    printf "\nConvert the certificate and the key into legacy PKCS#12 container with\
+ RC2-40-CBC private key and certificate encryption algorithm\n" >> "makecerts.log"
+    "$OPENSSL" pkcs12 -export -in tmp/cert.pem -inkey tmp/key.pem -out tmp/legacy.p12 -passout pass:"$password" \
+        -keypbe rc2-40-cbc -certpbe rc2-40-cbc -legacy \
+        2>> "makecerts.log" 1>&2
+  else
+    printf "\nConvert the certificate and the key into legacy PKCS#12 container with\
+ RC2-40-CBC private key and certificate encryption algorithm\n" >> "makecerts.log"
+    "$OPENSSL" pkcs12 -export -in tmp/cert.pem -inkey tmp/key.pem -out tmp/legacy.p12 -passout pass:"$password" \
+        -keypbe rc2-40-cbc -certpbe rc2-40-cbc \
+        2>> "makecerts.log" 1>&2
+  fi
+  test_result $?
+
+  printf "\nConvert the certificate and the key into a PKCS#12 container with\
+  AES-256-CBC private key and certificate encryption algorithm\n" >> "makecerts.log"
   "$OPENSSL" pkcs12 -export -in tmp/cert.pem -inkey tmp/key.pem -out tmp/cert.p12 -passout pass:"$password" \
       -keypbe aes-256-cbc -certpbe aes-256-cbc \
       2>> "makecerts.log" 1>&2
@@ -230,9 +247,9 @@ make_certs() {
       -a -s tmp/key.pem -a -s tmp/keyp.pem -a -s tmp/key.der -a -s tmp/key.pvk \
       -a -s tmp/cert.pem -a -s tmp/cert.p12 -a -s tmp/cert.der -a -s tmp/cert.spc \
       -a -s tmp/crosscert.pem -a -s tmp/expired.pem -a -s tmp/revoked.pem -a -s tmp/revoked.spc \
-      -a -s tmp/TSA.pem -a -s tmp/TSA.key -a -s tmp/tsa-chain.pem
+      -a -s tmp/TSA.pem -a -s tmp/TSA.key -a -s tmp/tsa-chain.pem -a -s tmp/legacy.p12
   then
-    mkdir "../certs"
+    mkdir -p "../certs"
     cp tmp/* ../certs
     printf "%s" "keys & certificates successfully generated"
   else

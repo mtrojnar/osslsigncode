@@ -27,6 +27,7 @@ policy                          = policy_match
 default_startdate               = 20180101000000Z
 default_enddate                 = 20280101000000Z
 unique_subject                  = no
+email_in_dn                     = no
 x509_extensions                 = tsa_extensions
 
 [ policy_match ]
