@@ -113,6 +113,9 @@
 #ifndef OPENSSL_NO_ENGINE
 #include <openssl/engine.h>
 #endif /* OPENSSL_NO_ENGINE */
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+#include <openssl/provider.h>
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 
 #include "msi.h"
 
@@ -248,6 +251,9 @@ typedef struct {
 	char *tsa_crlfile;
 	char *leafhash;
 	int jp;
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+	int legacy;
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 } GLOBAL_OPTIONS;
 
 typedef struct {
@@ -1198,6 +1204,9 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%1s[ sign ] ( -certs | -spc <certfile> -key <keyfile> | -pkcs12 <pkcs12file> |\n", "");
 		printf("%12s  [ -pkcs11engine <engine> ] -pkcs11module <module> -pkcs11cert <pkcs11 cert id> |\n", "");
 		printf("%12s  -certs <certfile> -key <pkcs11 key id>)\n", "");
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+		printf("%12s[ -nolegacy ]\n", "");
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 		printf("%12s[ -pass <password>", "");
 #ifdef PROVIDE_ASKPASS
 		printf("%1s [ -askpass ]", "");
@@ -1288,6 +1297,9 @@ static void help_for(const char *argv0, const char *cmd)
 	const char *cmds_in[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", "verify", NULL};
 	const char *cmds_jp[] = {"sign", NULL};
 	const char *cmds_key[] = {"sign", NULL};
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+	const char *cmds_nolegacy[] = {"sign", NULL};
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 	const char *cmds_n[] = {"sign", NULL};
 	const char *cmds_nest[] = {"attach-signature", "sign", NULL};
 #ifdef ENABLE_CURL
@@ -1400,6 +1412,10 @@ static void help_for(const char *argv0, const char *cmd)
 		printf("%26slevels of permissions in Microsoft Internet Explorer 4.x for CAB files\n", "");
 		printf("%26sonly \"low\" level is now supported\n", "");
 	}
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+	if (on_list(cmd, cmds_nolegacy))
+		printf("%-24s= disable legacy mode and don't automatically load the legacy provider\n", "-nolegacy");
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 	if (on_list(cmd, cmds_key))
 		printf("%-24s= the private key to use or PKCS#11 URI identifies a key in the token\n", "-key");
 	if (on_list(cmd, cmds_n))
@@ -5736,6 +5752,52 @@ static cmd_type_t get_command(char **argv)
 	return CMD_SIGN;
 }
 
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+DEFINE_STACK_OF(OSSL_PROVIDER)
+static STACK_OF(OSSL_PROVIDER) *providers = NULL;
+
+static void provider_free(OSSL_PROVIDER *prov)
+{
+	OSSL_PROVIDER_unload(prov);
+}
+
+static void providers_cleanup(void)
+{
+	sk_OSSL_PROVIDER_pop_free(providers, provider_free);
+	providers = NULL;
+}
+
+static int provider_load(OSSL_LIB_CTX *libctx, const char *pname)
+{
+	OSSL_PROVIDER *prov= OSSL_PROVIDER_load(libctx, pname);
+	if (prov == NULL) {
+		printf("Unable to load provider: %s\n", pname);
+		return 0; /* FAILED */
+	}
+	if (providers == NULL) {
+		providers = sk_OSSL_PROVIDER_new_null();
+	}
+	if (providers == NULL || !sk_OSSL_PROVIDER_push(providers, prov)) {
+		providers_cleanup();
+		return 0; /* FAILED */
+	}
+	return 1; /* OK */
+}
+
+static int use_legacy(void)
+{
+	/* load the legacy provider if not loaded already */
+	if (!OSSL_PROVIDER_available(NULL, "legacy")) {
+		if (!provider_load(NULL, "legacy"))
+			return 0; /* FAILED */
+		/* load the default provider explicitly */
+		if (!provider_load(NULL, "default"))
+			return 0; /* FAILED */
+	}
+	return 1; /* OK */
+}
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
+
 static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS *options)
 {
 	int i;
@@ -5751,6 +5813,10 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 	options->md = EVP_sha256();
 	options->time = INVALID_TIME;
 	options->jp = -1;
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+/* Use legacy PKCS#12 container with RC2-40-CBC private key and certificate encryption algorithm */
+	options->legacy = 1;
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 
 	if (*cmd == CMD_HELP) {
 		return 0; /* FAILED */
@@ -5824,6 +5890,10 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 			}
 			options->p11module = *(++argv);
 #endif /* OPENSSL_NO_ENGINE */
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-nolegacy")) {
+			options->legacy = 0;
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 		} else if ((*cmd == CMD_SIGN) && !strcmp(*argv, "-pass")) {
 			if (options->askpass || options->readpass) {
 				usage(argv0, "all");
@@ -6051,6 +6121,11 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 		return 0; /* FAILED */
 	}
 #endif /* WIN32 */
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+	if (*cmd == CMD_SIGN && options->legacy && !use_legacy()) {
+		printf("Warning: Legacy mode disabled\n");
+	}
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 	return 1; /* OK */
 }
 
@@ -6313,6 +6388,9 @@ err_cleanup:
 	free_msi_params(&msiparams);
 	free_crypto_params(&cparams);
 	free_options(&options);
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+	providers_cleanup();
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 	if (ret)
 		ERR_print_errors_fp(stdout);
 	if (cmd == CMD_HELP)
