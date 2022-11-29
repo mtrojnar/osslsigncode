@@ -20,6 +20,7 @@ file(COPY
   DESTINATION "${CONF}"
 )
 
+set(legacy_p12 "-pkcs12" "${CERTS}/legacy.p12" "-readpass" "${CERTS}/password.txt")
 set(priv_p12 "-pkcs12" "${CERTS}/cert.p12" "-readpass" "${CERTS}/password.txt")
 set(priv_spc "-certs" "${CERTS}/cert.spc" "-key" "${CERTS}/key.pvk" "-pass" "passme")
 set(priv_der "-certs" "${CERTS}/cert.pem" "-key" "${CERTS}/key.der" "-pass" "passme")
@@ -61,7 +62,7 @@ set(verify_opt "-CAfile" "${CERTS}/CACert.pem"
 )
 set(extensions_4 "exe" "ex_" "msi" "cat")
 set(extensions_3 "exe" "ex_" "msi")
-set(files_4 "signed" "nested" "added")
+set(files_4 "legacy" "signed" "nested" "added")
 set(files_3 "removed" "attached_pem" "attached_der")
 set(sign_formats "pem" "der")
 set(pem_certs "cert" "expired" "revoked")
@@ -74,7 +75,16 @@ add_test(
 
 foreach(ext ${extensions_4})
   # Signing time: May  1 00:00:00 2019 GMT
-  set(sign_${ext} )
+  add_test(
+    NAME legacy_${ext}
+    COMMAND osslsigncode "sign" ${sign_opt} ${legacy_p12}
+      "-in" "${FILES}/unsigned.${ext}" "-out" "${FILES}/legacy.${ext}"
+  )
+endforeach()
+
+foreach(ext ${extensions_4})
+  # Signing time: May  1 00:00:00 2019 GMT
+  set(sign_${ext})
   add_test(
     NAME signed_${ext}
     COMMAND osslsigncode "sign" ${sign_opt} ${priv_p12}
@@ -280,6 +290,7 @@ else()
 endif()
 
 foreach(ext ${extensions_4})
+  set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/legacy.${ext}")
   set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/signed.${ext}")
   set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/nested.${ext}")
   set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/removed.${ext}")
