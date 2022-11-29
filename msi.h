@@ -122,8 +122,12 @@
 #error "Cannot determine the endian-ness of this platform"
 #endif
 
+#ifndef LOWORD
 #define LOWORD(x) (x & 0xFFFF)
-#define HIWORD(x) (x >> 16)
+#endif /* LOWORD */
+#ifndef HIWORD
+#define HIWORD(x) ((x >> 16) & 0xFFFF)
+#endif /* HIWORD */
 
 #if BYTE_ORDER == BIG_ENDIAN
 #define LE_UINT16(x) ((((x) >> 8) & 0x00FF) | \
