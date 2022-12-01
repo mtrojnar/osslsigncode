@@ -60,6 +60,7 @@ You may need to use `cmake3` instead of `cmake` to complete the following steps 
   -DCMAKE_C_COMPILER=clang
   -DCMAKE_PREFIX_PATH=[openssl directory];[curl directory]
   -DCMAKE_INSTALL_PREFIX=[installation directory]
+  -DBASH_COMPLETION_USER_DIR=[bash completion installation directory]
 
 ```
 * Then call that build system to actually compile/link the osslsigncode project (alias `make`):
