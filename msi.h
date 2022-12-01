@@ -123,10 +123,10 @@
 #endif
 
 #ifndef LOWORD
-#define LOWORD(x) (x & 0xFFFF)
+#define LOWORD(x) ((x) & 0xFFFF)
 #endif /* LOWORD */
 #ifndef HIWORD
-#define HIWORD(x) ((x >> 16) & 0xFFFF)
+#define HIWORD(x) (((x) >> 16) & 0xFFFF)
 #endif /* HIWORD */
 
 #if BYTE_ORDER == BIG_ENDIAN
