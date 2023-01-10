@@ -15,6 +15,7 @@ jobs:
     - name: Get ready for scanning
       if: env.token
       run: |
+        sudo apt-get update
         sudo apt-get install -y libssl-dev libcurl4-openssl-dev
         cmake -S ${{github.workspace}} -B ${{github.workspace}}/build
     - uses: vapier/coverity-scan-action@v1

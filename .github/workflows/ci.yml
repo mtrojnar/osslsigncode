@@ -92,7 +92,9 @@ jobs:
 
     - name: Install apt dependencies (Linux)
       if: runner.os == 'Linux'
-      run: sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
 
     - name: Setup the oldest supported version of cmake (macOS)
       if: runner.os == 'macOS'
