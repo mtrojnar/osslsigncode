@@ -4819,10 +4819,12 @@ static char *map_file(const char *infile, const size_t size)
 		return NULL;
 	}
 	fmap = CreateFileMapping(fhandle, NULL, PAGE_READONLY, 0, 0, NULL);
+	CloseHandle(fhandle);
 	if (fmap == NULL) {
 		return NULL;
 	}
 	indata = (char *)MapViewOfFile(fmap, FILE_MAP_READ, 0, 0, 0);
+	CloseHandle(fmap);
 #else
 	int fd = open(infile, O_RDONLY);
 	if (fd < 0) {
@@ -5037,6 +5039,7 @@ static int read_password(GLOBAL_OPTIONS *options)
 			return 0; /* FAILED */
 		}
 		faddress = MapViewOfFile(fmap, FILE_MAP_READ, 0, 0, 0);
+		CloseHandle(fmap);
 		if (faddress == NULL) {
 			return 0; /* FAILED */
 		}
