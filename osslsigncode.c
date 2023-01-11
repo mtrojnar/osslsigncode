@@ -1264,7 +1264,7 @@ static void usage(const char *argv0, const char *cmd)
 		printf("%12s[ -CRLfile <infile> ]\n", "");
 		printf("%12s[ -TSA-CAfile <infile> ]\n", "");
 		printf("%12s[ -TSA-CRLfile <infile> ]\n", "");
-		printf("%12s[ -ignore_timestamp ]\n", "");
+		printf("%12s[ -ignore-timestamp ]\n", "");
 		printf("%12s[ -time <unix-time> ]\n", "");
 		printf("%12s[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n", "");
 		printf("%12s[ -verbose ]\n\n", "");
