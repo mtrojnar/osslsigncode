@@ -181,9 +181,7 @@ in the unauthenticated blob, as an attacker could modify this.  Do NOT, under
 any circumstances, put a URL here that you will use to download an additional
 file.  If you do do that, you would need to check the newly downloaded file is
 code signed AND that it has been signed with your cert AND that it is the
-version you expect.  You should consider using asymmetrical encryption for the
-data you put in the blob, such that the executable contains the public key to
-decrypt the data.  Basically, be VERY careful.
+version you expect.
 
 ## BUGS, QUESTIONS etc.
 
