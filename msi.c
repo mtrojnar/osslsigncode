@@ -635,11 +635,12 @@ static void prehash_metadata(MSI_ENTRY *entry, BIO *hash)
 int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root)
 {
 	int i, ret = 0;
-	STACK_OF(MSI_DIRENT) *children = sk_MSI_DIRENT_dup(dirent->children);
+	STACK_OF(MSI_DIRENT) *children;
 
-	if (dirent == NULL) {
-		goto out;
+	if (!dirent || !dirent->children) {
+		return ret;
 	}
+	children = sk_MSI_DIRENT_dup(dirent->children);
 	prehash_metadata(dirent->entry, hash);
 	sk_MSI_DIRENT_set_cmp_func(children, &dirent_cmp_hash);
 	sk_MSI_DIRENT_sort(children);
@@ -668,8 +669,12 @@ out:
 int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root)
  {
 	int i, ret = 0;
+	STACK_OF(MSI_DIRENT) *children;
 
-	STACK_OF(MSI_DIRENT) *children = sk_MSI_DIRENT_dup(dirent->children);
+	if (!dirent || !dirent->children) {
+		return ret;
+	}
+	children = sk_MSI_DIRENT_dup(dirent->children);
 	sk_MSI_DIRENT_set_cmp_func(children, &dirent_cmp_hash);
 	sk_MSI_DIRENT_sort(children);
 
@@ -1069,8 +1074,12 @@ static int dirents_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out, uint32_t
 {
 	int i, childenNum;
 	char *entry;
-	STACK_OF(MSI_DIRENT) *children = sk_MSI_DIRENT_dup(dirent->children);
-
+	STACK_OF(MSI_DIRENT) *children;
+	
+	if (!dirent || !dirent->children) {
+		return count;
+	}
+	children = sk_MSI_DIRENT_dup(dirent->children);
 	sk_MSI_DIRENT_set_cmp_func(children, &dirent_cmp_tree);
 	sk_MSI_DIRENT_sort(children);
 	childenNum = sk_MSI_DIRENT_num(children);
