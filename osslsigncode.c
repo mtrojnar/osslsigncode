@@ -1534,7 +1534,7 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	if (!EVP_DigestInit(mdctx, md)) {
 		EVP_MD_CTX_free(mdctx);
 		printf("Unable to set up the digest context\n");
-		return NULL;  /* FAILED */
+		return NULL; /* FAILED */
 	}
 	nsections = GET_UINT16_LE(indata + header_size + 6);
 	pagesize = GET_UINT32_LE(indata + header_size + 56);
@@ -1560,7 +1560,13 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 		ro = GET_UINT32_LE(sections + 20);
 		for (l=0; l < rs; l+=pagesize, pi++) {
 			PUT_UINT32_LE(ro + l, res + pi*pphlen);
-			EVP_DigestInit(mdctx, md);
+			if (!EVP_DigestInit(mdctx, md)) {
+				EVP_MD_CTX_free(mdctx);
+				OPENSSL_free(res);
+				OPENSSL_free(zeroes);
+				printf("Unable to set up the digest context\n");
+				return NULL; /* FAILED */			
+			}
 			if (rs - l < pagesize) {
 				EVP_DigestUpdate(mdctx, indata + ro + l, rs - l);
 				EVP_DigestUpdate(mdctx, zeroes, pagesize - (rs - l));
