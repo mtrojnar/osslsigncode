@@ -3324,7 +3324,6 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *
 		printf("Unable to set up the digest context\n");
 		goto err;
 	}
-	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 	bio = BIO_new(BIO_s_mem());
 	i = n = header->header_size + 88 + 4 + 60 + header->pe32plus * 16 + 8;
 	if (!BIO_write_ex(bio, indata, i, &written) || written != i)
@@ -3791,7 +3790,6 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER 
 		printf("Unable to set up the digest context\n");
 		goto err;
 	}
-	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 	left = offset;
 	if (left > SIZE_64K)
 		left = SIZE_64K;
@@ -4376,6 +4374,8 @@ static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEAD
 			printf("Failed to extract current message digest\n\n");
 			goto out;
 		}
+		/* reset calculated message digest */
+		memset(cmdbuf, 0, EVP_MAX_MD_SIZE);
 		/* compute a message digest of the input file */
 		switch (filetype) {
 			case FILE_TYPE_CAB:

@@ -721,7 +721,6 @@ int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, uint32_t fileend)
 		printf("Unable to set up the digest context\n");
 		goto out;
 	}
-	memset(mdbuf, 0, EVP_MAX_MD_SIZE);
 	(void)BIO_seek(bio, 0);
 
 	n = 0;
