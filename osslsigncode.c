@@ -4879,6 +4879,18 @@ static char *map_file(const char *infile, const size_t size)
 	return indata;
 }
 
+static void unmap_file(char *indata, const size_t size)
+{
+	if (!indata)
+		return;
+#ifdef WIN32
+	(void)size;
+	UnmapViewOfFile(indata);
+#else
+	munmap(indata, size);
+#endif /* WIN32 */
+}
+
 static int input_validation(file_type_t type, GLOBAL_OPTIONS *options, FILE_HEADER *header,
 			MSI_PARAMS *msiparams, char *indata, uint32_t filesize)
 {
@@ -4933,17 +4945,17 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 	uint32_t filesize;
 	char *outdata;
 
+	filesize = get_file_size(options->outfile);
+	if (!filesize) {
+		printf("Error verifying result\n");
+		return 1; /* FAILED */
+	}
+	outdata = map_file(options->outfile, filesize);
+	if (!outdata) {
+		printf("Error verifying result\n");
+		return 1; /* FAILED */
+	}
 	if (type == FILE_TYPE_PE) {
-		filesize = get_file_size(options->outfile);
-		if (!filesize) {
-			printf("Error verifying result\n");
-			return 1; /* FAILED */
-		}
-		outdata = map_file(options->outfile, filesize);
-		if (!outdata) {
-			printf("Error verifying result\n");
-			return 1; /* FAILED */
-		}
 		if (!pe_verify_header(outdata, options->outfile, filesize, header)) {
 			printf("Corrupt PE file\n");
 			return 1; /* FAILED */
@@ -4953,16 +4965,6 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 			return 1; /* FAILED */
 		}
 	} else if (type == FILE_TYPE_CAB) {
-		filesize = get_file_size(options->outfile);
-		if (!filesize) {
-			printf("Error verifying result\n");
-			return 1; /* FAILED */
-		}
-		outdata = map_file(options->outfile, filesize);
-		if (!outdata) {
-			printf("Error verifying result\n");
-			return 1; /* FAILED */
-		}
 		if (!cab_verify_header(outdata, options->outfile, filesize, header)) {
 			printf("Corrupt CAB file\n");
 			return 1; /* FAILED */
@@ -4972,16 +4974,6 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 			return 1; /* FAILED */
 		}
 	} else if (type == FILE_TYPE_MSI) {
-		filesize = get_file_size(options->outfile);
-		if (!filesize) {
-			printf("Error verifying result\n");
-			return 1; /* FAILED */
-		}
-		outdata = map_file(options->outfile, filesize);
-		if (!outdata) {
-			printf("Error verifying result\n");
-			return 1; /* FAILED */
-		}
 		if (!msi_verify_header(outdata, filesize, msiparams)) {
 			printf("Corrupt MSI file: %s\n", options->outfile);
 			return 1; /* FAILED */
@@ -4993,7 +4985,8 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 	} else {
 		printf("Unknown input type for file: %s\n", options->infile);
 		return 1; /* FAILED */
-		}
+	}
+	unmap_file(outdata, filesize);
 	return 0; /* OK */
 }
 
@@ -5550,6 +5543,7 @@ static PKCS7 *get_sigfile(char *sigfile, file_type_t type)
 		else
 			sig = extract_existing_pkcs7(insigdata, &header);
 	}
+	unmap_file(insigdata, sigfilesize);
 	return sig; /* OK */
 }
 
@@ -6258,6 +6252,7 @@ int main(int argc, char **argv)
 			ret = 1; /* Failed */
 			goto err_cleanup;
 		}
+		unmap_file(catdata, catsize);
 	}
 
 	hash = BIO_new(BIO_f_md());
@@ -6411,13 +6406,7 @@ err_cleanup:
 #endif /* WIN32 */
 		}
 	}
-	if (indata) {
-#ifdef WIN32
-		UnmapViewOfFile(indata);
-#else
-		munmap(indata, filesize);
-#endif /* WIN32 */
-	}
+	unmap_file(indata, filesize);
 	free_msi_params(&msiparams);
 	free_crypto_params(&cparams);
 	free_options(&options);
