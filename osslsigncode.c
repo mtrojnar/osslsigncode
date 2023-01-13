@@ -4109,6 +4109,7 @@ static int cab_remove_file(char *indata, FILE_HEADER *header, uint32_t filesize,
 	BIO_write(outdata, indata+20, 10);
 	/* u2 flags: 30-31 */
 	flags = GET_UINT16_LE(indata+30);
+	/* coverity[result_independent_of_operands] only least significant byte is affected */
 	PUT_UINT16_LE(flags & (FLAG_PREV_CABINET | FLAG_NEXT_CABINET), buf);
 	BIO_write(outdata, buf, 2);
 	/*
