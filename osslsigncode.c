@@ -1079,6 +1079,16 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 
 	if (!url)
 		return 1; /* FAILED */
+
+	/* Encode timestamp request */
+	if (rfc3161) {
+		bout = encode_rfc3161_request(sig, md);
+	} else {
+		bout = encode_authenticode_request(sig);
+	}
+	if (!bout)
+		return 1; /* FAILED */
+
 	/* Start a libcurl easy session and set options for a curl easy handle */
 	curl = curl_easy_init();
 	if (proxy) {
@@ -1107,14 +1117,6 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	slist = curl_slist_append(slist, "Cache-Control: no-cache");
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
 
-	/* Encode timestamp request */
-	if (rfc3161) {
-		bout = encode_rfc3161_request(sig, md);
-	} else {
-		bout = encode_authenticode_request(sig);
-	}
-	if (!bout)
-		return 1; /* FAILED */
 	len = BIO_get_mem_data(bout, &p);
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, len);
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, (char*)p);
