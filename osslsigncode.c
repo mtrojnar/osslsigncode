@@ -6231,11 +6231,6 @@ int main(int argc, char **argv)
 
 	if (cmd != CMD_VERIFY) {
 		/* Create outdata file */
-#ifndef WIN32
-		if (!access(options.outfile, R_OK))
-			/* outdata file exists */
-			DO_EXIT_1("Failed to create file: %s\n", options.outfile);
-#endif
 		outdata = BIO_new_file(options.outfile, FILE_CREATE_MODE);
 		if (outdata == NULL)
 			DO_EXIT_1("Failed to create file: %s\n", options.outfile);
