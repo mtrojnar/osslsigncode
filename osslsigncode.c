@@ -2768,6 +2768,7 @@ static char *get_clrdp_url(X509 *cert)
 				url = OPENSSL_strdup((const char *)ASN1_STRING_get0_data(uri));
 				if (strncmp(url, "http://", 7) == 0)
 					goto out;
+				OPENSSL_free(url);
 			}
 		}
 	}
