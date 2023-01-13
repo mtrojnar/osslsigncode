@@ -1082,19 +1082,29 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	/* Start a libcurl easy session and set options for a curl easy handle */
 	curl = curl_easy_init();
 	if (proxy) {
-		curl_easy_setopt(curl, CURLOPT_PROXY, proxy);
-		if (!strncmp("http:", proxy, 5))
-			curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_HTTP);
-		if (!strncmp("socks:", proxy, 6))
-			curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5);
+		if ((res = curl_easy_setopt(curl, CURLOPT_PROXY, proxy)) != CURLE_OK) {
+			printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+		}
+		if (!strncmp("http:", proxy, 5) &&
+				(res = curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_HTTP)) != CURLE_OK) {
+			printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+		}
+		if (!strncmp("socks:", proxy, 6) &&
+				(res = curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5)) != CURLE_OK) {
+			printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+		}
 	}
-	curl_easy_setopt(curl, CURLOPT_URL, url);
+	if ((res = curl_easy_setopt(curl, CURLOPT_URL, url)) != CURLE_OK) {
+		printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+	}
 	/*
 	 * ask libcurl to show us the verbose output
 	 * curl_easy_setopt(curl, CURLOPT_VERBOSE, 42);
 	 */
-	if (noverifypeer)
-		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, FALSE);
+	if ((noverifypeer) &&
+			(res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, FALSE)) != CURLE_OK) {
+		printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+	}
 
 	if (rfc3161) {
 		slist = curl_slist_append(slist, "Content-Type: application/timestamp-query");
@@ -1105,7 +1115,9 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	}
 	slist = curl_slist_append(slist, "User-Agent: Transport");
 	slist = curl_slist_append(slist, "Cache-Control: no-cache");
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
+	if ((res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist)) != CURLE_OK) {
+		printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+	}
 
 	/* Encode timestamp request */
 	if (rfc3161) {
@@ -1116,14 +1128,24 @@ static int add_timestamp(PKCS7 *sig, char *url, char *proxy, int rfc3161,
 	if (!bout)
 		return 1; /* FAILED */
 	len = BIO_get_mem_data(bout, &p);
-	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, len);
-	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, (char*)p);
+	if ((res = curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, len)) != CURLE_OK) {
+		printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+	}
+	if ((res = curl_easy_setopt(curl, CURLOPT_POSTFIELDS, (char*)p)) != CURLE_OK) {
+		printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+	}
 
 	bin = BIO_new(BIO_s_mem());
 	BIO_set_mem_eof_return(bin, 0);
-	curl_easy_setopt(curl, CURLOPT_POST, 1);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, bin);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write);
+	if ((res = curl_easy_setopt(curl, CURLOPT_POST, 1)) != CURLE_OK) {
+		printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+	}
+	if ((res = curl_easy_setopt(curl, CURLOPT_WRITEDATA, bin)) != CURLE_OK) {
+		printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+	}
+	if ((res = curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write)) != CURLE_OK) {
+		printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+	}
 	/* Perform the request */
 	res = curl_easy_perform(curl);
 	curl_slist_free_all(slist);
