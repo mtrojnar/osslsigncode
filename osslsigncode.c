@@ -4391,7 +4391,8 @@ static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEAD
 					goto out;
 				break;
 			default:
-				break;
+				printf("Unsupported input file type.\n");
+				goto out;
 			}
 		mdlen = EVP_MD_size(EVP_get_digestbynid(mdtype));
 		if (!memcmp(mdbuf, cmdbuf, (size_t)mdlen)) {
