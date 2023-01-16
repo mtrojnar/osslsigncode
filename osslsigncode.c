@@ -4824,15 +4824,17 @@ static char *map_file(const char *infile, const size_t size)
 	}
 	indata = (char *)MapViewOfFile(fmap, FILE_MAP_READ, 0, 0, 0);
 #else
+#ifdef HAVE_SYS_MMAN_H
 	int fd = open(infile, O_RDONLY);
 	if (fd < 0) {
 		return NULL;
 	}
-#ifdef HAVE_SYS_MMAN_H
 	indata = mmap(0, size, PROT_READ, MAP_PRIVATE, fd, 0);
 	if (indata == MAP_FAILED) {
+		close(fd);
 		return NULL;
 	}
+	close(fd);
 #else
 	printf("No file mapping function\n");
 	return NULL;
