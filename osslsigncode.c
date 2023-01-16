@@ -6208,8 +6208,6 @@ int main(int argc, char **argv)
 
 	/* reset MSI parameters */
 	memset(&msiparams, 0, sizeof(MSI_PARAMS));
-	msiparams.msi = NULL;
-	msiparams.dirent = NULL;
 
 	/* commands and options initialization */
 	if (!main_configure(argc, argv, &cmd, &options))
@@ -6418,7 +6416,9 @@ err_cleanup:
 		}
 	}
 	unmap_file(indata, filesize);
+	/* coverity[uninit_use_in_call] False-positive: msiparams initialized by memset */
 	free_msi_params(&msiparams);
+	/* coverity[uninit_use_in_call] False-positive: cparams initialized by memset */
 	free_crypto_params(&cparams);
 	free_options(&options);
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
