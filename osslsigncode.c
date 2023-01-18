@@ -4776,10 +4776,7 @@ static int append_signature(PKCS7 *sig, PKCS7 *cursig, file_type_t type,
 			BIO_write(outdata, p, *padlen);
 		}
 	} else if (type == FILE_TYPE_MSI) {
-		int len_msi = *len;
-		u_char *p_msi = OPENSSL_malloc((size_t)len_msi);
-		memcpy(p_msi, p, (size_t)len_msi);
-		if (!msi_file_write(msiparams->msi, msiparams->dirent, p_msi, (uint32_t)len_msi,
+		if (!msi_file_write(msiparams->msi, msiparams->dirent, p, (uint32_t)*len,
 				msiparams->p_msiex, (uint32_t)msiparams->len_msiex, outdata)) {
 			printf("Saving the msi file failed\n");
 			OPENSSL_free(p);
@@ -5484,6 +5481,7 @@ static void free_msi_params(MSI_PARAMS *msiparams)
 {
 	msi_file_free(msiparams->msi);
 	msi_dirent_free(msiparams->dirent);
+	OPENSSL_free(msiparams->p_msiex);
 }
 
 static void free_crypto_params(CRYPTO_PARAMS *cparams)
