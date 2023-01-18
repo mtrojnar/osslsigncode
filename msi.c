@@ -683,12 +683,14 @@ int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root)
 		MSI_DIRENT *child = sk_MSI_DIRENT_value(children, i);
 		if (is_root && (!memcmp(child->name, digital_signature, MIN(child->nameLen, sizeof digital_signature))
 				|| !memcmp(child->name, digital_signature_ex, MIN(child->nameLen, sizeof digital_signature_ex)))) {
+			/* Skip DigitalSignature and MsiDigitalSignatureEx streams */
 			continue;
 		}
 		if (child->type == DIR_STREAM) {
 			char *indata;
 			uint32_t inlen = GET_UINT32_LE(child->entry->size);
-			if (inlen == 0) {
+			if (inlen == 0 || inlen >= MAXREGSECT) {
+				/* Skip null and corrupted streams */
 				continue;
 			}
 			indata = (char *)OPENSSL_malloc(inlen);
