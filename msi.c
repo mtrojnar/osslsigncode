@@ -864,14 +864,19 @@ static uint32_t stream_read(MSI_FILE *msi, MSI_ENTRY *entry, u_char *p_msi, uint
 		u_char *p_msiex, uint32_t len_msiex, char **indata, uint32_t inlen, int is_root)
 {
 	if (is_root && !memcmp(entry->name, digital_signature, sizeof digital_signature)) {
-		*indata = (char *)p_msi;
+		/* DigitalSignature */
 		inlen = len_msi;
+		*indata = OPENSSL_malloc((size_t)inlen);
+		memcpy(*indata, p_msi, (size_t)inlen);
 	} else if (is_root && !memcmp(entry->name, digital_signature_ex, sizeof digital_signature_ex)) {
-		*indata = (char *)p_msiex;
+		/* MsiDigitalSignatureEx */
 		inlen = len_msiex;
-	} else {
+		*indata = OPENSSL_malloc((size_t)inlen);
+		memcpy(*indata, p_msiex, (size_t)inlen);
+	} else if (inlen != 0) {
+		*indata = (char *)OPENSSL_malloc(inlen);
 		if (!msi_file_read(msi, entry, 0, *indata, inlen)) {
-			printf("Failed to read stream data\n");
+			OPENSSL_free(indata);
 			return 0; /* FAILED */
 		}
 	}
@@ -899,12 +904,17 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
 				return 0; /* FAILED */
 			}
 		} else { /* DIR_STREAM */
-			uint32_t inlen = GET_UINT32_LE(child->entry->size);
-			char *indata = (char *)OPENSSL_malloc(inlen);
 			char buf[MAX_SECTOR_SIZE];
-
+			char *indata;
+			uint32_t inlen = GET_UINT32_LE(child->entry->size);
+			if (inlen >= MAXREGSECT) {
+				printf("Corrupted stream length 0x%08X\n", inlen);
+				return 0; /* FAILED */
+			}
+			/* DigitalSignature or MsiDigitalSignatureEx: inlen == 0 */
 			inlen = stream_read(msi, child->entry, p_msi, len_msi, p_msiex, len_msiex, &indata, inlen, is_root);
 			if (inlen == 0) {
+				printf("Failed to read stream data\n");
 				continue;
 			}
 			/* set the size of the user-defined data if this is a stream object */
