@@ -3178,6 +3178,10 @@ static int msi_verify_file(MSI_PARAMS *msiparams, GLOBAL_OPTIONS *options)
 		goto out;
 	}
 	inlen = GET_UINT32_LE(ds->size);
+	if (inlen == 0 || inlen >= MAXREGSECT) {
+		printf("Corrupted DigitalSignature stream length 0x%08X\n", inlen);
+		goto out;
+	}
 	indata = OPENSSL_malloc((size_t)inlen);
 	if (!msi_file_read(msiparams->msi, ds, 0, indata, inlen)) {
 		printf("DigitalSignature stream data error\n\n");
@@ -3187,6 +3191,10 @@ static int msi_verify_file(MSI_PARAMS *msiparams, GLOBAL_OPTIONS *options)
 		printf("Warning: MsiDigitalSignatureEx stream doesn't exist\n");
 	} else {
 		exlen = GET_UINT32_LE(dse->size);
+		if (exlen == 0 || exlen >= MAXREGSECT) {
+			printf("Corrupted MsiDigitalSignatureEx stream length 0x%08X\n", exlen);
+			goto out;
+		}
 		exdata = OPENSSL_malloc((size_t)exlen);
 		if (!msi_file_read(msiparams->msi, dse, 0, exdata, exlen)) {
 			printf("MsiDigitalSignatureEx stream data error\n\n");
@@ -3249,6 +3257,10 @@ static int msi_extract_file(MSI_PARAMS *msiparams, BIO *outdata, int output_pkcs
 		return 1; /* FAILED */
 	}
 	len = GET_UINT32_LE(ds->size);
+	if (len == 0 || len >= MAXREGSECT) {
+		printf("Corrupted DigitalSignature stream length 0x%08X\n", len);
+		return 1; /* FAILED */
+	}
 	data = OPENSSL_malloc((size_t)len);
 	(void)BIO_reset(outdata);
 	sig = msi_extract_existing_pkcs7(msiparams, ds, &data, len);
@@ -5657,6 +5669,10 @@ static PKCS7 *msi_presign_file(file_type_t type, cmd_type_t cmd, FILE_HEADER *he
 			return NULL; /* FAILED */
 		}
 		len = GET_UINT32_LE(ds->size);
+		if (len == 0 || len >= MAXREGSECT) {
+			printf("Corrupted DigitalSignature stream length 0x%08X\n", len);
+			return NULL; /* FAILED */
+		}
 		data = OPENSSL_malloc((size_t)len);
 		*cursig = msi_extract_existing_pkcs7(msiparams, ds, &data, len);
 		OPENSSL_free(data);
