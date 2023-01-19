@@ -5344,21 +5344,41 @@ static int read_pvk_key(GLOBAL_OPTIONS *options, CRYPTO_PARAMS *cparams)
 /* Load an engine in a shareable library */
 static ENGINE *dynamic_engine(GLOBAL_OPTIONS *options)
 {
-	ENGINE *engine = ENGINE_by_id("dynamic");
+	ENGINE *engine;
+	char *id;
+
+	engine = ENGINE_by_id("dynamic");
 	if (!engine) {
 		printf("Failed to load 'dynamic' engine\n");
 		return NULL; /* FAILED */
 	}
+	if (options->p11engine) { /* strip directory and extension */
+		char *ptr;
+
+		ptr = strrchr(options->p11engine, '/');
+		if (!ptr) /* no slash -> try backslash */
+			ptr = strrchr(options->p11engine, '\\');
+		if (ptr) /* directory separator found */
+			ptr++; /* skip it */
+		else /* directory separator not found */
+			ptr = options->p11engine;
+		id = OPENSSL_strdup(ptr);
+		ptr = strchr(id, '.');
+		if (ptr) /* file extensions found */
+			*ptr = '\0'; /* remove them */
+	} else {
+		id = OPENSSL_strdup("pkcs11");
+	}
 	if (!ENGINE_ctrl_cmd_string(engine, "SO_PATH", options->p11engine, 0)
-			|| !ENGINE_ctrl_cmd_string(engine, "ID",
-				options->p11engine ? options->p11engine : "pkcs11", 0)
+			|| !ENGINE_ctrl_cmd_string(engine, "ID", id, 0)
 			|| !ENGINE_ctrl_cmd_string(engine, "LIST_ADD", "1", 0)
 			|| !ENGINE_ctrl_cmd_string(engine, "LOAD", NULL, 0)) {
 		printf("Failed to set 'dynamic' engine\n");
 		ENGINE_free(engine);
-		return NULL; /* FAILED */
+		engine = NULL; /* FAILED */
 	}
-	return engine; /* OK */
+	OPENSSL_free(id);
+	return engine;
 }
 
 /* Load a pkcs11 engine */
