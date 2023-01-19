@@ -2775,6 +2775,7 @@ static char *get_clrdp_url(X509 *cert)
 				if (strncmp(url, "http://", 7) == 0)
 					goto out;
 				OPENSSL_free(url);
+				url = NULL;
 			}
 		}
 	}
