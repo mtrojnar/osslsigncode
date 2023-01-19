@@ -1596,6 +1596,9 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	for (i=0; i<nsections; i++) {
 		rs = GET_UINT32_LE(sections + 16);
 		ro = GET_UINT32_LE(sections + 20);
+		if (rs == 0 || rs >= UINT32_MAX) {
+			continue;
+		}
 		for (l=0; l < rs; l+=pagesize, pi++) {
 			PUT_UINT32_LE(ro + l, res + pi*pphlen);
 			if (!EVP_DigestInit(mdctx, md)) {
