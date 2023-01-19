@@ -4965,6 +4965,7 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 {
 	uint32_t filesize;
 	char *outdata;
+	int ret = 1;
 
 	filesize = get_file_size(options->outfile);
 	if (!filesize) {
@@ -4979,36 +4980,38 @@ static int check_attached_data(file_type_t type, FILE_HEADER *header, GLOBAL_OPT
 	if (type == FILE_TYPE_PE) {
 		if (!pe_verify_header(outdata, options->outfile, filesize, header)) {
 			printf("Corrupt PE file\n");
-			return 1; /* FAILED */
+			goto out;
 		}
 		if (pe_verify_file(outdata, header, options)) {
 			printf("Signature mismatch\n");
-			return 1; /* FAILED */
+			goto out;
 		}
 	} else if (type == FILE_TYPE_CAB) {
 		if (!cab_verify_header(outdata, options->outfile, filesize, header)) {
 			printf("Corrupt CAB file\n");
-			return 1; /* FAILED */
+			goto out;
 		}
 		if (cab_verify_file(outdata, header, options)) {
 			printf("Signature mismatch\n");
-			return 1; /* FAILED */
+			goto out;
 		}
 	} else if (type == FILE_TYPE_MSI) {
 		if (!msi_verify_header(outdata, filesize, msiparams)) {
 			printf("Corrupt MSI file: %s\n", options->outfile);
-			return 1; /* FAILED */
+			goto out;
 		}
 		if (msi_verify_file(msiparams, options)) {
 			printf("Signature mismatch\n");
-			return 1; /* FAILED */
+			goto out;
 		}
 	} else {
 		printf("Unknown input type for file: %s\n", options->infile);
-		return 1; /* FAILED */
+		goto out;
 	}
+	ret = 0; /* OK */
+out:
 	unmap_file(outdata, filesize);
-	return 0; /* OK */
+	return ret;
 }
 
 static int get_file_type(char *indata, char *infile, file_type_t *type)
