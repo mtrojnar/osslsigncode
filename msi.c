@@ -30,7 +30,7 @@ static const u_char *sector_offset_to_address(MSI_FILE *msi, uint32_t sector, ui
 
 static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber)
 {
-	uint32_t entriesPerSector, difatSectorLocation;
+	uint32_t entriesPerSector, difatSectorLocation, fatSectorLocation;
 	const u_char *address;
 
 	if (fatSectorNumber < DIFAT_IN_HEADER) {
@@ -53,7 +53,12 @@ static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber)
 			printf("Failed to get a next sector address\n");
 			return NOSTREAM; /* FAILED */
 		}
-		return GET_UINT32_LE(address);
+		fatSectorLocation = GET_UINT32_LE(address);
+		if (fatSectorLocation == 0 || fatSectorLocation >= FREESECT) {
+			printf("Get corrupted sector location 0x%08X\n", fatSectorLocation);
+			return NOSTREAM; /* FAILED */
+		}
+		return fatSectorLocation;
 	}
 }
 
@@ -61,6 +66,7 @@ static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber)
 static uint32_t get_next_sector(MSI_FILE *msi, uint32_t sector)
 {
 	const u_char *address;
+	uint32_t nextSectorLocation;
 	uint32_t entriesPerSector = msi->m_sectorSize / 4;
 	uint32_t fatSectorNumber = sector / entriesPerSector;
 	uint32_t fatSectorLocation = get_fat_sector_location(msi, fatSectorNumber);
@@ -73,7 +79,12 @@ static uint32_t get_next_sector(MSI_FILE *msi, uint32_t sector)
 		printf("Failed to get a next sector address\n");
 		return NOSTREAM; /* FAILED */
 	}
-	return GET_UINT32_LE(address);
+	nextSectorLocation = GET_UINT32_LE(address);
+	if (nextSectorLocation == 0 || nextSectorLocation >= FREESECT) {
+		printf("Get corrupted sector location 0x%08X\n", nextSectorLocation);
+		return NOSTREAM; /* FAILED */
+	}
+	return nextSectorLocation;
 }
 
 /* Locate the final sector/offset when original offset expands multiple sectors */
@@ -146,7 +157,7 @@ static int read_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *bu
 /* Lookup miniFAT */
 static uint32_t get_next_mini_sector(MSI_FILE *msi, uint32_t miniSector)
 {
-	uint32_t sector, offset;
+	uint32_t sector, offset, nextMiniSectorLocation;
 	const u_char *address;
 
 	if (!locate_final_sector(msi, msi->m_hdr->firstMiniFATSectorLocation, miniSector * 4, &sector, &offset)) {
@@ -158,7 +169,12 @@ static uint32_t get_next_mini_sector(MSI_FILE *msi, uint32_t miniSector)
 		printf("Failed to get a next mini sector address\n");
 		return NOSTREAM; /* FAILED */
 	}
-	return GET_UINT32_LE(address);
+	nextMiniSectorLocation = GET_UINT32_LE(address);
+	if (nextMiniSectorLocation == 0 || nextMiniSectorLocation >= FREESECT) {
+		printf("Get corrupted sector location 0x%08X\n", nextMiniSectorLocation);
+		return NOSTREAM; /* FAILED */
+	}
+	return nextMiniSectorLocation;
 }
 
 static int locate_final_mini_sector(MSI_FILE *msi, uint32_t sector, uint32_t offset, uint32_t *finalSector, uint32_t *finalOffset)
