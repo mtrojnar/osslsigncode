@@ -894,7 +894,6 @@ static uint32_t stream_read(MSI_FILE *msi, MSI_ENTRY *entry, u_char *p_msi, uint
 	} else if (inlen != 0) {
 		*indata = (char *)OPENSSL_malloc(inlen);
 		if (!msi_file_read(msi, entry, 0, *indata, inlen)) {
-			OPENSSL_free(indata);
 			return 0; /* FAILED */
 		}
 	}
@@ -933,6 +932,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
 			inlen = stream_read(msi, child->entry, p_msi, len_msi, p_msiex, len_msiex, &indata, inlen, is_root);
 			if (inlen == 0) {
 				printf("Failed to read stream data\n");
+				OPENSSL_free(indata);
 				continue;
 			}
 			/* set the size of the user-defined data if this is a stream object */
