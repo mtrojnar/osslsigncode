@@ -1609,8 +1609,6 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	}
 	pphlen = 4 + EVP_MD_size(md);
 	phlen = pphlen * (3 + (int)nsections + (int)(sigpos / pagesize));
-	res = OPENSSL_malloc((size_t)phlen);
-	zeroes = OPENSSL_zalloc((size_t)pagesize);
 
 	mdctx = EVP_MD_CTX_new();
 	if (!EVP_DigestInit(mdctx, md)) {
@@ -1618,6 +1616,8 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 		printf("Unable to set up the digest context\n");
 		return NULL; /* FAILED */
 	}
+	res = OPENSSL_malloc((size_t)phlen);
+	zeroes = OPENSSL_zalloc((size_t)pagesize);
 	EVP_DigestUpdate(mdctx, indata, header_size + 88);
 	EVP_DigestUpdate(mdctx, indata + header_size + 92, 60 + pe32plus*16);
 	EVP_DigestUpdate(mdctx, indata + header_size + 160 + pe32plus*16,
