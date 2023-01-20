@@ -3575,6 +3575,10 @@ static PKCS7 *pe_extract_existing_pkcs7(char *indata, FILE_HEADER *header)
 	uint32_t pos = 0;
 	PKCS7 *p7 = NULL;
 
+	if (header->siglen == 0 || header->siglen > header->fileend) {
+		printf("Corrupted signature length: 0x%08X\n", header->siglen);
+		return NULL; /* FAILED */
+	}
 	while (pos < header->siglen) {
 		uint32_t l = GET_UINT32_LE(indata + header->sigpos + pos);
 		uint16_t certrev  = GET_UINT16_LE(indata + header->sigpos + pos + 4);
@@ -3665,9 +3669,11 @@ static int pe_verify_header(char *indata, char *infile, uint32_t filesize, FILE_
 		return 0; /* FAILED */
 	}
 	/* SizeOfHeaders field specifies the combined size of an MS-DOS stub, PE header,
-	 * and section headers rounded up to a multiple of FileAlignment. */
+	 * and section headers rounded up to a multiple of FileAlignment.
+	 * SizeOfHeaders must be < filesize and cannot be < 0x0000002C (44) in Windows 7
+	 * because of a bug when checking section names for compatibility purposes */
 	header->header_size = GET_UINT32_LE(indata + 60);
-	if (filesize < header->header_size) {
+	if (header->header_size < 44 || header->header_size > filesize) {
 		printf("Unexpected SizeOfHeaders field: 0x%08X\n", header->header_size);
 		return 0; /* FAILED */
 	}
@@ -5586,6 +5592,7 @@ static PKCS7 *get_sigfile(char *sigfile, file_type_t type)
 	} else {
 		/* reset header */
 		memset(&header, 0, sizeof(FILE_HEADER));
+		header.fileend = sigfilesize;
 		header.siglen = sigfilesize;
 		header.sigpos = 0;
 		if (type == FILE_TYPE_PE)
