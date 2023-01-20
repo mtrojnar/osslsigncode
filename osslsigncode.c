@@ -1562,27 +1562,62 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	uint32_t pe32plus, uint32_t sigpos, int phtype, int *rphlen)
 {
 	uint16_t nsections, opthdr_size;
-	uint32_t pagesize, hdrsize;
+	uint32_t alignment, pagesize, hdrsize;
 	uint32_t rs, ro, l, lastpos = 0;
 	int pphlen, phlen, i, pi = 1;
 	u_char *res, *zeroes;
 	char *sections;
 	const EVP_MD *md = EVP_get_digestbynid(phtype);
-	EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+	EVP_MD_CTX *mdctx;
+
+	/* NumberOfSections indicates the size of the section table,
+	 * which immediately follows the headers. */
+	nsections = GET_UINT16_LE(indata + header_size + 6);
+	if (nsections == 0 || nsections > UINT16_MAX) {
+		printf("Corrupted number of sections: 0x%08X\n", nsections);
+		return NULL; /* FAILED */
+	}
+	/* FileAlignment is the alignment factor (in bytes) that is used to align
+	 * the raw data of sections in the image file. The value should be a power
+	 * of 2 between 512 and 64 K, inclusive. The default is 512. */
+	alignment = GET_UINT32_LE(indata + header_size + 60);
+	if (alignment < 512 || alignment > UINT16_MAX) {
+		printf("Corrupted file alignment factor: 0x%08X\n", alignment);
+		return NULL; /* FAILED */
+	}
+	/* SectionAlignment is the alignment (in bytes) of sections when they are
+	 * loaded into memory. It must be greater than or equal to FileAlignment.
+	 * The default is the page size for the architecture. */
+	pagesize = GET_UINT32_LE(indata + header_size + 56);
+	if (pagesize < alignment || pagesize > UINT32_MAX) {
+		printf("Corrupted page size: 0x%08X\n", pagesize);
+		return NULL; /* FAILED */
+	}
+	/* SizeOfHeaders is the combined size of an MS-DOS stub, PE header,
+	 * and section headers rounded up to a multiple of FileAlignment. */
+	hdrsize = GET_UINT32_LE(indata + header_size + 84);
+	if (hdrsize < header_size || hdrsize > UINT32_MAX) {
+		printf("Corrupted headers size: 0x%08X\n", hdrsize);
+		return NULL; /* FAILED */
+	}
+	/* SizeOfOptionalHeader is she size of the optional header, which is
+	 * required for executable files, but for object files should be zero. */
+	opthdr_size = GET_UINT16_LE(indata + header_size + 20);
+	if (opthdr_size == 0 || opthdr_size > UINT16_MAX) {
+		printf("Corrupted optional header size: 0x%08X\n", opthdr_size);
+		return NULL; /* FAILED */
+	}
+	pphlen = 4 + EVP_MD_size(md);
+	phlen = pphlen * (3 + (int)nsections + (int)(sigpos / pagesize));
+	res = OPENSSL_malloc((size_t)phlen);
+	zeroes = OPENSSL_zalloc((size_t)pagesize);
+
+	mdctx = EVP_MD_CTX_new();
 	if (!EVP_DigestInit(mdctx, md)) {
 		EVP_MD_CTX_free(mdctx);
 		printf("Unable to set up the digest context\n");
 		return NULL; /* FAILED */
 	}
-	nsections = GET_UINT16_LE(indata + header_size + 6);
-	pagesize = GET_UINT32_LE(indata + header_size + 56);
-	hdrsize = GET_UINT32_LE(indata + header_size + 84);
-	pphlen = 4 + EVP_MD_size(md);
-	phlen = pphlen * (3 + (int)nsections + (int)(sigpos / pagesize));
-
-	res = OPENSSL_malloc((size_t)phlen);
-	zeroes = OPENSSL_zalloc((size_t)pagesize);
-
 	EVP_DigestUpdate(mdctx, indata, header_size + 88);
 	EVP_DigestUpdate(mdctx, indata + header_size + 92, 60 + pe32plus*16);
 	EVP_DigestUpdate(mdctx, indata + header_size + 160 + pe32plus*16,
@@ -1591,9 +1626,9 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	memset(res, 0, 4);
 	EVP_DigestFinal(mdctx, res + 4, NULL);
 
-	opthdr_size = GET_UINT16_LE(indata + header_size + 20);
 	sections = indata + header_size + 24 + opthdr_size;
 	for (i=0; i<nsections; i++) {
+		/* Resource Table address and size */
 		rs = GET_UINT32_LE(sections + 16);
 		ro = GET_UINT32_LE(sections + 20);
 		if (rs == 0 || rs >= UINT32_MAX) {
