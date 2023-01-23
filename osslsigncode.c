@@ -1591,7 +1591,7 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	 * The large page size is at most 4 MB.
 	 * https://devblogs.microsoft.com/oldnewthing/20210510-00/?p=105200 */
 	pagesize = GET_UINT32_LE(indata + header_size + 56);
-	if (pagesize < alignment || pagesize > 4194304) {
+	if (pagesize == 0 || pagesize < alignment || pagesize > 4194304) {
 		printf("Corrupted page size: 0x%08X\n", pagesize);
 		return NULL; /* FAILED */
 	}
