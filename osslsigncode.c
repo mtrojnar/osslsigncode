@@ -860,9 +860,8 @@ static BIO *encode_rfc3161_request(PKCS7 *sig, const EVP_MD *md)
 {
 	PKCS7_SIGNER_INFO *si;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
-	EVP_MD_CTX *mdctx;
 	TimeStampReq *req;
-	BIO *bout;
+	BIO *bout, *bhash;
 	u_char *p;
 	int len;
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(sig);
@@ -873,15 +872,16 @@ static BIO *encode_rfc3161_request(PKCS7 *sig, const EVP_MD *md)
 	if (!si)
 		return NULL; /* FAILED */
 
-	mdctx = EVP_MD_CTX_new();
-	if (!EVP_DigestInit(mdctx, md)) {
-		EVP_MD_CTX_free(mdctx);
-		printf("Unable to set up the digest context\n");
+	bhash = BIO_new(BIO_f_md());
+	if (!BIO_set_md(bhash, md)) {
+		printf("Unable to set the message digest of BIO\n");
+		BIO_free_all(bhash);
 		return NULL;  /* FAILED */
 	}
-	EVP_DigestUpdate(mdctx, si->enc_digest->data, (size_t)si->enc_digest->length);
-	EVP_DigestFinal(mdctx, mdbuf, NULL);
-	EVP_MD_CTX_free(mdctx);
+	BIO_push(bhash, BIO_new(BIO_s_null()));
+	BIO_write(bhash, si->enc_digest->data, si->enc_digest->length);
+	BIO_gets(bhash, mdbuf, EVP_MD_size(md));
+	BIO_free_all(bhash);
 
 	req = TimeStampReq_new();
 	ASN1_INTEGER_set(req->version, 1);
@@ -1569,7 +1569,7 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	u_char *res, *zeroes;
 	char *sections;
 	const EVP_MD *md = EVP_get_digestbynid(phtype);
-	EVP_MD_CTX *mdctx;
+	BIO *bhash;
 
 	/* NumberOfSections indicates the size of the section table,
 	 * which immediately follows the headers. */
@@ -1613,21 +1613,24 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	pphlen = 4 + EVP_MD_size(md);
 	phlen = pphlen * (3 + (int)nsections + (int)(sigpos / pagesize));
 
-	mdctx = EVP_MD_CTX_new();
-	if (!EVP_DigestInit(mdctx, md)) {
-		EVP_MD_CTX_free(mdctx);
-		printf("Unable to set up the digest context\n");
-		return NULL; /* FAILED */
+	bhash = BIO_new(BIO_f_md());
+	if (!BIO_set_md(bhash, md)) {
+		printf("Unable to set the message digest of BIO\n");
+		BIO_free_all(bhash);
+		return NULL;  /* FAILED */
 	}
 	res = OPENSSL_malloc((size_t)phlen);
 	zeroes = OPENSSL_zalloc((size_t)pagesize);
-	EVP_DigestUpdate(mdctx, indata, header_size + 88);
-	EVP_DigestUpdate(mdctx, indata + header_size + 92, 60 + pe32plus*16);
-	EVP_DigestUpdate(mdctx, indata + header_size + 160 + pe32plus*16,
+
+	BIO_push(bhash, BIO_new(BIO_s_null()));
+	BIO_write(bhash, indata, header_size + 88);
+	BIO_write(bhash, indata + header_size + 92, 60 + pe32plus*16);
+	BIO_write(bhash, indata + header_size + 160 + pe32plus*16,
 			hdrsize - (header_size + 160 + pe32plus*16));
-	EVP_DigestUpdate(mdctx, zeroes, pagesize - hdrsize);
+	BIO_write(bhash, zeroes, pagesize - hdrsize);
 	memset(res, 0, 4);
-	EVP_DigestFinal(mdctx, res + 4, NULL);
+	BIO_gets(bhash, res + 4, EVP_MD_size(md));
+	BIO_free_all(bhash);
 
 	sections = indata + header_size + 24 + opthdr_size;
 	for (i=0; i<nsections; i++) {
@@ -1639,25 +1642,25 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 		}
 		for (l=0; l < rs; l+=pagesize, pi++) {
 			PUT_UINT32_LE(ro + l, res + pi*pphlen);
-			if (!EVP_DigestInit(mdctx, md)) {
-				EVP_MD_CTX_free(mdctx);
-				OPENSSL_free(res);
-				OPENSSL_free(zeroes);
-				printf("Unable to set up the digest context\n");
-				return NULL; /* FAILED */			
+			bhash = BIO_new(BIO_f_md());
+			if (!BIO_set_md(bhash, md)) {
+				printf("Unable to set the message digest of BIO\n");
+				BIO_free_all(bhash);
+				return NULL;  /* FAILED */
 			}
+			BIO_push(bhash, BIO_new(BIO_s_null()));
 			if (rs - l < pagesize) {
-				EVP_DigestUpdate(mdctx, indata + ro + l, rs - l);
-				EVP_DigestUpdate(mdctx, zeroes, pagesize - (rs - l));
+				BIO_write(bhash, indata + ro + l, rs - l);
+				BIO_write(bhash, zeroes, pagesize - (rs - l));
 			} else {
-				EVP_DigestUpdate(mdctx, indata + ro + l, pagesize);
+				BIO_write(bhash, indata + ro + l, pagesize);
 			}
-			EVP_DigestFinal(mdctx, res + pi*pphlen + 4, NULL);
+			BIO_gets(bhash, res + pi*pphlen + 4, EVP_MD_size(md));
 		}
 		lastpos = ro + rs;
 		sections += 40;
 	}
-	EVP_MD_CTX_free(mdctx);
+	BIO_free_all(bhash);
 	PUT_UINT32_LE(lastpos, res + pi*pphlen);
 	memset(res + pi*pphlen + 4, 0, (size_t)EVP_MD_size(md));
 	pi++;
@@ -2004,6 +2007,7 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 	long mdlen = 0;
 	EVP_MD_CTX *ctx;
 	size_t certlen;
+	BIO *bhash = BIO_new(BIO_f_md());
 
 	/* decode the provided hash */
 	char *mdid = OPENSSL_strdup(leafhash);
@@ -2025,29 +2029,27 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 		goto out;
 	}
 	/* compute the leaf certificate hash */
-	ctx = EVP_MD_CTX_new();
-	if (!EVP_DigestInit(ctx, md)) {
-		EVP_MD_CTX_free(ctx);
-		printf("Unable to set up the digest context\n");
+	if (!BIO_set_md(bhash, md)) {
+		printf("Unable to set the message digest of BIO\n");
 		goto out;
 	}
+	BIO_push(bhash, BIO_new(BIO_s_null()));
 	certlen = (size_t)i2d_X509(leaf, NULL);
 	certbuf = OPENSSL_malloc(certlen);
 	tmp = certbuf;
 	i2d_X509(leaf, &tmp);
-	EVP_DigestUpdate(ctx, certbuf, certlen);
+	BIO_write(bhash, certbuf, certlen);
+	BIO_gets(bhash, cmdbuf, EVP_MD_size(md));
 	OPENSSL_free(certbuf);
-	EVP_DigestFinal(ctx, cmdbuf, NULL);
-	EVP_MD_CTX_free(ctx);
 
 	/* compare the provided hash against the computed hash */
 	if (memcmp(mdbuf, cmdbuf, (size_t)EVP_MD_size(md))) {
 		print_hash("\nLeaf hash value mismatch", "computed", cmdbuf, EVP_MD_size(md));
 		goto out;
 	}
-
 	ret = 0; /* OK */
 out:
+	BIO_free_all(bhash);
 	OPENSSL_free(mdid);
 	OPENSSL_free(mdbuf);
 	return ret;
@@ -2687,8 +2689,8 @@ static int TST_verify(CMS_ContentInfo *timestamp, PKCS7_SIGNER_INFO *si)
 	const u_char *p = NULL;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
 	const EVP_MD *md;
-	EVP_MD_CTX *mdctx;
 	int md_nid;
+	BIO *bhash;
 
 	pos  = CMS_get0_content(timestamp);
 	if (pos != NULL && *pos != NULL) {
@@ -2698,15 +2700,16 @@ static int TST_verify(CMS_ContentInfo *timestamp, PKCS7_SIGNER_INFO *si)
 			/* compute a hash from the encrypted message digest value of the file */
 			md_nid = OBJ_obj2nid(token->messageImprint->digestAlgorithm->algorithm);
 			md = EVP_get_digestbynid(md_nid);
-			mdctx = EVP_MD_CTX_new();
-			if (!EVP_DigestInit(mdctx, md)) {
-				EVP_MD_CTX_free(mdctx);
-				printf("Unable to set up the digest context\n");
-				return 0; /* FAILED */
+			bhash = BIO_new(BIO_f_md());
+			if (!BIO_set_md(bhash, md)) {
+				printf("Unable to set the message digest of BIO\n");
+				BIO_free_all(bhash);
+				return 0;  /* FAILED */
 			}
-			EVP_DigestUpdate(mdctx, si->enc_digest->data, (size_t)si->enc_digest->length);
-			EVP_DigestFinal(mdctx, mdbuf, NULL);
-			EVP_MD_CTX_free(mdctx);
+			BIO_push(bhash, BIO_new(BIO_s_null()));
+			BIO_write(bhash, si->enc_digest->data, (size_t)si->enc_digest->length);
+			BIO_gets(bhash, mdbuf, EVP_MD_size(md));
+			BIO_free_all(bhash);
 
 			/* compare the provided hash against the computed hash */
 			hash = token->messageImprint->digest;
