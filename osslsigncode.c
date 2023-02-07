@@ -796,13 +796,14 @@ static int is_content_type(PKCS7 *p7, const char *objid)
 	return retval;
 }
 
-int bio_hash_data(char *indata, BIO *hash, uint32_t idx, uint32_t fileend)
+int bio_hash_data(char *indata, BIO *hash, uint32_t idx, uint32_t offset, uint32_t fileend)
 {
 	size_t written;
 	uint32_t want;
+	uint32_t start = offset ? offset : idx;
 
-	while (idx < fileend) {
-		want = fileend - idx;
+	while (start < fileend) {
+		want = fileend - start;
 		if (want > SIZE_64K)
 			want = SIZE_64K;
 		if (!BIO_write_ex(hash, indata + idx, want, &written)) {
@@ -810,6 +811,7 @@ int bio_hash_data(char *indata, BIO *hash, uint32_t idx, uint32_t fileend)
 			return 0; /* FAILED */
 		}
 		idx += (uint32_t)written;
+		start += (uint32_t)written;
 	}
 	return 1; /* OK */
 }
@@ -3491,7 +3493,7 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *
 		return 0; /* FAILED */
 	}
 	idx += (uint32_t)written + 8;
-	if (!bio_hash_data(indata, bhash, idx, fileend)) {
+	if (!bio_hash_data(indata, bhash, idx, 0, fileend)) {
 		printf("Unable to calculate digest\n");
 		BIO_free_all(bhash);
 		return 0;  /* FAILED */
@@ -3912,8 +3914,7 @@ static int cab_verify_header(char *indata, char *infile, uint32_t filesize, FILE
 /* Compute a message digest value of the signed or unsigned CAB file */
 static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *header)
 {
-	size_t written;
-	uint32_t idx = 0, offset, coffFiles;
+	uint32_t idx = 0, fileend, coffFiles;
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
 	BIO *bhash = BIO_new(BIO_f_md());
 
@@ -3925,9 +3926,9 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER 
 	BIO_push(bhash, BIO_new(BIO_s_null()));
 
 	if (header->sigpos)
-		offset = header->sigpos;
+		fileend = header->sigpos;
 	else
-		offset = header->fileend;
+		fileend = header->fileend;
 	
 	/* u1 signature[4] 4643534D MSCF: 0-3 */
 	BIO_write(bhash, indata, 4);
@@ -3980,14 +3981,14 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER 
 				BIO_write(bhash, indata + idx, 1);
 				pos++;
 				idx++;
-			} while (byte && pos < offset);
+			} while (byte && pos < fileend);
 			/* szDiskPrev */
 			do {
 				byte = GET_UINT8_LE(indata + idx);
 				BIO_write(bhash, indata + idx, 1);
 				pos++;
 				idx++;
-			} while (byte && pos < offset);
+			} while (byte && pos < fileend);
 		}
 		if (flags & FLAG_NEXT_CABINET) {
 			uint8_t byte;
@@ -3997,14 +3998,14 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER 
 				BIO_write(bhash, indata + idx, 1);
 				pos++;
 				idx++;
-			} while (byte && pos < offset);
+			} while (byte && pos < fileend);
 			/* szDiskNext */
 			do {
 				byte = GET_UINT8_LE(indata + idx);
 				BIO_write(bhash, indata + idx, 1);
 				pos++;
 				idx++;
-			} while (byte && pos < offset);
+			} while (byte && pos < fileend);
 		}
 		/*
 		 * (u8 * cFolders) CFFOLDER - structure contains information about
@@ -4020,16 +4021,10 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER 
 		coffFiles = 8;
 	}
 	/* (variable) ab - the compressed data bytes */
-	while (coffFiles < offset) {
-		uint32_t want = offset - coffFiles;
-		if (want > SIZE_64K)
-			want = SIZE_64K;
-		if (!BIO_write_ex(bhash, indata + idx, want, &written)) {
-			BIO_free_all(bhash);
-			return 0; /* FAILED */
-		}
-		idx += (uint32_t)written;
-		coffFiles += (uint32_t)written;
+	if (!bio_hash_data(indata, bhash, idx, coffFiles, fileend)) {
+		printf("Unable to calculate digest\n");
+		BIO_free_all(bhash);
+		return 0;  /* FAILED */
 	}
 	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
 	return 1; /* OK */

@@ -6,4 +6,4 @@
  *
  */
 
-int bio_hash_data(char *indata, BIO *hash, uint32_t idx, uint32_t fileend);
+int bio_hash_data(char *indata, BIO *hash, uint32_t idx, uint32_t offset, uint32_t fileend);

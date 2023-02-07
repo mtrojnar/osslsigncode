@@ -745,7 +745,7 @@ int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, uint32_t fileend)
 		return 0;  /* FAILED */
 	}
 	BIO_push(bhash, BIO_new(BIO_s_null()));
-	if (!bio_hash_data(indata, bhash, 0, fileend)) {
+	if (!bio_hash_data(indata, bhash, 0, 0, fileend)) {
 		printf("Unable to calculate digest\n");
 		BIO_free_all(bhash);
 		return 0;  /* FAILED */
