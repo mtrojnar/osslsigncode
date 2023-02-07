@@ -880,7 +880,7 @@ static BIO *encode_rfc3161_request(PKCS7 *sig, const EVP_MD *md)
 	}
 	BIO_push(bhash, BIO_new(BIO_s_null()));
 	BIO_write(bhash, si->enc_digest->data, si->enc_digest->length);
-	BIO_gets(bhash, mdbuf, EVP_MD_size(md));
+	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
 	BIO_free_all(bhash);
 
 	req = TimeStampReq_new();
@@ -1566,6 +1566,7 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	uint32_t alignment, pagesize, hdrsize;
 	uint32_t rs, ro, l, lastpos = 0;
 	int pphlen, phlen, i, pi = 1;
+	size_t written;
 	u_char *res, *zeroes;
 	char *sections;
 	const EVP_MD *md = EVP_get_digestbynid(phtype);
@@ -1623,13 +1624,29 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	zeroes = OPENSSL_zalloc((size_t)pagesize);
 
 	BIO_push(bhash, BIO_new(BIO_s_null()));
-	BIO_write(bhash, indata, header_size + 88);
-	BIO_write(bhash, indata + header_size + 92, 60 + pe32plus*16);
-	BIO_write(bhash, indata + header_size + 160 + pe32plus*16,
-			hdrsize - (header_size + 160 + pe32plus*16));
-	BIO_write(bhash, zeroes, pagesize - hdrsize);
+	if (!BIO_write_ex(bhash, indata, header_size + 88, &written)
+			|| written != header_size + 88) {
+		BIO_free_all(bhash);
+		return NULL;  /* FAILED */
+	}
+	if (!BIO_write_ex(bhash, indata + header_size + 92, 60 + pe32plus*16, &written)
+			|| written != 60 + pe32plus*16) {
+		BIO_free_all(bhash);
+		return NULL;  /* FAILED */
+	}
+	if (!BIO_write_ex(bhash, indata + header_size + 160 + pe32plus*16,
+			hdrsize - (header_size + 160 + pe32plus*16), &written)
+			|| written != hdrsize - (header_size + 160 + pe32plus*16)) {
+		BIO_free_all(bhash);
+		return NULL;  /* FAILED */
+	}
+	if (!BIO_write_ex(bhash, zeroes, pagesize - hdrsize, &written)
+			|| written != pagesize - hdrsize) {
+		BIO_free_all(bhash);
+		return NULL;  /* FAILED */
+	}
 	memset(res, 0, 4);
-	BIO_gets(bhash, res + 4, EVP_MD_size(md));
+	BIO_gets(bhash, (char*)res + 4, EVP_MD_size(md));
 	BIO_free_all(bhash);
 
 	sections = indata + header_size + 24 + opthdr_size;
@@ -1650,12 +1667,24 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 			}
 			BIO_push(bhash, BIO_new(BIO_s_null()));
 			if (rs - l < pagesize) {
-				BIO_write(bhash, indata + ro + l, rs - l);
-				BIO_write(bhash, zeroes, pagesize - (rs - l));
+				if (!BIO_write_ex(bhash, indata + ro + l, rs - l, &written)
+						|| written != rs - l) {
+					BIO_free_all(bhash);
+					return NULL;  /* FAILED */
+				}
+				if (!BIO_write_ex(bhash, zeroes, pagesize - (rs - l), &written)
+						|| written != pagesize - (rs - l)) {
+					BIO_free_all(bhash);
+					return NULL;  /* FAILED */
+				}
 			} else {
-				BIO_write(bhash, indata + ro + l, pagesize);
+				if (!BIO_write_ex(bhash, indata + ro + l, pagesize, &written)
+						|| written != pagesize) {
+					BIO_free_all(bhash);
+					return NULL;  /* FAILED */
+				}
 			}
-			BIO_gets(bhash, res + pi*pphlen + 4, EVP_MD_size(md));
+			BIO_gets(bhash, (char*)res + pi*pphlen + 4, EVP_MD_size(md));
 		}
 		lastpos = ro + rs;
 		sections += 40;
@@ -2005,8 +2034,7 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 	u_char cmdbuf[EVP_MAX_MD_SIZE];
 	const EVP_MD *md;
 	long mdlen = 0;
-	EVP_MD_CTX *ctx;
-	size_t certlen;
+	size_t certlen, written;
 	BIO *bhash = BIO_new(BIO_f_md());
 
 	/* decode the provided hash */
@@ -2038,8 +2066,11 @@ static int verify_leaf_hash(X509 *leaf, const char *leafhash)
 	certbuf = OPENSSL_malloc(certlen);
 	tmp = certbuf;
 	i2d_X509(leaf, &tmp);
-	BIO_write(bhash, certbuf, certlen);
-	BIO_gets(bhash, cmdbuf, EVP_MD_size(md));
+	if (!BIO_write_ex(bhash, certbuf, certlen, &written) || written != certlen) {
+		OPENSSL_free(certbuf);
+		goto out;
+	}
+	BIO_gets(bhash, (char*)cmdbuf, EVP_MD_size(md));
 	OPENSSL_free(certbuf);
 
 	/* compare the provided hash against the computed hash */
@@ -2708,7 +2739,7 @@ static int TST_verify(CMS_ContentInfo *timestamp, PKCS7_SIGNER_INFO *si)
 			}
 			BIO_push(bhash, BIO_new(BIO_s_null()));
 			BIO_write(bhash, si->enc_digest->data, (size_t)si->enc_digest->length);
-			BIO_gets(bhash, mdbuf, EVP_MD_size(md));
+			BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
 			BIO_free_all(bhash);
 
 			/* compare the provided hash against the computed hash */
