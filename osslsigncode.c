@@ -1625,10 +1625,11 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 		printf("Corrupted headers size: 0x%08X\n", hdrsize);
 		return NULL; /* FAILED */
 	}
-	/* SizeOfOptionalHeader is she size of the optional header, which is
-	 * required for executable files, but for object files should be zero. */
+	/* SizeOfOptionalHeader is the size of the optional header, which is
+	 * required for executable files, but for object files should be zero,
+	 * and can't be bigger than the file */
 	opthdr_size = GET_UINT16_LE(indata + header_size + 20);
-	if (opthdr_size == 0 || opthdr_size > UINT16_MAX) {
+	if (opthdr_size == 0 || opthdr_size > sigpos) {
 		printf("Corrupted optional header size: 0x%08X\n", opthdr_size);
 		return NULL; /* FAILED */
 	}
