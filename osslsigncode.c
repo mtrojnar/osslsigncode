@@ -2759,7 +2759,7 @@ static int TST_verify(CMS_ContentInfo *timestamp, PKCS7_SIGNER_INFO *si)
 				return 0;  /* FAILED */
 			}
 			BIO_push(bhash, BIO_new(BIO_s_null()));
-			BIO_write(bhash, si->enc_digest->data, (size_t)si->enc_digest->length);
+			BIO_write(bhash, si->enc_digest->data, si->enc_digest->length);
 			BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
 			BIO_free_all(bhash);
 
@@ -3504,7 +3504,7 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *
 		int len = 8 - header->fileend % 8;
 		if (len > 0 && len != 8) {
 			memset(buf, 0, (size_t)len);
-			BIO_write(bhash, buf, (size_t)len);
+			BIO_write(bhash, buf, len);
 			OPENSSL_free(buf);
 		}
 	}
