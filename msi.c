@@ -735,37 +735,30 @@ out:
 /* Compute a simple sha1/sha256 message digest of the MSI file */
 int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, uint32_t fileend)
 {
-	uint32_t n;
-	int ret = 0;
+	uint32_t idx = 0, offset;
+	size_t written;
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
-	BIO *bio = BIO_new_mem_buf(indata, (int)fileend);
-	EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
+	BIO *bhash = BIO_new(BIO_f_md());
 
-	if (!EVP_DigestInit(mdctx, md)) {
-		printf("Unable to set up the digest context\n");
-		goto out;
+	if (!BIO_set_md(bhash, md)) {
+		printf("Unable to set the message digest of BIO\n");
+		BIO_free_all(bhash);
+		return 0;  /* FAILED */
 	}
-	(void)BIO_seek(bio, 0);
-
-	n = 0;
-	while (n < fileend) {
-		int l;
-		static u_char bfb[16*1024*1024];
-		uint32_t want = fileend - n;
-		if (want > sizeof bfb)
-			want = sizeof bfb;
-		l = BIO_read(bio, bfb, (int)want);
-		if (l <= 0)
-			break;
-		EVP_DigestUpdate(mdctx, bfb, (size_t)l);
-		n += (uint32_t)l;
+	BIO_push(bhash, BIO_new(BIO_s_null()));
+	offset = fileend;
+	while (idx < offset) {
+		uint32_t want = offset - idx;
+		if (want > SIZE_64K)
+			want = SIZE_64K;
+		if (!BIO_write_ex(bhash, indata + idx, want, &written)) {
+			BIO_free_all(bhash);
+			return 0; /* FAILED */
+		}
+		idx += (uint32_t)written;
 	}
-	EVP_DigestFinal(mdctx, mdbuf, NULL);
-	ret = 1; /* OK */
-out:
-	EVP_MD_CTX_free(mdctx);
-	BIO_free(bio);
-	return ret;
+	BIO_gets(bhash, mdbuf, EVP_MD_size(md));
+	return 1; /* OK */
 }
 
 static void ministream_append(MSI_OUT *out, char *buf, uint32_t len)
