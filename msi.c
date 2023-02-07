@@ -12,6 +12,7 @@
 
 #include <string.h>       /* memcmp */
 #include "msi.h"
+#include "osslsigncode.h"
 
 #define MIN(a,b) ((a) < (b) ? a : b)
 
@@ -735,8 +736,6 @@ out:
 /* Compute a simple sha1/sha256 message digest of the MSI file */
 int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, uint32_t fileend)
 {
-	uint32_t idx = 0, offset;
-	size_t written;
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
 	BIO *bhash = BIO_new(BIO_f_md());
 
@@ -746,18 +745,12 @@ int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, uint32_t fileend)
 		return 0;  /* FAILED */
 	}
 	BIO_push(bhash, BIO_new(BIO_s_null()));
-	offset = fileend;
-	while (idx < offset) {
-		uint32_t want = offset - idx;
-		if (want > SIZE_64K)
-			want = SIZE_64K;
-		if (!BIO_write_ex(bhash, indata + idx, want, &written)) {
-			BIO_free_all(bhash);
-			return 0; /* FAILED */
-		}
-		idx += (uint32_t)written;
+	if (!bio_hash_data(indata, bhash, 0, fileend)) {
+		printf("Unable to calculate digest\n");
+		BIO_free_all(bhash);
+		return 0;  /* FAILED */
 	}
-	BIO_gets(bhash, mdbuf, EVP_MD_size(md));
+	BIO_gets(bhash, (char *)mdbuf, EVP_MD_size(md));
 	return 1; /* OK */
 }
 
