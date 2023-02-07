@@ -3412,75 +3412,58 @@ static int msi_calc_MsiDigitalSignatureEx(MSI_PARAMS *msiparams, const EVP_MD *m
 /* Compute a message digest value of the signed or unsigned PE file */
 static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *header)
 {
-	BIO *bio = NULL;
-	u_char *bfb;
-	EVP_MD_CTX *mdctx;
-	size_t written, nread;
-	uint32_t i, n, offset;
-	int ret = 0;
+	size_t written;
+	uint32_t idx = 0, offset;
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
+	BIO *bhash = BIO_new(BIO_f_md());
 
+	if (!BIO_set_md(bhash, md)) {
+		printf("Unable to set the message digest of BIO\n");
+		BIO_free_all(bhash);
+		return 0;  /* FAILED */
+	}
+	BIO_push(bhash, BIO_new(BIO_s_null()));
 	if (header->sigpos)
 		offset = header->sigpos;
 	else
 		offset = header->fileend;
 
-	mdctx = EVP_MD_CTX_new();
-	if (!EVP_DigestInit(mdctx, md)) {
-		printf("Unable to set up the digest context\n");
-		goto err;
+	/* header->header_size + 88 + 4 + 60 + header->pe32plus * 16 + 8 */
+	if (!BIO_write_ex(bhash, indata, header->header_size + 88, &written)
+			|| written != header->header_size + 88) {
+		BIO_free_all(bhash);
+		return 0; /* FAILED */
 	}
-	bio = BIO_new(BIO_s_mem());
-	i = n = header->header_size + 88 + 4 + 60 + header->pe32plus * 16 + 8;
-	if (!BIO_write_ex(bio, indata, i, &written) || written != i)
-		goto err;
-	(void)BIO_seek(bio, 0);
-
-	bfb = OPENSSL_malloc(SIZE_64K);
-	if (!BIO_read_ex(bio, bfb, header->header_size + 88, &nread))
-		goto err;
-	EVP_DigestUpdate(mdctx, bfb, header->header_size + 88);
-	BIO_read(bio, bfb, 4);
-	if (!BIO_read_ex(bio, bfb, 60 + header->pe32plus * 16, &nread))
-		goto err;
-	EVP_DigestUpdate(mdctx, bfb, 60 + header->pe32plus * 16);
-	BIO_read(bio, bfb, 8);
-
-	while (n < offset) {
-		uint32_t want = offset - n;
-
-		if (i <= n) {
-			size_t left = offset - i;
-			if (left > SIZE_64K)
-				left = SIZE_64K;
-			if (!BIO_write_ex(bio, indata + i, left, &written))
-				goto err;
-			(void)BIO_seek(bio, 0);
-			i += (uint32_t)written;
-		}
+	idx += (uint32_t)written + 4;
+	if (!BIO_write_ex(bhash, indata + idx, 60 + header->pe32plus * 16, &written)
+			|| written != 60 + header->pe32plus * 16) {
+		BIO_free_all(bhash);
+		return 0; /* FAILED */
+	}
+	idx += (uint32_t)written + 8;
+	while (idx < offset) {
+		uint32_t want = offset - idx;
 		if (want > SIZE_64K)
 			want = SIZE_64K;
-		if (!BIO_read_ex(bio, bfb, want, &nread))
-			goto err; /* FAILED */
-		EVP_DigestUpdate(mdctx, bfb, nread);
-		n += (uint32_t)nread;
+		if (!BIO_write_ex(bhash, indata + idx, want, &written)) {
+			BIO_free_all(bhash);
+			return 0; /* FAILED */
+		}
+		idx += (uint32_t)written;
 	}
 
 	if (!header->sigpos) {
 		/* pad (with 0's) unsigned PE file to 8 byte boundary */
+		char *buf = OPENSSL_malloc(8);
 		int len = 8 - header->fileend % 8;
 		if (len > 0 && len != 8) {
-			memset(bfb, 0, (size_t)len);
-			EVP_DigestUpdate(mdctx, bfb, (size_t)len);
+			memset(buf, 0, (size_t)len);
+			BIO_write(bhash, buf, (size_t)len);
+			OPENSSL_free(buf);
 		}
 	}
-	OPENSSL_free(bfb);
-	BIO_free(bio);
-	EVP_DigestFinal(mdctx, mdbuf, NULL);
-	ret = 1; /* OK */
-err:
-	EVP_MD_CTX_free(mdctx);
-	return ret;
+	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
+	return 1;  /* OK */
 }
 
 static int pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
@@ -3885,37 +3868,26 @@ static int cab_verify_header(char *indata, char *infile, uint32_t filesize, FILE
 /* Compute a message digest value of the signed or unsigned CAB file */
 static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *header)
 {
-	size_t left, written;
-	uint32_t i, n, offset, coffFiles;
-	int ret = 0;
+	size_t written;
+	uint32_t idx = 0, offset, coffFiles;
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
-	EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
-	BIO *bio = BIO_new(BIO_s_mem());
-	u_char *bfb = OPENSSL_malloc(SIZE_64K);
+	BIO *bhash = BIO_new(BIO_f_md());
+
+	if (!BIO_set_md(bhash, md)) {
+		printf("Unable to set the message digest of BIO\n");
+		BIO_free_all(bhash);
+		return 0;  /* FAILED */
+	}
+	BIO_push(bhash, BIO_new(BIO_s_null()));
 
 	if (header->sigpos)
 		offset = header->sigpos;
 	else
 		offset = header->fileend;
 	
-	if (!EVP_DigestInit(mdctx, md)) {
-		printf("Unable to set up the digest context\n");
-		goto err;
-	}
-	left = offset;
-	if (left > SIZE_64K)
-		left = SIZE_64K;
-	if (!BIO_write_ex(bio, indata, left, &written))
-		goto err;
-	(void)BIO_seek(bio, 0);
-	i = (uint32_t)written;
-
 	/* u1 signature[4] 4643534D MSCF: 0-3 */
-	BIO_read(bio, bfb, 4);
-	EVP_DigestUpdate(mdctx, bfb, 4);
-	/* u4 reserved1 00000000: 4-7 */
-	BIO_read(bio, bfb, 4);
-	n = 8;
+	BIO_write(bhash, indata, 4);
+	/* u4 reserved1 00000000: 4-7 skipped */
 	if (header->sigpos) {
 		uint16_t nfolders, flags;
 		uint32_t pos = 60;
@@ -3923,89 +3895,81 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER 
 		 * u4 cbCabinet - size of this cabinet file in bytes: 8-11
 		 * u4 reserved2 00000000: 12-15
 		 */
-		BIO_read(bio, bfb, 8);
-		EVP_DigestUpdate(mdctx, bfb, 8);
+		BIO_write(bhash, indata + 8, 8);
 		 /* u4 coffFiles - offset of the first CFFILE entry: 16-19 */
-		BIO_read(bio, bfb, 4);
-		coffFiles = GET_UINT32_LE(bfb);
-		EVP_DigestUpdate(mdctx, bfb, 4);
+		coffFiles = GET_UINT32_LE(indata + 16);
+		BIO_write(bhash, indata + 16, 4);
 		/*
 		 * u4 reserved3 00000000: 20-23
 		 * u1 versionMinor 03: 24
 		 * u1 versionMajor 01: 25
 		 */
-		BIO_read(bio, bfb, 6);
-		EVP_DigestUpdate(mdctx, bfb, 6);
+		BIO_write(bhash, indata + 20, 6);
 		/* u2 cFolders - number of CFFOLDER entries in this cabinet: 26-27 */
-		BIO_read(bio, bfb, 2);
-		nfolders = GET_UINT16_LE(bfb);
-		EVP_DigestUpdate(mdctx, bfb, 2);
+		nfolders = GET_UINT16_LE(indata + 26);
+		BIO_write(bhash, indata + 26, 2);
 		/* u2 cFiles - number of CFFILE entries in this cabinet: 28-29 */
-		BIO_read(bio, bfb, 2);
-		EVP_DigestUpdate(mdctx, bfb, 2);
+		BIO_write(bhash, indata + 28, 2);
 		/* u2 flags: 30-31 */
-		BIO_read(bio, bfb, 2);
-		flags = GET_UINT16_LE(bfb);
-		EVP_DigestUpdate(mdctx, bfb, 2);
+		flags = GET_UINT16_LE(indata + 30);
+		BIO_write(bhash, indata + 30, 2);
 		/* u2 setID must be the same for all cabinets in a set: 32-33 */
-		BIO_read(bio, bfb, 2);
-		EVP_DigestUpdate(mdctx, bfb, 2);
+		BIO_write(bhash, indata + 32, 2);
 		/*
-		* u2 iCabinet - number of this cabinet file in a set: 34-35
-		* u2 cbCFHeader: 36-37
-		* u1 cbCFFolder: 38
-		* u1 cbCFData: 39
-		* u22 abReserve: 40-55
-		* - Additional data offset: 44-47
-		* - Additional data size: 48-51
+		* u2 iCabinet - number of this cabinet file in a set: 34-35 skipped
+		* u2 cbCFHeader: 36-37 skipped
+		* u1 cbCFFolder: 38 skipped
+		* u1 cbCFData: 39 skipped
+		* u22 abReserve: 40-55 skipped
+		* - Additional data offset: 44-47 skipped
+		* - Additional data size: 48-51 skipped
 		*/
-		BIO_read(bio, bfb, 22);
 		/* u22 abReserve: 56-59 */
-		BIO_read(bio, bfb, 4);
-		n += 52;
-		EVP_DigestUpdate(mdctx, bfb, 4);
+		BIO_write(bhash, indata + 56, 4);
+		idx += 60;
 		/* TODO */
 		if (flags & FLAG_PREV_CABINET) {
+			uint8_t byte;
 			/* szCabinetPrev */
 			do {
-				BIO_read(bio, bfb, 1);
-				EVP_DigestUpdate(mdctx, bfb, 1);
+				byte = GET_UINT8_LE(indata + idx);
+				BIO_write(bhash, indata + idx, 1);
 				pos++;
-				n++;
-			} while (bfb[0] && pos < offset);
+				idx++;
+			} while (byte && pos < offset);
 			/* szDiskPrev */
 			do {
-				BIO_read(bio, bfb, 1);
-				EVP_DigestUpdate(mdctx, bfb, 1);
+				byte = GET_UINT8_LE(indata + idx);
+				BIO_write(bhash, indata + idx, 1);
 				pos++;
-				n++;
-			} while (bfb[0] && pos < offset);
+				idx++;
+			} while (byte && pos < offset);
 		}
 		if (flags & FLAG_NEXT_CABINET) {
+			uint8_t byte;
 			/* szCabinetNext */
 			do {
-				BIO_read(bio, bfb, 1);
-				EVP_DigestUpdate(mdctx, bfb, 1);
+				byte = GET_UINT8_LE(indata + idx);
+				BIO_write(bhash, indata + idx, 1);
 				pos++;
-				n++;
-			} while (bfb[0] && pos < offset);
+				idx++;
+			} while (byte && pos < offset);
 			/* szDiskNext */
 			do {
-				BIO_read(bio, bfb, 1);
-				EVP_DigestUpdate(mdctx, bfb, 1);
+				byte = GET_UINT8_LE(indata + idx);
+				BIO_write(bhash, indata + idx, 1);
 				pos++;
-				n++;
-			} while (bfb[0] && pos < offset);
+				idx++;
+			} while (byte && pos < offset);
 		}
 		/*
 		 * (u8 * cFolders) CFFOLDER - structure contains information about
 		 * one of the folders or partial folders stored in this cabinet file
 		 */
 		while (nfolders) {
-			BIO_read(bio, bfb, 8);
-			EVP_DigestUpdate(mdctx, bfb, 8);
+			BIO_write(bhash, indata + idx, 8);
+			idx += 8;
 			nfolders--;
-			n += 8;
 		}
 	} else {
 		/* read what's left of the unsigned CAB file */
@@ -4013,32 +3977,18 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER 
 	}
 	/* (variable) ab - the compressed data bytes */
 	while (coffFiles < offset) {
-		size_t nread;
 		uint32_t want = offset - coffFiles;
-		if (i <= n) {
-			left = offset - i;
-			if (left > SIZE_64K)
-				left = SIZE_64K;
-			if (!BIO_write_ex(bio, indata + i, left, &written))
-				goto err;
-			(void)BIO_seek(bio, 0);
-			i += (uint32_t)written;
-		}
 		if (want > SIZE_64K)
 			want = SIZE_64K;
-		if (!BIO_read_ex(bio, bfb, want, &nread))
-			goto err; /* FAILED */
-		EVP_DigestUpdate(mdctx, bfb, nread);
-		coffFiles += (uint32_t)nread;
-		n += (uint32_t)nread;
+		if (!BIO_write_ex(bhash, indata + idx, want, &written)) {
+			BIO_free_all(bhash);
+			return 0; /* FAILED */
+		}
+		idx += (uint32_t)written;
+		coffFiles += (uint32_t)written;
 	}
-	EVP_DigestFinal(mdctx, mdbuf, NULL);
-	ret = 1; /* OK */
-err:
-	OPENSSL_free(bfb);
-	BIO_free(bio);
-	EVP_MD_CTX_free(mdctx);
-	return ret;
+	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
+	return 1; /* OK */
 }
 
 static int cab_verify_pkcs7(SIGNATURE *signature, char *indata, FILE_HEADER *header,
