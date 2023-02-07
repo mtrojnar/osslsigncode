@@ -118,6 +118,7 @@
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 
 #include "msi.h"
+#include "osslsigncode.h"
 
 #ifdef ENABLE_CURL
 #ifdef __CYGWIN__
@@ -793,6 +794,24 @@ static int is_content_type(PKCS7 *p7, const char *objid)
 		p7->d.sign->contents->d.other->type == V_ASN1_OCTET_STRING);
 	ASN1_OBJECT_free(indir_objid);
 	return retval;
+}
+
+int bio_hash_data(char *indata, BIO *hash, uint32_t idx, uint32_t fileend)
+{
+	size_t written;
+	uint32_t want;
+
+	while (idx < fileend) {
+		want = fileend - idx;
+		if (want > SIZE_64K)
+			want = SIZE_64K;
+		if (!BIO_write_ex(hash, indata + idx, want, &written)) {
+			BIO_free_all(hash);
+			return 0; /* FAILED */
+		}
+		idx += (uint32_t)written;
+	}
+	return 1; /* OK */
 }
 
 #ifdef ENABLE_CURL
@@ -3444,7 +3463,7 @@ static int msi_calc_MsiDigitalSignatureEx(MSI_PARAMS *msiparams, const EVP_MD *m
 static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *header)
 {
 	size_t written;
-	uint32_t idx = 0, offset;
+	uint32_t idx = 0, fileend;
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
 	BIO *bhash = BIO_new(BIO_f_md());
 
@@ -3455,9 +3474,9 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *
 	}
 	BIO_push(bhash, BIO_new(BIO_s_null()));
 	if (header->sigpos)
-		offset = header->sigpos;
+		fileend = header->sigpos;
 	else
-		offset = header->fileend;
+		fileend = header->fileend;
 
 	/* header->header_size + 88 + 4 + 60 + header->pe32plus * 16 + 8 */
 	if (!BIO_write_ex(bhash, indata, header->header_size + 88, &written)
@@ -3472,17 +3491,11 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *
 		return 0; /* FAILED */
 	}
 	idx += (uint32_t)written + 8;
-	while (idx < offset) {
-		uint32_t want = offset - idx;
-		if (want > SIZE_64K)
-			want = SIZE_64K;
-		if (!BIO_write_ex(bhash, indata + idx, want, &written)) {
-			BIO_free_all(bhash);
-			return 0; /* FAILED */
-		}
-		idx += (uint32_t)written;
+	if (!bio_hash_data(indata, bhash, idx, fileend)) {
+		printf("Unable to calculate digest\n");
+		BIO_free_all(bhash);
+		return 0;  /* FAILED */
 	}
-
 	if (!header->sigpos) {
 		/* pad (with 0's) unsigned PE file to 8 byte boundary */
 		char *buf = OPENSSL_malloc(8);
