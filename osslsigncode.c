@@ -1594,7 +1594,7 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	BIO *bhash;
 
 	/* NumberOfSections indicates the size of the section table,
-	 * which immediately follows the headers. */
+	 * which immediately follows the headers, can be up to 65535 under Vista and later */
 	nsections = GET_UINT16_LE(indata + header_size + 6);
 	if (nsections == 0 || nsections > UINT16_MAX) {
 		printf("Corrupted number of sections: 0x%08X\n", nsections);
