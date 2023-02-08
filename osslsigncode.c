@@ -258,18 +258,6 @@ typedef struct {
 } GLOBAL_OPTIONS;
 
 typedef struct {
-	uint32_t header_size;
-	uint32_t pe32plus;
-	uint16_t magic;
-	uint32_t pe_checksum;
-	uint32_t nrvas;
-	uint32_t sigpos;
-	uint32_t siglen;
-	uint32_t fileend;
-	uint16_t flags;
-} FILE_HEADER;
-
-typedef struct {
 	EVP_PKEY *pkey;
 	X509 *cert;
 	STACK_OF(X509) *certs;
@@ -4490,7 +4478,7 @@ static int cat_verify_member(CatalogAuthAttr *attribute, char *indata, FILE_HEAD
 					goto out;
 				break;
 			case FILE_TYPE_MSI:
-				if (!msi_calc_digest(indata, mdtype, cmdbuf, header->fileend))
+				if (!msi_calc_digest(indata, mdtype, cmdbuf, header))
 					goto out;
 				break;
 			default:
