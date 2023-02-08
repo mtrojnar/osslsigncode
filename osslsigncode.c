@@ -2095,7 +2095,11 @@ static time_t asn1_get_time_t(const ASN1_TIME *s)
 		return INVALID_TIME;
 	}
 	if (ASN1_TIME_to_tm(s, &tm)) {
-		return mktime(&tm);
+#ifdef _WIN32
+		return _mkgmtime(&tm);
+#else
+		return timegm(&tm);
+#endif
 	} else {
 		return INVALID_TIME;
 	}
