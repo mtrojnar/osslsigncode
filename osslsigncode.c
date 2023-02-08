@@ -2003,11 +2003,11 @@ static void pe_recalc_checksum(BIO *bio, FILE_HEADER *header)
 
 static uint32_t pe_calc_realchecksum(char *indata, FILE_HEADER *header)
 {
-	uint32_t n = 0, checksum = 0, size = 0;
+	uint32_t n = 0, checkSum = 0, offset = 0;
 	BIO *bio = BIO_new(BIO_s_mem());
 	unsigned short *buf = OPENSSL_malloc(SIZE_64K);
 	
-	/* calculate the checksum */
+	/* calculate the checkSum */
 	while (n < header->fileend) {
 		size_t i, written, nread;
 		size_t left = header->fileend - n;
@@ -2021,20 +2021,20 @@ static uint32_t pe_calc_realchecksum(char *indata, FILE_HEADER *header)
 		if (!BIO_read_ex(bio, buf, written, &nread))
 			goto err; /* FAILED */
 		for (i = 0; i < nread / 2; i++) {
-			val = buf[i];
-			if (size == header->header_size + 88 || size == header->header_size + 90)
+			val = LE_UINT16(buf[i]);
+			if (offset == header->header_size + 88 || offset == header->header_size + 90)
 				val = 0;
-			checksum += val;
-			checksum = 0xffff & (checksum + (checksum >> 0x10));
-			size += 2;
+			checkSum += val;
+			checkSum = LOWORD(LOWORD(checkSum) + HIWORD(checkSum));
+			offset += 2;
 		}
 	}
-	checksum = 0xffff & (checksum + (checksum >> 0x10));
-	checksum += size;
+	checkSum = LOWORD(LOWORD(checkSum) + HIWORD(checkSum));
+	checkSum += offset;
 err:
 	OPENSSL_free(buf);
 	BIO_free(bio);
-	return checksum;
+	return checkSum;
 }
 
 static int verify_leaf_hash(X509 *leaf, const char *leafhash)
