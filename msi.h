@@ -144,6 +144,18 @@
 typedef unsigned char u_char;
 
 typedef struct {
+	uint32_t header_size;
+	uint32_t pe32plus;
+	uint16_t magic;
+	uint32_t pe_checksum;
+	uint32_t nrvas;
+	uint32_t sigpos;
+	uint32_t siglen;
+	uint32_t fileend;
+	uint16_t flags;
+} FILE_HEADER;
+
+typedef struct {
 	u_char signature[8];      /* 0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1 */
 	u_char unused_clsid[16];  /* reserved and unused */
 	uint16_t minorVersion;
@@ -260,7 +272,7 @@ MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse);
 void msi_dirent_free(MSI_DIRENT *dirent);
 int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root);
 int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root);
-int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, uint32_t fileend);
+int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *header);
 int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen);
 int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p, uint32_t len,
     u_char *p_msiex, uint32_t len_msiex, BIO *outdata);

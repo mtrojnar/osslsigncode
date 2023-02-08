@@ -734,7 +734,7 @@ out:
 }
 
 /* Compute a simple sha1/sha256 message digest of the MSI file */
-int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, uint32_t fileend)
+int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *header)
 {
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
 	BIO *bhash = BIO_new(BIO_f_md());
@@ -745,7 +745,7 @@ int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, uint32_t fileend)
 		return 0;  /* FAILED */
 	}
 	BIO_push(bhash, BIO_new(BIO_s_null()));
-	if (!bio_hash_data(indata, bhash, 0, 0, fileend)) {
+	if (!bio_hash_data(indata, bhash, 0, 0, header->fileend)) {
 		printf("Unable to calculate digest\n");
 		BIO_free_all(bhash);
 		return 0;  /* FAILED */
