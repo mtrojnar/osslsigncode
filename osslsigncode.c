@@ -1537,7 +1537,8 @@ typedef enum {
 	CMD_VERIFY,
 	CMD_ADD,
 	CMD_ATTACH,
-	CMD_HELP
+	CMD_HELP,
+	CMD_DEFAULT
 } cmd_type_t;
 
 
@@ -5880,7 +5881,7 @@ static cmd_type_t get_command(char **argv)
 		return CMD_VERIFY;
 	else if (!strcmp(argv[1], "add"))
 		return CMD_ADD;
-	return CMD_SIGN;
+	return CMD_DEFAULT;
 }
 
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
@@ -5938,8 +5939,12 @@ static int main_configure(int argc, char **argv, cmd_type_t *cmd, GLOBAL_OPTIONS
 	argv0 = argv[0];
 	if (argc > 1) {
 		*cmd = get_command(argv);
-		argv++;
-		argc--;
+		if (*cmd == CMD_DEFAULT) {
+			*cmd = CMD_SIGN;
+		} else {
+			argv++;
+			argc--;
+		}
 	}
 	options->md = EVP_sha256();
 	options->time = INVALID_TIME;
@@ -6272,7 +6277,7 @@ int main(int argc, char **argv)
 	int ret = -1, len = 0, padlen = 0;
 	uint32_t filesize = 0;
 	file_type_t type = FILE_TYPE_ANY, filetype = FILE_TYPE_CAT;
-	cmd_type_t cmd = CMD_SIGN;
+	cmd_type_t cmd = CMD_DEFAULT;
 
 	/* reset options */
 	memset(&options, 0, sizeof(GLOBAL_OPTIONS));
