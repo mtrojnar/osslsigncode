@@ -96,12 +96,11 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
 
-    - name: Install brew dependencies (macOS)
+    - name: Install Xcode (macOS)
       if: runner.os == 'macOS'
-      run: |
-        brew install make
-        echo "/usr/local/opt/make/libexec/gnubin" >> $GITHUB_PATH
-        echo "/usr/local/opt/openssl/bin" >> $GITHUB_PATH
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: latest-stable
 
     - name: Setup the oldest supported version of cmake (macOS)
       if: runner.os == 'macOS'
