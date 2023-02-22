@@ -100,6 +100,7 @@ jobs:
       if: runner.os == 'macOS'
       run: |
         brew install make
+        echo "/usr/local/opt/make/libexec/gnubin" >> $GITHUB_PATH
         echo "/usr/local/opt/openssl/bin" >> $GITHUB_PATH
 
     - name: Setup the oldest supported version of cmake (macOS)
