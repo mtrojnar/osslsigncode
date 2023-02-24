@@ -1630,9 +1630,6 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 		BIO_free_all(bhash);
 		return NULL;  /* FAILED */
 	}
-	res = OPENSSL_malloc((size_t)phlen);
-	zeroes = OPENSSL_zalloc((size_t)pagesize);
-
 	BIO_push(bhash, BIO_new(BIO_s_null()));
 	if (!BIO_write_ex(bhash, indata, header_size + 88, &written)
 			|| written != header_size + 88) {
@@ -1650,11 +1647,14 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 		BIO_free_all(bhash);
 		return NULL;  /* FAILED */
 	}
+	zeroes = OPENSSL_zalloc((size_t)pagesize);
 	if (!BIO_write_ex(bhash, zeroes, pagesize - hdrsize, &written)
 			|| written != pagesize - hdrsize) {
 		BIO_free_all(bhash);
+		OPENSSL_free(zeroes);
 		return NULL;  /* FAILED */
 	}
+	res = OPENSSL_malloc((size_t)phlen);
 	memset(res, 0, 4);
 	BIO_gets(bhash, (char*)res + 4, EVP_MD_size(md));
 	BIO_free_all(bhash);
@@ -1673,6 +1673,8 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 			if (!BIO_set_md(bhash, md)) {
 				printf("Unable to set the message digest of BIO\n");
 				BIO_free_all(bhash);
+				OPENSSL_free(zeroes);
+				OPENSSL_free(res);
 				return NULL;  /* FAILED */
 			}
 			BIO_push(bhash, BIO_new(BIO_s_null()));
@@ -1680,26 +1682,32 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 				if (!BIO_write_ex(bhash, indata + ro + l, rs - l, &written)
 						|| written != rs - l) {
 					BIO_free_all(bhash);
+					OPENSSL_free(zeroes);
+					OPENSSL_free(res);
 					return NULL;  /* FAILED */
 				}
 				if (!BIO_write_ex(bhash, zeroes, pagesize - (rs - l), &written)
 						|| written != pagesize - (rs - l)) {
 					BIO_free_all(bhash);
+					OPENSSL_free(zeroes);
+					OPENSSL_free(res);
 					return NULL;  /* FAILED */
 				}
 			} else {
 				if (!BIO_write_ex(bhash, indata + ro + l, pagesize, &written)
 						|| written != pagesize) {
 					BIO_free_all(bhash);
+					OPENSSL_free(zeroes);
+					OPENSSL_free(res);
 					return NULL;  /* FAILED */
 				}
 			}
 			BIO_gets(bhash, (char*)res + pi*pphlen + 4, EVP_MD_size(md));
+			BIO_free_all(bhash);
 		}
 		lastpos = ro + rs;
 		sections += 40;
 	}
-	BIO_free_all(bhash);
 	PUT_UINT32_LE(lastpos, res + pi*pphlen);
 	memset(res + pi*pphlen + 4, 0, (size_t)EVP_MD_size(md));
 	pi++;
