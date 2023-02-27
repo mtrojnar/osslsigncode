@@ -3497,9 +3497,9 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, FILE_HEADER *
 	}
 	if (!header->sigpos) {
 		/* pad (with 0's) unsigned PE file to 8 byte boundary */
-		char *buf = OPENSSL_malloc(8);
 		int len = 8 - header->fileend % 8;
 		if (len > 0 && len != 8) {
+			char *buf = OPENSSL_malloc(8);
 			memset(buf, 0, (size_t)len);
 			BIO_write(bhash, buf, len);
 			OPENSSL_free(buf);
