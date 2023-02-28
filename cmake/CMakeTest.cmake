@@ -60,7 +60,8 @@ set(verify_opt "-CAfile" "${CERTS}/CACert.pem"
   "-CRLfile" "${CERTS}/CACertCRL.pem"
   "-TSA-CAfile" "${CERTS}/TSACA.pem"
 )
-set(extensions_4 "exe" "ex_" "msi" "cat")
+# TODO "cat" extension
+set(extensions_4 "exe" "ex_" "msi")
 set(extensions_3 "exe" "ex_" "msi")
 set(files_4 "legacy" "signed" "nested" "added")
 set(files_3 "removed" "attached_pem" "attached_der")

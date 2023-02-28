@@ -47,7 +47,7 @@ configure_file(Config.h.in config.h)
 target_compile_definitions(osslsigncode PRIVATE HAVE_CONFIG_H=1)
 
 # set sources
-target_sources(osslsigncode PRIVATE osslsigncode.c msi.c)
+target_sources(osslsigncode PRIVATE osslsigncode.c helpers.c msi.c pe.c cab.c)
 if(NOT UNIX)
   target_sources(osslsigncode PRIVATE applink.c)
 endif(NOT UNIX)
