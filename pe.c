@@ -9,6 +9,7 @@
  */
 
 #include "osslsigncode.h"
+#include "helpers.h"
 
 const u_char classid_page_hash[] = {
 	0xa6, 0xb5, 0x86, 0xd5, 0xb4, 0xa1, 0x24, 0x66,

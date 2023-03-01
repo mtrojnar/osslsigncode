@@ -59,6 +59,7 @@
 */
 
 #include "osslsigncode.h"
+#include "helpers.h"
 
 /*
  * ASN.1 definitions (more or less from official MS Authenticode docs)
@@ -1601,6 +1602,28 @@ static int check_attached_data(TYPE_DATA *input_tdata)
 	tdata->format->cleanup_data(tdata);
 	OPENSSL_free(options);
 	return 0; /* OK */
+}
+
+static void free_options(GLOBAL_OPTIONS *options)
+{
+	/* If memory has not been allocated nothing is done */
+	OPENSSL_free(options->cafile);
+	OPENSSL_free(options->tsa_cafile);
+	OPENSSL_free(options->crlfile);
+	OPENSSL_free(options->tsa_crlfile);
+	/* If key is NULL nothing is done */
+	EVP_PKEY_free(options->pkey);
+	options->pkey = NULL;
+	/* If X509 structure is NULL nothing is done */
+	X509_free(options->cert);
+	options->cert = NULL;
+	/* Free up all elements of sk structure and sk itself */
+	sk_X509_pop_free(options->certs, X509_free);
+	options->certs = NULL;
+	sk_X509_pop_free(options->xcerts, X509_free);
+	options->xcerts = NULL;
+	sk_X509_CRL_pop_free(options->crls, X509_CRL_free);
+	options->crls = NULL;
 }
 
 static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)

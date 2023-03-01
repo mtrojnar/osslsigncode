@@ -10,6 +10,7 @@
  */
 
 #include "osslsigncode.h"
+#include "helpers.h"
 
 /*
  * FLAG_PREV_CABINET is set if the cabinet file is not the first in a set

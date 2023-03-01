@@ -11,6 +11,7 @@
  */
 
 #include "osslsigncode.h"
+#include "helpers.h"
 
 #define MAXREGSECT       0xfffffffa   /* maximum regular sector number */
 #define DIFSECT          0xfffffffc   /* specifies a DIFAT sector in the FAT */
