@@ -225,6 +225,11 @@ static size_t curl_write(void *ptr, size_t sz, size_t nmemb, void *stream)
 	return written;
 }
 
+/*
+ * [in] url: URL of the Time-Stamp Authority server
+ * [in] http_code: curlinfo response code
+ * [out] none
+ */
 static void print_timestamp_error(const char *url, long http_code)
 {
 	if (http_code != -1) {
@@ -265,40 +270,44 @@ static void print_timestamp_error(const char *url, long http_code)
 
 /*
  * Encode RFC 3161 timestamp request and write it into BIO
+ * [in, out] tdata: TYPE_DATA structure
+ * [out] pointer to BIO
  */
-static BIO *encode_rfc3161_request(PKCS7 *sig, const EVP_MD *md)
+static BIO *bio_encode_rfc3161_request(TYPE_DATA *tdata)
 {
+	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 	PKCS7_SIGNER_INFO *si;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
 	TimeStampReq *req;
 	BIO *bout, *bhash;
 	u_char *p;
 	int len;
-	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(sig);
 
+	signer_info = PKCS7_get_signer_info(tdata->sign->sig);
 	if (!signer_info)
 		return NULL; /* FAILED */
+
 	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
 	if (!si)
 		return NULL; /* FAILED */
 
 	bhash = BIO_new(BIO_f_md());
-	if (!BIO_set_md(bhash, md)) {
+	if (!BIO_set_md(bhash, tdata->options->md)) {
 		printf("Unable to set the message digest of BIO\n");
 		BIO_free_all(bhash);
 		return NULL;  /* FAILED */
 	}
 	BIO_push(bhash, BIO_new(BIO_s_null()));
 	BIO_write(bhash, si->enc_digest->data, si->enc_digest->length);
-	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
+	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(tdata->options->md));
 	BIO_free_all(bhash);
 
 	req = TimeStampReq_new();
 	ASN1_INTEGER_set(req->version, 1);
-	req->messageImprint->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(md));
+	req->messageImprint->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(tdata->options->md));
 	req->messageImprint->digestAlgorithm->parameters = ASN1_TYPE_new();
 	req->messageImprint->digestAlgorithm->parameters->type = V_ASN1_NULL;
-	ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(md));
+	ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(tdata->options->md));
 	req->certReq = 0xFF;
 
 	len = i2d_TimeStampReq(req, NULL);
@@ -316,18 +325,22 @@ static BIO *encode_rfc3161_request(PKCS7 *sig, const EVP_MD *md)
 
 /*
  * Encode authenticode timestamp request and write it into BIO
+ * [in, out] tdata: TYPE_DATA structure
+ * [out] pointer to BIO
  */
-static BIO *encode_authenticode_request(PKCS7 *sig)
+static BIO *bio_encode_authenticode_request(TYPE_DATA *tdata)
 {
+	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 	PKCS7_SIGNER_INFO *si;
 	TimeStampRequest *req;
 	BIO *bout, *b64;
 	u_char *p;
 	int len;
-	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(sig);
 
+	signer_info = PKCS7_get_signer_info(tdata->sign->sig);
 	if (!signer_info)
 		return 0; /* FAILED */
+
 	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
 	if (!si)
 		return 0; /* FAILED */
@@ -357,15 +370,19 @@ static BIO *encode_authenticode_request(PKCS7 *sig)
  * Decode a curl response from BIO.
  * If successful the RFC 3161 timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1].
+ * [in, out] tdata: TYPE_DATA structure
+ * [in] bin: BIO with curl data
+ * [in] verbose: additional output mode
+ * [out] CURLcode
  */
-static CURLcode decode_rfc3161_response(PKCS7 *sig, BIO *bin, int verbose)
+static CURLcode decode_rfc3161_response(TYPE_DATA *tdata, BIO *bin, int verbose)
 {
 	PKCS7_SIGNER_INFO *si;
 	STACK_OF(X509_ATTRIBUTE) *attrs;
 	TimeStampResp *reply;
 	u_char *p;
 	int i, len;
-	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(sig);
+	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(tdata->sign->sig);
 
 	if (!signer_info)
 		return 1; /* FAILED */
@@ -413,8 +430,12 @@ static CURLcode decode_rfc3161_response(PKCS7 *sig, BIO *bin, int verbose)
  * Decode a curl response from BIO.
  * If successful the authenticode timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1].
+ * [in, out] tdata: TYPE_DATA structure
+ * [in] bin: BIO with curl data
+ * [in] verbose: additional output mode
+ * [out] CURLcode
  */
-static CURLcode decode_authenticode_response(PKCS7 *sig, BIO *bin, int verbose)
+static CURLcode decode_authenticode_response(TYPE_DATA *tdata, BIO *bin, int verbose)
 {
 	PKCS7 *p7;
 	PKCS7_SIGNER_INFO *info, *si;
@@ -434,7 +455,7 @@ static CURLcode decode_authenticode_response(PKCS7 *sig, BIO *bin, int verbose)
 		return 1; /* FAILED */
 
 	for(i = sk_X509_num(p7->d.sign->cert)-1; i>=0; i--)
-		PKCS7_add_certificate(sig, sk_X509_value(p7->d.sign->cert, i));
+		PKCS7_add_certificate(tdata->sign->sig, sk_X509_value(p7->d.sign->cert, i));
 
 	signer_info = PKCS7_get_signer_info(p7);
 	if (!signer_info)
@@ -458,7 +479,7 @@ static CURLcode decode_authenticode_response(PKCS7 *sig, BIO *bin, int verbose)
 	attrs = X509at_add1_attr_by_txt(&attrs, PKCS9_COUNTER_SIGNATURE, V_ASN1_SET, p, len);
 	OPENSSL_free(p);
 
-	signer_info = PKCS7_get_signer_info(sig);
+	signer_info = PKCS7_get_signer_info(tdata->sign->sig);
 	if (!signer_info)
 		return 1; /* FAILED */
 	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
@@ -476,6 +497,10 @@ static CURLcode decode_authenticode_response(PKCS7 *sig, BIO *bin, int verbose)
 /*
  * Add timestamp to the PKCS7 SignerInfo structure:
  * sig->d.sign->signer_info->unauth_attr
+ * [in, out] tdata: TYPE_DATA structure
+ * [in] url: URL of the Time-Stamp Authority server
+ * [in] rfc3161: Authenticode / RFC3161 Timestamp switch
+ * [out] return code
  */
 static int add_timestamp(TYPE_DATA *tdata, char *url, int rfc3161)
 {
@@ -492,9 +517,9 @@ static int add_timestamp(TYPE_DATA *tdata, char *url, int rfc3161)
 
 	/* Encode timestamp request */
 	if (rfc3161) {
-		bout = encode_rfc3161_request(tdata->sign->sig, tdata->options->md);
+		bout = bio_encode_rfc3161_request(tdata);
 	} else {
-		bout = encode_authenticode_request(tdata->sign->sig);
+		bout = bio_encode_authenticode_request(tdata);
 	}
 	if (!bout)
 		return 1; /* FAILED */
@@ -588,9 +613,9 @@ static int add_timestamp(TYPE_DATA *tdata, char *url, int rfc3161)
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 		/* Decode a curl response from BIO and write it into the PKCS7 structure */
 		if (rfc3161)
-			res = decode_rfc3161_response(tdata->sign->sig, bin, verbose);
+			res = decode_rfc3161_response(tdata, bin, verbose);
 		else
-			res = decode_authenticode_response(tdata->sign->sig, bin, verbose);
+			res = decode_authenticode_response(tdata, bin, verbose);
 		if (res && verbose)
 			print_timestamp_error(url, http_code);
 	}
@@ -599,6 +624,10 @@ static int add_timestamp(TYPE_DATA *tdata, char *url, int rfc3161)
 	return (int)res;
 }
 
+/*
+ * [in, out] tdata: TYPE_DATA structure
+ * [out] return code
+ */
 static int add_timestamp_authenticode(TYPE_DATA *tdata)
 {
 	int i;
@@ -609,6 +638,10 @@ static int add_timestamp_authenticode(TYPE_DATA *tdata)
 	return 0; /* FAILED */
 }
 
+/*
+ * [in, out] tdata: TYPE_DATA structure
+ * [out] return code
+ */
 static int add_timestamp_rfc3161(TYPE_DATA *tdata)
 {
 	int i;
@@ -620,6 +653,10 @@ static int add_timestamp_rfc3161(TYPE_DATA *tdata)
 }
 #endif /* ENABLE_CURL */
 
+/*
+ * [in, out] tdata: TYPE_DATA structure
+ * [out] return code
+ */
 static int add_unauthenticated_blob(TYPE_DATA *tdata)
 {
 	PKCS7_SIGNER_INFO *si;
@@ -651,6 +688,10 @@ static int add_unauthenticated_blob(TYPE_DATA *tdata)
 	return 1; /* OK */
 }
 
+/*
+ * [in, out] tdata: TYPE_DATA structure
+ * [out] return code
+ */
 static int check_timestamp_and_blob(TYPE_DATA *tdata)
 {
 #ifdef ENABLE_CURL
@@ -658,29 +699,37 @@ static int check_timestamp_and_blob(TYPE_DATA *tdata)
 	if (tdata->options->nturl && !add_timestamp_authenticode(tdata)) {
 		printf("%s\n%s\n", "Authenticode timestamping failed",
 			"Use the \"-ts\" option to add the RFC3161 Time-Stamp Authority or choose another one Authenticode Time-Stamp Authority");
-		return 1; /* Failed */
+		return 1; /* FAILED */
 	}
 	if (tdata->options->ntsurl && !add_timestamp_rfc3161(tdata)) {
 		printf("%s\n%s\n", "RFC 3161 timestamping failed",
 			"Use the \"-t\" option to add the Authenticode Time-Stamp Authority or choose another one RFC3161 Time-Stamp Authority");
-		return 1; /* Failed */
+		return 1; /* FAILED */
 	}
 #endif /* ENABLE_CURL */
 	if (tdata->options->addBlob && !add_unauthenticated_blob(tdata)) {
 		printf("Adding unauthenticated blob failed\n");
-		return 1; /* Failed */
+		return 1; /* FAILED */
 	}
 	return 0; /* OK */
 }
 
-static bool on_list(const char *txt, const char *list[])
+/*
+ * [in] txt, list
+ * [out] return code
+ */
+static int on_list(const char *txt, const char *list[])
 {
 	while (*list)
 		if (!strcmp(txt, *list++))
-			return true;
-	return false;
+			return 1; /* OK */
+	return 0; /* FAILED */
 }
 
+/*
+ * [in] argv0, cmd
+ * [out] none
+ */
 static void usage(const char *argv0, const char *cmd)
 {
 	const char *cmds_all[] = {"all", NULL};
@@ -767,6 +816,10 @@ static void usage(const char *argv0, const char *cmd)
 	}
 }
 
+/*
+ * [in] argv0, cmd
+ * [out] none
+ */
 static void help_for(const char *argv0, const char *cmd)
 {
 	const char *cmds_all[] = {"all", NULL};
@@ -976,7 +1029,12 @@ static void help_for(const char *argv0, const char *cmd)
 	usage(argv0, cmd);
 }
 
-static STACK_OF(X509) *PEM_read_certs(BIO *bin, char *certpass)
+/*
+ * [in] bin: certfile BIO
+ * [in] certpass: NULL
+ * [out] pointer to STACK_OF(X509) structure
+ */
+static STACK_OF(X509) *X509_chain_read_certs(BIO *bin, char *certpass)
 {
 	STACK_OF(X509) *certs = sk_X509_new_null();
 	X509 *x509;
@@ -995,6 +1053,10 @@ static STACK_OF(X509) *PEM_read_certs(BIO *bin, char *certpass)
 }
 
 #ifdef PROVIDE_ASKPASS
+/*
+ * [in] prompt: "Password: "
+ * [out] password
+ */
 static char *getpassword(const char *prompt)
 {
 #ifdef HAVE_TERMIOS_H
@@ -1029,6 +1091,10 @@ static char *getpassword(const char *prompt)
 }
 #endif
 
+/*
+ * [in, out] options: GLOBAL_OPTIONS structure
+ * [out] return code
+ */
 static int read_password(GLOBAL_OPTIONS *options)
 {
 	char passbuf[4096];
@@ -1090,6 +1156,8 @@ static int read_password(GLOBAL_OPTIONS *options)
  * If successful the private key will be written to options->pkey,
  * the corresponding certificate to options->cert
  * and any additional certificates to options->certs.
+ * [in, out] options: GLOBAL_OPTIONS structure
+ * [out] return code
  */
 static int read_pkcs12file(GLOBAL_OPTIONS *options)
 {
@@ -1119,7 +1187,11 @@ out:
 	return ret;
 }
 
-/* Obtain a copy of the whole X509_CRL chain */
+/*
+ * Obtain a copy of the whole X509_CRL chain
+ * [in] chain: STACK_OF(X509_CRL) structure
+ * [out] pointer to STACK_OF(X509_CRL) structure
+ */
 static STACK_OF(X509_CRL) *X509_CRL_chain_up_ref(STACK_OF(X509_CRL) *chain)
 {
 	STACK_OF(X509_CRL) *ret;
@@ -1144,6 +1216,8 @@ err:
  * Load certificates from a file.
  * If successful all certificates will be written to options->certs
  * and optional CRLs will be written to options->crls.
+ * [in, out] options: GLOBAL_OPTIONS structure
+ * [out] return code
  */
 static int read_certfile(GLOBAL_OPTIONS *options)
 {
@@ -1156,7 +1230,7 @@ static int read_certfile(GLOBAL_OPTIONS *options)
 		return 0; /* FAILED */
 	}
 	/* .pem certificate file */
-	options->certs = PEM_read_certs(btmp, NULL);
+	options->certs = X509_chain_read_certs(btmp, NULL);
 
 	/* .der certificate file */
 	if (!options->certs) {
@@ -1195,7 +1269,11 @@ out:
 	return ret;
 }
 
-/* Load additional (cross) certificates from a .pem file */
+/*
+ * Load additional (cross) certificates from a .pem file
+ * [in, out] options: GLOBAL_OPTIONS structure
+ * [out] return code
+ */
 static int read_xcertfile(GLOBAL_OPTIONS *options)
 {
 	BIO *btmp;
@@ -1206,7 +1284,7 @@ static int read_xcertfile(GLOBAL_OPTIONS *options)
 		printf("Failed to read cross certificates file: %s\n", options->xcertfile);
 		return 0; /* FAILED */
 	}
-	options->xcerts = PEM_read_certs(btmp, NULL);
+	options->xcerts = X509_chain_read_certs(btmp, NULL);
 	if (!options->xcerts) {
 		printf("Failed to read cross certificates file: %s\n", options->xcertfile);
 		goto out; /* FAILED */
@@ -1218,7 +1296,11 @@ out:
 	return ret;
 }
 
-/* Load the private key from a file */
+/*
+ * Load the private key from a file
+ * [in, out] options: GLOBAL_OPTIONS structure
+ * [out] return code
+ */
 static int read_keyfile(GLOBAL_OPTIONS *options)
 {
 	BIO *btmp;
@@ -1248,6 +1330,8 @@ out:
  * PVK is a proprietary Microsoft format that stores a cryptographic private key.
  * PVK files are often password-protected.
  * A PVK file may have an associated .spc (PKCS7) certificate file.
+ * [in, out] options: GLOBAL_OPTIONS structure
+ * [out] PVK file
  */
 static char *find_pvk_key(GLOBAL_OPTIONS *options)
 {
@@ -1276,6 +1360,10 @@ static char *find_pvk_key(GLOBAL_OPTIONS *options)
 	return pvkfile;
 }
 
+/*
+ * [in, out] options: GLOBAL_OPTIONS structure
+ * [out] return code
+ */
 static int read_pvk_key(GLOBAL_OPTIONS *options)
 {
 	BIO *btmp;
@@ -1300,8 +1388,12 @@ static int read_pvk_key(GLOBAL_OPTIONS *options)
 
 #ifndef OPENSSL_NO_ENGINE
 
-/* Load an engine in a shareable library */
-static ENGINE *dynamic_engine(GLOBAL_OPTIONS *options)
+/*
+ * Load an engine in a shareable library
+ * [in] options: GLOBAL_OPTIONS structure
+ * [out] pointer to ENGINE
+ */
+static ENGINE *engine_dynamic(GLOBAL_OPTIONS *options)
 {
 	ENGINE *engine;
 	char *id;
@@ -1340,8 +1432,12 @@ static ENGINE *dynamic_engine(GLOBAL_OPTIONS *options)
 	return engine;
 }
 
-/* Load a pkcs11 engine */
-static ENGINE *pkcs11_engine()
+/*
+ * Load a pkcs11 engine
+ * [in] none
+ * [out] pointer to ENGINE
+ */
+static ENGINE *engine_pkcs11()
 {
 	ENGINE *engine = ENGINE_by_id("pkcs11");
 	if (!engine) {
@@ -1351,7 +1447,12 @@ static ENGINE *pkcs11_engine()
 	return engine; /* OK */
 }
 
-/* Load the private key and the signer certificate from a security token */
+/*
+ * Load the private key and the signer certificate from a security token
+ * [in, out] options: GLOBAL_OPTIONS structure
+ * [in] engine: ENGINE structure
+ * [out] return code
+ */
 static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
 {
 	if (options->p11module && !ENGINE_ctrl_cmd_string(engine, "MODULE_PATH", options->p11module, 0)) {
@@ -1403,6 +1504,10 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
 }
 #endif /* OPENSSL_NO_ENGINE */
 
+/*
+ * [in, out] options: GLOBAL_OPTIONS structure
+ * [out] return code
+ */
 static int read_crypto_params(GLOBAL_OPTIONS *options)
 {
 	int ret = 0;
@@ -1424,9 +1529,9 @@ static int read_crypto_params(GLOBAL_OPTIONS *options)
 		ENGINE *engine;
 
 		if (options->p11engine)
-			engine = dynamic_engine(options);
+			engine = engine_dynamic(options);
 		else
-			engine = pkcs11_engine();
+			engine = engine_pkcs11();
 		if (!engine)
 			goto out; /* FAILED */
 		printf("Engine \"%s\" set.\n", ENGINE_get_id(engine));
@@ -1458,6 +1563,10 @@ out:
 	return ret; /* OK */
 }
 
+/*
+ * [in] none
+ * [out] default CAfile
+ */
 static char *get_cafile(void)
 {
 #ifndef WIN32
@@ -1499,6 +1608,10 @@ static void print_version(void)
 	printf("\n");
 }
 
+/*
+ * [in] argv
+ * [out] cmd_type_t: command
+ */
 static cmd_type_t get_command(char **argv)
 {
 	if (!strcmp(argv[1], "--help")) {
@@ -1569,6 +1682,10 @@ static int use_legacy(void)
 }
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 
+/*
+ * [in] input_tdata: TYPE_DATA structure
+ * [out] return code
+ */
 static int check_attached_data(TYPE_DATA *input_tdata)
 {
 	TYPE_DATA *tdata;
@@ -1594,7 +1711,7 @@ static int check_attached_data(TYPE_DATA *input_tdata)
 		printf("Corrupted file.\n");
 		return 1; /* Failed */
 	}
-	if (tdata->format->verify_signed(tdata)) {
+	if (tdata->format->verify_signed_file(tdata)) {
 		printf("Signature mismatch\n");
 		return 1; /* Failed */
 	}
@@ -1604,6 +1721,10 @@ static int check_attached_data(TYPE_DATA *input_tdata)
 	return 0; /* OK */
 }
 
+/*
+ * [in, out] options: GLOBAL_OPTIONS structure
+ * [out] none
+ */
 static void free_options(GLOBAL_OPTIONS *options)
 {
 	/* If memory has not been allocated nothing is done */
@@ -1626,6 +1747,11 @@ static void free_options(GLOBAL_OPTIONS *options)
 	options->crls = NULL;
 }
 
+/*
+ * [in] argc, argv
+ * [in, out] options: GLOBAL_OPTIONS structure
+ * [out] return code
+ */
 static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
 {
 	int i;
@@ -2012,7 +2138,7 @@ int main(int argc, char **argv)
 		goto err_cleanup;
 	}
 	if (options.cmd == CMD_VERIFY) {
-		ret =  tdata->format->verify_signed(tdata);
+		ret =  tdata->format->verify_signed_file(tdata);
 		goto skip_signing;
 	} else if (options.cmd == CMD_EXTRACT) {
 		ret = tdata->format->extract_signature(tdata);

@@ -214,7 +214,7 @@ struct msi_header_st {
 /* FILE_FORMAT method prototypes */
 static TYPE_DATA *msi_init(GLOBAL_OPTIONS *options);
 static ASN1_OBJECT *msi_spc_sip_info(TYPE_DATA *tdata, u_char **p, int *plen);
-static int msi_verify_signed(TYPE_DATA *tdata);
+static int msi_verify_signed_file(TYPE_DATA *tdata);
 static int msi_extract_signature(TYPE_DATA *tdata);
 static int msi_remove_signature(TYPE_DATA *tdata);
 static int msi_prepare_signature(TYPE_DATA *tdata);
@@ -225,7 +225,7 @@ static void msi_cleanup_data(TYPE_DATA *tdata);
 FILE_FORMAT file_format_msi = {
 	.init = msi_init,
 	.get_data_blob = msi_spc_sip_info,
-	.verify_signed = msi_verify_signed,
+	.verify_signed_file = msi_verify_signed_file,
 	.extract_signature = msi_extract_signature,
 	.remove_signature = msi_remove_signature,
 	.prepare_signature = msi_prepare_signature,
@@ -385,7 +385,7 @@ static int msi_append_signature(TYPE_DATA *tdata)
 	return 0; /* OK */
 }
 
-static int msi_verify_signed(TYPE_DATA *tdata)
+static int msi_verify_signed_file(TYPE_DATA *tdata)
 {
 	int i, ret = 1;
 	char *indata = NULL;

@@ -481,7 +481,7 @@ extern FILE_FORMAT file_format_cat;
 struct file_format_st {
 	TYPE_DATA *(*init) (GLOBAL_OPTIONS *option);
 	ASN1_OBJECT *(*get_data_blob) (TYPE_DATA *tdata, u_char **p, int *plen);
-	int (*verify_signed) (TYPE_DATA *tdata);
+	int (*verify_signed_file) (TYPE_DATA *tdata);
 	int (*extract_signature) (TYPE_DATA *tdata);
 	int (*remove_signature) (TYPE_DATA *tdata);
 	int (*prepare_signature) (TYPE_DATA *tdata);

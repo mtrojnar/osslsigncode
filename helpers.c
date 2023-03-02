@@ -406,6 +406,7 @@ void signature_list_free(STACK_OF(SIGNATURE) *signatures)
 	sk_SIGNATURE_pop_free(signatures, signature_free);
 }
 
+/* PE and CAB format specific */
 SpcLink *get_obsolete_link(void)
 {
 	const u_char obsolete[] = {

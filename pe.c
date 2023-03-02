@@ -44,7 +44,7 @@ struct pe_header_st {
 /* FILE_FORMAT method prototypes */
 static TYPE_DATA *pe_init(GLOBAL_OPTIONS *options);
 static ASN1_OBJECT *pe_spc_image_data(TYPE_DATA *tdata, u_char **p, int *plen);
-static int pe_verify_signed(TYPE_DATA *tdata);
+static int pe_verify_signed_file(TYPE_DATA *tdata);
 static int pe_extract_signature(TYPE_DATA *tdata);
 static int pe_remove_signature(TYPE_DATA *tdata);
 static int pe_prepare_signature(TYPE_DATA *tdata);
@@ -56,7 +56,7 @@ static void pe_cleanup_data(TYPE_DATA *tdata);
 FILE_FORMAT file_format_pe = {
 	.init = pe_init,
 	.get_data_blob = pe_spc_image_data,
-	.verify_signed = pe_verify_signed,
+	.verify_signed_file = pe_verify_signed_file,
 	.extract_signature = pe_extract_signature,
 	.remove_signature = pe_remove_signature,
 	.prepare_signature = pe_prepare_signature,
@@ -195,7 +195,7 @@ static void pe_update_data_size(TYPE_DATA *tdata)
 		pe_recalc_checksum(tdata->sign->outdata, tdata->pe);
 }
 
-static int pe_verify_signed(TYPE_DATA *tdata)
+static int pe_verify_signed_file(TYPE_DATA *tdata)
 {
 	int i, peok = 1, ret = 1;
 	uint32_t real_pe_checksum;

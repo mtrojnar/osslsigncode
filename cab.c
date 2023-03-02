@@ -43,7 +43,7 @@ struct cab_header_st {
 /* FILE_FORMAT method prototypes */
 static TYPE_DATA *cab_init(GLOBAL_OPTIONS *options);
 static ASN1_OBJECT *cab_obsolete_link(TYPE_DATA *tdata, u_char **p, int *plen);
-static int cab_verify_signed(TYPE_DATA *tdata);
+static int cab_verify_signed_file(TYPE_DATA *tdata);
 static int cab_extract_signature(TYPE_DATA *tdata);
 static int cab_remove_signature(TYPE_DATA *tdata);
 static int cab_prepare_signature(TYPE_DATA *tdata);
@@ -55,7 +55,7 @@ static void cab_cleanup_data(TYPE_DATA *tdata);
 FILE_FORMAT file_format_cab = {
 	.init = cab_init,
 	.get_data_blob = cab_obsolete_link,
-	.verify_signed = cab_verify_signed,
+	.verify_signed_file = cab_verify_signed_file,
 	.extract_signature = cab_extract_signature,
 	.remove_signature = cab_remove_signature,
 	.prepare_signature = cab_prepare_signature,
@@ -179,7 +179,7 @@ static void cab_update_data_size(TYPE_DATA *tdata)
 	}
 }
 
-static int cab_verify_signed(TYPE_DATA *tdata)
+static int cab_verify_signed_file(TYPE_DATA *tdata)
 {
 	int i, ret = 1;
 	PKCS7 *p7;
