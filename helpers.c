@@ -70,6 +70,7 @@ static int load_crlfile_lookup(X509_STORE *store, char *certs, char *crl);
 static int cms_print_timestamp(CMS_ContentInfo *cms, time_t time);
 static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
 	PKCS7_SIGNER_INFO *countersignature);
+static void signature_free(SIGNATURE *signature);
 
 /*
  * Common functions
@@ -400,17 +401,9 @@ int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allow
 	return 1; /* OK */
 }
 
-void signature_free(SIGNATURE *signature)
+void signature_list_free(STACK_OF(SIGNATURE) *signatures)
 {
-	if (signature->timestamp) {
-		CMS_ContentInfo_free(signature->timestamp);
-		ERR_clear_error();
-	}
-	PKCS7_free(signature->p7);
-	/* If memory has not been allocated nothing is done */
-	OPENSSL_free(signature->url);
-	OPENSSL_free(signature->desc);
-	OPENSSL_free(signature);
+	sk_SIGNATURE_pop_free(signatures, signature_free);
 }
 
 SpcLink *get_obsolete_link(void)
@@ -1507,6 +1500,19 @@ out:
 		ERR_print_errors_fp(stdout);
 	PKCS7_free(p7);
 	return cms;
+}
+
+static void signature_free(SIGNATURE *signature)
+{
+	if (signature->timestamp) {
+		CMS_ContentInfo_free(signature->timestamp);
+		ERR_clear_error();
+	}
+	PKCS7_free(signature->p7);
+	/* If memory has not been allocated nothing is done */
+	OPENSSL_free(signature->url);
+	OPENSSL_free(signature->desc);
+	OPENSSL_free(signature);
 }
 
 /*

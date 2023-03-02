@@ -20,7 +20,7 @@ int is_content_type(PKCS7 *p7, const char *objid);
 int set_indirect_data_blob(TYPE_DATA *tdata, PKCS7 *sig);
 int verify_signature(TYPE_DATA *tdata, SIGNATURE *signature);
 int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allownest);
-void signature_free(SIGNATURE *signature);
+void signature_list_free(STACK_OF(SIGNATURE) *signatures);
 SpcLink *get_obsolete_link(void);
 int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype);
 

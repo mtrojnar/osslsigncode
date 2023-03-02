@@ -242,7 +242,7 @@ static int pe_verify_signed(TYPE_DATA *tdata)
 	}
 	printf("Number of verified signatures: %d\n", i);
 out:
-	sk_SIGNATURE_pop_free(signatures, signature_free);
+	signature_list_free(signatures);
 	return ret;
 }
 
