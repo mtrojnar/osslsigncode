@@ -254,9 +254,6 @@ static void msi_file_free(MSI_FILE *msi);
 static void msi_dirent_free(MSI_DIRENT *dirent);
 
 
-/*
- * FILE_FORMAT method definitions
- */
 static TYPE_DATA *msi_init(GLOBAL_OPTIONS *options)
 {
 	TYPE_DATA *tdata;
@@ -270,18 +267,30 @@ static TYPE_DATA *msi_init(GLOBAL_OPTIONS *options)
 	if (options->jp >= 0)
 		printf("Warning: -jp option is only valid for CAB files\n");
 
-	filesize = input_validation(options, FILE_TYPE_MSI);
+	filesize = get_file_size(options->infile);
 	if (filesize == 0)
 		return NULL; /* FAILED */
 
-	header = OPENSSL_zalloc(sizeof(MSI_HEADER));
-	if (!msi_verify_header(options->indata, filesize, header))
+	options->indata = map_file(options->infile, filesize);
+	if (!options->indata) {
 		return NULL; /* FAILED */
-
+	}
+	if (memcmp(options->indata, msi_magic, sizeof msi_magic)) {
+		unmap_file(options->infile, filesize);
+		return NULL; /* FAILED */
+	}
+	header = OPENSSL_zalloc(sizeof(MSI_HEADER));
+	if (!msi_verify_header(options->indata, filesize, header)) {
+		unmap_file(options->infile, filesize);
+		OPENSSL_free(header);
+		return NULL; /* FAILED */
+	}
 	hash = BIO_new(BIO_f_md());
 	if (!BIO_set_md(hash, options->md)) {
 		printf("Unable to set the message digest of BIO\n");
+		unmap_file(options->infile, filesize);
 		BIO_free_all(hash);
+		OPENSSL_free(header);
 		return NULL; /* FAILED */
 	}
 	if (options->cmd != CMD_VERIFY) {
@@ -289,7 +298,9 @@ static TYPE_DATA *msi_init(GLOBAL_OPTIONS *options)
 		outdata = BIO_new_file(options->outfile, FILE_CREATE_MODE);
 		if (outdata == NULL) {
 			printf("Failed to create file: %s\n", options->outfile);
+			unmap_file(options->infile, filesize);
 			BIO_free_all(hash);
+			OPENSSL_free(header);
 			return NULL; /* FAILED */
 		}
 		BIO_push(hash, BIO_new(BIO_s_null()));

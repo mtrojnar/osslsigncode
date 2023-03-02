@@ -6,7 +6,6 @@
  */
 
 /* Common functions */
-uint32_t input_validation(GLOBAL_OPTIONS *options, file_type_t type);
 uint32_t get_file_size(const char *infile);
 char *map_file(const char *infile, const size_t size);
 void unmap_file(char *indata, const size_t size);

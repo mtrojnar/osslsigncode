@@ -97,18 +97,28 @@ static TYPE_DATA *pe_init(GLOBAL_OPTIONS *options)
 	if (options->add_msi_dse == 1)
 		printf("Warning: -add-msi-dse option is only valid for MSI files\n");
 
-	filesize = input_validation(options, FILE_TYPE_PE);
+	filesize = get_file_size(options->infile);
 	if (filesize == 0)
 		return NULL; /* FAILED */
 
+	options->indata = map_file(options->infile, filesize);
+	if (!options->indata) {
+		return NULL; /* FAILED */
+	}
+	if (memcmp(options->indata, "MZ", 2)) {
+		unmap_file(options->infile, filesize);
+		return NULL; /* FAILED */
+	}
 	header = OPENSSL_zalloc(sizeof(PE_HEADER));
 	if (!pe_verify_header(options->indata, filesize, header)) {
+		unmap_file(options->infile, filesize);
 		OPENSSL_free(header);
 		return NULL; /* FAILED */
 	}
 	hash = BIO_new(BIO_f_md());
 	if (!BIO_set_md(hash, options->md)) {
 		printf("Unable to set the message digest of BIO\n");
+		unmap_file(options->infile, filesize);
 		BIO_free_all(hash);
 		OPENSSL_free(header);
 		return NULL; /* FAILED */
@@ -118,6 +128,7 @@ static TYPE_DATA *pe_init(GLOBAL_OPTIONS *options)
 		outdata = BIO_new_file(options->outfile, FILE_CREATE_MODE);
 		if (outdata == NULL) {
 			printf("Failed to create file: %s\n", options->outfile);
+			unmap_file(options->infile, filesize);
 			BIO_free_all(hash);
 			OPENSSL_free(header);
 			return NULL; /* FAILED */

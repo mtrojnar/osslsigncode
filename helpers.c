@@ -41,7 +41,6 @@ const u_char purpose_comm[] = {
 /* Prototypes */
 static SpcSpOpusInfo *createOpus(const char *desc, const char *url);
 static void tohex(const u_char *v, char *b, int len);
-static file_type_t get_file_type(char *indata);
 static int append_nested_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_char *p, int len);
 static int get_indirect_data_blob(TYPE_DATA *tdata, u_char **blob, int *len);
 static int set_signing_blob(PKCS7 *sig, BIO *hash, u_char *buf, int len);
@@ -75,24 +74,6 @@ static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
 /*
  * Common functions
  */
-uint32_t input_validation(GLOBAL_OPTIONS *options, file_type_t type)
-{
-	uint32_t filesize = get_file_size(options->infile);
-
-	if (filesize == 0) {
-		return 0; /* FAILED */
-	}
-	options->indata = map_file(options->infile, filesize);
-	if (!options->indata) {
-		return 0; /* FAILED */
-	}
-	if (type != get_file_type(options->indata)) {
-		unmap_file(options->infile, filesize);
-		return 0; /* FAILED */
-	}
-	return filesize; /* OK */
-}
-
 uint32_t get_file_size(const char *infile)
 {
 	int ret;
@@ -500,33 +481,6 @@ static void tohex(const u_char *v, char *b, int len)
 		j += sprintf(b+j, "%02X", v[i]);
 #endif /* WIN32 */
 	}
-}
-
-static file_type_t get_file_type(char *indata)
-{
-	file_type_t type;
-	const u_char pkcs7_signed_data[] = {
-		0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d,
-		0x01, 0x07, 0x02,
-	};
-	const u_char msi_magic[] = {
-		0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1
-	};
-
-	if (!memcmp(indata, "MSCF", 4)) {
-		type = FILE_TYPE_CAB;
-	} else if (!memcmp(indata, "MZ", 2)) {
-		type = FILE_TYPE_PE;
-	} else if (!memcmp(indata, msi_magic, sizeof msi_magic)) {
-		type = FILE_TYPE_MSI;
-	} else if (!memcmp(indata + ((GET_UINT8_LE(indata+1) == 0x82) ? 4 : 5),
-			pkcs7_signed_data, sizeof pkcs7_signed_data)) {
-		/* the maximum size of a supported cat file is (2^24 -1) bytes */
-		type = FILE_TYPE_CAT;
-	} else {
-		type = FILE_TYPE_ANY;
-	}
-	return type;
 }
 
 static int append_nested_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_char *p, int len)

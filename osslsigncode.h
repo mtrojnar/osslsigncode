@@ -211,14 +211,6 @@
 #define DO_EXIT_2(x, y, z) { printf(x, y, z); goto err_cleanup; }
 
 typedef enum {
-	FILE_TYPE_CAB,
-	FILE_TYPE_PE,
-	FILE_TYPE_MSI,
-	FILE_TYPE_CAT,
-	FILE_TYPE_ANY
-} file_type_t;
-
-typedef enum {
 	CMD_SIGN,
 	CMD_EXTRACT,
 	CMD_REMOVE,
