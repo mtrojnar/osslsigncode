@@ -66,9 +66,6 @@ FILE_FORMAT file_format_pe = {
 	.cleanup_data = pe_cleanup_data
 };
 
-/* Common function */
-int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, PE_HEADER *header);
-
 /* Prototypes */
 static int pe_verify_header(char *indata, uint32_t filesize, PE_HEADER *header);
 static PKCS7 *get_pkcs7(TYPE_DATA *tdata);
@@ -395,7 +392,7 @@ static void pe_cleanup_data(TYPE_DATA *tdata)
  * PE helper functions
  */
 /* Compute a message digest value of a signed PE file. */
-int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, PE_HEADER *header)
+static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, PE_HEADER *header)
 {
 	size_t written;
 	uint32_t idx = 0, fileend;
@@ -426,7 +423,7 @@ int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, PE_HEADER *header)
 		return 0; /* FAILED */
 	}
 	idx += (uint32_t)written + 8;
-	if (!bio_hash_data(indata, bhash, idx, 0, fileend)) {
+	if (!bio_hash_data(indata, bhash, idx, fileend)) {
 		printf("Unable to calculate digest\n");
 		BIO_free_all(bhash);
 		return 0;  /* FAILED */

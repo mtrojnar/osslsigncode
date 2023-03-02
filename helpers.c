@@ -240,22 +240,16 @@ int asn1_simple_hdr_len(const u_char *p, int len)
 	return (p[1]&0x80) ? (2 + (p[1]&0x7f)) : 2;
 }
 
-int bio_hash_data(char *indata, BIO *hash, uint32_t idx, uint32_t offset, uint32_t fileend)
+int bio_hash_data(char *indata, BIO *hash, size_t idx, size_t fileend)
 {
-	size_t written;
-	uint32_t want;
-	uint32_t start = offset ? offset : idx;
-
-	while (start < fileend) {
-		want = fileend - start;
+	while (idx < fileend) {
+		size_t want, written;
+		want = fileend - idx;
 		if (want > SIZE_64K)
 			want = SIZE_64K;
-		if (!BIO_write_ex(hash, indata + idx, want, &written)) {
-			BIO_free_all(hash);
+		if (!BIO_write_ex(hash, indata + idx, want, &written))
 			return 0; /* FAILED */
-		}
-		idx += (uint32_t)written;
-		start += (uint32_t)written;
+		idx += written;
 	}
 	return 1; /* OK */
 }

@@ -14,7 +14,7 @@ int add_purpose_attribute(PKCS7_SIGNER_INFO *si, int comm);
 int pkcs7_set_nested_signature(TYPE_DATA *tdata);
 int pkcs7_add_signing_time(PKCS7_SIGNER_INFO *si, time_t time);
 int asn1_simple_hdr_len(const u_char *p, int len);
-int bio_hash_data(char *indata, BIO *hash, uint32_t idx, uint32_t offset, uint32_t fileend);
+int bio_hash_data(char *indata, BIO *hash, size_t idx, size_t fileend);
 void print_hash(const char *descript1, const char *descript2, const u_char *hashbuf, int length);
 int is_content_type(PKCS7 *p7, const char *objid);
 int set_indirect_data_blob(TYPE_DATA *tdata, PKCS7 *sig);

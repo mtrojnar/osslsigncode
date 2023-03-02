@@ -65,9 +65,6 @@ FILE_FORMAT file_format_cab = {
 	.cleanup_data = cab_cleanup_data
 };
 
-/* Common function */
-static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, CAB_HEADER *header);
-
 /* Prototypes */
 static int cab_verify_header(char *indata, uint32_t filesize, CAB_HEADER *header);
 static PKCS7 *get_pkcs7(TYPE_DATA *tdata);
@@ -616,9 +613,9 @@ static PKCS7 *get_pkcs7(TYPE_DATA *tdata)
 }
 
 /* Compute a message digest value of the signed or unsigned CAB file */
-int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, CAB_HEADER *header)
+static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, CAB_HEADER *header)
 {
-	uint32_t idx = 0, fileend, coffFiles;
+	uint32_t idx, fileend, coffFiles;
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
 	BIO *bhash = BIO_new(BIO_f_md());
 
@@ -629,17 +626,12 @@ int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, CAB_HEADER *header)
 	}
 	BIO_push(bhash, BIO_new(BIO_s_null()));
 
-	if (header->sigpos)
-		fileend = header->sigpos;
-	else
-		fileend = header->fileend;
-
 	/* u1 signature[4] 4643534D MSCF: 0-3 */
 	BIO_write(bhash, indata, 4);
 	/* u4 reserved1 00000000: 4-7 skipped */
 	if (header->sigpos) {
 		uint16_t nfolders, flags;
-		uint32_t pos = 60;
+		
 		/*
 		 * u4 cbCabinet - size of this cabinet file in bytes: 8-11
 		 * u4 reserved2 00000000: 12-15
@@ -675,7 +667,8 @@ int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, CAB_HEADER *header)
 		*/
 		/* u22 abReserve: 56-59 */
 		BIO_write(bhash, indata + 56, 4);
-		idx += 60;
+		idx = 60;
+		fileend = header->sigpos;
 		/* TODO */
 		if (flags & FLAG_PREV_CABINET) {
 			uint8_t byte;
@@ -683,16 +676,14 @@ int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, CAB_HEADER *header)
 			do {
 				byte = GET_UINT8_LE(indata + idx);
 				BIO_write(bhash, indata + idx, 1);
-				pos++;
 				idx++;
-			} while (byte && pos < fileend);
+			} while (byte && idx < fileend);
 			/* szDiskPrev */
 			do {
 				byte = GET_UINT8_LE(indata + idx);
 				BIO_write(bhash, indata + idx, 1);
-				pos++;
 				idx++;
-			} while (byte && pos < fileend);
+			} while (byte && idx < fileend);
 		}
 		if (flags & FLAG_NEXT_CABINET) {
 			uint8_t byte;
@@ -700,16 +691,14 @@ int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, CAB_HEADER *header)
 			do {
 				byte = GET_UINT8_LE(indata + idx);
 				BIO_write(bhash, indata + idx, 1);
-				pos++;
 				idx++;
-			} while (byte && pos < fileend);
+			} while (byte && idx < fileend);
 			/* szDiskNext */
 			do {
 				byte = GET_UINT8_LE(indata + idx);
 				BIO_write(bhash, indata + idx, 1);
-				pos++;
 				idx++;
-			} while (byte && pos < fileend);
+			} while (byte && idx < fileend);
 		}
 		/*
 		 * (u8 * cFolders) CFFOLDER - structure contains information about
@@ -720,12 +709,19 @@ int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, CAB_HEADER *header)
 			idx += 8;
 			nfolders--;
 		}
+		if (idx != coffFiles) {
+			printf("Corrupt coffFiles value: 0x%08X\n", coffFiles);
+			BIO_free_all(bhash);
+			return 0;  /* FAILED */
+		}
 	} else {
+		/* TESTME with CAT file */
 		/* read what's left of the unsigned CAB file */
-		coffFiles = 8;
+		idx = 8;
+		fileend = header->fileend;
 	}
 	/* (variable) ab - the compressed data bytes */
-	if (!bio_hash_data(indata, bhash, idx, coffFiles, fileend)) {
+	if (!bio_hash_data(indata, bhash, idx, fileend)) {
 		printf("Unable to calculate digest\n");
 		BIO_free_all(bhash);
 		return 0;  /* FAILED */

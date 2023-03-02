@@ -234,9 +234,6 @@ FILE_FORMAT file_format_msi = {
 	.cleanup_data = msi_cleanup_data
 };
 
-/* Common function */
-int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, MSI_HEADER *header);
-
 /* Prototypes */
 static int msi_verify_header(char *indata, uint32_t filesize, MSI_HEADER *header);
 static PKCS7 *msi_extract_pkcs7(TYPE_DATA *tdata, MSI_ENTRY *ds, char **p, uint32_t len);
@@ -598,8 +595,8 @@ static void msi_cleanup_data(TYPE_DATA *tdata)
 /*
  * MSI helper functions
  */
-/* Compute a simple sha1/sha256 message digest of the MSI file */
-int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, MSI_HEADER *header)
+/* Compute a simple sha1/sha256 message digest of the MSI file for use with CAT file */
+static int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, MSI_HEADER *header)
 {
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
 	BIO *bhash = BIO_new(BIO_f_md());
@@ -610,7 +607,7 @@ int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, MSI_HEADER *header)
 		return 0;  /* FAILED */
 	}
 	BIO_push(bhash, BIO_new(BIO_s_null()));
-	if (!bio_hash_data(indata, bhash, 0, 0, header->fileend)) {
+	if (!bio_hash_data(indata, bhash, 0, header->fileend)) {
 		printf("Unable to calculate digest\n");
 		BIO_free_all(bhash);
 		return 0;  /* FAILED */
