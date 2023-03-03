@@ -462,7 +462,7 @@ typedef struct {
 } SIGN_DATA;
 
 typedef struct {
-    FILE_FORMAT *format;
+	FILE_FORMAT *format;
 	GLOBAL_OPTIONS *options;
 	SIGN_DATA *sign;
     union {

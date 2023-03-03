@@ -39,20 +39,21 @@ const u_char purpose_comm[] = {
 };
 
 /* Prototypes */
-static SpcSpOpusInfo *createOpus(const char *desc, const char *url);
-static void tohex(const u_char *v, char *b, int len);
-static int append_nested_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_char *p, int len);
-static int get_indirect_data_blob(TYPE_DATA *tdata, u_char **blob, int *len);
-static int set_signing_blob(PKCS7 *sig, BIO *hash, u_char *buf, int len);
+static SpcSpOpusInfo *spc_sp_opus_info_create(TYPE_DATA *tdata);
+static int X509_attribute_chain_append_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_char *p, int len);
+static int spc_indirect_data_content_get(u_char **blob, int *len, TYPE_DATA *tdata);
+static int pkcs7_set_spc_indirect_data_content(PKCS7 *sig, TYPE_DATA *tdata, u_char *buf, int len);
 static X509 *find_signer(PKCS7 *p7, char *leafhash, int *leafok);
 static int print_certs(PKCS7 *p7);
 static int print_cert(X509 *cert, int i);
 static char *get_clrdp_url(X509 *cert);
 static int verify_timestamp(SIGNATURE *signature, TYPE_DATA *tdata);
 static int verify_authenticode(SIGNATURE *signature, TYPE_DATA *tdata, X509 *signer);
-static void get_signed_attributes(SIGNATURE *signature, STACK_OF(X509_ATTRIBUTE) *auth_attr);
-static void get_unsigned_attributes(STACK_OF(SIGNATURE) **signatures, SIGNATURE *signature,
-	STACK_OF(X509_ATTRIBUTE) *unauth_attr, PKCS7 *p7, int allownest);
+static void signature_get_signed_attributes(SIGNATURE *signature,
+	STACK_OF(X509_ATTRIBUTE) *auth_attr);
+static void signature_get_unsigned_attributes(SIGNATURE *signature,
+	STACK_OF(SIGNATURE) **signatures, STACK_OF(X509_ATTRIBUTE) *unauth_attr,
+	PKCS7 *p7, int allownest);
 static int print_attributes(SIGNATURE *signature, int verbose);
 static int verify_leaf_hash(X509 *leaf, const char *leafhash);
 static int load_file_lookup(X509_STORE *store, char *certs);
@@ -74,6 +75,11 @@ static void signature_free(SIGNATURE *signature);
 
 /*
  * Common functions
+ */
+
+/*
+ * [in] infile
+ * [returns] file size
  */
 uint32_t get_file_size(const char *infile)
 {
@@ -101,6 +107,10 @@ uint32_t get_file_size(const char *infile)
 	return (uint32_t)st.st_size;
 }
 
+/*
+ * [in] infile: starting address for the new mapping
+ * [returns] pointer to the mapped area
+ */
 char *map_file(const char *infile, const size_t size)
 {
 	char *indata = NULL;
@@ -138,6 +148,11 @@ char *map_file(const char *infile, const size_t size)
 	return indata;
 }
 
+/*
+ * [in] indata: starting address space
+ * [in] size: mapped area length
+ * [returns] none
+ */
 void unmap_file(char *indata, const size_t size)
 {
 	if (!indata)
@@ -150,15 +165,21 @@ void unmap_file(char *indata, const size_t size)
 #endif /* WIN32 */
 }
 
-int add_opus_attribute(PKCS7_SIGNER_INFO *si, char *desc, char *url)
+/*
+ * [in, out] si: PKCS7_SIGNER_INFO structure
+ * [in] tdata: TYPE_DATA structure
+ * [returns] 0 on error or 1 on success
+ */
+int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, TYPE_DATA *tdata)
 {
 	SpcSpOpusInfo *opus;
 	ASN1_STRING *astr;
 	int len;
 	u_char *p = NULL;
 
-	opus = createOpus(desc, url);
-	if ((len = i2d_SpcSpOpusInfo(opus, NULL)) <= 0 || (p = OPENSSL_malloc((size_t)len)) == NULL) {
+	opus = spc_sp_opus_info_create(tdata);
+	if ((len = i2d_SpcSpOpusInfo(opus, NULL)) <= 0
+		|| (p = OPENSSL_malloc((size_t)len)) == NULL) {
 		SpcSpOpusInfo_free(opus);
 		return 0; /* FAILED */
 	}
@@ -172,31 +193,56 @@ int add_opus_attribute(PKCS7_SIGNER_INFO *si, char *desc, char *url)
 			V_ASN1_SEQUENCE, astr);
 }
 
-int add_purpose_attribute(PKCS7_SIGNER_INFO *si, int comm)
+/*
+ * [in, out] si: PKCS7_SIGNER_INFO structure
+ * [in] tdata: TYPE_DATA structure
+ * [returns] 0 on error or 1 on success
+ */
+int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, TYPE_DATA *tdata)
 {
-	ASN1_STRING *astr;
+	ASN1_STRING *purpose = ASN1_STRING_new();
 
-	astr = ASN1_STRING_new();
-	if (comm) {
-		ASN1_STRING_set(astr, purpose_comm, sizeof purpose_comm);
+	if (tdata->options->comm) {
+		ASN1_STRING_set(purpose, purpose_comm, sizeof purpose_comm);
 	} else {
-		ASN1_STRING_set(astr, purpose_ind, sizeof purpose_ind);
+		ASN1_STRING_set(purpose, purpose_ind, sizeof purpose_ind);
 	}
 	return PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_STATEMENT_TYPE_OBJID),
-			V_ASN1_SEQUENCE, astr);
+			V_ASN1_SEQUENCE, purpose);
 }
 
 /*
- * pkcs7_set_nested_signature adds the p7nest signature to p7
- * as a nested signature (SPC_NESTED_SIGNATURE).
+ * Add a custom, non-trusted time to the PKCS7 structure to prevent OpenSSL
+ * adding the _current_ time. This allows to create a deterministic signature
+ * when no trusted timestamp server was specified, making osslsigncode
+ * behaviour closer to signtool.exe (which doesn't include any non-trusted
+ * time in this case.)
+ * [in, out] si: PKCS7_SIGNER_INFO structure
+ * [in] tdata: TYPE_DATA structure
+ * [returns] 0 on error or 1 on success
  */
-int pkcs7_set_nested_signature(TYPE_DATA *tdata)
+int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, TYPE_DATA *tdata)
+{
+	if (tdata->options->time == INVALID_TIME) /* -time option was not specified */
+		return 1; /* SUCCESS */
+	return PKCS7_add_signed_attribute(si, NID_pkcs9_signingTime, V_ASN1_UTCTIME,
+		ASN1_TIME_adj(NULL, tdata->options->time, 0, 0));
+}
+
+/*
+ * Add the current signature to the new signature as a nested signature:
+ * new unauthorized SPC_NESTED_SIGNATURE_OBJID attribute
+ * [in, out] tdata: TYPE_DATA structure
+ * [returns] 0 on error or 1 on success
+ */
+int set_nested_signature(TYPE_DATA *tdata)
 {
 	u_char *p = NULL;
 	int len = 0;
 	PKCS7_SIGNER_INFO *si;
-	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(tdata->sign->cursig);
+	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 
+	signer_info = PKCS7_get_signer_info(tdata->sign->cursig);
 	if (!signer_info)
 		return 0; /* FAILED */
 	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
@@ -208,8 +254,8 @@ int pkcs7_set_nested_signature(TYPE_DATA *tdata)
 	i2d_PKCS7(tdata->sign->sig, &p);
 	p -= len;
 
-	pkcs7_add_signing_time(si, tdata->options->time);
-	if (!append_nested_signature(&(si->unauth_attr), p, len)) {
+	pkcs7_signer_info_add_signing_time(si, tdata);
+	if (!X509_attribute_chain_append_signature(&(si->unauth_attr), p, len)) {
 		OPENSSL_free(p);
 		return 0; /* FAILED */
 	}
@@ -217,23 +263,11 @@ int pkcs7_set_nested_signature(TYPE_DATA *tdata)
 	return 1; /* OK */
 }
 
-/*
- * Add a custom, non-trusted time to the PKCS7 structure to prevent OpenSSL
- * adding the _current_ time. This allows to create a deterministic signature
- * when no trusted timestamp server was specified, making osslsigncode
- * behaviour closer to signtool.exe (which doesn't include any non-trusted
- * time in this case.)
+/* Return the header length (tag and length octets) of the ASN.1 type
+ * [in] p: ASN.1 data
+ * [in] len: ASN.1 data length
+ * [returns] header length
  */
-int pkcs7_add_signing_time(PKCS7_SIGNER_INFO *si, time_t time)
-{
-	if (time == INVALID_TIME) /* -time option was not specified */
-		return 1; /* success */
-	return PKCS7_add_signed_attribute(si,
-		NID_pkcs9_signingTime, V_ASN1_UTCTIME,
-		ASN1_TIME_adj(NULL, time, 0, 0));
-}
-
-/* Return the header length (tag and length octets) of the ASN.1 type */
 int asn1_simple_hdr_len(const u_char *p, int len)
 {
 	if (len <= 2 || p[0] > 0x31)
@@ -241,7 +275,14 @@ int asn1_simple_hdr_len(const u_char *p, int len)
 	return (p[1]&0x80) ? (2 + (p[1]&0x7f)) : 2;
 }
 
-int bio_hash_data(char *indata, BIO *hash, size_t idx, size_t fileend)
+/*
+ * [in, out] hash: BIO with message digest method
+ * [in] indata: starting address space
+ * [in] idx: offset
+ * [in] fileend: the length of the hashed area
+ * [returns] 0 on error or 1 on success
+ */
+int bio_hash_data(BIO *hash, char *indata, size_t idx, size_t fileend)
 {
 	while (idx < fileend) {
 		size_t want, written;
@@ -255,44 +296,68 @@ int bio_hash_data(char *indata, BIO *hash, size_t idx, size_t fileend)
 	return 1; /* OK */
 }
 
-void print_hash(const char *descript1, const char *descript2, const u_char *hashbuf, int length)
+/*
+ * [in] descript1, descript2: descriptions
+ * [in] mdbuf: message digest
+ * [in] len: message digest length
+ * [returns] none
+ */
+void print_hash(const char *descript1, const char *descript2, const u_char *mdbuf, int len)
 {
 	char hexbuf[EVP_MAX_MD_SIZE*2+1];
+	int i, j = 0;
 
-	if (length > EVP_MAX_MD_SIZE) {
+	if (len > EVP_MAX_MD_SIZE) {
 		printf("Invalid message digest size\n");
 		return;
 	}
-	tohex(hashbuf, hexbuf, length);
+	for (i = 0; i < len; i++) {
+#ifdef WIN32
+		int size = EVP_MAX_MD_SIZE*2 + 1;
+		j += sprintf_s(hexbuf + j, size - j, "%02X", mdbuf[i]);
+#else
+		j += sprintf(hexbuf + j, "%02X", mdbuf[i]);
+#endif /* WIN32 */
+	}
 	printf("%s: %s %s\n", descript1, hexbuf, descript2);
 }
 
+/*
+ * [in] p7:  PKCS#7 structure
+ * [in] objid: Microsoft OID Authenticode
+ * [returns] 0 on error or 1 on success
+ */
 int is_content_type(PKCS7 *p7, const char *objid)
 {
 	ASN1_OBJECT *indir_objid;
-	int retval;
+	int ret;
 
 	indir_objid = OBJ_txt2obj(objid, 1);
-	retval = p7 && PKCS7_type_is_signed(p7) &&
+	ret = p7 && PKCS7_type_is_signed(p7) &&
 		!OBJ_cmp(p7->d.sign->contents->type, indir_objid) &&
 		(p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE ||
 		p7->d.sign->contents->d.other->type == V_ASN1_OCTET_STRING);
 	ASN1_OBJECT_free(indir_objid);
-	return retval;
+	return ret;
 }
 
-int set_indirect_data_blob(TYPE_DATA *tdata, PKCS7 *sig)
+/*
+ * [out] sig: PKCS#7 structure
+ * [in] tdata: TYPE_DATA structure
+ * [returns] 0 on error or 1 on success
+ */
+int pkcs7_set_data_content(PKCS7 *sig, TYPE_DATA *tdata)
 {
 	u_char *p = NULL;
 	int len = 0;
 	u_char *buf;
 
-	if (!get_indirect_data_blob(tdata, &p, &len))
+	if (!spc_indirect_data_content_get(&p, &len, tdata))
 		return 0; /* FAILED */
 	buf = OPENSSL_malloc(SIZE_64K);
 	memcpy(buf, p, (size_t)len);
 	OPENSSL_free(p);
-	if (!set_signing_blob(sig, tdata->sign->hash, buf, len)) {
+	if (!pkcs7_set_spc_indirect_data_content(sig, tdata, buf, len)) {
 		OPENSSL_free(buf);
 		return 0; /* FAILED */
 	}
@@ -301,6 +366,11 @@ int set_indirect_data_blob(TYPE_DATA *tdata, PKCS7 *sig)
 	return 1; /* OK */
 }
 
+/*
+ * [in] tdata: TYPE_DATA structure
+ * [in] signature: SIGNATURE structure
+ * [returns] 1 on error or 0 on success
+ */
 int verify_signature(TYPE_DATA *tdata, SIGNATURE *signature)
 {
 	int leafok = 0, verok;
@@ -359,7 +429,15 @@ int verify_signature(TYPE_DATA *tdata, SIGNATURE *signature)
 	return 0; /* OK */
 }
 
-int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allownest)
+/*
+ * Create new SIGNATURE structure, get signed and unsigned attributes,
+ * insert this signature to signature list
+ * [in, out] signatures: signature list
+ * [in] p7: PKCS#7 structure
+ * [in] allownest: allow nested signature switch
+ * [returns] 0 on error or 1 on success
+ */
+int signature_list_append_pkcs7(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allownest)
 {
 	SIGNATURE *signature = NULL;
 	PKCS7_SIGNER_INFO *si;
@@ -387,11 +465,11 @@ int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allow
 
 	auth_attr = PKCS7_get_signed_attributes(si);  /* cont[0] */
 	if (auth_attr)
-		get_signed_attributes(signature, auth_attr);
+		signature_get_signed_attributes(signature, auth_attr);
 
 	unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
 	if (unauth_attr)
-		get_unsigned_attributes(signatures, signature, unauth_attr, p7, allownest);
+		signature_get_unsigned_attributes(signature, signatures, unauth_attr, p7, allownest);
 
 	if (!sk_SIGNATURE_unshift(*signatures, signature)) {
 		printf("Failed to insert signature\n");
@@ -401,13 +479,21 @@ int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allow
 	return 1; /* OK */
 }
 
+/*
+ * [in] signatures: signature list
+ * [returns] none
+ */
 void signature_list_free(STACK_OF(SIGNATURE) *signatures)
 {
 	sk_SIGNATURE_pop_free(signatures, signature_free);
 }
 
-/* PE and CAB format specific */
-SpcLink *get_obsolete_link(void)
+/*
+ * PE and CAB format specific
+ * [in] none
+ * [returns] pointer to SpcLink
+ */
+SpcLink *spc_link_obsolete_get(void)
 {
 	const u_char obsolete[] = {
 		0x00, 0x3c, 0x00, 0x3c, 0x00, 0x3c, 0x00, 0x4f,
@@ -424,6 +510,11 @@ SpcLink *get_obsolete_link(void)
 	return link;
 }
 
+/*
+ * [in] mdbuf, cmdbuf: message digests
+ * [in] mdtype: message digest algorithm type
+ * [returns] 0 on error or 1 on success
+ */
 int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype)
 {
 	int mdlen = EVP_MD_size(EVP_get_digestbynid(mdtype));
@@ -437,41 +528,39 @@ int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype)
 /*
  * Helper functions
  */
-static SpcSpOpusInfo *createOpus(const char *desc, const char *url)
+
+/*
+ * [in] tdata: TYPE_DATA structure
+ * [returns] pointer to SpcSpOpusInfo structure
+ */
+static SpcSpOpusInfo *spc_sp_opus_info_create(TYPE_DATA *tdata)
 {
 	SpcSpOpusInfo *info = SpcSpOpusInfo_new();
 
-	if (desc) {
+	if (tdata->options->desc) {
 		info->programName = SpcString_new();
 		info->programName->type = 1;
 		info->programName->value.ascii = ASN1_IA5STRING_new();
 		ASN1_STRING_set((ASN1_STRING *)info->programName->value.ascii,
-				desc, (int)strlen(desc));
+				tdata->options->desc, (int)strlen(tdata->options->desc));
 	}
-	if (url) {
+	if (tdata->options->url) {
 		info->moreInfo = SpcLink_new();
 		info->moreInfo->type = 0;
 		info->moreInfo->value.url = ASN1_IA5STRING_new();
 		ASN1_STRING_set((ASN1_STRING *)info->moreInfo->value.url,
-				url, (int)strlen(url));
+				tdata->options->url, (int)strlen(tdata->options->url));
 	}
 	return info;
 }
 
-static void tohex(const u_char *v, char *b, int len)
-{
-	int i, j = 0;
-	for(i=0; i<len; i++) {
-#ifdef WIN32
-		int size = EVP_MAX_MD_SIZE*2+1;
-		j += sprintf_s(b+j, size-j, "%02X", v[i]);
-#else
-		j += sprintf(b+j, "%02X", v[i]);
-#endif /* WIN32 */
-	}
-}
-
-static int append_nested_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_char *p, int len)
+/*
+ * [in, out] unauth_attr: pointer to STACK_OF(X509_ATTRIBUTE) structure
+ * [in] p: PKCS#7 data
+ * [in] len: PKCS#7 data length
+ * [returns] 0 on error or 1 on success
+ */
+static int X509_attribute_chain_append_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_char *p, int len)
 {
 	X509_ATTRIBUTE *attr = NULL;
 	int nid = OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID);
@@ -500,11 +589,16 @@ static int append_nested_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_cha
 		X509_ATTRIBUTE_free(attr);
 		return 0; /* FAILED */
 	}
-
 	return 1; /* OK */
 }
 
-static int get_indirect_data_blob(TYPE_DATA *tdata, u_char **blob, int *len)
+/*
+ * [out] blob: SpcIndirectDataContent data
+ * [out] len: SpcIndirectDataContent data length
+ * [in] tdata: TYPE_DATA structure
+ * [returns] 0 on error or 1 on success
+ */
+static int spc_indirect_data_content_get(u_char **blob, int *len, TYPE_DATA *tdata)
 {
 	u_char *p = NULL;
 	int hashlen, l = 0;
@@ -536,14 +630,22 @@ static int get_indirect_data_blob(TYPE_DATA *tdata, u_char **blob, int *len)
 	return 1; /* OK */
 }
 
-static int set_signing_blob(PKCS7 *sig, BIO *hash, u_char *buf, int len)
+/*
+ * Replace the data part with the MS Authenticode spcIndirectDataContent blob
+ * [out] sig: PKCS#7 structure
+ * [in] tdata: TYPE_DATA structure
+ * [in] blob: SpcIndirectDataContent data
+ * [in] len: SpcIndirectDataContent data length
+ * [returns] 0 on error or 1 on success
+ */
+static int pkcs7_set_spc_indirect_data_content(PKCS7 *sig, TYPE_DATA *tdata, u_char *buf, int len)
 {
 	u_char mdbuf[EVP_MAX_MD_SIZE];
 	int mdlen, seqhdrlen;
 	BIO *sigbio;
 	PKCS7 *td7;
 
-	mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
+	mdlen = BIO_gets(tdata->sign->hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
 	memcpy(buf+len, mdbuf, (size_t)mdlen);
 	seqhdrlen = asn1_simple_hdr_len(buf, len);
 
@@ -559,10 +661,7 @@ static int set_signing_blob(PKCS7 *sig, BIO *hash, u_char *buf, int len)
 		return 0; /* FAILED */
 	}
 	BIO_free_all(sigbio);
-	/*
-	   replace the data part with the MS Authenticode
-	   spcIndirectDataContext blob
-	 */
+
 	td7 = PKCS7_new();
 	td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
 	td7->d.other = ASN1_TYPE_new();
@@ -851,7 +950,13 @@ out:
 	return verok;
 }
 
-static void get_signed_attributes(SIGNATURE *signature, STACK_OF(X509_ATTRIBUTE) *auth_attr)
+/*
+ * [out] signature:  SIGNATURE structure
+ * [in] auth_attr: signed attributes list
+ * [returns] none
+ */
+static void signature_get_signed_attributes(SIGNATURE *signature,
+	STACK_OF(X509_ATTRIBUTE) *auth_attr)
 {
 	X509_ATTRIBUTE *attr;
 	ASN1_OBJECT *object;
@@ -916,8 +1021,17 @@ static void get_signed_attributes(SIGNATURE *signature, STACK_OF(X509_ATTRIBUTE)
 	}
 }
 
-static void get_unsigned_attributes(STACK_OF(SIGNATURE) **signatures, SIGNATURE *signature,
-	STACK_OF(X509_ATTRIBUTE) *unauth_attr, PKCS7 *p7, int allownest)
+/*
+ * [in, out] signatures: signature list
+ * [out] signature:  SIGNATURE structure
+ * [in] unauth_attr: unsigned attributes list
+ * [in] p7: PKCS#7 structure
+ * [in] allownest: allow nested signature switch
+ * [returns] none
+ */
+static void signature_get_unsigned_attributes(SIGNATURE *signature,
+	STACK_OF(SIGNATURE) **signatures, STACK_OF(X509_ATTRIBUTE) *unauth_attr,
+	PKCS7 *p7, int allownest)
 {
 	X509_ATTRIBUTE *attr;
 	ASN1_OBJECT *object;
@@ -994,7 +1108,7 @@ static void get_unsigned_attributes(STACK_OF(SIGNATURE) **signatures, SIGNATURE 
 				data = ASN1_STRING_get0_data(value);
 				nested = d2i_PKCS7(NULL, &data, ASN1_STRING_length(value));
 				if (nested)
-					if (!append_signature_list(signatures, nested, 0)) {
+					if (!signature_list_append_pkcs7(signatures, nested, 0)) {
 						printf("Failed to append signature list\n\n");
 						PKCS7_free(nested);
 					}

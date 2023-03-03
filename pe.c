@@ -163,7 +163,7 @@ static ASN1_OBJECT *pe_spc_image_data(TYPE_DATA *tdata, u_char **p, int *plen)
 			return NULL; /* FAILED */
 		pid->file = link;
 	} else {
-		pid->file = get_obsolete_link();
+		pid->file = spc_link_obsolete_get();
 	}
 	*plen = i2d_SpcPeImageData(pid, NULL);
 	*p = OPENSSL_malloc((size_t)*plen);
@@ -230,7 +230,7 @@ static int pe_verify_signed_file(TYPE_DATA *tdata)
 		printf("Failed to extract PKCS7 data\n\n");
 		goto out;
 	}
-	if (!append_signature_list(&signatures, p7, 1)) {
+	if (!signature_list_append_pkcs7(&signatures, p7, 1)) {
 		printf("Failed to create signature list\n\n");
 		PKCS7_free(p7);
 		goto out;
@@ -327,7 +327,7 @@ static int pe_append_signature(TYPE_DATA *tdata)
 			printf("Internal error: No 'cursig' was extracted\n");
 			return 1; /* FAILED */
 		}
-		if (pkcs7_set_nested_signature(tdata) == 0) {
+		if (set_nested_signature(tdata) == 0) {
 			printf("Unable to append the nested signature to the current signature\n");
 			return 1; /* FAILED */
 		}
@@ -423,7 +423,7 @@ static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, PE_HEADER *he
 		return 0; /* FAILED */
 	}
 	idx += (uint32_t)written + 8;
-	if (!bio_hash_data(indata, bhash, idx, fileend)) {
+	if (!bio_hash_data(bhash, indata, idx, fileend)) {
 		printf("Unable to calculate digest\n");
 		BIO_free_all(bhash);
 		return 0;  /* FAILED */
@@ -577,15 +577,15 @@ static PKCS7 *pe_create_signature(TYPE_DATA *tdata)
 		    return NULL; /* FAILED */
 		}
 	}
-	pkcs7_add_signing_time(si, tdata->options->time);
+	pkcs7_signer_info_add_signing_time(si, tdata);
 	PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
 		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1));
 
-	if (!add_purpose_attribute(si, tdata->options->comm))
+	if (!pkcs7_signer_info_add_purpose(si, tdata))
 		return NULL; /* FAILED */
 
 	if ((tdata->options->desc || tdata->options->url) &&
-			!add_opus_attribute(si, tdata->options->desc, tdata->options->url)) {
+			!pkcs7_signer_info_add_spc_sp_opus_info(si, tdata)) {
 		printf("Couldn't allocate memory for opus info\n");
 		return NULL; /* FAILED */
 	}
@@ -613,7 +613,7 @@ static PKCS7 *pe_create_signature(TYPE_DATA *tdata)
 		for (i=0; i<sk_X509_CRL_num(tdata->options->crls); i++)
 			PKCS7_add_crl(sig, sk_X509_CRL_value(tdata->options->crls, i));
 	}
-	if (!set_indirect_data_blob(tdata, sig)) {
+	if (!pkcs7_set_data_content(sig, tdata)) {
 		PKCS7_free(sig);
 		printf("Signing failed\n");
 		return NULL; /* FAILED */

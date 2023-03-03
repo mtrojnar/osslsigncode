@@ -228,7 +228,7 @@ static size_t curl_write(void *ptr, size_t sz, size_t nmemb, void *stream)
 /*
  * [in] url: URL of the Time-Stamp Authority server
  * [in] http_code: curlinfo response code
- * [out] none
+ * [returns] none
  */
 static void print_timestamp_error(const char *url, long http_code)
 {
@@ -269,9 +269,9 @@ static void print_timestamp_error(const char *url, long http_code)
 */
 
 /*
- * Encode RFC 3161 timestamp request and write it into BIO
+ * Encode RFC3161 timestamp request and write it into BIO
  * [in, out] tdata: TYPE_DATA structure
- * [out] pointer to BIO
+ * [returns] pointer to BIO with RFC3161 Timestamp Request
  */
 static BIO *bio_encode_rfc3161_request(TYPE_DATA *tdata)
 {
@@ -326,7 +326,7 @@ static BIO *bio_encode_rfc3161_request(TYPE_DATA *tdata)
 /*
  * Encode authenticode timestamp request and write it into BIO
  * [in, out] tdata: TYPE_DATA structure
- * [out] pointer to BIO
+ * [returns] pointer to BIO with authenticode Timestamp Request
  */
 static BIO *bio_encode_authenticode_request(TYPE_DATA *tdata)
 {
@@ -373,7 +373,7 @@ static BIO *bio_encode_authenticode_request(TYPE_DATA *tdata)
  * [in, out] tdata: TYPE_DATA structure
  * [in] bin: BIO with curl data
  * [in] verbose: additional output mode
- * [out] CURLcode
+ * [returns] CURLcode on error or CURLE_OK (0) on success
  */
 static CURLcode decode_rfc3161_response(TYPE_DATA *tdata, BIO *bin, int verbose)
 {
@@ -433,7 +433,7 @@ static CURLcode decode_rfc3161_response(TYPE_DATA *tdata, BIO *bin, int verbose)
  * [in, out] tdata: TYPE_DATA structure
  * [in] bin: BIO with curl data
  * [in] verbose: additional output mode
- * [out] CURLcode
+ * [returns] CURLcode on error or CURLE_OK (0) on success
  */
 static CURLcode decode_authenticode_response(TYPE_DATA *tdata, BIO *bin, int verbose)
 {
@@ -500,7 +500,7 @@ static CURLcode decode_authenticode_response(TYPE_DATA *tdata, BIO *bin, int ver
  * [in, out] tdata: TYPE_DATA structure
  * [in] url: URL of the Time-Stamp Authority server
  * [in] rfc3161: Authenticode / RFC3161 Timestamp switch
- * [out] return code
+ * [returns] 1 on error or 0 on success
  */
 static int add_timestamp(TYPE_DATA *tdata, char *url, int rfc3161)
 {
@@ -626,7 +626,7 @@ static int add_timestamp(TYPE_DATA *tdata, char *url, int rfc3161)
 
 /*
  * [in, out] tdata: TYPE_DATA structure
- * [out] return code
+ * [returns] 0 on error or 1 on success
  */
 static int add_timestamp_authenticode(TYPE_DATA *tdata)
 {
@@ -640,7 +640,7 @@ static int add_timestamp_authenticode(TYPE_DATA *tdata)
 
 /*
  * [in, out] tdata: TYPE_DATA structure
- * [out] return code
+ * [returns] 0 on error or 1 on success
  */
 static int add_timestamp_rfc3161(TYPE_DATA *tdata)
 {
@@ -655,7 +655,7 @@ static int add_timestamp_rfc3161(TYPE_DATA *tdata)
 
 /*
  * [in, out] tdata: TYPE_DATA structure
- * [out] return code
+ * [returns] 0 on error or 1 on success
  */
 static int add_unauthenticated_blob(TYPE_DATA *tdata)
 {
@@ -690,7 +690,7 @@ static int add_unauthenticated_blob(TYPE_DATA *tdata)
 
 /*
  * [in, out] tdata: TYPE_DATA structure
- * [out] return code
+ * [returns] 1 on error or 0 on success
  */
 static int check_timestamp_and_blob(TYPE_DATA *tdata)
 {
@@ -716,7 +716,7 @@ static int check_timestamp_and_blob(TYPE_DATA *tdata)
 
 /*
  * [in] txt, list
- * [out] return code
+ * [returns] 0 on error or 1 on success
  */
 static int on_list(const char *txt, const char *list[])
 {
@@ -728,7 +728,7 @@ static int on_list(const char *txt, const char *list[])
 
 /*
  * [in] argv0, cmd
- * [out] none
+ * [returns] none
  */
 static void usage(const char *argv0, const char *cmd)
 {
@@ -818,7 +818,7 @@ static void usage(const char *argv0, const char *cmd)
 
 /*
  * [in] argv0, cmd
- * [out] none
+ * [returns] none
  */
 static void help_for(const char *argv0, const char *cmd)
 {
@@ -1032,7 +1032,7 @@ static void help_for(const char *argv0, const char *cmd)
 /*
  * [in] bin: certfile BIO
  * [in] certpass: NULL
- * [out] pointer to STACK_OF(X509) structure
+ * [returns] pointer to STACK_OF(X509) structure
  */
 static STACK_OF(X509) *X509_chain_read_certs(BIO *bin, char *certpass)
 {
@@ -1055,7 +1055,7 @@ static STACK_OF(X509) *X509_chain_read_certs(BIO *bin, char *certpass)
 #ifdef PROVIDE_ASKPASS
 /*
  * [in] prompt: "Password: "
- * [out] password
+ * [returns] password
  */
 static char *getpassword(const char *prompt)
 {
@@ -1093,7 +1093,7 @@ static char *getpassword(const char *prompt)
 
 /*
  * [in, out] options: GLOBAL_OPTIONS structure
- * [out] return code
+ * [returns] 0 on error or 1 on success
  */
 static int read_password(GLOBAL_OPTIONS *options)
 {
@@ -1157,7 +1157,7 @@ static int read_password(GLOBAL_OPTIONS *options)
  * the corresponding certificate to options->cert
  * and any additional certificates to options->certs.
  * [in, out] options: GLOBAL_OPTIONS structure
- * [out] return code
+ * [returns] 0 on error or 1 on success
  */
 static int read_pkcs12file(GLOBAL_OPTIONS *options)
 {
@@ -1190,7 +1190,7 @@ out:
 /*
  * Obtain a copy of the whole X509_CRL chain
  * [in] chain: STACK_OF(X509_CRL) structure
- * [out] pointer to STACK_OF(X509_CRL) structure
+ * [returns] pointer to STACK_OF(X509_CRL) structure
  */
 static STACK_OF(X509_CRL) *X509_CRL_chain_up_ref(STACK_OF(X509_CRL) *chain)
 {
@@ -1217,7 +1217,7 @@ err:
  * If successful all certificates will be written to options->certs
  * and optional CRLs will be written to options->crls.
  * [in, out] options: GLOBAL_OPTIONS structure
- * [out] return code
+ * [returns] 0 on error or 1 on success
  */
 static int read_certfile(GLOBAL_OPTIONS *options)
 {
@@ -1272,7 +1272,7 @@ out:
 /*
  * Load additional (cross) certificates from a .pem file
  * [in, out] options: GLOBAL_OPTIONS structure
- * [out] return code
+ * [returns] 0 on error or 1 on success
  */
 static int read_xcertfile(GLOBAL_OPTIONS *options)
 {
@@ -1299,7 +1299,7 @@ out:
 /*
  * Load the private key from a file
  * [in, out] options: GLOBAL_OPTIONS structure
- * [out] return code
+ * [returns] 0 on error or 1 on success
  */
 static int read_keyfile(GLOBAL_OPTIONS *options)
 {
@@ -1331,7 +1331,7 @@ out:
  * PVK files are often password-protected.
  * A PVK file may have an associated .spc (PKCS7) certificate file.
  * [in, out] options: GLOBAL_OPTIONS structure
- * [out] PVK file
+ * [returns] PVK file
  */
 static char *find_pvk_key(GLOBAL_OPTIONS *options)
 {
@@ -1362,7 +1362,7 @@ static char *find_pvk_key(GLOBAL_OPTIONS *options)
 
 /*
  * [in, out] options: GLOBAL_OPTIONS structure
- * [out] return code
+ * [returns] 0 on error or 1 on success
  */
 static int read_pvk_key(GLOBAL_OPTIONS *options)
 {
@@ -1391,7 +1391,7 @@ static int read_pvk_key(GLOBAL_OPTIONS *options)
 /*
  * Load an engine in a shareable library
  * [in] options: GLOBAL_OPTIONS structure
- * [out] pointer to ENGINE
+ * [returns] pointer to ENGINE
  */
 static ENGINE *engine_dynamic(GLOBAL_OPTIONS *options)
 {
@@ -1435,7 +1435,7 @@ static ENGINE *engine_dynamic(GLOBAL_OPTIONS *options)
 /*
  * Load a pkcs11 engine
  * [in] none
- * [out] pointer to ENGINE
+ * [returns] pointer to ENGINE
  */
 static ENGINE *engine_pkcs11()
 {
@@ -1451,7 +1451,7 @@ static ENGINE *engine_pkcs11()
  * Load the private key and the signer certificate from a security token
  * [in, out] options: GLOBAL_OPTIONS structure
  * [in] engine: ENGINE structure
- * [out] return code
+ * [returns] 0 on error or 1 on success
  */
 static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
 {
@@ -1506,7 +1506,7 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
 
 /*
  * [in, out] options: GLOBAL_OPTIONS structure
- * [out] return code
+ * [returns] 0 on error or 1 on success
  */
 static int read_crypto_params(GLOBAL_OPTIONS *options)
 {
@@ -1553,19 +1553,19 @@ static int read_crypto_params(GLOBAL_OPTIONS *options)
 	if (options->xcertfile && !read_xcertfile(options))
 		goto out; /* FAILED */
 
-	ret = 1;
+	ret = 1; /* OK */
 out:
 	/* reset password */
 	if (options->pass) {
 		memset(options->pass, 0, strlen(options->pass));
 		OPENSSL_free(options->pass);
 	}
-	return ret; /* OK */
+	return ret;
 }
 
 /*
  * [in] none
- * [out] default CAfile
+ * [returns] default CAfile
  */
 static char *get_cafile(void)
 {
@@ -1610,7 +1610,7 @@ static void print_version(void)
 
 /*
  * [in] argv
- * [out] cmd_type_t: command
+ * [returns] cmd_type_t: command
  */
 static cmd_type_t get_command(char **argv)
 {
@@ -1684,7 +1684,7 @@ static int use_legacy(void)
 
 /*
  * [in] input_tdata: TYPE_DATA structure
- * [out] return code
+ * [returns] 1 on error or 0 on success
  */
 static int check_attached_data(TYPE_DATA *input_tdata)
 {
@@ -1723,7 +1723,7 @@ static int check_attached_data(TYPE_DATA *input_tdata)
 
 /*
  * [in, out] options: GLOBAL_OPTIONS structure
- * [out] none
+ * [returns] none
  */
 static void free_options(GLOBAL_OPTIONS *options)
 {
@@ -1750,7 +1750,7 @@ static void free_options(GLOBAL_OPTIONS *options)
 /*
  * [in] argc, argv
  * [in, out] options: GLOBAL_OPTIONS structure
- * [out] return code
+ * [returns] 0 on error or 1 on success
  */
 static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
 {

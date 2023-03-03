@@ -9,19 +9,19 @@
 uint32_t get_file_size(const char *infile);
 char *map_file(const char *infile, const size_t size);
 void unmap_file(char *indata, const size_t size);
-int add_opus_attribute(PKCS7_SIGNER_INFO *si, char *desc, char *url);
-int add_purpose_attribute(PKCS7_SIGNER_INFO *si, int comm);
-int pkcs7_set_nested_signature(TYPE_DATA *tdata);
-int pkcs7_add_signing_time(PKCS7_SIGNER_INFO *si, time_t time);
+int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, TYPE_DATA *tdata);
+int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, TYPE_DATA *tdata);
+int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, TYPE_DATA *tdata);
+int set_nested_signature(TYPE_DATA *tdata);
 int asn1_simple_hdr_len(const u_char *p, int len);
-int bio_hash_data(char *indata, BIO *hash, size_t idx, size_t fileend);
+int bio_hash_data(BIO *hash, char *indata, size_t idx, size_t fileend);
 void print_hash(const char *descript1, const char *descript2, const u_char *hashbuf, int length);
 int is_content_type(PKCS7 *p7, const char *objid);
-int set_indirect_data_blob(TYPE_DATA *tdata, PKCS7 *sig);
+int pkcs7_set_data_content(PKCS7 *sig, TYPE_DATA *tdata);
 int verify_signature(TYPE_DATA *tdata, SIGNATURE *signature);
-int append_signature_list(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allownest);
+int signature_list_append_pkcs7(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allownest);
 void signature_list_free(STACK_OF(SIGNATURE) *signatures);
-SpcLink *get_obsolete_link(void);
+SpcLink *spc_link_obsolete_get(void);
 int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype);
 
 /*
