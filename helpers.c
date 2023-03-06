@@ -39,16 +39,16 @@ const u_char purpose_comm[] = {
 };
 
 /* Prototypes */
-static SpcSpOpusInfo *spc_sp_opus_info_create(TYPE_DATA *tdata);
+static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx);
 static int X509_attribute_chain_append_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_char *p, int len);
-static int spc_indirect_data_content_get(u_char **blob, int *len, TYPE_DATA *tdata);
-static int pkcs7_set_spc_indirect_data_content(PKCS7 *sig, TYPE_DATA *tdata, u_char *buf, int len);
+static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CTX *ctx);
+static int pkcs7_set_spc_indirect_data_content(PKCS7 *sig, FILE_FORMAT_CTX *ctx, u_char *buf, int len);
 static X509 *find_signer(PKCS7 *p7, char *leafhash, int *leafok);
 static int print_certs(PKCS7 *p7);
 static int print_cert(X509 *cert, int i);
 static char *get_clrdp_url(X509 *cert);
-static int verify_timestamp(SIGNATURE *signature, TYPE_DATA *tdata);
-static int verify_authenticode(SIGNATURE *signature, TYPE_DATA *tdata, X509 *signer);
+static int verify_timestamp(SIGNATURE *signature, FILE_FORMAT_CTX *ctx);
+static int verify_authenticode(SIGNATURE *signature, FILE_FORMAT_CTX *ctx, X509 *signer);
 static void signature_get_signed_attributes(SIGNATURE *signature,
 	STACK_OF(X509_ATTRIBUTE) *auth_attr);
 static void signature_get_unsigned_attributes(SIGNATURE *signature,
@@ -167,17 +167,17 @@ void unmap_file(char *indata, const size_t size)
 
 /*
  * [in, out] si: PKCS7_SIGNER_INFO structure
- * [in] tdata: TYPE_DATA structure
+ * [in] ctx: FILE_FORMAT_CTX structure
  * [returns] 0 on error or 1 on success
  */
-int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, TYPE_DATA *tdata)
+int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
 {
 	SpcSpOpusInfo *opus;
 	ASN1_STRING *astr;
 	int len;
 	u_char *p = NULL;
 
-	opus = spc_sp_opus_info_create(tdata);
+	opus = spc_sp_opus_info_create(ctx);
 	if ((len = i2d_SpcSpOpusInfo(opus, NULL)) <= 0
 		|| (p = OPENSSL_malloc((size_t)len)) == NULL) {
 		SpcSpOpusInfo_free(opus);
@@ -195,14 +195,14 @@ int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, TYPE_DATA *tda
 
 /*
  * [in, out] si: PKCS7_SIGNER_INFO structure
- * [in] tdata: TYPE_DATA structure
+ * [in] ctx: FILE_FORMAT_CTX structure
  * [returns] 0 on error or 1 on success
  */
-int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, TYPE_DATA *tdata)
+int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
 {
 	ASN1_STRING *purpose = ASN1_STRING_new();
 
-	if (tdata->options->comm) {
+	if (ctx->options->comm) {
 		ASN1_STRING_set(purpose, purpose_comm, sizeof purpose_comm);
 	} else {
 		ASN1_STRING_set(purpose, purpose_ind, sizeof purpose_ind);
@@ -218,43 +218,43 @@ int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, TYPE_DATA *tdata)
  * behaviour closer to signtool.exe (which doesn't include any non-trusted
  * time in this case.)
  * [in, out] si: PKCS7_SIGNER_INFO structure
- * [in] tdata: TYPE_DATA structure
+ * [in] ctx: FILE_FORMAT_CTX structure
  * [returns] 0 on error or 1 on success
  */
-int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, TYPE_DATA *tdata)
+int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
 {
-	if (tdata->options->time == INVALID_TIME) /* -time option was not specified */
+	if (ctx->options->time == INVALID_TIME) /* -time option was not specified */
 		return 1; /* SUCCESS */
 	return PKCS7_add_signed_attribute(si, NID_pkcs9_signingTime, V_ASN1_UTCTIME,
-		ASN1_TIME_adj(NULL, tdata->options->time, 0, 0));
+		ASN1_TIME_adj(NULL, ctx->options->time, 0, 0));
 }
 
 /*
  * Add the current signature to the new signature as a nested signature:
  * new unauthorized SPC_NESTED_SIGNATURE_OBJID attribute
- * [in, out] tdata: TYPE_DATA structure
+ * [in, out] ctx: FILE_FORMAT_CTX structure
  * [returns] 0 on error or 1 on success
  */
-int set_nested_signature(TYPE_DATA *tdata)
+int set_nested_signature(FILE_FORMAT_CTX *ctx)
 {
 	u_char *p = NULL;
 	int len = 0;
 	PKCS7_SIGNER_INFO *si;
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 
-	signer_info = PKCS7_get_signer_info(tdata->sign->cursig);
+	signer_info = PKCS7_get_signer_info(ctx->sign->cursig);
 	if (!signer_info)
 		return 0; /* FAILED */
 	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
 	if (!si)
 		return 0; /* FAILED */
-	if (((len = i2d_PKCS7(tdata->sign->sig, NULL)) <= 0) ||
+	if (((len = i2d_PKCS7(ctx->sign->sig, NULL)) <= 0) ||
 		(p = OPENSSL_malloc((size_t)len)) == NULL)
 		return 0; /* FAILED */
-	i2d_PKCS7(tdata->sign->sig, &p);
+	i2d_PKCS7(ctx->sign->sig, &p);
 	p -= len;
 
-	pkcs7_signer_info_add_signing_time(si, tdata);
+	pkcs7_signer_info_add_signing_time(si, ctx);
 	if (!X509_attribute_chain_append_signature(&(si->unauth_attr), p, len)) {
 		OPENSSL_free(p);
 		return 0; /* FAILED */
@@ -343,21 +343,21 @@ int is_content_type(PKCS7 *p7, const char *objid)
 
 /*
  * [out] sig: PKCS#7 structure
- * [in] tdata: TYPE_DATA structure
+ * [in] ctx: FILE_FORMAT_CTX structure
  * [returns] 0 on error or 1 on success
  */
-int pkcs7_set_data_content(PKCS7 *sig, TYPE_DATA *tdata)
+int pkcs7_set_data_content(PKCS7 *sig, FILE_FORMAT_CTX *ctx)
 {
 	u_char *p = NULL;
 	int len = 0;
 	u_char *buf;
 
-	if (!spc_indirect_data_content_get(&p, &len, tdata))
+	if (!spc_indirect_data_content_get(&p, &len, ctx))
 		return 0; /* FAILED */
 	buf = OPENSSL_malloc(SIZE_64K);
 	memcpy(buf, p, (size_t)len);
 	OPENSSL_free(p);
-	if (!pkcs7_set_spc_indirect_data_content(sig, tdata, buf, len)) {
+	if (!pkcs7_set_spc_indirect_data_content(sig, ctx, buf, len)) {
 		OPENSSL_free(buf);
 		return 0; /* FAILED */
 	}
@@ -367,41 +367,41 @@ int pkcs7_set_data_content(PKCS7 *sig, TYPE_DATA *tdata)
 }
 
 /*
- * [in] tdata: TYPE_DATA structure
+ * [in] ctx: FILE_FORMAT_CTX structure
  * [in] signature: SIGNATURE structure
  * [returns] 1 on error or 0 on success
  */
-int verify_signature(TYPE_DATA *tdata, SIGNATURE *signature)
+int verify_signature(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 {
 	int leafok = 0, verok;
 	X509 *signer;
 	char *url;
 
-	signer = find_signer(signature->p7, tdata->options->leafhash, &leafok);
+	signer = find_signer(signature->p7, ctx->options->leafhash, &leafok);
 	if (!signer) {
 		printf("Find signer error\n");
 		return 1; /* FAILED */
 	}
 	if (!print_certs(signature->p7))
 		printf("Print certs error\n");
-	if (!print_attributes(signature, tdata->options->verbose))
+	if (!print_attributes(signature, ctx->options->verbose))
 		printf("Print attributes error\n");
-	if (tdata->options->leafhash != NULL) {
+	if (ctx->options->leafhash != NULL) {
 		printf("\nLeaf hash match: %s\n", leafok ? "ok" : "failed");
 		if (!leafok) {
 			printf("Signature verification: failed\n\n");
 			return 1; /* FAILED */
 		}
 	}
-	if (tdata->options->catalog)
-		printf("\nFile is signed in catalog: %s\n", tdata->options->catalog);
-	printf("\nCAfile: %s\n", tdata->options->cafile);
-	if (tdata->options->crlfile)
-		printf("CRLfile: %s\n", tdata->options->crlfile);
-	if (tdata->options->tsa_cafile)
-		printf("TSA's certificates file: %s\n", tdata->options->tsa_cafile);
-	if (tdata->options->tsa_crlfile)
-		printf("TSA's CRL file: %s\n", tdata->options->tsa_crlfile);
+	if (ctx->options->catalog)
+		printf("\nFile is signed in catalog: %s\n", ctx->options->catalog);
+	printf("\nCAfile: %s\n", ctx->options->cafile);
+	if (ctx->options->crlfile)
+		printf("CRLfile: %s\n", ctx->options->crlfile);
+	if (ctx->options->tsa_cafile)
+		printf("TSA's certificates file: %s\n", ctx->options->tsa_cafile);
+	if (ctx->options->tsa_crlfile)
+		printf("TSA's CRL file: %s\n", ctx->options->tsa_crlfile);
 	url = get_clrdp_url(signer);
 	if (url) {
 		printf("CRL distribution point: %s\n", url);
@@ -409,8 +409,8 @@ int verify_signature(TYPE_DATA *tdata, SIGNATURE *signature)
 	}
 
 	if (signature->timestamp) {
-		if (!tdata->options->ignore_timestamp) {
-			int timeok = verify_timestamp(signature, tdata);
+		if (!ctx->options->ignore_timestamp) {
+			int timeok = verify_timestamp(signature, ctx);
 			printf("Timestamp Server Signature verification: %s\n", timeok ? "ok" : "failed");
 			if (!timeok) {
 				signature->time = INVALID_TIME;
@@ -421,7 +421,7 @@ int verify_signature(TYPE_DATA *tdata, SIGNATURE *signature)
 		}
 	} else
 		printf("\nTimestamp is not available\n\n");
-	verok = verify_authenticode(signature, tdata, signer);
+	verok = verify_authenticode(signature, ctx, signer);
 	printf("Signature verification: %s\n\n", verok ? "ok" : "failed");
 	if (!verok)
 		return 1; /* FAILED */
@@ -530,26 +530,26 @@ int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype)
  */
 
 /*
- * [in] tdata: TYPE_DATA structure
+ * [in] ctx: FILE_FORMAT_CTX structure
  * [returns] pointer to SpcSpOpusInfo structure
  */
-static SpcSpOpusInfo *spc_sp_opus_info_create(TYPE_DATA *tdata)
+static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx)
 {
 	SpcSpOpusInfo *info = SpcSpOpusInfo_new();
 
-	if (tdata->options->desc) {
+	if (ctx->options->desc) {
 		info->programName = SpcString_new();
 		info->programName->type = 1;
 		info->programName->value.ascii = ASN1_IA5STRING_new();
 		ASN1_STRING_set((ASN1_STRING *)info->programName->value.ascii,
-				tdata->options->desc, (int)strlen(tdata->options->desc));
+				ctx->options->desc, (int)strlen(ctx->options->desc));
 	}
-	if (tdata->options->url) {
+	if (ctx->options->url) {
 		info->moreInfo = SpcLink_new();
 		info->moreInfo->type = 0;
 		info->moreInfo->value.url = ASN1_IA5STRING_new();
 		ASN1_STRING_set((ASN1_STRING *)info->moreInfo->value.url,
-				tdata->options->url, (int)strlen(tdata->options->url));
+				ctx->options->url, (int)strlen(ctx->options->url));
 	}
 	return info;
 }
@@ -595,10 +595,10 @@ static int X509_attribute_chain_append_signature(STACK_OF(X509_ATTRIBUTE) **unau
 /*
  * [out] blob: SpcIndirectDataContent data
  * [out] len: SpcIndirectDataContent data length
- * [in] tdata: TYPE_DATA structure
+ * [in] ctx: FILE_FORMAT_CTX structure
  * [returns] 0 on error or 1 on success
  */
-static int spc_indirect_data_content_get(u_char **blob, int *len, TYPE_DATA *tdata)
+static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CTX *ctx)
 {
 	u_char *p = NULL;
 	int hashlen, l = 0;
@@ -608,14 +608,14 @@ static int spc_indirect_data_content_get(u_char **blob, int *len, TYPE_DATA *tda
 	idc->data->value = ASN1_TYPE_new();
 	idc->data->value->type = V_ASN1_SEQUENCE;
 	idc->data->value->value.sequence = ASN1_STRING_new();
-	idc->data->type = tdata->format->get_data_blob(tdata, &p, &l);
+	idc->data->type = ctx->format->get_data_blob(ctx, &p, &l);
 	idc->data->value->value.sequence->data = p;
 	idc->data->value->value.sequence->length = l;
-	idc->messageDigest->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(tdata->options->md));
+	idc->messageDigest->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(ctx->options->md));
 	idc->messageDigest->digestAlgorithm->parameters = ASN1_TYPE_new();
 	idc->messageDigest->digestAlgorithm->parameters->type = V_ASN1_NULL;
 
-	hashlen = EVP_MD_size(tdata->options->md);
+	hashlen = EVP_MD_size(ctx->options->md);
 	hash = OPENSSL_malloc((size_t)hashlen);
 	memset(hash, 0, (size_t)hashlen);
 	ASN1_OCTET_STRING_set(idc->messageDigest->digest, hash, hashlen);
@@ -626,26 +626,26 @@ static int spc_indirect_data_content_get(u_char **blob, int *len, TYPE_DATA *tda
 	p = *blob;
 	i2d_SpcIndirectDataContent(idc, &p);
 	SpcIndirectDataContent_free(idc);
-	*len -= EVP_MD_size(tdata->options->md);
+	*len -= EVP_MD_size(ctx->options->md);
 	return 1; /* OK */
 }
 
 /*
  * Replace the data part with the MS Authenticode spcIndirectDataContent blob
  * [out] sig: PKCS#7 structure
- * [in] tdata: TYPE_DATA structure
+ * [in] ctx: FILE_FORMAT_CTX structure
  * [in] blob: SpcIndirectDataContent data
  * [in] len: SpcIndirectDataContent data length
  * [returns] 0 on error or 1 on success
  */
-static int pkcs7_set_spc_indirect_data_content(PKCS7 *sig, TYPE_DATA *tdata, u_char *buf, int len)
+static int pkcs7_set_spc_indirect_data_content(PKCS7 *sig, FILE_FORMAT_CTX *ctx, u_char *buf, int len)
 {
 	u_char mdbuf[EVP_MAX_MD_SIZE];
 	int mdlen, seqhdrlen;
 	BIO *sigbio;
 	PKCS7 *td7;
 
-	mdlen = BIO_gets(tdata->sign->hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
+	mdlen = BIO_gets(ctx->sign->hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
 	memcpy(buf+len, mdbuf, (size_t)mdlen);
 	seqhdrlen = asn1_simple_hdr_len(buf, len);
 
@@ -782,7 +782,7 @@ out:
 	return url;
 }
 
-static int verify_timestamp(SIGNATURE *signature, TYPE_DATA *tdata)
+static int verify_timestamp(SIGNATURE *signature, FILE_FORMAT_CTX *ctx)
 {
 	X509_STORE *store;
 	STACK_OF(CMS_SignerInfo) *sinfos;
@@ -797,7 +797,7 @@ static int verify_timestamp(SIGNATURE *signature, TYPE_DATA *tdata)
 	store = X509_STORE_new();
 	if (!store)
 		goto out;
-	if (load_file_lookup(store, tdata->options->tsa_cafile)) {
+	if (load_file_lookup(store, ctx->options->tsa_cafile)) {
 		/*
 		 * The TSA signing key MUST be of a sufficient length to allow for a sufficiently
 		 * long lifetime.  Even if this is done, the key will  have a finite lifetime.
@@ -838,9 +838,9 @@ static int verify_timestamp(SIGNATURE *signature, TYPE_DATA *tdata)
 
 	/* verify a Certificate Revocation List */
 	crls = signature->p7->d.sign->crl;
-	if (tdata->options->tsa_crlfile || crls) {
+	if (ctx->options->tsa_crlfile || crls) {
 		STACK_OF(X509) *chain = CMS_get1_certs(signature->timestamp);
-		int crlok = verify_crl(tdata->options->tsa_cafile, tdata->options->tsa_crlfile,
+		int crlok = verify_crl(ctx->options->tsa_cafile, ctx->options->tsa_crlfile,
 			crls, signer, chain);
 		sk_X509_pop_free(chain, X509_free);
 		printf("Timestamp Server Signature CRL verification: %s\n", crlok ? "ok" : "failed");
@@ -872,7 +872,7 @@ out:
 	return verok;
 }
 
-static int verify_authenticode(SIGNATURE *signature, TYPE_DATA *tdata, X509 *signer)
+static int verify_authenticode(SIGNATURE *signature, FILE_FORMAT_CTX *ctx, X509 *signer)
 {
 	X509_STORE *store;
 	STACK_OF(X509_CRL) *crls;
@@ -882,7 +882,7 @@ static int verify_authenticode(SIGNATURE *signature, TYPE_DATA *tdata, X509 *sig
 	store = X509_STORE_new();
 	if (!store)
 		goto out;
-	if (!load_file_lookup(store, tdata->options->cafile)) {
+	if (!load_file_lookup(store, ctx->options->cafile)) {
 		printf("Failed to add store lookup file\n");
 		X509_STORE_free(store);
 		goto out;
@@ -895,10 +895,10 @@ static int verify_authenticode(SIGNATURE *signature, TYPE_DATA *tdata, X509 *sig
 			X509_STORE_free(store);
 			goto out;
 		}
-	} else if (tdata->options->time != INVALID_TIME) {
+	} else if (ctx->options->time != INVALID_TIME) {
 		printf("Signature verification time: ");
-		print_time_t(tdata->options->time);
-		if (!set_store_time(store, tdata->options->time)) {
+		print_time_t(ctx->options->time);
+		if (!set_store_time(store, ctx->options->time)) {
 			printf("Failed to set verifying time\n");
 			X509_STORE_free(store);
 			goto out;
@@ -928,9 +928,9 @@ static int verify_authenticode(SIGNATURE *signature, TYPE_DATA *tdata, X509 *sig
 
 	/* verify a Certificate Revocation List */
 	crls = signature->p7->d.sign->crl;
-	if (tdata->options->crlfile || crls) {
+	if (ctx->options->crlfile || crls) {
 		STACK_OF(X509) *chain = signature->p7->d.sign->cert;
-		int crlok = verify_crl(tdata->options->cafile, tdata->options->crlfile,
+		int crlok = verify_crl(ctx->options->cafile, ctx->options->crlfile,
 			crls, signer, chain);
 		printf("Signature CRL verification: %s\n", crlok ? "ok" : "failed");
 		if (!crlok)

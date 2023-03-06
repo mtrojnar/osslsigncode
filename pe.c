@@ -42,19 +42,19 @@ struct pe_header_st {
 };
 
 /* FILE_FORMAT method prototypes */
-static TYPE_DATA *pe_init(GLOBAL_OPTIONS *options);
-static ASN1_OBJECT *pe_spc_image_data(TYPE_DATA *tdata, u_char **p, int *plen);
-static int pe_verify_signed_file(TYPE_DATA *tdata);
-static int pe_extract_signature(TYPE_DATA *tdata);
-static int pe_remove_signature(TYPE_DATA *tdata);
-static int pe_prepare_signature(TYPE_DATA *tdata);
-static int pe_append_signature(TYPE_DATA *tdata);
-static void pe_update_data_size(TYPE_DATA *tdata);
-static void pe_free_data(TYPE_DATA *tdata);
-static void pe_cleanup_data(TYPE_DATA *tdata);
+static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options);
+static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
+static int pe_verify_signed_file(FILE_FORMAT_CTX *ctx);
+static int pe_extract_signature(FILE_FORMAT_CTX *ctx);
+static int pe_remove_signature(FILE_FORMAT_CTX *ctx);
+static int pe_prepare_signature(FILE_FORMAT_CTX *ctx);
+static int pe_append_signature(FILE_FORMAT_CTX *ctx);
+static void pe_update_data_size(FILE_FORMAT_CTX *ctx);
+static void pe_ctx_free(FILE_FORMAT_CTX *ctx);
+static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx);
 
 FILE_FORMAT file_format_pe = {
-	.init = pe_init,
+	.ctx_new = pe_ctx_new,
 	.get_data_blob = pe_spc_image_data,
 	.verify_signed_file = pe_verify_signed_file,
 	.extract_signature = pe_extract_signature,
@@ -62,28 +62,28 @@ FILE_FORMAT file_format_pe = {
 	.prepare_signature = pe_prepare_signature,
 	.append_signature = pe_append_signature,
 	.update_data_size = pe_update_data_size,
-	.free_data = pe_free_data,
-	.cleanup_data = pe_cleanup_data
+	.ctx_free = pe_ctx_free,
+	.ctx_cleanup = pe_ctx_cleanup
 };
 
 /* Prototypes */
 static int pe_verify_header(char *indata, uint32_t filesize, PE_HEADER *header);
-static PKCS7 *get_pkcs7(TYPE_DATA *tdata);
+static PKCS7 *get_pkcs7(FILE_FORMAT_CTX *ctx);
 static uint32_t pe_calc_checksum(BIO *bio, PE_HEADER *header);
 static void pe_recalc_checksum(BIO *bio, PE_HEADER *header);
-static uint32_t pe_calc_realchecksum(TYPE_DATA *tdata);
-static int pe_modify_header(TYPE_DATA *tdata);
+static uint32_t pe_calc_realchecksum(FILE_FORMAT_CTX *ctx);
+static int pe_modify_header(FILE_FORMAT_CTX *ctx);
 static PKCS7 *pe_extract_existing_pkcs7(char *indata, PE_HEADER *header);
-static int pe_verify_pkcs7(TYPE_DATA *tdata, SIGNATURE *signature);
+static int pe_verify_pkcs7(FILE_FORMAT_CTX *ctx, SIGNATURE *signature);
 static SpcLink *get_page_hash_link(int phtype, char *indata, PE_HEADER *header);
 
 
 /*
  * FILE_FORMAT method definitions
  */
-static TYPE_DATA *pe_init(GLOBAL_OPTIONS *options)
+static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options)
 {
-	TYPE_DATA *tdata;
+	FILE_FORMAT_CTX *ctx;
 	PE_HEADER *header;
 	SIGN_DATA *sign;
 	BIO *hash, *outdata = NULL;
@@ -138,27 +138,27 @@ static TYPE_DATA *pe_init(GLOBAL_OPTIONS *options)
 	sign->sig = sign->cursig = NULL;
 	sign->len = sign->padlen = 0;
 
-	tdata = OPENSSL_malloc(sizeof(TYPE_DATA));
-	tdata->format = &file_format_pe;
-	tdata->options = options;
-	tdata->sign = sign;
-	tdata->pe = header;
-	return tdata;
+	ctx = OPENSSL_malloc(sizeof(FILE_FORMAT_CTX));
+	ctx->format = &file_format_pe;
+	ctx->options = options;
+	ctx->sign = sign;
+	ctx->pe = header;
+	return ctx;
 }
 
-static ASN1_OBJECT *pe_spc_image_data(TYPE_DATA *tdata, u_char **p, int *plen)
+static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *plen)
 {
 	int phtype;
 	ASN1_OBJECT *dtype;
 	SpcPeImageData *pid = SpcPeImageData_new();
 
 	ASN1_BIT_STRING_set_bit(pid->flags, 0, 1);
-	if (tdata->options->pagehash) {
+	if (ctx->options->pagehash) {
 		SpcLink *link;
 		phtype = NID_sha1;
-		if (EVP_MD_size(tdata->options->md) > EVP_MD_size(EVP_sha1()))
+		if (EVP_MD_size(ctx->options->md) > EVP_MD_size(EVP_sha1()))
 			phtype = NID_sha256;
-		link = get_page_hash_link(phtype, tdata->options->indata, tdata->pe);
+		link = get_page_hash_link(phtype, ctx->options->indata, ctx->pe);
 		if (!link)
 			return NULL; /* FAILED */
 		pid->file = link;
@@ -174,58 +174,58 @@ static ASN1_OBJECT *pe_spc_image_data(TYPE_DATA *tdata, u_char **p, int *plen)
 	return dtype; /* OK */
 }
 
-static void pe_update_data_size(TYPE_DATA *tdata)
+static void pe_update_data_size(FILE_FORMAT_CTX *ctx)
 {
 	u_char buf[] = {
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 	};
 
-	if (tdata->options->cmd == CMD_SIGN || tdata->options->cmd == CMD_ADD
-		|| tdata->options->cmd == CMD_ATTACH) {
+	if (ctx->options->cmd == CMD_SIGN || ctx->options->cmd == CMD_ADD
+		|| ctx->options->cmd == CMD_ATTACH) {
 		/* Update signature position and size */
-		(void)BIO_seek(tdata->sign->outdata, tdata->pe->header_size + 152 + tdata->pe->pe32plus * 16);
+		(void)BIO_seek(ctx->sign->outdata, ctx->pe->header_size + 152 + ctx->pe->pe32plus * 16);
 		/* Previous file end = signature table start */
-		PUT_UINT32_LE(tdata->pe->fileend, buf);
-		BIO_write(tdata->sign->outdata, buf, 4);
-		PUT_UINT32_LE(tdata->sign->len + 8 + tdata->sign->padlen, buf);
-		BIO_write(tdata->sign->outdata, buf, 4);
+		PUT_UINT32_LE(ctx->pe->fileend, buf);
+		BIO_write(ctx->sign->outdata, buf, 4);
+		PUT_UINT32_LE(ctx->sign->len + 8 + ctx->sign->padlen, buf);
+		BIO_write(ctx->sign->outdata, buf, 4);
 	}
-	if (tdata->options->cmd == CMD_SIGN || tdata->options->cmd == CMD_REMOVE
-		|| tdata->options->cmd == CMD_ADD || tdata->options->cmd == CMD_ATTACH)
-		pe_recalc_checksum(tdata->sign->outdata, tdata->pe);
+	if (ctx->options->cmd == CMD_SIGN || ctx->options->cmd == CMD_REMOVE
+		|| ctx->options->cmd == CMD_ADD || ctx->options->cmd == CMD_ATTACH)
+		pe_recalc_checksum(ctx->sign->outdata, ctx->pe);
 }
 
-static int pe_verify_signed_file(TYPE_DATA *tdata)
+static int pe_verify_signed_file(FILE_FORMAT_CTX *ctx)
 {
 	int i, peok = 1, ret = 1;
 	uint32_t real_pe_checksum;
 	PKCS7 *p7;
 	STACK_OF(SIGNATURE) *signatures = sk_SIGNATURE_new_null();
 
-	if (!tdata) {
+	if (!ctx) {
 		printf("Init error\n\n");
 		goto out;
 	}
-	if (tdata->pe->siglen == 0)
-		tdata->pe->sigpos = tdata->pe->fileend;
+	if (ctx->pe->siglen == 0)
+		ctx->pe->sigpos = ctx->pe->fileend;
 
 	/* check PE checksum */
-	printf("Current PE checksum   : %08X\n", tdata->pe->pe_checksum);
-	real_pe_checksum = pe_calc_realchecksum(tdata);
-	if (tdata->pe->pe_checksum && tdata->pe->pe_checksum != real_pe_checksum)
+	printf("Current PE checksum   : %08X\n", ctx->pe->pe_checksum);
+	real_pe_checksum = pe_calc_realchecksum(ctx);
+	if (ctx->pe->pe_checksum && ctx->pe->pe_checksum != real_pe_checksum)
 		peok = 0;
 	printf("Calculated PE checksum: %08X%s\n\n", real_pe_checksum, peok ? "" : "    MISMATCH!!!");
 
-	if (tdata->pe->sigpos == 0 || tdata->pe->siglen == 0
-		|| tdata->pe->sigpos > tdata->pe->fileend) {
+	if (ctx->pe->sigpos == 0 || ctx->pe->siglen == 0
+		|| ctx->pe->sigpos > ctx->pe->fileend) {
 		printf("No signature found\n\n");
 		goto out;
 	}
-	if (tdata->pe->siglen != GET_UINT32_LE(tdata->options->indata + tdata->pe->sigpos)) {
+	if (ctx->pe->siglen != GET_UINT32_LE(ctx->options->indata + ctx->pe->sigpos)) {
 		printf("Invalid signature\n\n");
 		goto out;
 	}
-	p7 = pe_extract_existing_pkcs7(tdata->options->indata, tdata->pe);
+	p7 = pe_extract_existing_pkcs7(ctx->options->indata, ctx->pe);
 	if (!p7) {
 		printf("Failed to extract PKCS7 data\n\n");
 		goto out;
@@ -238,7 +238,7 @@ static int pe_verify_signed_file(TYPE_DATA *tdata)
 	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
 		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
 		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-		ret &= pe_verify_pkcs7(tdata, signature);
+		ret &= pe_verify_pkcs7(ctx, signature);
 	}
 	printf("Number of verified signatures: %d\n", i);
 out:
@@ -246,75 +246,75 @@ out:
 	return ret;
 }
 
-static int pe_extract_signature(TYPE_DATA *tdata)
+static int pe_extract_signature(FILE_FORMAT_CTX *ctx)
 {
 	int ret = 0;
 	PKCS7 *sig;
 	size_t written;
 
-	if (tdata->pe->sigpos == 0) {
+	if (ctx->pe->sigpos == 0) {
 		printf("PE file does not have any signature\n");
 		return 1; /* FAILED */
 	}
-	(void)BIO_reset(tdata->sign->outdata);
-	if (tdata->options->output_pkcs7) {
-		sig = pe_extract_existing_pkcs7(tdata->options->indata, tdata->pe);
+	(void)BIO_reset(ctx->sign->outdata);
+	if (ctx->options->output_pkcs7) {
+		sig = pe_extract_existing_pkcs7(ctx->options->indata, ctx->pe);
 		if (!sig) {
 			printf("Unable to extract existing signature\n");
 			return 1; /* FAILED */
 		}
-		ret = !PEM_write_bio_PKCS7(tdata->sign->outdata, sig);
+		ret = !PEM_write_bio_PKCS7(ctx->sign->outdata, sig);
 		PKCS7_free(sig);
 	} else
-		if (!BIO_write_ex(tdata->sign->outdata,
-			tdata->options->indata + tdata->pe->sigpos,
-			tdata->pe->siglen, &written) || written != tdata->pe->siglen)
+		if (!BIO_write_ex(ctx->sign->outdata,
+			ctx->options->indata + ctx->pe->sigpos,
+			ctx->pe->siglen, &written) || written != ctx->pe->siglen)
 			ret = 1; /* FAILED */
 	return ret;
 }
 
-static int pe_remove_signature(TYPE_DATA *tdata)
+static int pe_remove_signature(FILE_FORMAT_CTX *ctx)
 {
-	if (tdata->pe->sigpos == 0) {
+	if (ctx->pe->sigpos == 0) {
 		printf("PE file does not have any signature\n");
 		return 1; /* FAILED */
 	}
-	return pe_prepare_signature(tdata);
+	return pe_prepare_signature(ctx);
 }
 
-static int pe_prepare_signature(TYPE_DATA *tdata)
+static int pe_prepare_signature(FILE_FORMAT_CTX *ctx)
 {
 	PKCS7 *sig = NULL;
 
 	/* Obtain a current signature from previously-signed file */
-	if ((tdata->options->cmd == CMD_SIGN && tdata->options->nest)
-		|| (tdata->options->cmd == CMD_ATTACH && tdata->options->nest)
-		|| tdata->options->cmd == CMD_ADD) {
-		tdata->sign->cursig = pe_extract_existing_pkcs7(tdata->options->indata, tdata->pe);
-		if (!tdata->sign->cursig) {
+	if ((ctx->options->cmd == CMD_SIGN && ctx->options->nest)
+		|| (ctx->options->cmd == CMD_ATTACH && ctx->options->nest)
+		|| ctx->options->cmd == CMD_ADD) {
+		ctx->sign->cursig = pe_extract_existing_pkcs7(ctx->options->indata, ctx->pe);
+		if (!ctx->sign->cursig) {
 			printf("Unable to extract existing signature\n");
 			return 1; /* FAILED */
 		}
-		if (tdata->options->cmd == CMD_ADD)
-			sig = tdata->sign->cursig;
+		if (ctx->options->cmd == CMD_ADD)
+			sig = ctx->sign->cursig;
 	}
-	if (tdata->pe->sigpos > 0) {
+	if (ctx->pe->sigpos > 0) {
 		/* Strip current signature */
-		tdata->pe->fileend = tdata->pe->sigpos;
+		ctx->pe->fileend = ctx->pe->sigpos;
 	}
-	if (!pe_modify_header(tdata)) {
+	if (!pe_modify_header(ctx)) {
 		printf("Unable to modify file header\n");
 		return 1; /* FAILED */
 	}
 	/* Obtain an existing signature or create a new one */
-	if ((tdata->options->cmd == CMD_ATTACH) || (tdata->options->cmd == CMD_SIGN))
-		sig = get_pkcs7(tdata);
+	if ((ctx->options->cmd == CMD_ATTACH) || (ctx->options->cmd == CMD_SIGN))
+		sig = get_pkcs7(ctx);
 
-	tdata->sign->sig = sig;
+	ctx->sign->sig = sig;
 	return 0; /* OK */
 }
 
-static int pe_append_signature(TYPE_DATA *tdata)
+static int pe_append_signature(FILE_FORMAT_CTX *ctx)
 {
 	u_char *p = NULL;
 	PKCS7 *outsig;
@@ -322,70 +322,70 @@ static int pe_append_signature(TYPE_DATA *tdata)
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 	};
 
-	if (tdata->options->nest) {
-		if (tdata->sign->cursig == NULL) {
+	if (ctx->options->nest) {
+		if (ctx->sign->cursig == NULL) {
 			printf("Internal error: No 'cursig' was extracted\n");
 			return 1; /* FAILED */
 		}
-		if (set_nested_signature(tdata) == 0) {
+		if (set_nested_signature(ctx) == 0) {
 			printf("Unable to append the nested signature to the current signature\n");
 			return 1; /* FAILED */
 		}
-		outsig = tdata->sign->cursig;
+		outsig = ctx->sign->cursig;
 	} else {
-		outsig = tdata->sign->sig;
+		outsig = ctx->sign->sig;
 	}
 	/* Append signature to the outfile */
-	if (((tdata->sign->len = i2d_PKCS7(outsig, NULL)) <= 0)
-		|| (p = OPENSSL_malloc((size_t)tdata->sign->len)) == NULL) {
-		printf("i2d_PKCS memory allocation failed: %d\n", tdata->sign->len);
+	if (((ctx->sign->len = i2d_PKCS7(outsig, NULL)) <= 0)
+		|| (p = OPENSSL_malloc((size_t)ctx->sign->len)) == NULL) {
+		printf("i2d_PKCS memory allocation failed: %d\n", ctx->sign->len);
 		return 1; /* FAILED */
 	}
 	i2d_PKCS7(outsig, &p);
-	p -= tdata->sign->len;
-	tdata->sign->padlen = (8 - tdata->sign->len % 8) % 8;
+	p -= ctx->sign->len;
+	ctx->sign->padlen = (8 - ctx->sign->len % 8) % 8;
 
-	PUT_UINT32_LE(tdata->sign->len + 8 + tdata->sign->padlen, buf);
+	PUT_UINT32_LE(ctx->sign->len + 8 + ctx->sign->padlen, buf);
 	PUT_UINT16_LE(WIN_CERT_REVISION_2_0, buf + 4);
 	PUT_UINT16_LE(WIN_CERT_TYPE_PKCS_SIGNED_DATA, buf + 6);
-	BIO_write(tdata->sign->outdata, buf, 8);
-	BIO_write(tdata->sign->outdata, p, tdata->sign->len);
+	BIO_write(ctx->sign->outdata, buf, 8);
+	BIO_write(ctx->sign->outdata, p, ctx->sign->len);
 	/* pad (with 0's) asn1 blob to 8 byte boundary */
-	if (tdata->sign->padlen > 0) {
-		memset(p, 0, (size_t)tdata->sign->padlen);
-		BIO_write(tdata->sign->outdata, p, tdata->sign->padlen);
+	if (ctx->sign->padlen > 0) {
+		memset(p, 0, (size_t)ctx->sign->padlen);
+		BIO_write(ctx->sign->outdata, p, ctx->sign->padlen);
 	}
 	OPENSSL_free(p);
 	return 0; /* OK */
 }
 
-static void pe_free_data(TYPE_DATA *tdata)
+static void pe_ctx_free(FILE_FORMAT_CTX *ctx)
 {
-	BIO_free_all(tdata->sign->hash);
-	tdata->sign->hash = tdata->sign->outdata = NULL;
+	BIO_free_all(ctx->sign->hash);
+	ctx->sign->hash = ctx->sign->outdata = NULL;
 }
 
-static void pe_cleanup_data(TYPE_DATA *tdata)
+static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 {
-	if (tdata->sign->hash) {
-		BIO_free_all(tdata->sign->hash);
+	if (ctx->sign->hash) {
+		BIO_free_all(ctx->sign->hash);
 	}
-	if (tdata->sign->outdata) {
-		if (tdata->options->outfile) {
+	if (ctx->sign->outdata) {
+		if (ctx->options->outfile) {
 #ifdef WIN32
-			_unlink(tdata->options->outfile);
+			_unlink(ctx->options->outfile);
 #else
-			unlink(tdata->options->outfile);
+			unlink(ctx->options->outfile);
 #endif /* WIN32 */
 		}
 	}
-	unmap_file(tdata->options->indata, tdata->pe->fileend);
-	PKCS7_free(tdata->sign->sig);
-	if (tdata->options->cmd != CMD_ADD)
-		PKCS7_free(tdata->sign->cursig);
-	OPENSSL_free(tdata->sign);
-	OPENSSL_free(tdata->pe);
-	OPENSSL_free(tdata);
+	unmap_file(ctx->options->indata, ctx->pe->fileend);
+	PKCS7_free(ctx->sign->sig);
+	if (ctx->options->cmd != CMD_ADD)
+		PKCS7_free(ctx->sign->cursig);
+	OPENSSL_free(ctx->sign);
+	OPENSSL_free(ctx->pe);
+	OPENSSL_free(ctx);
 }
 
 /*
@@ -507,7 +507,7 @@ static int pe_verify_header(char *indata, uint32_t filesize, PE_HEADER *header)
 	return 1; /* OK */
 }
 
-static PKCS7 *pe_get_sigfile(TYPE_DATA *tdata)
+static PKCS7 *pe_get_sigfile(FILE_FORMAT_CTX *ctx)
 {
 	PKCS7 *sig = NULL;
 	uint32_t sigfilesize;
@@ -516,13 +516,13 @@ static PKCS7 *pe_get_sigfile(TYPE_DATA *tdata)
 	BIO *sigbio;
 	const char pemhdr[] = "-----BEGIN PKCS7-----";
 
-	sigfilesize = get_file_size(tdata->options->sigfile);
+	sigfilesize = get_file_size(ctx->options->sigfile);
 	if (!sigfilesize) {
 		return NULL; /* FAILED */
 	}
-	insigdata = map_file(tdata->options->sigfile, sigfilesize);
+	insigdata = map_file(ctx->options->sigfile, sigfilesize);
 	if (!insigdata) {
-		printf("Failed to open file: %s\n", tdata->options->sigfile);
+		printf("Failed to open file: %s\n", ctx->options->sigfile);
 		return NULL; /* FAILED */
 	}
 	if (sigfilesize >= sizeof pemhdr && !memcmp(insigdata, pemhdr, sizeof pemhdr - 1)) {
@@ -541,7 +541,7 @@ static PKCS7 *pe_get_sigfile(TYPE_DATA *tdata)
 	return sig; /* OK */
 }
 
-static PKCS7 *pe_create_signature(TYPE_DATA *tdata)
+static PKCS7 *pe_create_signature(FILE_FORMAT_CTX *ctx)
 {
 	int i, signer = -1;
 	PKCS7 *sig;
@@ -550,70 +550,70 @@ static PKCS7 *pe_create_signature(TYPE_DATA *tdata)
 	sig = PKCS7_new();
 	PKCS7_set_type(sig, NID_pkcs7_signed);
 
-	if (tdata->options->cert != NULL) {
+	if (ctx->options->cert != NULL) {
 		/*
 		 * the private key and corresponding certificate are parsed from the PKCS12
 		 * structure or loaded from the security token, so we may omit to check
 		 * the consistency of a private key with the public key in an X509 certificate
 		 */
-		si = PKCS7_add_signature(sig, tdata->options->cert, tdata->options->pkey, tdata->options->md);
+		si = PKCS7_add_signature(sig, ctx->options->cert, ctx->options->pkey, ctx->options->md);
 		if (si == NULL)
 			return NULL; /* FAILED */
 	} else {
 		/* find the signer's certificate located somewhere in the whole certificate chain */
-		for (i=0; i<sk_X509_num(tdata->options->certs); i++) {
-			X509 *signcert = sk_X509_value(tdata->options->certs, i);
-			if (X509_check_private_key(signcert, tdata->options->pkey)) {
-				si = PKCS7_add_signature(sig, signcert, tdata->options->pkey, tdata->options->md);
+		for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
+			X509 *signcert = sk_X509_value(ctx->options->certs, i);
+			if (X509_check_private_key(signcert, ctx->options->pkey)) {
+				si = PKCS7_add_signature(sig, signcert, ctx->options->pkey, ctx->options->md);
 				signer = i;
 				break;
 			}
 		}
 		if (si == NULL) {
 		    printf("Failed to checking the consistency of a private key: %s\n",
-				tdata->options->keyfile);
+				ctx->options->keyfile);
 		    printf("          with a public key in any X509 certificate: %s\n\n",
-				tdata->options->certfile);
+				ctx->options->certfile);
 		    return NULL; /* FAILED */
 		}
 	}
-	pkcs7_signer_info_add_signing_time(si, tdata);
+	pkcs7_signer_info_add_signing_time(si, ctx);
 	PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
 		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1));
 
-	if (!pkcs7_signer_info_add_purpose(si, tdata))
+	if (!pkcs7_signer_info_add_purpose(si, ctx))
 		return NULL; /* FAILED */
 
-	if ((tdata->options->desc || tdata->options->url) &&
-			!pkcs7_signer_info_add_spc_sp_opus_info(si, tdata)) {
+	if ((ctx->options->desc || ctx->options->url) &&
+			!pkcs7_signer_info_add_spc_sp_opus_info(si, ctx)) {
 		printf("Couldn't allocate memory for opus info\n");
 		return NULL; /* FAILED */
 	}
 	PKCS7_content_new(sig, NID_pkcs7_data);
 
 	/* add the signer's certificate */
-	if (tdata->options->cert != NULL)
-		PKCS7_add_certificate(sig, tdata->options->cert);
+	if (ctx->options->cert != NULL)
+		PKCS7_add_certificate(sig, ctx->options->cert);
 	if (signer != -1)
-		PKCS7_add_certificate(sig, sk_X509_value(tdata->options->certs, signer));
+		PKCS7_add_certificate(sig, sk_X509_value(ctx->options->certs, signer));
 
 	/* add the certificate chain */
-	for (i=0; i<sk_X509_num(tdata->options->certs); i++) {
+	for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
 		if (i == signer)
 			continue;
-		PKCS7_add_certificate(sig, sk_X509_value(tdata->options->certs, i));
+		PKCS7_add_certificate(sig, sk_X509_value(ctx->options->certs, i));
 	}
 	/* add all cross certificates */
-	if (tdata->options->xcerts) {
-		for (i=0; i<sk_X509_num(tdata->options->xcerts); i++)
-			PKCS7_add_certificate(sig, sk_X509_value(tdata->options->xcerts, i));
+	if (ctx->options->xcerts) {
+		for (i=0; i<sk_X509_num(ctx->options->xcerts); i++)
+			PKCS7_add_certificate(sig, sk_X509_value(ctx->options->xcerts, i));
 	}
 	/* add crls */
-	if (tdata->options->crls) {
-		for (i=0; i<sk_X509_CRL_num(tdata->options->crls); i++)
-			PKCS7_add_crl(sig, sk_X509_CRL_value(tdata->options->crls, i));
+	if (ctx->options->crls) {
+		for (i=0; i<sk_X509_CRL_num(ctx->options->crls); i++)
+			PKCS7_add_crl(sig, sk_X509_CRL_value(ctx->options->crls, i));
 	}
-	if (!pkcs7_set_data_content(sig, tdata)) {
+	if (!pkcs7_set_data_content(sig, ctx)) {
 		PKCS7_free(sig);
 		printf("Signing failed\n");
 		return NULL; /* FAILED */
@@ -621,18 +621,18 @@ static PKCS7 *pe_create_signature(TYPE_DATA *tdata)
 	return sig; /* OK */
 }
 /* Obtain an existing signature or create a new one */
-static PKCS7 *get_pkcs7(TYPE_DATA *tdata)
+static PKCS7 *get_pkcs7(FILE_FORMAT_CTX *ctx)
 {
 	PKCS7 *sig = NULL;
 
-	if (tdata->options->cmd == CMD_ATTACH) {
-		sig = pe_get_sigfile(tdata);
+	if (ctx->options->cmd == CMD_ATTACH) {
+		sig = pe_get_sigfile(ctx);
 		if (!sig) {
 			printf("Unable to extract valid signature\n");
 			return NULL; /* FAILED */
 		}
-	} else if (tdata->options->cmd == CMD_SIGN) {
-		sig = pe_create_signature(tdata);
+	} else if (ctx->options->cmd == CMD_SIGN) {
+		sig = pe_create_signature(ctx);
 		if (!sig) {
 			printf("Creating a new signature failed\n");
 			return NULL; /* FAILED */
@@ -684,20 +684,20 @@ static void pe_recalc_checksum(BIO *bio, PE_HEADER *header)
 
 
 /* Compute a checkSum value of the signed or unsigned PE file. */
-static uint32_t pe_calc_realchecksum(TYPE_DATA *tdata)
+static uint32_t pe_calc_realchecksum(FILE_FORMAT_CTX *ctx)
 {
 	uint32_t n = 0, checkSum = 0, offset = 0;
 	BIO *bio = BIO_new(BIO_s_mem());
 	unsigned short *buf = OPENSSL_malloc(SIZE_64K);
 
 	/* calculate the checkSum */
-	while (n < tdata->pe->fileend) {
+	while (n < ctx->pe->fileend) {
 		size_t i, written, nread;
-		size_t left = tdata->pe->fileend - n;
+		size_t left = ctx->pe->fileend - n;
 		unsigned short val;
 		if (left > SIZE_64K)
 			left = SIZE_64K;
-		if (!BIO_write_ex(bio, tdata->options->indata + n, left, &written))
+		if (!BIO_write_ex(bio, ctx->options->indata + n, left, &written))
 			goto err; /* FAILED */
 		(void)BIO_seek(bio, 0);
 		n += (uint32_t)written;
@@ -705,8 +705,8 @@ static uint32_t pe_calc_realchecksum(TYPE_DATA *tdata)
 			goto err; /* FAILED */
 		for (i = 0; i < nread / 2; i++) {
 			val = LE_UINT16(buf[i]);
-			if (offset == tdata->pe->header_size + 88
-				|| offset == tdata->pe->header_size + 90) {
+			if (offset == ctx->pe->header_size + 88
+				|| offset == ctx->pe->header_size + 90) {
 				val = 0;
 			}
 			checkSum += val;
@@ -722,32 +722,32 @@ err:
 	return checkSum;
 }
 
-static int pe_modify_header(TYPE_DATA *tdata)
+static int pe_modify_header(FILE_FORMAT_CTX *ctx)
 {
 	size_t i, len, written;
 	char *buf;
 
-	i = len = tdata->pe->header_size + 88;
-	if (!BIO_write_ex(tdata->sign->hash, tdata->options->indata, len, &written)
+	i = len = ctx->pe->header_size + 88;
+	if (!BIO_write_ex(ctx->sign->hash, ctx->options->indata, len, &written)
 		|| written != len)
 		return 0; /* FAILED */
 	buf = OPENSSL_malloc(SIZE_64K);
 	memset(buf, 0, 4);
-	BIO_write(tdata->sign->outdata, buf, 4); /* zero out checksum */
+	BIO_write(ctx->sign->outdata, buf, 4); /* zero out checksum */
 	i += 4;
-	len = 60 + tdata->pe->pe32plus * 16;
-	if (!BIO_write_ex(tdata->sign->hash, tdata->options->indata + i, len, &written)
+	len = 60 + ctx->pe->pe32plus * 16;
+	if (!BIO_write_ex(ctx->sign->hash, ctx->options->indata + i, len, &written)
 		|| written != len) {
 		OPENSSL_free(buf);
 		return 0; /* FAILED */
 	}
-	i += 60 + tdata->pe->pe32plus * 16;
+	i += 60 + ctx->pe->pe32plus * 16;
 	memset(buf, 0, 8);
-	BIO_write(tdata->sign->outdata, buf, 8); /* zero out sigtable offset + pos */
+	BIO_write(ctx->sign->outdata, buf, 8); /* zero out sigtable offset + pos */
 	i += 8;
-	len = tdata->pe->fileend - i;
+	len = ctx->pe->fileend - i;
 	while (len > 0) {
-		if (!BIO_write_ex(tdata->sign->hash, tdata->options->indata + i, len, &written)) {
+		if (!BIO_write_ex(ctx->sign->hash, ctx->options->indata + i, len, &written)) {
 			OPENSSL_free(buf);
 			return 0; /* FAILED */
 		}
@@ -755,14 +755,14 @@ static int pe_modify_header(TYPE_DATA *tdata)
 		i += written;
 	}
 	/* pad (with 0's) pe file to 8 byte boundary */
-	len = 8 - tdata->pe->fileend % 8;
+	len = 8 - ctx->pe->fileend % 8;
 	if (len != 8) {
 		memset(buf, 0, len);
-		if (!BIO_write_ex(tdata->sign->hash, buf, len, &written) || written != len) {
+		if (!BIO_write_ex(ctx->sign->hash, buf, len, &written) || written != len) {
 			OPENSSL_free(buf);
 			return 0; /* FAILED */
 		}
-		tdata->pe->fileend += (uint32_t)len;
+		ctx->pe->fileend += (uint32_t)len;
 	}
 	OPENSSL_free(buf);
 	return 1; /* OK */
@@ -1092,7 +1092,7 @@ static PKCS7 *pe_extract_existing_pkcs7(char *indata, PE_HEADER *header)
 	return p7;
 }
 
-static int pe_verify_pkcs7(TYPE_DATA *tdata, SIGNATURE *signature)
+static int pe_verify_pkcs7(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 {
 	int ret = 1, mdtype = -1, phtype = -1;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
@@ -1121,7 +1121,7 @@ static int pe_verify_pkcs7(TYPE_DATA *tdata, SIGNATURE *signature)
 		printf("Failed to extract current message digest\n\n");
 		goto out;
 	}
-	if (!pe_calc_digest(tdata->options->indata, mdtype, cmdbuf, tdata->pe)) {
+	if (!pe_calc_digest(ctx->options->indata, mdtype, cmdbuf, ctx->pe)) {
 		printf("Failed to calculate message digest\n\n");
 		goto out;
 	}
@@ -1129,12 +1129,12 @@ static int pe_verify_pkcs7(TYPE_DATA *tdata, SIGNATURE *signature)
 		printf("Signature verification: failed\n\n");
 		goto out;
 	}
-	if (phlen > 0 && !pe_print_page_hash(tdata->options->indata, tdata->pe, ph, phlen, phtype)) {
+	if (phlen > 0 && !pe_print_page_hash(ctx->options->indata, ctx->pe, ph, phlen, phtype)) {
 		printf("Signature verification: failed\n\n");
 		goto out;
 	}
 
-	ret = verify_signature(tdata, signature);
+	ret = verify_signature(ctx, signature);
 out:
 	if (ret)
 		ERR_print_errors_fp(stdout);

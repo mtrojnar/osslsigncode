@@ -212,48 +212,48 @@ struct msi_header_st {
 };
 
 /* FILE_FORMAT method prototypes */
-static TYPE_DATA *msi_init(GLOBAL_OPTIONS *options);
-static ASN1_OBJECT *msi_spc_sip_info(TYPE_DATA *tdata, u_char **p, int *plen);
-static int msi_verify_signed_file(TYPE_DATA *tdata);
-static int msi_extract_signature(TYPE_DATA *tdata);
-static int msi_remove_signature(TYPE_DATA *tdata);
-static int msi_prepare_signature(TYPE_DATA *tdata);
-static int msi_append_signature(TYPE_DATA *tdata);
-static void msi_free_data(TYPE_DATA *tdata);
-static void msi_cleanup_data(TYPE_DATA *tdata);
+static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options);
+static ASN1_OBJECT *msi_spc_sip_info(FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
+static int msi_verify_signed_file(FILE_FORMAT_CTX *ctx);
+static int msi_extract_signature(FILE_FORMAT_CTX *ctx);
+static int msi_remove_signature(FILE_FORMAT_CTX *ctx);
+static int msi_prepare_signature(FILE_FORMAT_CTX *ctx);
+static int msi_append_signature(FILE_FORMAT_CTX *ctx);
+static void msi_ctx_free(FILE_FORMAT_CTX *ctx);
+static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx);
 
 FILE_FORMAT file_format_msi = {
-	.init = msi_init,
+	.ctx_new = msi_ctx_new,
 	.get_data_blob = msi_spc_sip_info,
 	.verify_signed_file = msi_verify_signed_file,
 	.extract_signature = msi_extract_signature,
 	.remove_signature = msi_remove_signature,
 	.prepare_signature = msi_prepare_signature,
 	.append_signature = msi_append_signature,
-	.free_data = msi_free_data,
-	.cleanup_data = msi_cleanup_data
+	.ctx_free = msi_ctx_free,
+	.ctx_cleanup = msi_ctx_cleanup
 };
 
 /* Prototypes */
 static int msi_verify_header(char *indata, uint32_t filesize, MSI_HEADER *header);
-static PKCS7 *msi_extract_pkcs7(TYPE_DATA *tdata, MSI_ENTRY *ds, char **p, uint32_t len);
-static PKCS7 *get_pkcs7(TYPE_DATA *tdata);
+static PKCS7 *msi_extract_pkcs7(FILE_FORMAT_CTX *ctx, MSI_ENTRY *ds, char **p, uint32_t len);
+static PKCS7 *get_pkcs7(FILE_FORMAT_CTX *ctx);
 static int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint32_t len_msi,
 		u_char *p_msiex, uint32_t len_msiex, BIO *outdata);
 static MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse);
 static int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer, uint32_t len);
-static int msi_verify_pkcs7(TYPE_DATA *tdata, SIGNATURE *signature, char *exdata, int exlen);
+static int msi_verify_pkcs7(FILE_FORMAT_CTX *ctx, SIGNATURE *signature, char *exdata, int exlen);
 static int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen);
-static int msi_calc_MsiDigitalSignatureEx(TYPE_DATA *tdata, BIO *hash);
-static int msi_check_MsiDigitalSignatureEx(TYPE_DATA *tdata, MSI_ENTRY *dse);
+static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash);
+static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse);
 static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root);
 static void msi_file_free(MSI_FILE *msi);
 static void msi_dirent_free(MSI_DIRENT *dirent);
 
 
-static TYPE_DATA *msi_init(GLOBAL_OPTIONS *options)
+static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options)
 {
-	TYPE_DATA *tdata;
+	FILE_FORMAT_CTX *ctx;
 	MSI_HEADER *header;
 	SIGN_DATA *sign;
 	BIO *hash, *outdata = NULL;
@@ -308,15 +308,15 @@ static TYPE_DATA *msi_init(GLOBAL_OPTIONS *options)
 	sign->sig = sign->cursig = NULL;
 	sign->len = sign->padlen = 0;
 
-	tdata = OPENSSL_malloc(sizeof(TYPE_DATA));
-	tdata->format = &file_format_msi;
-	tdata->options = options;
-	tdata->sign = sign;
-	tdata->msi = header;
-	return tdata;
+	ctx = OPENSSL_malloc(sizeof(FILE_FORMAT_CTX));
+	ctx->format = &file_format_msi;
+	ctx->options = options;
+	ctx->sign = sign;
+	ctx->msi = header;
+	return ctx;
 }
 
-static ASN1_OBJECT *msi_spc_sip_info(TYPE_DATA *tdata, u_char **p, int *plen)
+static ASN1_OBJECT *msi_spc_sip_info(FILE_FORMAT_CTX *ctx, u_char **p, int *plen)
 {
 	const u_char msistr[] = {
 		0xf1, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -326,7 +326,7 @@ static ASN1_OBJECT *msi_spc_sip_info(TYPE_DATA *tdata, u_char **p, int *plen)
 	SpcSipInfo *si = SpcSipInfo_new();
 
 	/* squash the unused parameter warning */
-	(void)tdata;
+	(void)ctx;
 
 	ASN1_INTEGER_set(si->a, 1);
 	ASN1_INTEGER_set(si->b, 0);
@@ -344,39 +344,39 @@ static ASN1_OBJECT *msi_spc_sip_info(TYPE_DATA *tdata, u_char **p, int *plen)
 	return dtype; /* OK */
 }
 
-static int msi_append_signature(TYPE_DATA *tdata)
+static int msi_append_signature(FILE_FORMAT_CTX *ctx)
 {
 	u_char *p = NULL;
 	PKCS7 *outsig = NULL;
 
-	if (tdata->options->nest) {
-		if (tdata->sign->cursig == NULL) {
+	if (ctx->options->nest) {
+		if (ctx->sign->cursig == NULL) {
 			printf("Internal error: No 'cursig' was extracted\n");
 			return 1; /* FAILED */
 		}
-		if (set_nested_signature(tdata) == 0) {
+		if (set_nested_signature(ctx) == 0) {
 			printf("Unable to append the nested signature to the current signature\n");
 			return 1; /* FAILED */
 		}
-		outsig = tdata->sign->cursig;
+		outsig = ctx->sign->cursig;
 	} else {
-		outsig = tdata->sign->sig;
+		outsig = ctx->sign->sig;
 	}
 	/* Append signature to the outfile */
-	if (((tdata->sign->len = i2d_PKCS7(outsig, NULL)) <= 0)
-		|| (p = OPENSSL_malloc((size_t)tdata->sign->len)) == NULL) {
-		printf("i2d_PKCS memory allocation failed: %d\n", tdata->sign->len);
+	if (((ctx->sign->len = i2d_PKCS7(outsig, NULL)) <= 0)
+		|| (p = OPENSSL_malloc((size_t)ctx->sign->len)) == NULL) {
+		printf("i2d_PKCS memory allocation failed: %d\n", ctx->sign->len);
 		return 1; /* FAILED */
 	}
 	i2d_PKCS7(outsig, &p);
-	p -= tdata->sign->len;
-	tdata->sign->padlen = (8 - tdata->sign->len % 8) % 8;
+	p -= ctx->sign->len;
+	ctx->sign->padlen = (8 - ctx->sign->len % 8) % 8;
 
-	if (!msi_file_write(tdata->msi->msi,
-			tdata->msi->dirent, p, (uint32_t)tdata->sign->len,
-			tdata->msi->p_msiex,
-			(uint32_t)tdata->msi->len_msiex,
-			tdata->sign->outdata)) {
+	if (!msi_file_write(ctx->msi->msi,
+			ctx->msi->dirent, p, (uint32_t)ctx->sign->len,
+			ctx->msi->p_msiex,
+			(uint32_t)ctx->msi->len_msiex,
+			ctx->sign->outdata)) {
 		printf("Saving the msi file failed\n");
 		OPENSSL_free(p);
 		return 1; /* FAILED */
@@ -385,7 +385,7 @@ static int msi_append_signature(TYPE_DATA *tdata)
 	return 0; /* OK */
 }
 
-static int msi_verify_signed_file(TYPE_DATA *tdata)
+static int msi_verify_signed_file(FILE_FORMAT_CTX *ctx)
 {
 	int i, ret = 1;
 	char *indata = NULL;
@@ -396,11 +396,11 @@ static int msi_verify_signed_file(TYPE_DATA *tdata)
 	STACK_OF(SIGNATURE) *signatures = sk_SIGNATURE_new_null();
 	MSI_ENTRY *ds, *dse = NULL;
 
-	if (!tdata) {
+	if (!ctx) {
 		printf("Init error\n\n");
 		goto out;
 	}
-	ds = msi_signatures_get(tdata->msi->dirent, &dse);
+	ds = msi_signatures_get(ctx->msi->dirent, &dse);
 	if (!ds) {
 		printf("MSI file has no signature\n\n");
 		goto out;
@@ -411,7 +411,7 @@ static int msi_verify_signed_file(TYPE_DATA *tdata)
 		goto out;
 	}
 	indata = OPENSSL_malloc((size_t)inlen);
-	if (!msi_file_read(tdata->msi->msi, ds, 0, indata, inlen)) {
+	if (!msi_file_read(ctx->msi->msi, ds, 0, indata, inlen)) {
 		printf("DigitalSignature stream data error\n\n");
 		goto out;
 	}
@@ -424,7 +424,7 @@ static int msi_verify_signed_file(TYPE_DATA *tdata)
 			goto out;
 		}
 		exdata = OPENSSL_malloc((size_t)exlen);
-		if (!msi_file_read(tdata->msi->msi, dse, 0, exdata, exlen)) {
+		if (!msi_file_read(ctx->msi->msi, dse, 0, exdata, exlen)) {
 			printf("MsiDigitalSignatureEx stream data error\n\n");
 			goto out;
 		}
@@ -443,7 +443,7 @@ static int msi_verify_signed_file(TYPE_DATA *tdata)
 	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
 		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
 		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-		ret &= msi_verify_pkcs7(tdata, signature, exdata, (int)exlen);
+		ret &= msi_verify_pkcs7(ctx, signature, exdata, (int)exlen);
 	}
 	printf("Number of verified signatures: %d\n", i);
 out:
@@ -453,7 +453,7 @@ out:
 	return ret;
 }
 
-static int msi_extract_signature(TYPE_DATA *tdata)
+static int msi_extract_signature(FILE_FORMAT_CTX *ctx)
 {
 	int ret = 0;
 	PKCS7 *sig;
@@ -461,7 +461,7 @@ static int msi_extract_signature(TYPE_DATA *tdata)
 	char *p;
 	size_t written;
 
-	MSI_ENTRY *ds = msi_signatures_get(tdata->msi->dirent, NULL);
+	MSI_ENTRY *ds = msi_signatures_get(ctx->msi->dirent, NULL);
 	if (!ds) {
 		printf("MSI file has no signature\n\n");
 		return 1; /* FAILED */
@@ -472,16 +472,16 @@ static int msi_extract_signature(TYPE_DATA *tdata)
 		return 1; /* FAILED */
 	}
 	p = OPENSSL_malloc((size_t)len);
-	(void)BIO_reset(tdata->sign->outdata);
-	sig = msi_extract_pkcs7(tdata, ds, &p, len);
+	(void)BIO_reset(ctx->sign->outdata);
+	sig = msi_extract_pkcs7(ctx, ds, &p, len);
 	if (!sig) {
 		printf("Unable to extract existing signature\n");
 		return 1; /* FAILED */
 	}
-	if (tdata->options->output_pkcs7) {
-		ret = !PEM_write_bio_PKCS7(tdata->sign->outdata, sig);
+	if (ctx->options->output_pkcs7) {
+		ret = !PEM_write_bio_PKCS7(ctx->sign->outdata, sig);
 	} else {
-		if (!BIO_write_ex(tdata->sign->outdata, p, len, &written) || written != len)
+		if (!BIO_write_ex(ctx->sign->outdata, p, len, &written) || written != len)
 			ret = 1; /* FAILED */
 	}
 	PKCS7_free(sig);
@@ -489,50 +489,50 @@ static int msi_extract_signature(TYPE_DATA *tdata)
 	return ret;
 }
 
-static int msi_remove_signature(TYPE_DATA *tdata)
+static int msi_remove_signature(FILE_FORMAT_CTX *ctx)
 {
-	if (!msi_dirent_delete(tdata->msi->dirent, digital_signature_ex,
+	if (!msi_dirent_delete(ctx->msi->dirent, digital_signature_ex,
 			sizeof digital_signature_ex)) {
 		return 1; /* FAILED */
 	}
-	if (!msi_dirent_delete(tdata->msi->dirent, digital_signature,
+	if (!msi_dirent_delete(ctx->msi->dirent, digital_signature,
 			sizeof digital_signature)) {
 		return 1; /* FAILED */
 	}
-	if (!msi_file_write(tdata->msi->msi, tdata->msi->dirent,
-			NULL, 0, NULL, 0, tdata->sign->outdata)) {
+	if (!msi_file_write(ctx->msi->msi, ctx->msi->dirent,
+			NULL, 0, NULL, 0, ctx->sign->outdata)) {
 		printf("Saving the msi file failed\n");
 		return 1; /* FAILED */
 	}
 	return 0; /* OK */
 }
 
-static int msi_prepare_signature(TYPE_DATA *tdata)
+static int msi_prepare_signature(FILE_FORMAT_CTX *ctx)
 {
 	PKCS7 *sig = NULL;
 	uint32_t len;
 	char *p;
 
-	if (tdata->options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(tdata, tdata->sign->hash)) {
+	if (ctx->options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ctx, ctx->sign->hash)) {
 		printf("Unable to calc MsiDigitalSignatureEx\n");
 		return 1; /* FAILED */
 	}
-	if (!msi_hash_dir(tdata->msi->msi, tdata->msi->dirent, tdata->sign->hash, 1)) {
+	if (!msi_hash_dir(ctx->msi->msi, ctx->msi->dirent, ctx->sign->hash, 1)) {
 		printf("Unable to msi_handle_dir()\n");
 		return 1; /* FAILED */
 	}
 
 	/* Obtain a current signature from previously-signed file */
-	if ((tdata->options->cmd == CMD_SIGN && tdata->options->nest)
-		|| (tdata->options->cmd == CMD_ATTACH && tdata->options->nest)
-		|| tdata->options->cmd == CMD_ADD) {
+	if ((ctx->options->cmd == CMD_SIGN && ctx->options->nest)
+		|| (ctx->options->cmd == CMD_ATTACH && ctx->options->nest)
+		|| ctx->options->cmd == CMD_ADD) {
 		MSI_ENTRY *dse = NULL;
-		MSI_ENTRY *ds = msi_signatures_get(tdata->msi->dirent, &dse);
+		MSI_ENTRY *ds = msi_signatures_get(ctx->msi->dirent, &dse);
 		if (!ds) {
 			printf("MSI file has no signature\n\n");
 			return 1; /* FAILED */
 		}
-		if (!msi_check_MsiDigitalSignatureEx(tdata, dse)) {
+		if (!msi_check_MsiDigitalSignatureEx(ctx, dse)) {
 			return 1; /* FAILED */
 		}
 		len = GET_UINT32_LE(ds->size);
@@ -541,55 +541,54 @@ static int msi_prepare_signature(TYPE_DATA *tdata)
 			return 1; /* FAILED */
 		}
 		p = OPENSSL_malloc((size_t)len);
-		tdata->sign->cursig = msi_extract_pkcs7(tdata, ds, &p, len);
+		ctx->sign->cursig = msi_extract_pkcs7(ctx, ds, &p, len);
 		OPENSSL_free(p);
-		if (!tdata->sign->cursig) {
+		if (!ctx->sign->cursig) {
 			printf("Unable to extract existing signature\n");
 			return 1; /* FAILED */
 		}
-		if (tdata->options->cmd == CMD_ADD)
-			sig = tdata->sign->cursig;
+		if (ctx->options->cmd == CMD_ADD)
+			sig = ctx->sign->cursig;
 	}
 	/* Obtain an existing signature or create a new one */
-	if ((tdata->options->cmd == CMD_ATTACH) || (tdata->options->cmd == CMD_SIGN))
-		sig = get_pkcs7(tdata);
+	if ((ctx->options->cmd == CMD_ATTACH) || (ctx->options->cmd == CMD_SIGN))
+		sig = get_pkcs7(ctx);
 
-	tdata->sign->sig = sig;
+	ctx->sign->sig = sig;
 	return 0; /* OK */
-
 }
 
-static void msi_free_data(TYPE_DATA *tdata)
+static void msi_ctx_free(FILE_FORMAT_CTX *ctx)
 {
-	msi_file_free(tdata->msi->msi);
-	msi_dirent_free(tdata->msi->dirent);
-	OPENSSL_free(tdata->msi->p_msiex);
+	msi_file_free(ctx->msi->msi);
+	msi_dirent_free(ctx->msi->dirent);
+	OPENSSL_free(ctx->msi->p_msiex);
 
-	BIO_free_all(tdata->sign->outdata);
-	tdata->sign->outdata = NULL;
+	BIO_free_all(ctx->sign->outdata);
+	ctx->sign->outdata = NULL;
 }
 
-static void msi_cleanup_data(TYPE_DATA *tdata)
+static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 {
-	if (tdata->sign->outdata) {
-		BIO_free_all(tdata->sign->outdata);
-		tdata->sign->outdata = NULL;
-		if (tdata->options->outfile) {
+	if (ctx->sign->outdata) {
+		BIO_free_all(ctx->sign->outdata);
+		ctx->sign->outdata = NULL;
+		if (ctx->options->outfile) {
 #ifdef WIN32
-			_unlink(tdata->options->outfile);
+			_unlink(ctx->options->outfile);
 #else
-			unlink(tdata->options->outfile);
+			unlink(ctx->options->outfile);
 #endif /* WIN32 */
 		}
 	}
-	unmap_file(tdata->options->indata, tdata->msi->fileend);
-	BIO_free_all(tdata->sign->hash);
-	PKCS7_free(tdata->sign->sig);
-	if (tdata->options->cmd != CMD_ADD)
-		PKCS7_free(tdata->sign->cursig);
-	OPENSSL_free(tdata->sign);
-	OPENSSL_free(tdata->msi);
-	OPENSSL_free(tdata);
+	unmap_file(ctx->options->indata, ctx->msi->fileend);
+	BIO_free_all(ctx->sign->hash);
+	PKCS7_free(ctx->sign->sig);
+	if (ctx->options->cmd != CMD_ADD)
+		PKCS7_free(ctx->sign->cursig);
+	OPENSSL_free(ctx->sign);
+	OPENSSL_free(ctx->msi);
+	OPENSSL_free(ctx);
 }
 
 /*
@@ -627,7 +626,7 @@ static PKCS7 *msi_extract_existing_pkcs7(char *indata, MSI_HEADER *header)
 	return p7;
 }
 
-static PKCS7 *msi_get_sigfile(TYPE_DATA *tdata)
+static PKCS7 *msi_get_sigfile(FILE_FORMAT_CTX *ctx)
 {
 	PKCS7 *sig = NULL;
 	uint32_t sigfilesize;
@@ -636,13 +635,13 @@ static PKCS7 *msi_get_sigfile(TYPE_DATA *tdata)
 	BIO *sigbio;
 	const char pemhdr[] = "-----BEGIN PKCS7-----";
 
-	sigfilesize = get_file_size(tdata->options->sigfile);
+	sigfilesize = get_file_size(ctx->options->sigfile);
 	if (!sigfilesize) {
 		return NULL; /* FAILED */
 	}
-	insigdata = map_file(tdata->options->sigfile, sigfilesize);
+	insigdata = map_file(ctx->options->sigfile, sigfilesize);
 	if (!insigdata) {
-		printf("Failed to open file: %s\n", tdata->options->sigfile);
+		printf("Failed to open file: %s\n", ctx->options->sigfile);
 		return NULL; /* FAILED */
 	}
 	if (sigfilesize >= sizeof pemhdr && !memcmp(insigdata, pemhdr, sizeof pemhdr - 1)) {
@@ -661,7 +660,7 @@ static PKCS7 *msi_get_sigfile(TYPE_DATA *tdata)
 	return sig; /* OK */
 }
 
-static PKCS7 *msi_create_signature(TYPE_DATA *tdata)
+static PKCS7 *msi_create_signature(FILE_FORMAT_CTX *ctx)
 {
 	int i, signer = -1;
 	PKCS7 *sig;
@@ -670,71 +669,71 @@ static PKCS7 *msi_create_signature(TYPE_DATA *tdata)
 	sig = PKCS7_new();
 	PKCS7_set_type(sig, NID_pkcs7_signed);
 
-	if (tdata->options->cert != NULL) {
+	if (ctx->options->cert != NULL) {
 		/*
 		 * the private key and corresponding certificate are parsed from the PKCS12
 		 * structure or loaded from the security token, so we may omit to check
 		 * the consistency of a private key with the public key in an X509 certificate
 		 */
-		si = PKCS7_add_signature(sig, tdata->options->cert, tdata->options->pkey,
-			tdata->options->md);
+		si = PKCS7_add_signature(sig, ctx->options->cert, ctx->options->pkey,
+			ctx->options->md);
 		if (si == NULL)
 			return NULL; /* FAILED */
 	} else {
 		/* find the signer's certificate located somewhere in the whole certificate chain */
-		for (i=0; i<sk_X509_num(tdata->options->certs); i++) {
-			X509 *signcert = sk_X509_value(tdata->options->certs, i);
-			if (X509_check_private_key(signcert, tdata->options->pkey)) {
-				si = PKCS7_add_signature(sig, signcert, tdata->options->pkey, tdata->options->md);
+		for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
+			X509 *signcert = sk_X509_value(ctx->options->certs, i);
+			if (X509_check_private_key(signcert, ctx->options->pkey)) {
+				si = PKCS7_add_signature(sig, signcert, ctx->options->pkey, ctx->options->md);
 				signer = i;
 				break;
 			}
 		}
 		if (si == NULL) {
 		    printf("Failed to checking the consistency of a private key: %s\n",
-				tdata->options->keyfile);
+				ctx->options->keyfile);
 		    printf("          with a public key in any X509 certificate: %s\n\n",
-				tdata->options->certfile);
+				ctx->options->certfile);
 		    return NULL; /* FAILED */
 		}
 	}
-	pkcs7_signer_info_add_signing_time(si, tdata);
+	pkcs7_signer_info_add_signing_time(si, ctx);
 	PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
 		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1));
 
-	if (!pkcs7_signer_info_add_purpose(si, tdata))
+	if (!pkcs7_signer_info_add_purpose(si, ctx))
 		return NULL; /* FAILED */
 
-	if ((tdata->options->desc || tdata->options->url) &&
-			!pkcs7_signer_info_add_spc_sp_opus_info(si, tdata)) {
+	if ((ctx->options->desc || ctx->options->url) &&
+			!pkcs7_signer_info_add_spc_sp_opus_info(si, ctx)) {
 		printf("Couldn't allocate memory for opus info\n");
 		return NULL; /* FAILED */
 	}
 	PKCS7_content_new(sig, NID_pkcs7_data);
 
 	/* add the signer's certificate */
-	if (tdata->options->cert != NULL)
-		PKCS7_add_certificate(sig, tdata->options->cert);
+	if (ctx->options->cert != NULL)
+		PKCS7_add_certificate(sig, ctx->options->cert);
 	if (signer != -1)
-		PKCS7_add_certificate(sig, sk_X509_value(tdata->options->certs, signer));
+		PKCS7_add_certificate(sig, sk_X509_value(ctx->options->certs, signer));
 
 	/* add the certificate chain */
-	for (i=0; i<sk_X509_num(tdata->options->certs); i++) {
+	for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
 		if (i == signer)
 			continue;
-		PKCS7_add_certificate(sig, sk_X509_value(tdata->options->certs, i));
+		PKCS7_add_certificate(sig, sk_X509_value(ctx->options->certs, i));
 	}
 	/* add all cross certificates */
-	if (tdata->options->xcerts) {
-		for (i=0; i<sk_X509_num(tdata->options->xcerts); i++)
-			PKCS7_add_certificate(sig, sk_X509_value(tdata->options->xcerts, i));
+	if (ctx->options->xcerts) {
+		for (i=0; i<sk_X509_num(ctx->options->xcerts); i++)
+			PKCS7_add_certificate(sig, sk_X509_value(ctx->options->xcerts, i));
 	}
 	/* add crls */
-	if (tdata->options->crls) {
-		for (i=0; i<sk_X509_CRL_num(tdata->options->crls); i++)
-			PKCS7_add_crl(sig, sk_X509_CRL_value(tdata->options->crls, i));
+	if (ctx->options->crls) {
+		for (i=0; i<sk_X509_CRL_num(ctx->options->crls); i++)
+			PKCS7_add_crl(sig, sk_X509_CRL_value(ctx->options->crls, i));
 	}
-	if (!pkcs7_set_data_content(sig, tdata)) {
+	if (!pkcs7_set_data_content(sig, ctx)) {
 		PKCS7_free(sig);
 		printf("Signing failed\n");
 		return NULL; /* FAILED */
@@ -743,18 +742,18 @@ static PKCS7 *msi_create_signature(TYPE_DATA *tdata)
 }
 
 /* Obtain an existing signature or create a new one */
-static PKCS7 *get_pkcs7(TYPE_DATA *tdata)
+static PKCS7 *get_pkcs7(FILE_FORMAT_CTX *ctx)
 {
 	PKCS7 *sig = NULL;
 
-	if (tdata->options->cmd == CMD_ATTACH) {
-		sig = msi_get_sigfile(tdata);
+	if (ctx->options->cmd == CMD_ATTACH) {
+		sig = msi_get_sigfile(ctx);
 		if (!sig) {
 			printf("Unable to extract valid signature\n");
 			return NULL; /* FAILED */
 		}
-	} else if (tdata->options->cmd == CMD_SIGN) {
-		sig = msi_create_signature(tdata);
+	} else if (ctx->options->cmd == CMD_SIGN) {
+		sig = msi_create_signature(ctx);
 		if (!sig) {
 			printf("Creating a new signature failed\n");
 			return NULL; /* FAILED */
@@ -763,12 +762,12 @@ static PKCS7 *get_pkcs7(TYPE_DATA *tdata)
 	return sig;
 }
 
-static PKCS7 *msi_extract_pkcs7(TYPE_DATA *tdata, MSI_ENTRY *ds, char **p, uint32_t len)
+static PKCS7 *msi_extract_pkcs7(FILE_FORMAT_CTX *ctx, MSI_ENTRY *ds, char **p, uint32_t len)
 {
 	PKCS7 *p7 = NULL;
 	const u_char *blob;
 
-	if (!msi_file_read(tdata->msi->msi, ds, 0, *p, len)) {
+	if (!msi_file_read(ctx->msi->msi, ds, 0, *p, len)) {
 		printf("DigitalSignature stream data error\n");
 		return NULL;
 	}
@@ -2123,7 +2122,7 @@ out:
 	return ret;
 }
 
-static int msi_verify_pkcs7(TYPE_DATA *tdata, SIGNATURE *signature, char *exdata, int exlen)
+static int msi_verify_pkcs7(FILE_FORMAT_CTX *ctx, SIGNATURE *signature, char *exdata, int exlen)
 {
 	int ret = 1, mdok, mdtype = -1;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
@@ -2174,7 +2173,7 @@ static int msi_verify_pkcs7(TYPE_DATA *tdata, SIGNATURE *signature, char *exdata
 		BIO_push(prehash, BIO_new(BIO_s_null()));
 
 		print_hash("Current MsiDigitalSignatureEx    ", "", (u_char *)exdata, exlen);
-		if (!msi_prehash_dir(tdata->msi->dirent, prehash, 1)) {
+		if (!msi_prehash_dir(ctx->msi->dirent, prehash, 1)) {
 			printf("Failed to calculate pre-hash used for MsiDigitalSignatureEx\n\n");
 			BIO_free_all(hash);
 			BIO_free_all(prehash);
@@ -2186,7 +2185,7 @@ static int msi_verify_pkcs7(TYPE_DATA *tdata, SIGNATURE *signature, char *exdata
 		print_hash("Calculated MsiDigitalSignatureEx ", "", cexmdbuf, EVP_MD_size(md));
 	}
 
-	if (!msi_hash_dir(tdata->msi->msi, tdata->msi->dirent, hash, 1)) {
+	if (!msi_hash_dir(ctx->msi->msi, ctx->msi->dirent, hash, 1)) {
 		printf("Failed to calculate DigitalSignature\n\n");
 		BIO_free_all(hash);
 		goto out;
@@ -2200,7 +2199,7 @@ static int msi_verify_pkcs7(TYPE_DATA *tdata, SIGNATURE *signature, char *exdata
 		printf("Signature verification: failed\n\n");
 		goto out;
 	}
-	ret = verify_signature(tdata, signature);
+	ret = verify_signature(ctx, signature);
 out:
 	if (ret)
 		ERR_print_errors_fp(stdout);
@@ -2248,24 +2247,24 @@ out:
  * ("metadata") hash.
  */
 
-static int msi_calc_MsiDigitalSignatureEx(TYPE_DATA *tdata, BIO *hash)
+static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash)
 {
 	BIO *prehash = BIO_new(BIO_f_md());
-	if (!BIO_set_md(prehash, tdata->options->md)) {
+	if (!BIO_set_md(prehash, ctx->options->md)) {
 		printf("Unable to set the message digest of BIO\n");
 		BIO_free_all(prehash);
 		return 0; /* FAILED */
 	}
 	BIO_push(prehash, BIO_new(BIO_s_null()));
 
-	if (!msi_prehash_dir(tdata->msi->dirent, prehash, 1)) {
+	if (!msi_prehash_dir(ctx->msi->dirent, prehash, 1)) {
 		printf("Unable to calculate MSI pre-hash ('metadata') hash\n");
 		return 0; /* FAILED */
 	}
-	tdata->msi->p_msiex = OPENSSL_malloc(EVP_MAX_MD_SIZE);
-	tdata->msi->len_msiex = BIO_gets(prehash,
-		(char*)tdata->msi->p_msiex, EVP_MAX_MD_SIZE);
-	BIO_write(hash, tdata->msi->p_msiex, tdata->msi->len_msiex);
+	ctx->msi->p_msiex = OPENSSL_malloc(EVP_MAX_MD_SIZE);
+	ctx->msi->len_msiex = BIO_gets(prehash,
+		(char*)ctx->msi->p_msiex, EVP_MAX_MD_SIZE);
+	BIO_write(hash, ctx->msi->p_msiex, ctx->msi->len_msiex);
 	BIO_free_all(prehash);
 	return 1; /* OK */
 }
@@ -2276,20 +2275,20 @@ static int msi_calc_MsiDigitalSignatureEx(TYPE_DATA *tdata, BIO *hash)
  * section, we can't add a nested signature of a different MD type
  * without breaking the initial signature.
  */
-static int msi_check_MsiDigitalSignatureEx(TYPE_DATA *tdata, MSI_ENTRY *dse)
+static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse)
 {
-	if (dse && GET_UINT32_LE(dse->size) != (uint32_t)EVP_MD_size(tdata->options->md)) {
+	if (dse && GET_UINT32_LE(dse->size) != (uint32_t)EVP_MD_size(ctx->options->md)) {
 		printf("Unable to add nested signature with a different MD type (-h parameter) "
 			"than what exists in the MSI file already.\nThis is due to the presence of "
 			"MsiDigitalSignatureEx (-add-msi-dse parameter).\n\n");
 			return 0; /* FAILED */
 	}
-	if (!dse && tdata->options->add_msi_dse) {
+	if (!dse && ctx->options->add_msi_dse) {
 		printf("Unable to add signature with -add-msi-dse parameter "
 			"without breaking the initial signature.\n\n");
 			return 0; /* FAILED */
 	}
-	if (dse && !tdata->options->add_msi_dse) {
+	if (dse && !ctx->options->add_msi_dse) {
 		printf("Unable to add signature without -add-msi-dse parameter "
 			"without breaking the initial signature.\nThis is due to the presence of "
 			"MsiDigitalSignatureEx (-add-msi-dse parameter).\n"

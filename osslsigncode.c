@@ -270,10 +270,10 @@ static void print_timestamp_error(const char *url, long http_code)
 
 /*
  * Encode RFC3161 timestamp request and write it into BIO
- * [in, out] tdata: TYPE_DATA structure
+ * [in, out] ctx: FILE_FORMAT_CTX structure
  * [returns] pointer to BIO with RFC3161 Timestamp Request
  */
-static BIO *bio_encode_rfc3161_request(TYPE_DATA *tdata)
+static BIO *bio_encode_rfc3161_request(FILE_FORMAT_CTX *ctx)
 {
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 	PKCS7_SIGNER_INFO *si;
@@ -283,7 +283,7 @@ static BIO *bio_encode_rfc3161_request(TYPE_DATA *tdata)
 	u_char *p;
 	int len;
 
-	signer_info = PKCS7_get_signer_info(tdata->sign->sig);
+	signer_info = PKCS7_get_signer_info(ctx->sign->sig);
 	if (!signer_info)
 		return NULL; /* FAILED */
 
@@ -292,22 +292,22 @@ static BIO *bio_encode_rfc3161_request(TYPE_DATA *tdata)
 		return NULL; /* FAILED */
 
 	bhash = BIO_new(BIO_f_md());
-	if (!BIO_set_md(bhash, tdata->options->md)) {
+	if (!BIO_set_md(bhash, ctx->options->md)) {
 		printf("Unable to set the message digest of BIO\n");
 		BIO_free_all(bhash);
 		return NULL;  /* FAILED */
 	}
 	BIO_push(bhash, BIO_new(BIO_s_null()));
 	BIO_write(bhash, si->enc_digest->data, si->enc_digest->length);
-	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(tdata->options->md));
+	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(ctx->options->md));
 	BIO_free_all(bhash);
 
 	req = TimeStampReq_new();
 	ASN1_INTEGER_set(req->version, 1);
-	req->messageImprint->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(tdata->options->md));
+	req->messageImprint->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(ctx->options->md));
 	req->messageImprint->digestAlgorithm->parameters = ASN1_TYPE_new();
 	req->messageImprint->digestAlgorithm->parameters->type = V_ASN1_NULL;
-	ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(tdata->options->md));
+	ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(ctx->options->md));
 	req->certReq = 0xFF;
 
 	len = i2d_TimeStampReq(req, NULL);
@@ -325,10 +325,10 @@ static BIO *bio_encode_rfc3161_request(TYPE_DATA *tdata)
 
 /*
  * Encode authenticode timestamp request and write it into BIO
- * [in, out] tdata: TYPE_DATA structure
+ * [in, out] ctx: FILE_FORMAT_CTX structure
  * [returns] pointer to BIO with authenticode Timestamp Request
  */
-static BIO *bio_encode_authenticode_request(TYPE_DATA *tdata)
+static BIO *bio_encode_authenticode_request(FILE_FORMAT_CTX *ctx)
 {
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 	PKCS7_SIGNER_INFO *si;
@@ -337,7 +337,7 @@ static BIO *bio_encode_authenticode_request(TYPE_DATA *tdata)
 	u_char *p;
 	int len;
 
-	signer_info = PKCS7_get_signer_info(tdata->sign->sig);
+	signer_info = PKCS7_get_signer_info(ctx->sign->sig);
 	if (!signer_info)
 		return 0; /* FAILED */
 
@@ -370,19 +370,19 @@ static BIO *bio_encode_authenticode_request(TYPE_DATA *tdata)
  * Decode a curl response from BIO.
  * If successful the RFC 3161 timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1].
- * [in, out] tdata: TYPE_DATA structure
+ * [in, out] ctx: FILE_FORMAT_CTX structure
  * [in] bin: BIO with curl data
  * [in] verbose: additional output mode
  * [returns] CURLcode on error or CURLE_OK (0) on success
  */
-static CURLcode decode_rfc3161_response(TYPE_DATA *tdata, BIO *bin, int verbose)
+static CURLcode decode_rfc3161_response(FILE_FORMAT_CTX *ctx, BIO *bin, int verbose)
 {
 	PKCS7_SIGNER_INFO *si;
 	STACK_OF(X509_ATTRIBUTE) *attrs;
 	TimeStampResp *reply;
 	u_char *p;
 	int i, len;
-	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(tdata->sign->sig);
+	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(ctx->sign->sig);
 
 	if (!signer_info)
 		return 1; /* FAILED */
@@ -430,12 +430,12 @@ static CURLcode decode_rfc3161_response(TYPE_DATA *tdata, BIO *bin, int verbose)
  * Decode a curl response from BIO.
  * If successful the authenticode timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1].
- * [in, out] tdata: TYPE_DATA structure
+ * [in, out] ctx: FILE_FORMAT_CTX structure
  * [in] bin: BIO with curl data
  * [in] verbose: additional output mode
  * [returns] CURLcode on error or CURLE_OK (0) on success
  */
-static CURLcode decode_authenticode_response(TYPE_DATA *tdata, BIO *bin, int verbose)
+static CURLcode decode_authenticode_response(FILE_FORMAT_CTX *ctx, BIO *bin, int verbose)
 {
 	PKCS7 *p7;
 	PKCS7_SIGNER_INFO *info, *si;
@@ -455,7 +455,7 @@ static CURLcode decode_authenticode_response(TYPE_DATA *tdata, BIO *bin, int ver
 		return 1; /* FAILED */
 
 	for(i = sk_X509_num(p7->d.sign->cert)-1; i>=0; i--)
-		PKCS7_add_certificate(tdata->sign->sig, sk_X509_value(p7->d.sign->cert, i));
+		PKCS7_add_certificate(ctx->sign->sig, sk_X509_value(p7->d.sign->cert, i));
 
 	signer_info = PKCS7_get_signer_info(p7);
 	if (!signer_info)
@@ -479,7 +479,7 @@ static CURLcode decode_authenticode_response(TYPE_DATA *tdata, BIO *bin, int ver
 	attrs = X509at_add1_attr_by_txt(&attrs, PKCS9_COUNTER_SIGNATURE, V_ASN1_SET, p, len);
 	OPENSSL_free(p);
 
-	signer_info = PKCS7_get_signer_info(tdata->sign->sig);
+	signer_info = PKCS7_get_signer_info(ctx->sign->sig);
 	if (!signer_info)
 		return 1; /* FAILED */
 	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
@@ -497,12 +497,12 @@ static CURLcode decode_authenticode_response(TYPE_DATA *tdata, BIO *bin, int ver
 /*
  * Add timestamp to the PKCS7 SignerInfo structure:
  * sig->d.sign->signer_info->unauth_attr
- * [in, out] tdata: TYPE_DATA structure
+ * [in, out] ctx: FILE_FORMAT_CTX structure
  * [in] url: URL of the Time-Stamp Authority server
  * [in] rfc3161: Authenticode / RFC3161 Timestamp switch
  * [returns] 1 on error or 0 on success
  */
-static int add_timestamp(TYPE_DATA *tdata, char *url, int rfc3161)
+static int add_timestamp(FILE_FORMAT_CTX *ctx, char *url, int rfc3161)
 {
 	CURL *curl;
 	struct curl_slist *slist = NULL;
@@ -510,34 +510,34 @@ static int add_timestamp(TYPE_DATA *tdata, char *url, int rfc3161)
 	BIO *bout, *bin;
 	u_char *p = NULL;
 	long len = 0;
-	int verbose = tdata->options->verbose || tdata->options->ntsurl == 1;
+	int verbose = ctx->options->verbose || ctx->options->ntsurl == 1;
 
 	if (!url)
 		return 1; /* FAILED */
 
 	/* Encode timestamp request */
 	if (rfc3161) {
-		bout = bio_encode_rfc3161_request(tdata);
+		bout = bio_encode_rfc3161_request(ctx);
 	} else {
-		bout = bio_encode_authenticode_request(tdata);
+		bout = bio_encode_authenticode_request(ctx);
 	}
 	if (!bout)
 		return 1; /* FAILED */
 
 	/* Start a libcurl easy session and set options for a curl easy handle */
 	curl = curl_easy_init();
-	if (tdata->options->proxy) {
-		res = curl_easy_setopt(curl, CURLOPT_PROXY, tdata->options->proxy);
+	if (ctx->options->proxy) {
+		res = curl_easy_setopt(curl, CURLOPT_PROXY, ctx->options->proxy);
 		if (res != CURLE_OK) {
 			printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
 		}
-		if (!strncmp("http:", tdata->options->proxy, 5)) {
+		if (!strncmp("http:", ctx->options->proxy, 5)) {
 			res = curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_HTTP);
 			if (res != CURLE_OK) {
 				printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
 			}
 		}
-		if (!strncmp("socks:", tdata->options->proxy, 6)) {
+		if (!strncmp("socks:", ctx->options->proxy, 6)) {
 			res = curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5);
 			if (res != CURLE_OK) {
 				printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
@@ -552,7 +552,7 @@ static int add_timestamp(TYPE_DATA *tdata, char *url, int rfc3161)
 	 * ask libcurl to show us the verbose output
 	 * curl_easy_setopt(curl, CURLOPT_VERBOSE, 42);
 	 */
-	if (tdata->options->noverifypeer) {
+	if (ctx->options->noverifypeer) {
 		res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, FALSE);
 		if (res != CURLE_OK) {
 			printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
@@ -613,9 +613,9 @@ static int add_timestamp(TYPE_DATA *tdata, char *url, int rfc3161)
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 		/* Decode a curl response from BIO and write it into the PKCS7 structure */
 		if (rfc3161)
-			res = decode_rfc3161_response(tdata, bin, verbose);
+			res = decode_rfc3161_response(ctx, bin, verbose);
 		else
-			res = decode_authenticode_response(tdata, bin, verbose);
+			res = decode_authenticode_response(ctx, bin, verbose);
 		if (res && verbose)
 			print_timestamp_error(url, http_code);
 	}
@@ -625,28 +625,28 @@ static int add_timestamp(TYPE_DATA *tdata, char *url, int rfc3161)
 }
 
 /*
- * [in, out] tdata: TYPE_DATA structure
+ * [in, out] ctx: FILE_FORMAT_CTX structure
  * [returns] 0 on error or 1 on success
  */
-static int add_timestamp_authenticode(TYPE_DATA *tdata)
+static int add_timestamp_authenticode(FILE_FORMAT_CTX *ctx)
 {
 	int i;
-	for (i=0; i<tdata->options->nturl; i++) {
-		if (!add_timestamp(tdata, tdata->options->turl[i], 0))
+	for (i=0; i<ctx->options->nturl; i++) {
+		if (!add_timestamp(ctx, ctx->options->turl[i], 0))
 			return 1; /* OK */
 	}
 	return 0; /* FAILED */
 }
 
 /*
- * [in, out] tdata: TYPE_DATA structure
+ * [in, out] ctx: FILE_FORMAT_CTX structure
  * [returns] 0 on error or 1 on success
  */
-static int add_timestamp_rfc3161(TYPE_DATA *tdata)
+static int add_timestamp_rfc3161(FILE_FORMAT_CTX *ctx)
 {
 	int i;
-	for (i=0; i<tdata->options->ntsurl; i++) {
-		if (!add_timestamp(tdata, tdata->options->tsurl[i], 1))
+	for (i=0; i<ctx->options->ntsurl; i++) {
+		if (!add_timestamp(ctx, ctx->options->tsurl[i], 1))
 			return 1; /* OK */
 	}
 	return 0; /* FAILED */
@@ -654,10 +654,10 @@ static int add_timestamp_rfc3161(TYPE_DATA *tdata)
 #endif /* ENABLE_CURL */
 
 /*
- * [in, out] tdata: TYPE_DATA structure
+ * [in, out] ctx: FILE_FORMAT_CTX structure
  * [returns] 0 on error or 1 on success
  */
-static int add_unauthenticated_blob(TYPE_DATA *tdata)
+static int add_unauthenticated_blob(FILE_FORMAT_CTX *ctx)
 {
 	PKCS7_SIGNER_INFO *si;
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
@@ -668,10 +668,10 @@ static int add_unauthenticated_blob(TYPE_DATA *tdata)
 	const char prefix[] = "\x0c\x82\x04\x00---BEGIN_BLOB---";
 	const char postfix[] = "---END_BLOB---";
 
-	signer_info = PKCS7_get_signer_info(tdata->sign->sig);
+	signer_info = PKCS7_get_signer_info(ctx->sign->sig);
 	if (!signer_info)
 		return 0; /* FAILED */
-	si = sk_PKCS7_SIGNER_INFO_value(tdata->sign->sig->d.sign->signer_info, 0);
+	si = sk_PKCS7_SIGNER_INFO_value(ctx->sign->sig->d.sign->signer_info, 0);
 	if (!si)
 		return 0; /* FAILED */
 	if ((p = OPENSSL_malloc((size_t)len)) == NULL)
@@ -689,25 +689,25 @@ static int add_unauthenticated_blob(TYPE_DATA *tdata)
 }
 
 /*
- * [in, out] tdata: TYPE_DATA structure
+ * [in, out] ctx: FILE_FORMAT_CTX structure
  * [returns] 1 on error or 0 on success
  */
-static int check_timestamp_and_blob(TYPE_DATA *tdata)
+static int check_timestamp_and_blob(FILE_FORMAT_CTX *ctx)
 {
 #ifdef ENABLE_CURL
 	/* add counter-signature/timestamp */
-	if (tdata->options->nturl && !add_timestamp_authenticode(tdata)) {
+	if (ctx->options->nturl && !add_timestamp_authenticode(ctx)) {
 		printf("%s\n%s\n", "Authenticode timestamping failed",
 			"Use the \"-ts\" option to add the RFC3161 Time-Stamp Authority or choose another one Authenticode Time-Stamp Authority");
 		return 1; /* FAILED */
 	}
-	if (tdata->options->ntsurl && !add_timestamp_rfc3161(tdata)) {
+	if (ctx->options->ntsurl && !add_timestamp_rfc3161(ctx)) {
 		printf("%s\n%s\n", "RFC 3161 timestamping failed",
 			"Use the \"-t\" option to add the Authenticode Time-Stamp Authority or choose another one RFC3161 Time-Stamp Authority");
 		return 1; /* FAILED */
 	}
 #endif /* ENABLE_CURL */
-	if (tdata->options->addBlob && !add_unauthenticated_blob(tdata)) {
+	if (ctx->options->addBlob && !add_unauthenticated_blob(ctx)) {
 		printf("Adding unauthenticated blob failed\n");
 		return 1; /* FAILED */
 	}
@@ -1683,40 +1683,40 @@ static int use_legacy(void)
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 
 /*
- * [in] input_tdata: TYPE_DATA structure
+ * [in] in_ctx: input file context
  * [returns] 1 on error or 0 on success
  */
-static int check_attached_data(TYPE_DATA *input_tdata)
+static int check_attached_data(FILE_FORMAT_CTX *in_ctx)
 {
-	TYPE_DATA *tdata;
+	FILE_FORMAT_CTX *ctx;
 	GLOBAL_OPTIONS *options = NULL;
 
-	options = OPENSSL_memdup(input_tdata->options, sizeof(GLOBAL_OPTIONS));
+	options = OPENSSL_memdup(in_ctx->options, sizeof(GLOBAL_OPTIONS));
 	if (!options) {
 		printf("OPENSSL_memdup error.\n");
 		return 1; /* Failed */
 	}
-	options->infile = input_tdata->options->outfile;
+	options->infile = in_ctx->options->outfile;
 	options->cmd = CMD_VERIFY;
 
-	tdata = file_format_msi.init(options);
-	if (!tdata)
-		tdata = file_format_pe.init(options);
-	if (!tdata)
-		tdata = file_format_cab.init(options);
+	ctx = file_format_msi.ctx_new(options);
+	if (!ctx)
+		ctx = file_format_pe.ctx_new(options);
+	if (!ctx)
+		ctx = file_format_cab.ctx_new(options);
 	/* TODO CAT files
-	if (!tdata)
-		tdata = file_format_cat.init(options); */
-	if (!tdata) {
+	if (!ctx)
+		ctx = file_format_cat.ctx_new(options); */
+	if (!ctx) {
 		printf("Corrupted file.\n");
 		return 1; /* Failed */
 	}
-	if (tdata->format->verify_signed_file(tdata)) {
+	if (ctx->format->verify_signed_file(ctx)) {
 		printf("Signature mismatch\n");
 		return 1; /* Failed */
 	}
-	tdata->format->free_data(tdata);
-	tdata->format->cleanup_data(tdata);
+	ctx->format->ctx_free(ctx);
+	ctx->format->ctx_cleanup(ctx);
 	OPENSSL_free(options);
 	return 0; /* OK */
 }
@@ -2091,7 +2091,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
 
 int main(int argc, char **argv)
 {
-	TYPE_DATA *tdata = NULL;
+	FILE_FORMAT_CTX *ctx = NULL;
 	GLOBAL_OPTIONS options;
 	int ret = -1;
 
@@ -2124,50 +2124,50 @@ int main(int argc, char **argv)
 	if (options.cmd == CMD_SIGN && !read_crypto_params(&options))
 		goto err_cleanup;
 
-	tdata = file_format_msi.init(&options);
-	if (!tdata)
-		tdata = file_format_pe.init(&options);
-	if (!tdata)
-		tdata = file_format_cab.init(&options);
+	ctx = file_format_msi.ctx_new(&options);
+	if (!ctx)
+		ctx = file_format_pe.ctx_new(&options);
+	if (!ctx)
+		ctx = file_format_cab.ctx_new(&options);
 	/* TODO CAT files
-	if (!tdata)
-		tdata = file_format_cat.init(&options); */
-	if (!tdata) {
+	if (!ctx)
+		ctx = file_format_cat.ctx_new(&options); */
+	if (!ctx) {
 		ret = 1; /* Failed */
 		printf("Initialization error or unsupported input file type.\n");
 		goto err_cleanup;
 	}
 	if (options.cmd == CMD_VERIFY) {
-		ret =  tdata->format->verify_signed_file(tdata);
+		ret =  ctx->format->verify_signed_file(ctx);
 		goto skip_signing;
 	} else if (options.cmd == CMD_EXTRACT) {
-		ret = tdata->format->extract_signature(tdata);
+		ret = ctx->format->extract_signature(ctx);
 		goto skip_signing;
 	} else if (options.cmd == CMD_REMOVE) {
-		ret = tdata->format->remove_signature(tdata);
+		ret = ctx->format->remove_signature(ctx);
 		goto skip_signing;
 	} else {
-		ret = tdata->format->prepare_signature(tdata);
+		ret = ctx->format->prepare_signature(ctx);
 		if (ret)
 			goto err_cleanup;
 	}
-	ret = check_timestamp_and_blob(tdata);
+	ret = check_timestamp_and_blob(ctx);
 	if (ret)
 		goto err_cleanup;
 
-	ret = tdata->format->append_signature(tdata);
+	ret = ctx->format->append_signature(ctx);
 	if (ret)
 		DO_EXIT_0("Append signature to outfile failed\n");
 
 skip_signing:
 
-	if (tdata->format->update_data_size) {
-		tdata->format->update_data_size(tdata);
+	if (ctx->format->update_data_size) {
+		ctx->format->update_data_size(ctx);
 	}
-	tdata->format->free_data(tdata);
+	ctx->format->ctx_free(ctx);
 
 	if (!ret && options.cmd == CMD_ATTACH) {
-		ret = check_attached_data(tdata);
+		ret = check_attached_data(ctx);
 		if (!ret)
 			printf("Signature successfully attached\n");
 		/* else
@@ -2179,8 +2179,8 @@ skip_signing:
 
 err_cleanup:
 
-	if (tdata)
-		tdata->format->cleanup_data(tdata);
+	if (ctx)
+		ctx->format->ctx_cleanup(ctx);
 
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
 	providers_cleanup();

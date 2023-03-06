@@ -471,7 +471,7 @@ typedef struct {
         CAB_HEADER *cab;
         CAT_HEADER *cat;
     };
-} TYPE_DATA;
+} FILE_FORMAT_CTX;
 
 extern FILE_FORMAT file_format_msi;
 extern FILE_FORMAT file_format_pe;
@@ -479,16 +479,16 @@ extern FILE_FORMAT file_format_cab;
 extern FILE_FORMAT file_format_cat;
 
 struct file_format_st {
-	TYPE_DATA *(*init) (GLOBAL_OPTIONS *option);
-	ASN1_OBJECT *(*get_data_blob) (TYPE_DATA *tdata, u_char **p, int *plen);
-	int (*verify_signed_file) (TYPE_DATA *tdata);
-	int (*extract_signature) (TYPE_DATA *tdata);
-	int (*remove_signature) (TYPE_DATA *tdata);
-	int (*prepare_signature) (TYPE_DATA *tdata);
-	int (*append_signature) (TYPE_DATA *tdata);
-	void (*update_data_size) (TYPE_DATA *data);
-	void (*free_data) (TYPE_DATA *tdata);
-	void (*cleanup_data) (TYPE_DATA *tdata);
+	FILE_FORMAT_CTX *(*ctx_new) (GLOBAL_OPTIONS *option);
+	ASN1_OBJECT *(*get_data_blob) (FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
+	int (*verify_signed_file) (FILE_FORMAT_CTX *ctx);
+	int (*extract_signature) (FILE_FORMAT_CTX *ctx);
+	int (*remove_signature) (FILE_FORMAT_CTX *ctx);
+	int (*prepare_signature) (FILE_FORMAT_CTX *ctx);
+	int (*append_signature) (FILE_FORMAT_CTX *ctx);
+	void (*update_data_size) (FILE_FORMAT_CTX *data);
+	void (*ctx_free) (FILE_FORMAT_CTX *ctx);
+	void (*ctx_cleanup) (FILE_FORMAT_CTX *ctx);
 };
 
 /*
