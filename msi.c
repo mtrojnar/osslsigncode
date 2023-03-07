@@ -204,8 +204,8 @@ typedef struct {
 struct msi_header_st {
 	MSI_FILE *msi;
 	MSI_DIRENT *dirent;
-	u_char *p_msiex;
-	int len_msiex;
+	u_char *p_msiex; /* MsiDigitalSignatureEx stream data */
+	uint32_t len_msiex; /* MsiDigitalSignatureEx stream data length */
 	uint32_t sigpos;
 	uint32_t siglen;
 	uint32_t fileend;
@@ -214,7 +214,8 @@ struct msi_header_st {
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options);
 static ASN1_OBJECT *msi_spc_sip_info(FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
-static int msi_verify_signed_file(FILE_FORMAT_CTX *ctx);
+static STACK_OF(SIGNATURE) *msi_signature_list_get(FILE_FORMAT_CTX *ctx);
+static int msi_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature);
 static int msi_extract_signature(FILE_FORMAT_CTX *ctx);
 static int msi_remove_signature(FILE_FORMAT_CTX *ctx);
 static int msi_prepare_signature(FILE_FORMAT_CTX *ctx);
@@ -225,7 +226,8 @@ static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx);
 FILE_FORMAT file_format_msi = {
 	.ctx_new = msi_ctx_new,
 	.get_data_blob = msi_spc_sip_info,
-	.verify_signed_file = msi_verify_signed_file,
+	.signature_list_get = msi_signature_list_get,
+	.verify_digests = msi_verify_digests,
 	.extract_signature = msi_extract_signature,
 	.remove_signature = msi_remove_signature,
 	.prepare_signature = msi_prepare_signature,
@@ -242,13 +244,14 @@ static int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint
 		u_char *p_msiex, uint32_t len_msiex, BIO *outdata);
 static MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse);
 static int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer, uint32_t len);
-static int msi_verify_pkcs7(FILE_FORMAT_CTX *ctx, SIGNATURE *signature, char *exdata, int exlen);
+//static int msi_verify_pkcs7(FILE_FORMAT_CTX *ctx, SIGNATURE *signature, char *exdata, int exlen);
 static int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen);
 static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse);
 static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root);
 static void msi_file_free(MSI_FILE *msi);
 static void msi_dirent_free(MSI_DIRENT *dirent);
+static int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root);
 
 
 static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options)
@@ -372,11 +375,8 @@ static int msi_append_signature(FILE_FORMAT_CTX *ctx)
 	p -= ctx->sign->len;
 	ctx->sign->padlen = (8 - ctx->sign->len % 8) % 8;
 
-	if (!msi_file_write(ctx->msi->msi,
-			ctx->msi->dirent, p, (uint32_t)ctx->sign->len,
-			ctx->msi->p_msiex,
-			(uint32_t)ctx->msi->len_msiex,
-			ctx->sign->outdata)) {
+	if (!msi_file_write(ctx->msi->msi, ctx->msi->dirent, p, (uint32_t)ctx->sign->len,
+		ctx->msi->p_msiex, ctx->msi->len_msiex, ctx->sign->outdata)) {
 		printf("Saving the msi file failed\n");
 		OPENSSL_free(p);
 		return 1; /* FAILED */
@@ -385,73 +385,156 @@ static int msi_append_signature(FILE_FORMAT_CTX *ctx)
 	return 0; /* OK */
 }
 
-static int msi_verify_signed_file(FILE_FORMAT_CTX *ctx)
+static STACK_OF(SIGNATURE) *msi_signature_list_get(FILE_FORMAT_CTX *ctx)
 {
-	int i, ret = 1;
 	char *indata = NULL;
-	char *exdata = NULL;
 	const u_char *blob;
-	uint32_t inlen, exlen = 0;
+	uint32_t inlen;
 	PKCS7 *p7;
-	STACK_OF(SIGNATURE) *signatures = sk_SIGNATURE_new_null();
+	STACK_OF(SIGNATURE) *signatures;
 	MSI_ENTRY *ds, *dse = NULL;
 
 	if (!ctx) {
 		printf("Init error\n\n");
-		goto out;
+		return NULL; /* FAILED */
 	}
 	ds = msi_signatures_get(ctx->msi->dirent, &dse);
 	if (!ds) {
 		printf("MSI file has no signature\n\n");
-		goto out;
+		return NULL; /* FAILED */
 	}
 	inlen = GET_UINT32_LE(ds->size);
 	if (inlen == 0 || inlen >= MAXREGSECT) {
 		printf("Corrupted DigitalSignature stream length 0x%08X\n", inlen);
-		goto out;
+		return NULL; /* FAILED */
 	}
 	indata = OPENSSL_malloc((size_t)inlen);
 	if (!msi_file_read(ctx->msi->msi, ds, 0, indata, inlen)) {
 		printf("DigitalSignature stream data error\n\n");
-		goto out;
+		return NULL; /* FAILED */
 	}
 	if (!dse) {
 		printf("Warning: MsiDigitalSignatureEx stream doesn't exist\n");
 	} else {
-		exlen = GET_UINT32_LE(dse->size);
-		if (exlen == 0 || exlen >= MAXREGSECT) {
-			printf("Corrupted MsiDigitalSignatureEx stream length 0x%08X\n", exlen);
-			goto out;
+		ctx->msi->len_msiex = GET_UINT32_LE(dse->size);
+		if (ctx->msi->len_msiex == 0 || ctx->msi->len_msiex >= MAXREGSECT) {
+			printf("Corrupted MsiDigitalSignatureEx stream length 0x%08X\n",
+				ctx->msi->len_msiex);
+			OPENSSL_free(indata);
+			return NULL; /* FAILED */
 		}
-		exdata = OPENSSL_malloc((size_t)exlen);
-		if (!msi_file_read(ctx->msi->msi, dse, 0, exdata, exlen)) {
+		ctx->msi->p_msiex = OPENSSL_malloc((size_t)ctx->msi->len_msiex);
+		if (!msi_file_read(ctx->msi->msi, dse, 0, (char *)ctx->msi->p_msiex,
+				ctx->msi->len_msiex)) {
 			printf("MsiDigitalSignatureEx stream data error\n\n");
-			goto out;
+			OPENSSL_free(indata);
+			return NULL; /* FAILED */
 		}
 	}
 	blob = (u_char *)indata;
 	p7 = d2i_PKCS7(NULL, &blob, inlen);
+	OPENSSL_free(indata);
 	if (!p7) {
 		printf("Failed to extract PKCS7 data\n\n");
-		goto out;
+		return NULL; /* FAILED */
 	}
+	signatures = sk_SIGNATURE_new_null();
 	if (!signature_list_append_pkcs7(&signatures, p7, 1)) {
 		printf("Failed to create signature list\n\n");
 		PKCS7_free(p7);
-		goto out;
+		return NULL; /* FAILED */
 	}
-	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
-		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
-		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-		ret &= msi_verify_pkcs7(ctx, signature, exdata, (int)exlen);
-	}
-	printf("Number of verified signatures: %d\n", i);
-out:
-	signature_list_free(signatures);
-	OPENSSL_free(indata);
-	OPENSSL_free(exdata);
-	return ret;
+	return signatures;
 }
+
+
+/*
+ * [in] ctx: FILE_FORMAT_CTX structure
+ * [in] signature: structure for authenticode and time stamping
+ * [returns] 0 on error or 1 on success
+ */
+static int msi_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
+{
+	int mdok, mdtype = -1;
+	u_char mdbuf[EVP_MAX_MD_SIZE];
+	u_char cmdbuf[EVP_MAX_MD_SIZE];
+	u_char cexmdbuf[EVP_MAX_MD_SIZE];
+	const EVP_MD *md;
+	BIO *hash;
+
+	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
+		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
+		const u_char *p = content_val->data;
+		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
+		if (idc) {
+			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
+				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
+				memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
+			}
+			SpcIndirectDataContent_free(idc);
+		}
+	}
+	if (mdtype == -1) {
+		printf("Failed to extract current message digest\n\n");
+		return 0; /* FAILED */
+	}
+	printf("Message digest algorithm         : %s\n", OBJ_nid2sn(mdtype));
+	md = EVP_get_digestbynid(mdtype);
+	hash = BIO_new(BIO_f_md());
+	if (!BIO_set_md(hash, md)) {
+		printf("Unable to set the message digest of BIO\n");
+		BIO_free_all(hash);
+		return 0; /* FAILED */
+	}
+	BIO_push(hash, BIO_new(BIO_s_null()));
+	if (ctx->msi->p_msiex) {
+		BIO *prehash = BIO_new(BIO_f_md());
+		if (EVP_MD_size(md) != (int)ctx->msi->len_msiex) {
+			printf("Incorrect MsiDigitalSignatureEx stream data length\n\n");
+			BIO_free_all(hash);
+			BIO_free_all(prehash);
+			return 0; /* FAILED */
+		}
+		if (!BIO_set_md(prehash, md)) {
+			printf("Unable to set the message digest of BIO\n");
+			BIO_free_all(hash);
+			BIO_free_all(prehash);
+			return 0; /* FAILED */
+		}
+		BIO_push(prehash, BIO_new(BIO_s_null()));
+
+		print_hash("Current MsiDigitalSignatureEx    ", "", (u_char *)ctx->msi->p_msiex,
+			(int)ctx->msi->len_msiex);
+		if (!msi_prehash_dir(ctx->msi->dirent, prehash, 1)) {
+			printf("Failed to calculate pre-hash used for MsiDigitalSignatureEx\n\n");
+			BIO_free_all(hash);
+			BIO_free_all(prehash);
+			return 0; /* FAILED */
+		}
+		BIO_gets(prehash, (char*)cexmdbuf, EVP_MAX_MD_SIZE);
+		BIO_free_all(prehash);
+		BIO_write(hash, (char*)cexmdbuf, EVP_MD_size(md));
+		print_hash("Calculated MsiDigitalSignatureEx ", "", cexmdbuf, EVP_MD_size(md));
+	}
+
+	if (!msi_hash_dir(ctx->msi->msi, ctx->msi->dirent, hash, 1)) {
+		printf("Failed to calculate DigitalSignature\n\n");
+		BIO_free_all(hash);
+		return 0; /* FAILED */
+	}
+	print_hash("Current DigitalSignature         ", "", mdbuf, EVP_MD_size(md));
+	BIO_gets(hash, (char*)cmdbuf, EVP_MAX_MD_SIZE);
+	BIO_free_all(hash);
+	mdok = !memcmp(mdbuf, cmdbuf, (size_t)EVP_MD_size(md));
+	print_hash("Calculated DigitalSignature      ", mdok ? "\n" : "    MISMATCH!!!\n",
+		cmdbuf, EVP_MD_size(md));
+	if (!mdok) {
+		printf("Signature verification: failed\n\n");
+		return 0; /* FAILED */
+	}
+	return 1; /* OK */
+}
+
 
 static int msi_extract_signature(FILE_FORMAT_CTX *ctx)
 {
@@ -2122,90 +2205,6 @@ out:
 	return ret;
 }
 
-static int msi_verify_pkcs7(FILE_FORMAT_CTX *ctx, SIGNATURE *signature, char *exdata, int exlen)
-{
-	int ret = 1, mdok, mdtype = -1;
-	u_char mdbuf[EVP_MAX_MD_SIZE];
-	u_char cmdbuf[EVP_MAX_MD_SIZE];
-	u_char cexmdbuf[EVP_MAX_MD_SIZE];
-	const EVP_MD *md;
-	BIO *hash;
-
-	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
-		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
-		const u_char *p = content_val->data;
-		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
-		if (idc) {
-			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
-				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
-				memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
-			}
-			SpcIndirectDataContent_free(idc);
-		}
-	}
-	if (mdtype == -1) {
-		printf("Failed to extract current message digest\n\n");
-		goto out;
-	}
-	printf("Message digest algorithm         : %s\n", OBJ_nid2sn(mdtype));
-	md = EVP_get_digestbynid(mdtype);
-	hash = BIO_new(BIO_f_md());
-	if (!BIO_set_md(hash, md)) {
-		printf("Unable to set the message digest of BIO\n");
-		BIO_free_all(hash);
-		goto out;
-	}
-	BIO_push(hash, BIO_new(BIO_s_null()));
-	if (exdata) {
-		BIO *prehash = BIO_new(BIO_f_md());
-		if (EVP_MD_size(md) != exlen) {
-			printf("Incorrect MsiDigitalSignatureEx stream data length\n\n");
-			BIO_free_all(hash);
-			BIO_free_all(prehash);
-			goto out;
-		}
-		if (!BIO_set_md(prehash, md)) {
-			printf("Unable to set the message digest of BIO\n");
-			BIO_free_all(hash);
-			BIO_free_all(prehash);
-			goto out;
-		}
-		BIO_push(prehash, BIO_new(BIO_s_null()));
-
-		print_hash("Current MsiDigitalSignatureEx    ", "", (u_char *)exdata, exlen);
-		if (!msi_prehash_dir(ctx->msi->dirent, prehash, 1)) {
-			printf("Failed to calculate pre-hash used for MsiDigitalSignatureEx\n\n");
-			BIO_free_all(hash);
-			BIO_free_all(prehash);
-			goto out;
-		}
-		BIO_gets(prehash, (char*)cexmdbuf, EVP_MAX_MD_SIZE);
-		BIO_free_all(prehash);
-		BIO_write(hash, (char*)cexmdbuf, EVP_MD_size(md));
-		print_hash("Calculated MsiDigitalSignatureEx ", "", cexmdbuf, EVP_MD_size(md));
-	}
-
-	if (!msi_hash_dir(ctx->msi->msi, ctx->msi->dirent, hash, 1)) {
-		printf("Failed to calculate DigitalSignature\n\n");
-		BIO_free_all(hash);
-		goto out;
-	}
-	print_hash("Current DigitalSignature         ", "", mdbuf, EVP_MD_size(md));
-	BIO_gets(hash, (char*)cmdbuf, EVP_MAX_MD_SIZE);
-	BIO_free_all(hash);
-	mdok = !memcmp(mdbuf, cmdbuf, (size_t)EVP_MD_size(md));
-	print_hash("Calculated DigitalSignature      ", mdok ? "\n" : "    MISMATCH!!!\n", cmdbuf, EVP_MD_size(md));
-	if (!mdok) {
-		printf("Signature verification: failed\n\n");
-		goto out;
-	}
-	ret = verify_signature(ctx, signature);
-out:
-	if (ret)
-		ERR_print_errors_fp(stdout);
-	return ret;
-}
-
 /*
  * MsiDigitalSignatureEx is an enhanced signature type that
  * can be used when signing MSI files.  In addition to
@@ -2249,7 +2248,9 @@ out:
 
 static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash)
 {
+	size_t written;
 	BIO *prehash = BIO_new(BIO_f_md());
+
 	if (!BIO_set_md(prehash, ctx->options->md)) {
 		printf("Unable to set the message digest of BIO\n");
 		BIO_free_all(prehash);
@@ -2262,9 +2263,11 @@ static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash)
 		return 0; /* FAILED */
 	}
 	ctx->msi->p_msiex = OPENSSL_malloc(EVP_MAX_MD_SIZE);
-	ctx->msi->len_msiex = BIO_gets(prehash,
-		(char*)ctx->msi->p_msiex, EVP_MAX_MD_SIZE);
-	BIO_write(hash, ctx->msi->p_msiex, ctx->msi->len_msiex);
+	ctx->msi->len_msiex = (uint32_t)BIO_gets(prehash,
+		(char *)ctx->msi->p_msiex, EVP_MAX_MD_SIZE);
+	if (!BIO_write_ex(hash, ctx->msi->p_msiex, ctx->msi->len_msiex, &written)
+		|| written != ctx->msi->len_msiex)
+		return 0; /* FAILED */
 	BIO_free_all(prehash);
 	return 1; /* OK */
 }

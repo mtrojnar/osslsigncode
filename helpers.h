@@ -18,7 +18,6 @@ int bio_hash_data(BIO *hash, char *indata, size_t idx, size_t fileend);
 void print_hash(const char *descript1, const char *descript2, const u_char *hashbuf, int length);
 int is_content_type(PKCS7 *p7, const char *objid);
 int pkcs7_set_data_content(PKCS7 *sig, FILE_FORMAT_CTX *ctx);
-int verify_signature(FILE_FORMAT_CTX *ctx, SIGNATURE *signature);
 int signature_list_append_pkcs7(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allownest);
 void signature_list_free(STACK_OF(SIGNATURE) *signatures);
 SpcLink *spc_link_obsolete_get(void);

@@ -43,7 +43,8 @@ struct cab_header_st {
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options);
 static ASN1_OBJECT *cab_obsolete_link(FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
-static int cab_verify_signed_file(FILE_FORMAT_CTX *ctx);
+static STACK_OF(SIGNATURE) *cab_signature_list_get(FILE_FORMAT_CTX *ctx);
+static int cab_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature);
 static int cab_extract_signature(FILE_FORMAT_CTX *ctx);
 static int cab_remove_signature(FILE_FORMAT_CTX *ctx);
 static int cab_prepare_signature(FILE_FORMAT_CTX *ctx);
@@ -55,7 +56,8 @@ static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx);
 FILE_FORMAT file_format_cab = {
 	.ctx_new = cab_ctx_new,
 	.get_data_blob = cab_obsolete_link,
-	.verify_signed_file = cab_verify_signed_file,
+	.signature_list_get = cab_signature_list_get,
+	.verify_digests = cab_verify_digests,
 	.extract_signature = cab_extract_signature,
 	.remove_signature = cab_remove_signature,
 	.prepare_signature = cab_prepare_signature,
@@ -70,10 +72,10 @@ static int cab_verify_header(char *indata, uint32_t filesize, CAB_HEADER *header
 static PKCS7 *get_pkcs7(FILE_FORMAT_CTX *ctx);
 static void cab_add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp);
 static PKCS7 *cab_extract_existing_pkcs7(char *indata, CAB_HEADER *header);
-static int cab_verify_pkcs7(FILE_FORMAT_CTX *ctx, SIGNATURE *signature);
 static void cab_optional_names(uint16_t flags, char *indata, BIO *outdata, size_t *len);
 static int cab_modify_header(FILE_FORMAT_CTX *ctx);
 static int cab_add_header(FILE_FORMAT_CTX *ctx);
+static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, CAB_HEADER *header);
 
 
 /*
@@ -179,44 +181,74 @@ static void cab_update_data_size(FILE_FORMAT_CTX *ctx)
 	}
 }
 
-static int cab_verify_signed_file(FILE_FORMAT_CTX *ctx)
+static STACK_OF(SIGNATURE) *cab_signature_list_get(FILE_FORMAT_CTX *ctx)
 {
-	int i, ret = 1;
 	PKCS7 *p7;
-	STACK_OF(SIGNATURE) *signatures = sk_SIGNATURE_new_null();
+	STACK_OF(SIGNATURE) *signatures;
 
 	if (!ctx) {
 		printf("Init error\n\n");
-		goto out;
+		return NULL; /* FAILED */
 	}
 	if (ctx->cab->header_size != 20) {
 		printf("No signature found\n\n");
-		goto out;
+		return NULL; /* FAILED */
 	}
 	if (ctx->cab->sigpos == 0 || ctx->cab->siglen == 0
 		|| ctx->cab->sigpos > ctx->cab->fileend) {
 		printf("No signature found\n\n");
-		goto out;
+		return NULL; /* FAILED */
 	}
 	p7 = cab_extract_existing_pkcs7(ctx->options->indata, ctx->cab);
 	if (!p7) {
 		printf("Failed to extract PKCS7 data\n\n");
-		goto out;
+		return NULL; /* FAILED */
 	}
+	signatures = sk_SIGNATURE_new_null();
 	if (!signature_list_append_pkcs7(&signatures, p7, 1)) {
 		printf("Failed to create signature list\n\n");
 		PKCS7_free(p7);
-		goto out;
+		return NULL; /* FAILED */
 	}
-	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
-		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
-		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-		ret &= cab_verify_pkcs7(ctx, signature);
+	return signatures;
+}
+
+/*
+ * [in] ctx: FILE_FORMAT_CTX structure
+ * [in] signature: structure for authenticode and time stamping
+ * [returns] 0 on error or 1 on success
+ */
+static int cab_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
+{
+	int mdtype = -1;
+	u_char mdbuf[EVP_MAX_MD_SIZE];
+	u_char cmdbuf[EVP_MAX_MD_SIZE];
+
+	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
+		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
+		const u_char *p = content_val->data;
+		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
+		if (idc) {
+			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
+				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
+				memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
+			}
+			SpcIndirectDataContent_free(idc);
+		}
 	}
-	printf("Number of verified signatures: %d\n", i);
-out:
-	signature_list_free(signatures);
-	return ret;
+	if (mdtype == -1) {
+		printf("Failed to extract current message digest\n\n");
+		return 0; /* FAILED */
+	}
+	if (!cab_calc_digest(ctx->options->indata, mdtype, cmdbuf, ctx->cab)) {
+		printf("Failed to calculate message digest\n\n");
+		return 0; /* FAILED */
+	}
+	if (!compare_digests(mdbuf, cmdbuf, mdtype)) {
+		printf("Signature verification: failed\n\n");
+		return 0; /* FAILED */
+	}
+	return 1; /* OK */
 }
 
 static int cab_extract_signature(FILE_FORMAT_CTX *ctx)
@@ -766,44 +798,6 @@ static void cab_add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp)
 		PKCS7_add_signed_attribute(si, OBJ_txt2nid(MS_JAVA_SOMETHING),
 				V_ASN1_SEQUENCE, astr);
 	}
-}
-
-static int cab_verify_pkcs7(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
-{
-	int ret = 1, mdtype = -1;
-	u_char mdbuf[EVP_MAX_MD_SIZE];
-	u_char cmdbuf[EVP_MAX_MD_SIZE];
-
-	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
-		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
-		const u_char *p = content_val->data;
-		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
-		if (idc) {
-			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
-				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
-				memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
-			}
-			SpcIndirectDataContent_free(idc);
-		}
-	}
-	if (mdtype == -1) {
-		printf("Failed to extract current message digest\n\n");
-		goto out;
-	}
-	if (!cab_calc_digest(ctx->options->indata, mdtype, cmdbuf, ctx->cab)) {
-		printf("Failed to calculate message digest\n\n");
-		goto out;
-	}
-	if (!compare_digests(mdbuf, cmdbuf, mdtype)) {
-		printf("Signature verification: failed\n\n");
-		goto out;
-	}
-
-	ret = verify_signature(ctx, signature);
-out:
-	if (ret)
-		ERR_print_errors_fp(stdout);
-	return ret;
 }
 
 static void cab_optional_names(uint16_t flags, char *indata, BIO *outdata, size_t *len)

@@ -481,7 +481,8 @@ extern FILE_FORMAT file_format_cat;
 struct file_format_st {
 	FILE_FORMAT_CTX *(*ctx_new) (GLOBAL_OPTIONS *option);
 	ASN1_OBJECT *(*get_data_blob) (FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
-	int (*verify_signed_file) (FILE_FORMAT_CTX *ctx);
+	STACK_OF(SIGNATURE) *(*signature_list_get) (FILE_FORMAT_CTX *ctx);
+	int (*verify_digests) (FILE_FORMAT_CTX *ctx, SIGNATURE *signature);
 	int (*extract_signature) (FILE_FORMAT_CTX *ctx);
 	int (*remove_signature) (FILE_FORMAT_CTX *ctx);
 	int (*prepare_signature) (FILE_FORMAT_CTX *ctx);

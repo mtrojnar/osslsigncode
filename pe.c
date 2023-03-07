@@ -44,7 +44,8 @@ struct pe_header_st {
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options);
 static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
-static int pe_verify_signed_file(FILE_FORMAT_CTX *ctx);
+static STACK_OF(SIGNATURE) *pe_signature_list_get(FILE_FORMAT_CTX *ctx);
+static int pe_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature);
 static int pe_extract_signature(FILE_FORMAT_CTX *ctx);
 static int pe_remove_signature(FILE_FORMAT_CTX *ctx);
 static int pe_prepare_signature(FILE_FORMAT_CTX *ctx);
@@ -56,7 +57,8 @@ static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx);
 FILE_FORMAT file_format_pe = {
 	.ctx_new = pe_ctx_new,
 	.get_data_blob = pe_spc_image_data,
-	.verify_signed_file = pe_verify_signed_file,
+	.signature_list_get = pe_signature_list_get,
+	.verify_digests = pe_verify_digests,
 	.extract_signature = pe_extract_signature,
 	.remove_signature = pe_remove_signature,
 	.prepare_signature = pe_prepare_signature,
@@ -74,8 +76,11 @@ static void pe_recalc_checksum(BIO *bio, PE_HEADER *header);
 static uint32_t pe_calc_realchecksum(FILE_FORMAT_CTX *ctx);
 static int pe_modify_header(FILE_FORMAT_CTX *ctx);
 static PKCS7 *pe_extract_existing_pkcs7(char *indata, PE_HEADER *header);
-static int pe_verify_pkcs7(FILE_FORMAT_CTX *ctx, SIGNATURE *signature);
 static SpcLink *get_page_hash_link(int phtype, char *indata, PE_HEADER *header);
+static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, PE_HEADER *header);
+static int pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
+	u_char **ph, int *phlen, int *phtype);
+static int pe_print_page_hash(char *indata, PE_HEADER *header, u_char *ph, int phlen, int phtype);
 
 
 /*
@@ -195,16 +200,16 @@ static void pe_update_data_size(FILE_FORMAT_CTX *ctx)
 		pe_recalc_checksum(ctx->sign->outdata, ctx->pe);
 }
 
-static int pe_verify_signed_file(FILE_FORMAT_CTX *ctx)
+static STACK_OF(SIGNATURE) *pe_signature_list_get(FILE_FORMAT_CTX *ctx)
 {
-	int i, peok = 1, ret = 1;
+	int peok = 1;
 	uint32_t real_pe_checksum;
 	PKCS7 *p7;
-	STACK_OF(SIGNATURE) *signatures = sk_SIGNATURE_new_null();
+	STACK_OF(SIGNATURE) *signatures;
 
 	if (!ctx) {
 		printf("Init error\n\n");
-		goto out;
+		return NULL; /* FAILED */
 	}
 	if (ctx->pe->siglen == 0)
 		ctx->pe->sigpos = ctx->pe->fileend;
@@ -219,31 +224,78 @@ static int pe_verify_signed_file(FILE_FORMAT_CTX *ctx)
 	if (ctx->pe->sigpos == 0 || ctx->pe->siglen == 0
 		|| ctx->pe->sigpos > ctx->pe->fileend) {
 		printf("No signature found\n\n");
-		goto out;
+		return NULL; /* FAILED */
 	}
 	if (ctx->pe->siglen != GET_UINT32_LE(ctx->options->indata + ctx->pe->sigpos)) {
 		printf("Invalid signature\n\n");
-		goto out;
+		return NULL; /* FAILED */
 	}
 	p7 = pe_extract_existing_pkcs7(ctx->options->indata, ctx->pe);
 	if (!p7) {
 		printf("Failed to extract PKCS7 data\n\n");
-		goto out;
+		return NULL; /* FAILED */
 	}
+	signatures = sk_SIGNATURE_new_null();
 	if (!signature_list_append_pkcs7(&signatures, p7, 1)) {
 		printf("Failed to create signature list\n\n");
 		PKCS7_free(p7);
-		goto out;
+		return NULL; /* FAILED */
 	}
-	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
-		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
-		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-		ret &= pe_verify_pkcs7(ctx, signature);
+	return signatures;
+}
+
+/*
+ * [in] ctx: FILE_FORMAT_CTX structure
+ * [in] signature: structure for authenticode and time stamping
+ * [returns] 0 on error or 1 on success
+ */
+static int pe_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
+{
+	int mdtype = -1, phtype = -1;
+	u_char mdbuf[EVP_MAX_MD_SIZE];
+	u_char cmdbuf[EVP_MAX_MD_SIZE];
+	u_char *ph = NULL;
+	int phlen = 0;
+
+	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
+		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
+		const u_char *p = content_val->data;
+		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
+		if (idc) {
+			if (!pe_extract_page_hash(idc->data, &ph, &phlen, &phtype)) {
+				printf("Failed to extract a page hash\n\n");
+				SpcIndirectDataContent_free(idc);
+				return 0; /* FAILED */
+			}
+			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
+				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
+				memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
+			}
+			SpcIndirectDataContent_free(idc);
+		}
 	}
-	printf("Number of verified signatures: %d\n", i);
-out:
-	signature_list_free(signatures);
-	return ret;
+	if (mdtype == -1) {
+		printf("Failed to extract current message digest\n\n");
+		OPENSSL_free(ph);
+		return 0; /* FAILED */
+	}
+	if (!pe_calc_digest(ctx->options->indata, mdtype, cmdbuf, ctx->pe)) {
+		printf("Failed to calculate message digest\n\n");
+		OPENSSL_free(ph);
+		return 0; /* FAILED */
+	}
+	if (!compare_digests(mdbuf, cmdbuf, mdtype)) {
+		printf("Signature verification: failed\n\n");
+		OPENSSL_free(ph);
+		return 0; /* FAILED */
+	}
+	if (phlen > 0 && !pe_print_page_hash(ctx->options->indata, ctx->pe, ph, phlen, phtype)) {
+		printf("Signature verification: failed\n\n");
+		OPENSSL_free(ph);
+		return 0; /* FAILED */
+	}
+	OPENSSL_free(ph);
+	return 1; /* OK */
 }
 
 static int pe_extract_signature(FILE_FORMAT_CTX *ctx)
@@ -1090,56 +1142,6 @@ static PKCS7 *pe_extract_existing_pkcs7(char *indata, PE_HEADER *header)
 		pos += l;
 	}
 	return p7;
-}
-
-static int pe_verify_pkcs7(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
-{
-	int ret = 1, mdtype = -1, phtype = -1;
-	u_char mdbuf[EVP_MAX_MD_SIZE];
-	u_char cmdbuf[EVP_MAX_MD_SIZE];
-	u_char *ph = NULL;
-	int phlen = 0;
-
-	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
-		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
-		const u_char *p = content_val->data;
-		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
-		if (idc) {
-			if (!pe_extract_page_hash(idc->data, &ph, &phlen, &phtype)) {
-				printf("Failed to extract a page hash\n\n");
-				SpcIndirectDataContent_free(idc);
-				goto out;
-			}
-			if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
-				mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
-				memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
-			}
-			SpcIndirectDataContent_free(idc);
-		}
-	}
-	if (mdtype == -1) {
-		printf("Failed to extract current message digest\n\n");
-		goto out;
-	}
-	if (!pe_calc_digest(ctx->options->indata, mdtype, cmdbuf, ctx->pe)) {
-		printf("Failed to calculate message digest\n\n");
-		goto out;
-	}
-	if (!compare_digests(mdbuf, cmdbuf, mdtype)) {
-		printf("Signature verification: failed\n\n");
-		goto out;
-	}
-	if (phlen > 0 && !pe_print_page_hash(ctx->options->indata, ctx->pe, ph, phlen, phtype)) {
-		printf("Signature verification: failed\n\n");
-		goto out;
-	}
-
-	ret = verify_signature(ctx, signature);
-out:
-	if (ret)
-		ERR_print_errors_fp(stdout);
-	OPENSSL_free(ph);
-	return ret;
 }
 
 /*
