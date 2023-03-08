@@ -1582,7 +1582,7 @@ static int check_attached_data(FILE_FORMAT_CTX *in_ctx)
 }
 
 /*
- * [in, out] options: GLOBAL_OPTIONS structure
+ * [in, out] options: structure holds the input data
  * [returns] none
  */
 static void free_options(GLOBAL_OPTIONS *options)
@@ -1986,7 +1986,7 @@ static char *getpassword(const char *prompt)
 #endif
 
 /*
- * [in, out] options: GLOBAL_OPTIONS structure
+ * [in, out] options: structure holds the input data
  * [returns] 0 on error or 1 on success
  */
 static int read_password(GLOBAL_OPTIONS *options)
@@ -2050,7 +2050,7 @@ static int read_password(GLOBAL_OPTIONS *options)
  * If successful the private key will be written to options->pkey,
  * the corresponding certificate to options->cert
  * and any additional certificates to options->certs.
- * [in, out] options: GLOBAL_OPTIONS structure
+ * [in, out] options: structure holds the input data
  * [returns] 0 on error or 1 on success
  */
 static int read_pkcs12file(GLOBAL_OPTIONS *options)
@@ -2110,7 +2110,7 @@ err:
  * Load certificates from a file.
  * If successful all certificates will be written to options->certs
  * and optional CRLs will be written to options->crls.
- * [in, out] options: GLOBAL_OPTIONS structure
+ * [in, out] options: structure holds the input data
  * [returns] 0 on error or 1 on success
  */
 static int read_certfile(GLOBAL_OPTIONS *options)
@@ -2165,7 +2165,7 @@ out:
 
 /*
  * Load additional (cross) certificates from a .pem file
- * [in, out] options: GLOBAL_OPTIONS structure
+ * [in, out] options: structure holds the input data
  * [returns] 0 on error or 1 on success
  */
 static int read_xcertfile(GLOBAL_OPTIONS *options)
@@ -2192,7 +2192,7 @@ out:
 
 /*
  * Load the private key from a file
- * [in, out] options: GLOBAL_OPTIONS structure
+ * [in, out] options: structure holds the input data
  * [returns] 0 on error or 1 on success
  */
 static int read_keyfile(GLOBAL_OPTIONS *options)
@@ -2224,7 +2224,7 @@ out:
  * PVK is a proprietary Microsoft format that stores a cryptographic private key.
  * PVK files are often password-protected.
  * A PVK file may have an associated .spc (PKCS7) certificate file.
- * [in, out] options: GLOBAL_OPTIONS structure
+ * [in, out] options: structure holds the input data
  * [returns] PVK file
  */
 static char *find_pvk_key(GLOBAL_OPTIONS *options)
@@ -2255,7 +2255,7 @@ static char *find_pvk_key(GLOBAL_OPTIONS *options)
 }
 
 /*
- * [in, out] options: GLOBAL_OPTIONS structure
+ * [in, out] options: structure holds the input data
  * [returns] 0 on error or 1 on success
  */
 static int read_pvk_key(GLOBAL_OPTIONS *options)
@@ -2284,7 +2284,7 @@ static int read_pvk_key(GLOBAL_OPTIONS *options)
 
 /*
  * Load an engine in a shareable library
- * [in] options: GLOBAL_OPTIONS structure
+ * [in] options: structure holds the input data
  * [returns] pointer to ENGINE
  */
 static ENGINE *engine_dynamic(GLOBAL_OPTIONS *options)
@@ -2343,7 +2343,7 @@ static ENGINE *engine_pkcs11()
 
 /*
  * Load the private key and the signer certificate from a security token
- * [in, out] options: GLOBAL_OPTIONS structure
+ * [in, out] options: structure holds the input data
  * [in] engine: ENGINE structure
  * [returns] 0 on error or 1 on success
  */
@@ -2399,7 +2399,7 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
 #endif /* OPENSSL_NO_ENGINE */
 
 /*
- * [in, out] options: GLOBAL_OPTIONS structure
+ * [in, out] options: structure holds the input data
  * [returns] 0 on error or 1 on success
  */
 static int read_crypto_params(GLOBAL_OPTIONS *options)
@@ -2578,7 +2578,7 @@ static int use_legacy(void)
 
 /*
  * [in] argc, argv
- * [in, out] options: GLOBAL_OPTIONS structure
+ * [in, out] options: structure holds the input data
  * [returns] 0 on error or 1 on success
  */
 static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)

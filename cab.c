@@ -69,7 +69,8 @@ FILE_FORMAT file_format_cab = {
 
 /* Prototypes */
 static int cab_verify_header(char *indata, uint32_t filesize, CAB_HEADER *header);
-static PKCS7 *get_pkcs7(FILE_FORMAT_CTX *ctx);
+static PKCS7 *cab_get_sigfile(FILE_FORMAT_CTX *ctx);
+static PKCS7 *cab_create_signature(FILE_FORMAT_CTX *ctx);
 static void cab_add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp);
 static PKCS7 *cab_extract_existing_pkcs7(char *indata, CAB_HEADER *header);
 static void cab_optional_names(uint16_t flags, char *indata, BIO *outdata, size_t *len);
@@ -80,6 +81,12 @@ static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, CAB_HEADER *
 
 /*
  * FILE_FORMAT method definitions
+ */
+
+/*
+ * Allocate and return a CAB file format context.
+ * [in, out] options: structure holds the input data
+ * [returns] pointer to CAB file format context
  */
 static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options)
 {
@@ -146,6 +153,13 @@ static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options)
 	return ctx;
 }
 
+/*
+ * Allocate and return SpcLink object.
+ * [in] ctx: structure holds all input and output data (unused)
+ * [out] p: SpcLink data
+ * [out] plen: SpcLink data length
+ * [returns] pointer to ASN1_OBJECT structure corresponding to SPC_CAB_DATA_OBJID
+ */
 static ASN1_OBJECT *cab_obsolete_link(FILE_FORMAT_CTX *ctx, u_char **p, int *plen)
 {
 	ASN1_OBJECT *dtype;
@@ -163,24 +177,12 @@ static ASN1_OBJECT *cab_obsolete_link(FILE_FORMAT_CTX *ctx, u_char **p, int *ple
 	return dtype; /* OK */
 }
 
-static void cab_update_data_size(FILE_FORMAT_CTX *ctx)
-{
-	if (ctx->options->cmd == CMD_SIGN || ctx->options->cmd == CMD_ADD
-		|| ctx->options->cmd == CMD_ATTACH) {
-		u_char buf[] = {
-			0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-		};
-		/*
-		 * Update additional data size.
-		 * Additional data size is located at offset 0x30 (from file beginning)
-		 * and consist of 4 bytes (little-endian order).
-		 */
-		(void)BIO_seek(ctx->sign->outdata, 0x30);
-		PUT_UINT32_LE(ctx->sign->len + ctx->sign->padlen, buf);
-		BIO_write(ctx->sign->outdata, buf, 4);
-	}
-}
-
+/*
+ * Retrieve all PKCS#7 (include nested) signedData structures from CAB file,
+ * allocate and return signature list
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] pointer to signature list
+ */
 static STACK_OF(SIGNATURE) *cab_signature_list_get(FILE_FORMAT_CTX *ctx)
 {
 	PKCS7 *p7;
@@ -214,7 +216,8 @@ static STACK_OF(SIGNATURE) *cab_signature_list_get(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * [in] ctx: FILE_FORMAT_CTX structure
+ * Calculate message digest and compare to value retrieved from PKCS#7 signedData
+ * [in] ctx: structure holds all input and output data
  * [in] signature: structure for authenticode and time stamping
  * [returns] 0 on error or 1 on success
  */
@@ -251,6 +254,11 @@ static int cab_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 	return 1; /* OK */
 }
 
+/*
+ * Extract existing signature to DER or PEM format
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] 1 on error or 0 on success
+ */
 static int cab_extract_signature(FILE_FORMAT_CTX *ctx)
 {
 	int ret = 0;
@@ -274,6 +282,11 @@ static int cab_extract_signature(FILE_FORMAT_CTX *ctx)
 	return ret;
 }
 
+/*
+ * Remove existing signature
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] 1 on error or 0 on success
+ */
 static int cab_remove_signature(FILE_FORMAT_CTX *ctx)
 {
 	size_t i, written, len;
@@ -342,6 +355,11 @@ static int cab_remove_signature(FILE_FORMAT_CTX *ctx)
 	return 0; /* OK */
 }
 
+/*
+ * Obtain an existing signature or create a new one
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] 1 on error or 0 on success
+ */
 static int cab_prepare_signature(FILE_FORMAT_CTX *ctx)
 {
 	PKCS7 *sig = NULL;
@@ -366,14 +384,30 @@ static int cab_prepare_signature(FILE_FORMAT_CTX *ctx)
 		if (!cab_add_header(ctx))
 			return 1; /* FAILED */
 	}
-	/* Obtain an existing signature or create a new one */
-	if ((ctx->options->cmd == CMD_ATTACH) || (ctx->options->cmd == CMD_SIGN))
-		sig = get_pkcs7(ctx);
-
+	if (ctx->options->cmd == CMD_ATTACH) {
+		/* Obtain an existing signature */
+		sig = cab_get_sigfile(ctx);
+		if (!sig) {
+			printf("Unable to extract valid signature\n");
+			return 1; /* FAILED */
+		}
+	} else if (ctx->options->cmd == CMD_SIGN) {
+		/* Create a new signature */
+		sig = cab_create_signature(ctx);
+		if (!sig) {
+			printf("Creating a new signature failed\n");
+			return 1; /* FAILED */
+		}
+	}
 	ctx->sign->sig = sig;
 	return 0; /* OK */
 }
 
+/*
+ * Append signature to the outfile
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] 1 on error or 0 on success
+ */
 static int cab_append_signature(FILE_FORMAT_CTX *ctx)
 {
 	u_char *p = NULL;
@@ -411,12 +445,44 @@ static int cab_append_signature(FILE_FORMAT_CTX *ctx)
 	return 0; /* OK */
 }
 
+/*
+ * Update additional data size.
+ * Additional data size is located at offset 0x30 (from file beginning)
+ * and consist of 4 bytes (little-endian order).
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] none
+ */
+static void cab_update_data_size(FILE_FORMAT_CTX *ctx)
+{
+	u_char buf[] = {
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+	};
+
+	if (ctx->options->cmd == CMD_VERIFY || ctx->options->cmd == CMD_EXTRACT
+		|| ctx->options->cmd == CMD_REMOVE) {
+		return;
+	}
+	(void)BIO_seek(ctx->sign->outdata, 0x30);
+	PUT_UINT32_LE(ctx->sign->len + ctx->sign->padlen, buf);
+	BIO_write(ctx->sign->outdata, buf, 4);
+}
+
+/*
+ * Free up an entire hash BIO chain
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] none
+ */
 static void cab_ctx_free(FILE_FORMAT_CTX *ctx)
 {
 	BIO_free_all(ctx->sign->hash);
 	ctx->sign->hash = ctx->sign->outdata = NULL;
 }
 
+/*
+ * Deallocate a FILE_FORMAT_CTX structure, unmap indata file, unlink outfile
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] none
+ */
 static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 {
 	if (ctx->sign->hash) {
@@ -620,28 +686,6 @@ static PKCS7 *cab_create_signature(FILE_FORMAT_CTX *ctx)
 		return NULL; /* FAILED */
 	}
 	return sig; /* OK */
-}
-
-
-/* Obtain an existing signature or create a new one */
-static PKCS7 *get_pkcs7(FILE_FORMAT_CTX *ctx)
-{
-	PKCS7 *sig = NULL;
-
-	if (ctx->options->cmd == CMD_ATTACH) {
-		sig = cab_get_sigfile(ctx);
-		if (!sig) {
-			printf("Unable to extract valid signature\n");
-			return NULL; /* FAILED */
-		}
-	} else if (ctx->options->cmd == CMD_SIGN) {
-		sig = cab_create_signature(ctx);
-		if (!sig) {
-			printf("Creating a new signature failed\n");
-			return NULL; /* FAILED */
-		}
-	}
-	return sig;
 }
 
 /* Compute a message digest value of the signed or unsigned CAB file */

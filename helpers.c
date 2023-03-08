@@ -18,9 +18,9 @@ static void signature_get_signed_attributes(SIGNATURE *signature,
 static void signature_get_unsigned_attributes(SIGNATURE *signature,
 	STACK_OF(SIGNATURE) **signatures, STACK_OF(X509_ATTRIBUTE) *unauth_attr,
 	PKCS7 *p7, int allownest);
-static time_t asn1_get_time_t(const ASN1_TIME *s);
-static time_t si_get_time(PKCS7_SIGNER_INFO *si);
-static time_t cms_get_time(CMS_ContentInfo *cms);
+static time_t time_t_get_asn1_time(const ASN1_TIME *s);
+static time_t time_t_get_si_time(PKCS7_SIGNER_INFO *si);
+static time_t time_t_get_cms_time(CMS_ContentInfo *cms);
 static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
 	PKCS7_SIGNER_INFO *countersignature);
 static void signature_free(SIGNATURE *signature);
@@ -283,7 +283,7 @@ void print_hash(const char *descript1, const char *descript2, const u_char *mdbu
 }
 
 /*
- * [in] p7: PKCS#7 signedData structure
+ * [in] p7: PKCS#7 structure
  * [in] objid: Microsoft OID Authenticode
  * [returns] 0 on error or 1 on success
  */
@@ -302,7 +302,7 @@ int is_content_type(PKCS7 *p7, const char *objid)
 }
 
 /*
- * [out] p7: PKCS#7 signedData structure
+ * [out] p7: PKCS#7 structure
  * [in] ctx: structure holds all input and output data
  * [returns] 0 on error or 1 on success
  */
@@ -330,7 +330,7 @@ int pkcs7_set_data_content(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
  * Create new SIGNATURE structure, get signed and unsigned attributes,
  * insert this signature to signature list
  * [in, out] signatures: signature list
- * [in] p7: PKCS#7 signedData structure
+ * [in] p7: PKCS#7 structure
  * [in] allownest: allow nested signature switch
  * [returns] 0 on error or 1 on success
  */
@@ -529,7 +529,7 @@ static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CT
 
 /*
  * Replace the data part with the MS Authenticode spcIndirectDataContent blob
- * [out] p7: PKCS#7 signedData structure
+ * [out] p7: PKCS#7 structure
  * [in] ctx: FILE_FORMAT_CTX structure
  * [in] blob: SpcIndirectDataContent data
  * [in] len: SpcIndirectDataContent data length
@@ -574,6 +574,12 @@ static int pkcs7_set_spc_indirect_data_content(PKCS7 *p7, FILE_FORMAT_CTX *ctx, 
 }
 
 /*
+ * Enumerate and get authorized attributes:
+ * - PKCS#9 message digest - Policy OID: 1.2.840.113549.1.9.4
+ * - PKCS#9 signing time - Policy OID: 1.2.840.113549.1.9.5
+ * - URL and text description - Microsoft OID: 1.3.6.1.4.1.311.2.1.12
+ * - Code Signing purpose - Microsoft OID: 1.3.6.1.4.1.311.2.1.11
+ * - Level of permissions for CAB files - Microsoft OID: 1.3.6.1.4.1.311.15.1
  * [out] signature: structure for authenticode and time stamping
  * [in] auth_attr: signed attributes list
  * [returns] none
@@ -602,7 +608,7 @@ static void signature_get_signed_attributes(SIGNATURE *signature,
 			/* PKCS#9 signing time - Policy OID: 1.2.840.113549.1.9.5 */
 			ASN1_UTCTIME *time;
 			time = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
-			signature->signtime = asn1_get_time_t(time);
+			signature->signtime = time_t_get_asn1_time(time);
 		} else if (!strcmp(object_txt, SPC_SP_OPUS_INFO_OBJID)) {
 			/* Microsoft OID: 1.3.6.1.4.1.311.2.1.12 */
 			SpcSpOpusInfo *opus;
@@ -645,10 +651,15 @@ static void signature_get_signed_attributes(SIGNATURE *signature,
 }
 
 /*
+ * Enumerate and get unauthorized attributes:
+ * - Authenticode Timestamp - Policy OID: 1.2.840.113549.1.9.6
+ * - RFC3161 Timestamp - Policy OID: 1.3.6.1.4.1.311.3.3.1
+ * - Nested Signature - Policy OID: 1.3.6.1.4.1.311.2.4.1
+ * - Unauthenticated Data Blob - Policy OID: 1.3.6.1.4.1.42921.1.2.1
  * [in, out] signatures: signature list
  * [out] signature: structure for authenticode and time stamping
  * [in] unauth_attr: unauthorized attributes list
- * [in] p7: PKCS#7 signedData structure
+ * [in] p7: PKCS#7 structure
  * [in] allownest: allow nested signature switch
  * [returns] none
  */
@@ -685,7 +696,7 @@ static void signature_get_unsigned_attributes(SIGNATURE *signature,
 				ERR_print_errors_fp(stdout);
 				continue;
 			}
-			time = si_get_time(countersi);
+			time = time_t_get_si_time(countersi);
 			if (time != INVALID_TIME) {
 				timestamp = cms_get_timestamp(p7->d.sign, countersi);
 				if (timestamp) {
@@ -712,7 +723,7 @@ static void signature_get_unsigned_attributes(SIGNATURE *signature,
 				ERR_print_errors_fp(stdout);
 				continue;
 			}
-			time = cms_get_time(timestamp);
+			time = time_t_get_cms_time(timestamp);
 			if (time != INVALID_TIME) {
 				signature->time = time;
 				signature->timestamp = timestamp;
@@ -744,7 +755,12 @@ static void signature_get_unsigned_attributes(SIGNATURE *signature,
 	}
 }
 
-static time_t asn1_get_time_t(const ASN1_TIME *s)
+/*
+ * Convert ASN1_TIME to time_t
+ * [in] s: ASN1_TIME structure
+ * [returns] INVALID_TIME on error or time_t on success
+ */
+static time_t time_t_get_asn1_time(const ASN1_TIME *s)
 {
 	struct tm tm;
 
@@ -762,7 +778,12 @@ static time_t asn1_get_time_t(const ASN1_TIME *s)
 	}
 }
 
-static time_t si_get_time(PKCS7_SIGNER_INFO *si)
+/*
+ * Get signing time from authorized attributes
+ * [in] si: PKCS7_SIGNER_INFO structure
+ * [returns] INVALID_TIME on error or time_t on success
+ */
+static time_t time_t_get_si_time(PKCS7_SIGNER_INFO *si)
 {
 	STACK_OF(X509_ATTRIBUTE) *auth_attr;
 	X509_ATTRIBUTE *attr;
@@ -786,11 +807,16 @@ static time_t si_get_time(PKCS7_SIGNER_INFO *si)
 				time = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
 			}
 		}
-	posix_time = asn1_get_time_t(time);
+	posix_time = time_t_get_asn1_time(time);
 	return posix_time;
 }
 
-static time_t cms_get_time(CMS_ContentInfo *cms)
+/*
+ * Get timestamping time from embedded content in a CMS_ContentInfo structure
+ * [in] si: CMS_ContentInfo structure
+ * [returns] INVALID_TIME on error or time_t on success
+ */
+static time_t time_t_get_cms_time(CMS_ContentInfo *cms)
 {
 	ASN1_OCTET_STRING **pos;
 	const u_char *p = NULL;
@@ -804,7 +830,7 @@ static time_t cms_get_time(CMS_ContentInfo *cms)
 		token = d2i_TimeStampToken(NULL, &p, (*pos)->length);
 		if (token) {
 			asn1_time = token->time;
-			posix_time = asn1_get_time_t(asn1_time);
+			posix_time = time_t_get_asn1_time(asn1_time);
 			TimeStampToken_free(token);
 		}
 	}
@@ -814,6 +840,9 @@ static time_t cms_get_time(CMS_ContentInfo *cms)
 /*
  * Create new CMS_ContentInfo struct for Authenticode Timestamp.
  * This struct does not contain any TimeStampToken as specified in RFC 3161.
+ * [in] p7_signed: PKCS#7 signedData structure
+ * [in] countersignature: Authenticode Timestamp decoded to PKCS7_SIGNER_INFO
+ * [returns] pointer to CMS_ContentInfo structure
  */
 static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
 	PKCS7_SIGNER_INFO *countersignature)
@@ -839,7 +868,6 @@ static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
 		if (!PKCS7_add_certificate(p7, sk_X509_value(p7_signed->cert, i)))
 			goto out;
 	}
-
 	/* Create new encapsulated NID_id_smime_ct_TSTInfo content. */
 	content = PKCS7_new();
 	content->d.other = ASN1_TYPE_new();
@@ -851,7 +879,6 @@ static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
 		PKCS7_free(content);
 		goto out;
 	}
-
 	/* Convert PKCS7 into CMS_ContentInfo */
 	if (((len = i2d_PKCS7(p7, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
 		printf("Failed to convert pkcs7: %d\n", len);
@@ -870,6 +897,11 @@ out:
 	return cms;
 }
 
+/*
+ * Deallocate a SIGNATURE structure
+ * [in, out] signature: structure for authenticode and time stamping
+ * [returns] none
+ */
 static void signature_free(SIGNATURE *signature)
 {
 	if (signature->timestamp) {

@@ -70,21 +70,27 @@ FILE_FORMAT file_format_pe = {
 
 /* Prototypes */
 static int pe_verify_header(char *indata, uint32_t filesize, PE_HEADER *header);
-static PKCS7 *get_pkcs7(FILE_FORMAT_CTX *ctx);
 static uint32_t pe_calc_checksum(BIO *bio, PE_HEADER *header);
-static void pe_recalc_checksum(BIO *bio, PE_HEADER *header);
 static uint32_t pe_calc_realchecksum(FILE_FORMAT_CTX *ctx);
+static PKCS7 *pe_get_sigfile(FILE_FORMAT_CTX *ctx);
+static PKCS7 *pe_create_signature(FILE_FORMAT_CTX *ctx);
 static int pe_modify_header(FILE_FORMAT_CTX *ctx);
 static PKCS7 *pe_extract_existing_pkcs7(char *indata, PE_HEADER *header);
-static SpcLink *get_page_hash_link(int phtype, char *indata, PE_HEADER *header);
+static SpcLink *get_page_hash_link(FILE_FORMAT_CTX *ctx, int phtype);
 static int pe_calc_digest(char *indata, int mdtype, u_char *mdbuf, PE_HEADER *header);
 static int pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	u_char **ph, int *phlen, int *phtype);
-static int pe_print_page_hash(char *indata, PE_HEADER *header, u_char *ph, int phlen, int phtype);
+static int pe_compare_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype);
 
 
 /*
  * FILE_FORMAT method definitions
+ */
+
+/*
+ * Allocate and return a PE file format context.
+ * [in, out] options: structure holds the input data
+ * [returns] pointer to PE file format context
  */
 static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options)
 {
@@ -151,6 +157,13 @@ static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options)
 	return ctx;
 }
 
+/*
+ * Allocate and return SpcPeImageData object.
+ * [in] ctx: structure holds all input and output data
+ * [out] p: SpcPeImageData data
+ * [out] plen: SpcPeImageData data length
+ * [returns] pointer to ASN1_OBJECT structure corresponding to SPC_PE_IMAGE_DATA_OBJID
+ */
 static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *plen)
 {
 	int phtype;
@@ -163,7 +176,7 @@ static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *ple
 		phtype = NID_sha1;
 		if (EVP_MD_size(ctx->options->md) > EVP_MD_size(EVP_sha1()))
 			phtype = NID_sha256;
-		link = get_page_hash_link(phtype, ctx->options->indata, ctx->pe);
+		link = get_page_hash_link(ctx, phtype);
 		if (!link)
 			return NULL; /* FAILED */
 		pid->file = link;
@@ -179,27 +192,12 @@ static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *ple
 	return dtype; /* OK */
 }
 
-static void pe_update_data_size(FILE_FORMAT_CTX *ctx)
-{
-	u_char buf[] = {
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-	};
-
-	if (ctx->options->cmd == CMD_SIGN || ctx->options->cmd == CMD_ADD
-		|| ctx->options->cmd == CMD_ATTACH) {
-		/* Update signature position and size */
-		(void)BIO_seek(ctx->sign->outdata, ctx->pe->header_size + 152 + ctx->pe->pe32plus * 16);
-		/* Previous file end = signature table start */
-		PUT_UINT32_LE(ctx->pe->fileend, buf);
-		BIO_write(ctx->sign->outdata, buf, 4);
-		PUT_UINT32_LE(ctx->sign->len + 8 + ctx->sign->padlen, buf);
-		BIO_write(ctx->sign->outdata, buf, 4);
-	}
-	if (ctx->options->cmd == CMD_SIGN || ctx->options->cmd == CMD_REMOVE
-		|| ctx->options->cmd == CMD_ADD || ctx->options->cmd == CMD_ATTACH)
-		pe_recalc_checksum(ctx->sign->outdata, ctx->pe);
-}
-
+/*
+ * Retrieve all PKCS#7 (include nested) signedData structures from PE file,
+ * allocate and return signature list
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] pointer to signature list
+ */
 static STACK_OF(SIGNATURE) *pe_signature_list_get(FILE_FORMAT_CTX *ctx)
 {
 	int peok = 1;
@@ -245,7 +243,8 @@ static STACK_OF(SIGNATURE) *pe_signature_list_get(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * [in] ctx: FILE_FORMAT_CTX structure
+ * Calculate message digest and page_hash, compare to values retrieved from PKCS#7 signedData
+ * [in] ctx: structure holds all input and output data
  * [in] signature: structure for authenticode and time stamping
  * [returns] 0 on error or 1 on success
  */
@@ -289,7 +288,7 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 		OPENSSL_free(ph);
 		return 0; /* FAILED */
 	}
-	if (phlen > 0 && !pe_print_page_hash(ctx->options->indata, ctx->pe, ph, phlen, phtype)) {
+	if (phlen > 0 && !pe_compare_page_hash(ctx, ph, phlen, phtype)) {
 		printf("Signature verification: failed\n\n");
 		OPENSSL_free(ph);
 		return 0; /* FAILED */
@@ -298,6 +297,11 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 	return 1; /* OK */
 }
 
+/*
+ * Extract existing signature to DER or PEM format
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] 1 on error or 0 on success
+ */
 static int pe_extract_signature(FILE_FORMAT_CTX *ctx)
 {
 	int ret = 0;
@@ -325,6 +329,11 @@ static int pe_extract_signature(FILE_FORMAT_CTX *ctx)
 	return ret;
 }
 
+/*
+ * Remove existing signature
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] 1 on error or 0 on success
+ */
 static int pe_remove_signature(FILE_FORMAT_CTX *ctx)
 {
 	if (ctx->pe->sigpos == 0) {
@@ -334,6 +343,11 @@ static int pe_remove_signature(FILE_FORMAT_CTX *ctx)
 	return pe_prepare_signature(ctx);
 }
 
+/*
+ * Obtain an existing signature or create a new one
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] 1 on error or 0 on success
+ */
 static int pe_prepare_signature(FILE_FORMAT_CTX *ctx)
 {
 	PKCS7 *sig = NULL;
@@ -358,14 +372,30 @@ static int pe_prepare_signature(FILE_FORMAT_CTX *ctx)
 		printf("Unable to modify file header\n");
 		return 1; /* FAILED */
 	}
-	/* Obtain an existing signature or create a new one */
-	if ((ctx->options->cmd == CMD_ATTACH) || (ctx->options->cmd == CMD_SIGN))
-		sig = get_pkcs7(ctx);
-
+	if (ctx->options->cmd == CMD_ATTACH) {
+		/* Obtain an existing signature */
+		sig = pe_get_sigfile(ctx);
+		if (!sig) {
+			printf("Unable to extract valid signature\n");
+			return 1; /* FAILED */
+		}
+	} else if (ctx->options->cmd == CMD_SIGN) {
+		/* Create a new signature */
+		sig = pe_create_signature(ctx);
+		if (!sig) {
+			printf("Creating a new signature failed\n");
+			return 1; /* FAILED */
+		}
+	}
 	ctx->sign->sig = sig;
 	return 0; /* OK */
 }
 
+/*
+ * Append signature to the outfile
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] 1 on error or 0 on success
+ */
 static int pe_append_signature(FILE_FORMAT_CTX *ctx)
 {
 	u_char *p = NULL;
@@ -411,12 +441,53 @@ static int pe_append_signature(FILE_FORMAT_CTX *ctx)
 	return 0; /* OK */
 }
 
+/*
+ * Update signature position and size, write back new checksum
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] none
+ */
+static void pe_update_data_size(FILE_FORMAT_CTX *ctx)
+{
+	uint32_t checksum;
+	u_char buf[] = {
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+	};
+	
+	if (ctx->options->cmd == CMD_VERIFY || ctx->options->cmd == CMD_EXTRACT) {
+		return;
+	}
+	if (ctx->options->cmd != CMD_REMOVE) {
+		/* Update signature position and size */
+		(void)BIO_seek(ctx->sign->outdata, ctx->pe->header_size + 152 + ctx->pe->pe32plus * 16);
+		/* Previous file end = signature table start */
+		PUT_UINT32_LE(ctx->pe->fileend, buf);
+		BIO_write(ctx->sign->outdata, buf, 4);
+		PUT_UINT32_LE(ctx->sign->len + 8 + ctx->sign->padlen, buf);
+		BIO_write(ctx->sign->outdata, buf, 4);
+	}
+	checksum = pe_calc_checksum(ctx->sign->outdata, ctx->pe);	
+	/* write back checksum */
+	(void)BIO_seek(ctx->sign->outdata, ctx->pe->header_size + 88);
+	PUT_UINT32_LE(checksum, buf);
+	BIO_write(ctx->sign->outdata, buf, 4);
+}
+
+/*
+ * Free up an entire hash BIO chain
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] none
+ */
 static void pe_ctx_free(FILE_FORMAT_CTX *ctx)
 {
 	BIO_free_all(ctx->sign->hash);
 	ctx->sign->hash = ctx->sign->outdata = NULL;
 }
 
+/*
+ * Deallocate a FILE_FORMAT_CTX structure, unmap indata file, unlink outfile
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] none
+ */
 static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 {
 	if (ctx->sign->hash) {
@@ -672,26 +743,6 @@ static PKCS7 *pe_create_signature(FILE_FORMAT_CTX *ctx)
 	}
 	return sig; /* OK */
 }
-/* Obtain an existing signature or create a new one */
-static PKCS7 *get_pkcs7(FILE_FORMAT_CTX *ctx)
-{
-	PKCS7 *sig = NULL;
-
-	if (ctx->options->cmd == CMD_ATTACH) {
-		sig = pe_get_sigfile(ctx);
-		if (!sig) {
-			printf("Unable to extract valid signature\n");
-			return NULL; /* FAILED */
-		}
-	} else if (ctx->options->cmd == CMD_SIGN) {
-		sig = pe_create_signature(ctx);
-		if (!sig) {
-			printf("Creating a new signature failed\n");
-			return NULL; /* FAILED */
-		}
-	}
-	return sig;
-}
 
 /*
  * A signed PE file is padded (with 0's) to 8 byte boundary.
@@ -722,18 +773,6 @@ static uint32_t pe_calc_checksum(BIO *bio, PE_HEADER *header)
 	checkSum += offset;
 	return checkSum;
 }
-
-static void pe_recalc_checksum(BIO *bio, PE_HEADER *header)
-{
-	uint32_t checksum = pe_calc_checksum(bio, header);
-	char buf[4];
-
-	/* write back checksum */
-	(void)BIO_seek(bio, header->header_size + 88);
-	PUT_UINT32_LE(checksum, buf);
-	BIO_write(bio, buf, 4);
-}
-
 
 /* Compute a checkSum value of the signed or unsigned PE file. */
 static uint32_t pe_calc_realchecksum(FILE_FORMAT_CTX *ctx)
@@ -820,7 +859,9 @@ static int pe_modify_header(FILE_FORMAT_CTX *ctx)
 	return 1; /* OK */
 }
 
-/* Page hash support. */
+/*
+ * Page hash support
+ */
 static int pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	u_char **ph, int *phlen, int *phtype)
 {
@@ -883,8 +924,8 @@ static int pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	return 1; /* OK */
 }
 
-static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
-	uint32_t pe32plus, uint32_t sigpos, int phtype, int *rphlen)
+
+static u_char *pe_calc_page_hash(FILE_FORMAT_CTX *ctx, int phtype, int *rphlen)
 {
 	uint16_t nsections, opthdr_size;
 	uint32_t alignment, pagesize, hdrsize;
@@ -898,7 +939,7 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 
 	/* NumberOfSections indicates the size of the section table,
 	 * which immediately follows the headers, can be up to 65535 under Vista and later */
-	nsections = GET_UINT16_LE(indata + header_size + 6);
+	nsections = GET_UINT16_LE(ctx->options->indata + ctx->pe->header_size + 6);
 	if (nsections == 0 || nsections > UINT16_MAX) {
 		printf("Corrupted number of sections: 0x%08X\n", nsections);
 		return NULL; /* FAILED */
@@ -906,7 +947,7 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	/* FileAlignment is the alignment factor (in bytes) that is used to align
 	 * the raw data of sections in the image file. The value should be a power
 	 * of 2 between 512 and 64 K, inclusive. The default is 512. */
-	alignment = GET_UINT32_LE(indata + header_size + 60);
+	alignment = GET_UINT32_LE(ctx->options->indata + ctx->pe->header_size + 60);
 	if (alignment < 512 || alignment > UINT16_MAX) {
 		printf("Corrupted file alignment factor: 0x%08X\n", alignment);
 		return NULL; /* FAILED */
@@ -916,28 +957,28 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	 * The default is the page size for the architecture.
 	 * The large page size is at most 4 MB.
 	 * https://devblogs.microsoft.com/oldnewthing/20210510-00/?p=105200 */
-	pagesize = GET_UINT32_LE(indata + header_size + 56);
+	pagesize = GET_UINT32_LE(ctx->options->indata + ctx->pe->header_size + 56);
 	if (pagesize == 0 || pagesize < alignment || pagesize > 4194304) {
 		printf("Corrupted page size: 0x%08X\n", pagesize);
 		return NULL; /* FAILED */
 	}
 	/* SizeOfHeaders is the combined size of an MS-DOS stub, PE header,
 	 * and section headers rounded up to a multiple of FileAlignment. */
-	hdrsize = GET_UINT32_LE(indata + header_size + 84);
-	if (hdrsize < header_size || hdrsize > UINT32_MAX) {
+	hdrsize = GET_UINT32_LE(ctx->options->indata + ctx->pe->header_size + 84);
+	if (hdrsize < ctx->pe->header_size || hdrsize > UINT32_MAX) {
 		printf("Corrupted headers size: 0x%08X\n", hdrsize);
 		return NULL; /* FAILED */
 	}
 	/* SizeOfOptionalHeader is the size of the optional header, which is
 	 * required for executable files, but for object files should be zero,
 	 * and can't be bigger than the file */
-	opthdr_size = GET_UINT16_LE(indata + header_size + 20);
-	if (opthdr_size == 0 || opthdr_size > sigpos) {
+	opthdr_size = GET_UINT16_LE(ctx->options->indata + ctx->pe->header_size + 20);
+	if (opthdr_size == 0 || opthdr_size > ctx->pe->fileend) {
 		printf("Corrupted optional header size: 0x%08X\n", opthdr_size);
 		return NULL; /* FAILED */
 	}
 	pphlen = 4 + EVP_MD_size(md);
-	phlen = pphlen * (3 + (int)nsections + (int)(sigpos / pagesize));
+	phlen = pphlen * (3 + (int)nsections + (int)(ctx->pe->fileend / pagesize));
 
 	bhash = BIO_new(BIO_f_md());
 	if (!BIO_set_md(bhash, md)) {
@@ -946,19 +987,19 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 		return NULL;  /* FAILED */
 	}
 	BIO_push(bhash, BIO_new(BIO_s_null()));
-	if (!BIO_write_ex(bhash, indata, header_size + 88, &written)
-		|| written != header_size + 88) {
+	if (!BIO_write_ex(bhash, ctx->options->indata, ctx->pe->header_size + 88, &written)
+		|| written != ctx->pe->header_size + 88) {
 		BIO_free_all(bhash);
 		return NULL;  /* FAILED */
 	}
-	if (!BIO_write_ex(bhash, indata + header_size + 92, 60 + pe32plus*16, &written)
-		|| written != 60 + pe32plus*16) {
+	if (!BIO_write_ex(bhash, ctx->options->indata + ctx->pe->header_size + 92, 60 + ctx->pe->pe32plus*16, &written)
+		|| written != 60 + ctx->pe->pe32plus*16) {
 		BIO_free_all(bhash);
 		return NULL;  /* FAILED */
 	}
-	if (!BIO_write_ex(bhash, indata + header_size + 160 + pe32plus*16,
-		hdrsize - (header_size + 160 + pe32plus*16), &written)
-		|| written != hdrsize - (header_size + 160 + pe32plus*16)) {
+	if (!BIO_write_ex(bhash, ctx->options->indata + ctx->pe->header_size + 160 + ctx->pe->pe32plus*16,
+		hdrsize - (ctx->pe->header_size + 160 + ctx->pe->pe32plus*16), &written)
+		|| written != hdrsize - (ctx->pe->header_size + 160 + ctx->pe->pe32plus*16)) {
 		BIO_free_all(bhash);
 		return NULL;  /* FAILED */
 	}
@@ -974,7 +1015,7 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	BIO_gets(bhash, (char*)res + 4, EVP_MD_size(md));
 	BIO_free_all(bhash);
 
-	sections = indata + header_size + 24 + opthdr_size;
+	sections = ctx->options->indata + ctx->pe->header_size + 24 + opthdr_size;
 	for (i=0; i<nsections; i++) {
 		/* Resource Table address and size */
 		rs = GET_UINT32_LE(sections + 16);
@@ -994,7 +1035,7 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 			}
 			BIO_push(bhash, BIO_new(BIO_s_null()));
 			if (rs - l < pagesize) {
-				if (!BIO_write_ex(bhash, indata + ro + l, rs - l, &written)
+				if (!BIO_write_ex(bhash, ctx->options->indata + ro + l, rs - l, &written)
 					|| written != rs - l) {
 					BIO_free_all(bhash);
 					OPENSSL_free(zeroes);
@@ -1009,7 +1050,7 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 					return NULL;  /* FAILED */
 				}
 			} else {
-				if (!BIO_write_ex(bhash, indata + ro + l, pagesize, &written)
+				if (!BIO_write_ex(bhash, ctx->options->indata + ro + l, pagesize, &written)
 					|| written != pagesize) {
 					BIO_free_all(bhash);
 					OPENSSL_free(zeroes);
@@ -1031,21 +1072,21 @@ static u_char *pe_calc_page_hash(char *indata, uint32_t header_size,
 	return res;
 }
 
-static int pe_print_page_hash(char *indata, PE_HEADER *header, u_char *ph, int phlen, int phtype)
+static int pe_compare_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype)
 {
 	int mdok, cphlen = 0;
 	u_char *cph;
 
 	printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
 	print_hash("Page hash            ", "...", ph, (phlen < 32) ? phlen : 32);
-	cph = pe_calc_page_hash(indata, header->header_size, header->pe32plus, header->sigpos, phtype, &cphlen);
+	cph = pe_calc_page_hash(ctx, phtype, &cphlen);
 	mdok = (phlen == cphlen) && !memcmp(ph, cph, (size_t)phlen);
 	print_hash("Calculated page hash ", mdok ? "...\n" : "... MISMATCH!!!\n", cph, (cphlen < 32) ? cphlen : 32);
 	OPENSSL_free(cph);
 	return mdok;
 }
 
-static SpcLink *get_page_hash_link(int phtype, char *indata, PE_HEADER *header)
+static SpcLink *get_page_hash_link(FILE_FORMAT_CTX *ctx, int phtype)
 {
 	u_char *ph, *p, *tmp;
 	int l, phlen;
@@ -1056,8 +1097,7 @@ static SpcLink *get_page_hash_link(int phtype, char *indata, PE_HEADER *header)
 	SpcLink *link;
 	STACK_OF(ASN1_TYPE) *oset, *aset;
 
-	ph = pe_calc_page_hash(indata, header->header_size, header->pe32plus,
-			header->fileend, phtype, &phlen);
+	ph = pe_calc_page_hash(ctx, phtype, &phlen);
 	if (!ph) {
 		printf("Failed to calculate page hash\n");
 		return NULL; /* FAILED */

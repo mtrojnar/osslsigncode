@@ -238,13 +238,13 @@ FILE_FORMAT file_format_msi = {
 
 /* Prototypes */
 static int msi_verify_header(char *indata, uint32_t filesize, MSI_HEADER *header);
+static PKCS7 *msi_get_sigfile(FILE_FORMAT_CTX *ctx);
+static PKCS7 *msi_create_signature(FILE_FORMAT_CTX *ctx);
 static PKCS7 *msi_extract_pkcs7(FILE_FORMAT_CTX *ctx, MSI_ENTRY *ds, char **p, uint32_t len);
-static PKCS7 *get_pkcs7(FILE_FORMAT_CTX *ctx);
 static int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint32_t len_msi,
 		u_char *p_msiex, uint32_t len_msiex, BIO *outdata);
 static MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse);
 static int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer, uint32_t len);
-//static int msi_verify_pkcs7(FILE_FORMAT_CTX *ctx, SIGNATURE *signature, char *exdata, int exlen);
 static int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen);
 static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse);
@@ -253,7 +253,15 @@ static void msi_file_free(MSI_FILE *msi);
 static void msi_dirent_free(MSI_DIRENT *dirent);
 static int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root);
 
+/*
+ * FILE_FORMAT method definitions
+ */
 
+/*
+ * Allocate and return a MSI file format context.
+ * [in, out] options: structure holds the input data
+ * [returns] pointer to MSI file format context
+ */
 static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options)
 {
 	FILE_FORMAT_CTX *ctx;
@@ -319,6 +327,13 @@ static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options)
 	return ctx;
 }
 
+/*
+ * Allocate and return SpcSipInfo object.
+ * [in] ctx: structure holds all input and output data (unused)
+ * [out] p: SpcSipInfo data
+ * [out] plen: SpcSipInfo data length
+ * [returns] pointer to ASN1_OBJECT structure corresponding to SPC_SIPINFO_OBJID
+ */
 static ASN1_OBJECT *msi_spc_sip_info(FILE_FORMAT_CTX *ctx, u_char **p, int *plen)
 {
 	const u_char msistr[] = {
@@ -347,44 +362,12 @@ static ASN1_OBJECT *msi_spc_sip_info(FILE_FORMAT_CTX *ctx, u_char **p, int *plen
 	return dtype; /* OK */
 }
 
-static int msi_append_signature(FILE_FORMAT_CTX *ctx)
-{
-	u_char *p = NULL;
-	PKCS7 *outsig = NULL;
-
-	if (ctx->options->nest) {
-		if (ctx->sign->cursig == NULL) {
-			printf("Internal error: No 'cursig' was extracted\n");
-			return 1; /* FAILED */
-		}
-		if (set_nested_signature(ctx) == 0) {
-			printf("Unable to append the nested signature to the current signature\n");
-			return 1; /* FAILED */
-		}
-		outsig = ctx->sign->cursig;
-	} else {
-		outsig = ctx->sign->sig;
-	}
-	/* Append signature to the outfile */
-	if (((ctx->sign->len = i2d_PKCS7(outsig, NULL)) <= 0)
-		|| (p = OPENSSL_malloc((size_t)ctx->sign->len)) == NULL) {
-		printf("i2d_PKCS memory allocation failed: %d\n", ctx->sign->len);
-		return 1; /* FAILED */
-	}
-	i2d_PKCS7(outsig, &p);
-	p -= ctx->sign->len;
-	ctx->sign->padlen = (8 - ctx->sign->len % 8) % 8;
-
-	if (!msi_file_write(ctx->msi->msi, ctx->msi->dirent, p, (uint32_t)ctx->sign->len,
-		ctx->msi->p_msiex, ctx->msi->len_msiex, ctx->sign->outdata)) {
-		printf("Saving the msi file failed\n");
-		OPENSSL_free(p);
-		return 1; /* FAILED */
-	}
-	OPENSSL_free(p);
-	return 0; /* OK */
-}
-
+/*
+ * Retrieve all PKCS#7 (include nested) signedData structures from MSI file,
+ * allocate and return signature list
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] pointer to signature list
+ */
 static STACK_OF(SIGNATURE) *msi_signature_list_get(FILE_FORMAT_CTX *ctx)
 {
 	char *indata = NULL;
@@ -447,9 +430,10 @@ static STACK_OF(SIGNATURE) *msi_signature_list_get(FILE_FORMAT_CTX *ctx)
 	return signatures;
 }
 
-
 /*
- * [in] ctx: FILE_FORMAT_CTX structure
+ * Calculate DigitalSignature and MsiDigitalSignatureEx, compare to values
+ * retrieved from PKCS#7 signedData
+ * [in] ctx: structure holds all input and output data
  * [in] signature: structure for authenticode and time stamping
  * [returns] 0 on error or 1 on success
  */
@@ -535,7 +519,11 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 	return 1; /* OK */
 }
 
-
+/*
+ * Extract existing signature to DER or PEM format
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] 1 on error or 0 on success
+ */
 static int msi_extract_signature(FILE_FORMAT_CTX *ctx)
 {
 	int ret = 0;
@@ -559,11 +547,14 @@ static int msi_extract_signature(FILE_FORMAT_CTX *ctx)
 	sig = msi_extract_pkcs7(ctx, ds, &p, len);
 	if (!sig) {
 		printf("Unable to extract existing signature\n");
+		OPENSSL_free(p);
 		return 1; /* FAILED */
 	}
 	if (ctx->options->output_pkcs7) {
+		/* PEM format */
 		ret = !PEM_write_bio_PKCS7(ctx->sign->outdata, sig);
 	} else {
+		/* default DER format */
 		if (!BIO_write_ex(ctx->sign->outdata, p, len, &written) || written != len)
 			ret = 1; /* FAILED */
 	}
@@ -572,6 +563,11 @@ static int msi_extract_signature(FILE_FORMAT_CTX *ctx)
 	return ret;
 }
 
+/*
+ * Remove existing signature
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] 1 on error or 0 on success
+ */
 static int msi_remove_signature(FILE_FORMAT_CTX *ctx)
 {
 	if (!msi_dirent_delete(ctx->msi->dirent, digital_signature_ex,
@@ -590,6 +586,11 @@ static int msi_remove_signature(FILE_FORMAT_CTX *ctx)
 	return 0; /* OK */
 }
 
+/*
+ * Obtain an existing signature or create a new one
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] 1 on error or 0 on success
+ */
 static int msi_prepare_signature(FILE_FORMAT_CTX *ctx)
 {
 	PKCS7 *sig = NULL;
@@ -604,7 +605,6 @@ static int msi_prepare_signature(FILE_FORMAT_CTX *ctx)
 		printf("Unable to msi_handle_dir()\n");
 		return 1; /* FAILED */
 	}
-
 	/* Obtain a current signature from previously-signed file */
 	if ((ctx->options->cmd == CMD_SIGN && ctx->options->nest)
 		|| (ctx->options->cmd == CMD_ATTACH && ctx->options->nest)
@@ -633,14 +633,73 @@ static int msi_prepare_signature(FILE_FORMAT_CTX *ctx)
 		if (ctx->options->cmd == CMD_ADD)
 			sig = ctx->sign->cursig;
 	}
-	/* Obtain an existing signature or create a new one */
-	if ((ctx->options->cmd == CMD_ATTACH) || (ctx->options->cmd == CMD_SIGN))
-		sig = get_pkcs7(ctx);
-
+	if (ctx->options->cmd == CMD_ATTACH) {
+		/* Obtain an existing signature */
+		sig = msi_get_sigfile(ctx);
+		if (!sig) {
+			printf("Unable to extract valid signature\n");
+			return 1; /* FAILED */
+		}
+	} else if (ctx->options->cmd == CMD_SIGN) {
+		/* Create a new signature */
+		sig = msi_create_signature(ctx);
+		if (!sig) {
+			printf("Creating a new signature failed\n");
+			return 1; /* FAILED */
+		}
+	}
 	ctx->sign->sig = sig;
 	return 0; /* OK */
 }
 
+/*
+ * Append signature to the outfile
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] 1 on error or 0 on success
+ */
+static int msi_append_signature(FILE_FORMAT_CTX *ctx)
+{
+	u_char *p = NULL;
+	PKCS7 *outsig = NULL;
+
+	if (ctx->options->nest) {
+		if (ctx->sign->cursig == NULL) {
+			printf("Internal error: No 'cursig' was extracted\n");
+			return 1; /* FAILED */
+		}
+		if (set_nested_signature(ctx) == 0) {
+			printf("Unable to append the nested signature to the current signature\n");
+			return 1; /* FAILED */
+		}
+		outsig = ctx->sign->cursig;
+	} else {
+		outsig = ctx->sign->sig;
+	}
+	/* Append signature to the outfile */
+	if (((ctx->sign->len = i2d_PKCS7(outsig, NULL)) <= 0)
+		|| (p = OPENSSL_malloc((size_t)ctx->sign->len)) == NULL) {
+		printf("i2d_PKCS memory allocation failed: %d\n", ctx->sign->len);
+		return 1; /* FAILED */
+	}
+	i2d_PKCS7(outsig, &p);
+	p -= ctx->sign->len;
+	ctx->sign->padlen = (8 - ctx->sign->len % 8) % 8;
+
+	if (!msi_file_write(ctx->msi->msi, ctx->msi->dirent, p, (uint32_t)ctx->sign->len,
+		ctx->msi->p_msiex, ctx->msi->len_msiex, ctx->sign->outdata)) {
+		printf("Saving the msi file failed\n");
+		OPENSSL_free(p);
+		return 1; /* FAILED */
+	}
+	OPENSSL_free(p);
+	return 0; /* OK */
+}
+
+/*
+ * Deallocate MSI format specific structures, free up an entire outdata BIO chain
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] none
+ */
 static void msi_ctx_free(FILE_FORMAT_CTX *ctx)
 {
 	msi_file_free(ctx->msi->msi);
@@ -651,6 +710,11 @@ static void msi_ctx_free(FILE_FORMAT_CTX *ctx)
 	ctx->sign->outdata = NULL;
 }
 
+/*
+ * Deallocate a FILE_FORMAT_CTX structure, unmap indata file, unlink outfile
+ * [in, out] ctx: structure holds all input and output data
+ * [returns] none
+ */
 static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 {
 	if (ctx->sign->outdata) {
@@ -822,27 +886,6 @@ static PKCS7 *msi_create_signature(FILE_FORMAT_CTX *ctx)
 		return NULL; /* FAILED */
 	}
 	return sig; /* OK */
-}
-
-/* Obtain an existing signature or create a new one */
-static PKCS7 *get_pkcs7(FILE_FORMAT_CTX *ctx)
-{
-	PKCS7 *sig = NULL;
-
-	if (ctx->options->cmd == CMD_ATTACH) {
-		sig = msi_get_sigfile(ctx);
-		if (!sig) {
-			printf("Unable to extract valid signature\n");
-			return NULL; /* FAILED */
-		}
-	} else if (ctx->options->cmd == CMD_SIGN) {
-		sig = msi_create_signature(ctx);
-		if (!sig) {
-			printf("Creating a new signature failed\n");
-			return NULL; /* FAILED */
-		}
-	}
-	return sig;
 }
 
 static PKCS7 *msi_extract_pkcs7(FILE_FORMAT_CTX *ctx, MSI_ENTRY *ds, char **p, uint32_t len)
