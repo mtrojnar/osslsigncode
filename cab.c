@@ -32,7 +32,7 @@
 #define FLAG_RESERVE_PRESENT 0x0004
 
 
-struct cab_header_st {
+struct cab_ctx_st {
 	uint32_t header_size;
 	uint32_t sigpos;
 	uint32_t siglen;
@@ -69,8 +69,8 @@ FILE_FORMAT file_format_cab = {
 
 /* Prototypes */
 static int cab_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx);
-static CAB_HEADER *cab_header_get(char *indata, uint32_t filesize);
-static PKCS7 *cab_pkcs7_get_file(char *indata, CAB_HEADER *header);
+static CAB_CTX *cab_ctx_get(char *indata, uint32_t filesize);
+static PKCS7 *cab_pkcs7_get_file(char *indata, CAB_CTX *cab_ctx);
 static PKCS7 *cab_pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
 static PKCS7 *cab_pkcs7_create(FILE_FORMAT_CTX *ctx);
 static void cab_add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp);
@@ -90,7 +90,7 @@ static int cab_add_header(FILE_FORMAT_CTX *ctx);
 static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options)
 {
 	FILE_FORMAT_CTX *ctx;
-	CAB_HEADER *header;
+	CAB_CTX *cab_ctx;
 	SIGN_DATA *sign;
 	BIO *hash, *outdata = NULL;
 	uint32_t filesize;
@@ -112,8 +112,8 @@ static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options)
 		unmap_file(options->infile, filesize);
 		return NULL; /* FAILED */
 	}
-	header = cab_header_get(options->indata, filesize);
-	if (!header) {
+	cab_ctx = cab_ctx_get(options->indata, filesize);
+	if (!cab_ctx) {
 		unmap_file(options->infile, filesize);
 		return NULL; /* FAILED */
 	}
@@ -122,7 +122,7 @@ static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options)
 		printf("Unable to set the message digest of BIO\n");
 		unmap_file(options->infile, filesize);
 		BIO_free_all(hash);
-		OPENSSL_free(header);
+		OPENSSL_free(cab_ctx);
 		return NULL; /* FAILED */
 	}
 	if (options->cmd != CMD_VERIFY) {
@@ -132,7 +132,7 @@ static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options)
 			printf("Failed to create file: %s\n", options->outfile);
 			unmap_file(options->infile, filesize);
 			BIO_free_all(hash);
-			OPENSSL_free(header);
+			OPENSSL_free(cab_ctx);
 			return NULL; /* FAILED */
 		}
 		BIO_push(hash, outdata);
@@ -147,7 +147,7 @@ static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options)
 	ctx->format = &file_format_cab;
 	ctx->options = options;
 	ctx->sign = sign;
-	ctx->cab = header;
+	ctx->cab_ctx = cab_ctx;
 	return ctx;
 }
 
@@ -190,16 +190,16 @@ static STACK_OF(SIGNATURE) *cab_signature_list_get(FILE_FORMAT_CTX *ctx)
 		printf("Init error\n\n");
 		return NULL; /* FAILED */
 	}
-	if (ctx->cab->header_size != 20) {
+	if (ctx->cab_ctx->header_size != 20) {
 		printf("No signature found\n\n");
 		return NULL; /* FAILED */
 	}
-	if (ctx->cab->sigpos == 0 || ctx->cab->siglen == 0
-		|| ctx->cab->sigpos > ctx->cab->fileend) {
+	if (ctx->cab_ctx->sigpos == 0 || ctx->cab_ctx->siglen == 0
+		|| ctx->cab_ctx->sigpos > ctx->cab_ctx->fileend) {
 		printf("No signature found\n\n");
 		return NULL; /* FAILED */
 	}
-	p7 = cab_pkcs7_get_file(ctx->options->indata, ctx->cab);
+	p7 = cab_pkcs7_get_file(ctx->options->indata, ctx->cab_ctx);
 	if (!p7) {
 		printf("Failed to extract PKCS7 data\n\n");
 		return NULL; /* FAILED */
@@ -265,7 +265,7 @@ static int cab_extract_signature(FILE_FORMAT_CTX *ctx)
 
 	(void)BIO_reset(ctx->sign->outdata);
 	if (ctx->options->output_pkcs7) {
-		sig = cab_pkcs7_get_file(ctx->options->indata, ctx->cab);
+		sig = cab_pkcs7_get_file(ctx->options->indata, ctx->cab_ctx);
 		if (!sig) {
 			printf("Unable to extract existing signature\n");
 			return 1; /* FAILED */
@@ -274,8 +274,8 @@ static int cab_extract_signature(FILE_FORMAT_CTX *ctx)
 		PKCS7_free(sig);
 	} else
 		if (!BIO_write_ex(ctx->sign->outdata,
-			ctx->options->indata + ctx->cab->sigpos,
-			ctx->cab->siglen, &written) || written != ctx->cab->siglen)
+			ctx->options->indata + ctx->cab_ctx->sigpos,
+			ctx->cab_ctx->siglen, &written) || written != ctx->cab_ctx->siglen)
 			ret = 1; /* FAILED */
 	return ret;
 }
@@ -343,7 +343,7 @@ static int cab_remove_signature(FILE_FORMAT_CTX *ctx)
 	}
 	OPENSSL_free(buf);
 	/* Write what's left - the compressed data bytes */
-	len = ctx->cab->fileend - ctx->cab->siglen - i;
+	len = ctx->cab_ctx->fileend - ctx->cab_ctx->siglen - i;
 	while (len > 0) {
 		if (!BIO_write_ex(ctx->sign->outdata, ctx->options->indata + i, len, &written))
 			return 1; /* FAILED */
@@ -366,7 +366,7 @@ static int cab_prepare_signature(FILE_FORMAT_CTX *ctx)
 	if ((ctx->options->cmd == CMD_SIGN && ctx->options->nest)
 		|| (ctx->options->cmd == CMD_ATTACH && ctx->options->nest)
 		|| ctx->options->cmd == CMD_ADD) {
-		ctx->sign->cursig = cab_pkcs7_get_file(ctx->options->indata, ctx->cab);
+		ctx->sign->cursig = cab_pkcs7_get_file(ctx->options->indata, ctx->cab_ctx);
 		if (!ctx->sign->cursig) {
 			printf("Unable to extract existing signature\n");
 			return 1; /* FAILED */
@@ -374,7 +374,7 @@ static int cab_prepare_signature(FILE_FORMAT_CTX *ctx)
 		if (ctx->options->cmd == CMD_ADD)
 			sig = ctx->sign->cursig;
 	}
-	if (ctx->cab->header_size == 20) {
+	if (ctx->cab_ctx->header_size == 20) {
 		/* Strip current signature and modify header */
 		if (!cab_modify_header(ctx))
 			return 1; /* FAILED */
@@ -495,12 +495,12 @@ static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 #endif /* WIN32 */
 		}
 	}
-	unmap_file(ctx->options->indata, ctx->cab->fileend);
+	unmap_file(ctx->options->indata, ctx->cab_ctx->fileend);
 	PKCS7_free(ctx->sign->sig);
 	if (ctx->options->cmd != CMD_ADD)
 		PKCS7_free(ctx->sign->cursig);
 	OPENSSL_free(ctx->sign);
-	OPENSSL_free(ctx->cab);
+	OPENSSL_free(ctx->cab_ctx);
 	OPENSSL_free(ctx);
 }
 
@@ -530,7 +530,7 @@ static int cab_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx)
 	/* u1 signature[4] 4643534D MSCF: 0-3 */
 	BIO_write(bhash, ctx->options->indata, 4);
 	/* u4 reserved1 00000000: 4-7 skipped */
-	if (ctx->cab->sigpos) {
+	if (ctx->cab_ctx->sigpos) {
 		uint16_t nfolders, flags;
 		
 		/*
@@ -569,7 +569,7 @@ static int cab_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx)
 		/* u22 abReserve: 56-59 */
 		BIO_write(bhash, ctx->options->indata + 56, 4);
 		idx = 60;
-		fileend = ctx->cab->sigpos;
+		fileend = ctx->cab_ctx->sigpos;
 		/* TODO */
 		if (flags & FLAG_PREV_CABINET) {
 			uint8_t byte;
@@ -619,7 +619,7 @@ static int cab_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx)
 		/* TESTME with CAT file */
 		/* read what's left of the unsigned CAB file */
 		idx = 8;
-		fileend = ctx->cab->fileend;
+		fileend = ctx->cab_ctx->fileend;
 	}
 	/* (variable) ab - the compressed data bytes */
 	if (!bio_hash_data(bhash, ctx->options->indata, idx, fileend)) {
@@ -638,9 +638,9 @@ static int cab_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx)
  * [in] filesize: size of CAB file
  * [returns] pointer to CAB format specific structures
  */
-static CAB_HEADER *cab_header_get(char *indata, uint32_t filesize)
+static CAB_CTX *cab_ctx_get(char *indata, uint32_t filesize)
 {
-	CAB_HEADER *header;
+	CAB_CTX *cab_ctx;
 	uint32_t reserved, header_size = 0, sigpos = 0, siglen = 0;
 	uint16_t flags;
 
@@ -697,29 +697,29 @@ static CAB_HEADER *cab_header_get(char *indata, uint32_t filesize)
 			return NULL; /* FAILED */
 		}
 	}
-	header = OPENSSL_zalloc(sizeof(CAB_HEADER));
-	header->header_size = header_size;
-	header->sigpos = sigpos;
-	header->siglen = siglen;
-	header->fileend = filesize;
-	header->flags = flags;
-	return header; /* OK */
+	cab_ctx = OPENSSL_zalloc(sizeof(CAB_CTX));
+	cab_ctx->header_size = header_size;
+	cab_ctx->sigpos = sigpos;
+	cab_ctx->siglen = siglen;
+	cab_ctx->fileend = filesize;
+	cab_ctx->flags = flags;
+	return cab_ctx; /* OK */
 }
 
 /*
  * Retrieve a decoded PKCS#7 struct corresponding to the existing signature
  * stored in the CAB file
  * [in] indata: mapped CAB file
- * [in] header: CAB format specific structures
+ * [in] cab_ctx: CAB format specific structures
  * [returns] pointer to PKCS#7 structure
  */
-static PKCS7 *cab_pkcs7_get_file(char *indata, CAB_HEADER *header)
+static PKCS7 *cab_pkcs7_get_file(char *indata, CAB_CTX *cab_ctx)
 {
 	PKCS7 *p7 = NULL;
 	const u_char *blob;
 
-	blob = (u_char *)indata + header->sigpos;
-	p7 = d2i_PKCS7(NULL, &blob, header->siglen);
+	blob = (u_char *)indata + cab_ctx->sigpos;
+	p7 = d2i_PKCS7(NULL, &blob, cab_ctx->siglen);
 	return p7;
 }
 
@@ -735,7 +735,7 @@ static PKCS7 *cab_pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
 	PKCS7 *sig = NULL;
 	uint32_t sigfilesize;
 	char *insigdata;
-	CAB_HEADER header;
+	CAB_CTX cab_ctx;
 	BIO *sigbio;
 	const char pemhdr[] = "-----BEGIN PKCS7-----";
 
@@ -753,12 +753,12 @@ static PKCS7 *cab_pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
 		sig = PEM_read_bio_PKCS7(sigbio, NULL, NULL, NULL);
 		BIO_free_all(sigbio);
 	} else {
-		/* reset header */
-		memset(&header, 0, sizeof(CAB_HEADER));
-		header.fileend = sigfilesize;
-		header.siglen = sigfilesize;
-		header.sigpos = 0;
-		sig = cab_pkcs7_get_file(insigdata, &header);
+		/* reset cab_ctx */
+		memset(&cab_ctx, 0, sizeof(CAB_CTX));
+		cab_ctx.fileend = sigfilesize;
+		cab_ctx.siglen = sigfilesize;
+		cab_ctx.sigpos = 0;
+		sig = cab_pkcs7_get_file(insigdata, &cab_ctx);
 	}
 	unmap_file(insigdata, sigfilesize);
 	return sig; /* OK */
@@ -972,7 +972,7 @@ static int cab_modify_header(FILE_FORMAT_CTX *ctx)
 		nfolders--;
 	}
 	/* Write what's left - the compressed data bytes */
-	len = ctx->cab->sigpos - i;
+	len = ctx->cab_ctx->sigpos - i;
 	while (len > 0) {
 		if (!BIO_write_ex(ctx->sign->hash, ctx->options->indata + i, len, &written))
 			return 0; /* FAILED */
@@ -1046,7 +1046,7 @@ static int cab_add_header(FILE_FORMAT_CTX *ctx)
 	}
 	OPENSSL_free(buf);
 	/* Write what's left - the compressed data bytes */
-	len = ctx->cab->fileend - i;
+	len = ctx->cab_ctx->fileend - i;
 	while (len > 0) {
 		if (!BIO_write_ex(ctx->sign->hash, ctx->options->indata + i, len, &written))
 			return 0; /* FAILED */

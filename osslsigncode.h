@@ -447,10 +447,10 @@ typedef struct {
 DECLARE_ASN1_FUNCTIONS(TimeStampToken)
 
 typedef struct file_format_st FILE_FORMAT;
-typedef struct msi_header_st MSI_HEADER;
-typedef struct pe_header_st PE_HEADER;
-typedef struct cab_header_st CAB_HEADER;
-typedef struct cat_header_st CAT_HEADER;
+typedef struct msi_ctx_st MSI_CTX;
+typedef struct pe_ctx_st PE_CTX;
+typedef struct cab_ctx_st CAB_CTX;
+typedef struct cat_ctx_st CAT_CTX;
 
 typedef struct {
 	BIO *outdata;
@@ -466,10 +466,10 @@ typedef struct {
 	GLOBAL_OPTIONS *options;
 	SIGN_DATA *sign;
     union {
-        MSI_HEADER *msi;
-        PE_HEADER *pe;
-        CAB_HEADER *cab;
-        CAT_HEADER *cat;
+        MSI_CTX *msi_ctx;
+        PE_CTX *pe_ctx;
+        CAB_CTX *cab_ctx;
+        CAT_CTX *cat_ctx;
     };
 } FILE_FORMAT_CTX;
 
