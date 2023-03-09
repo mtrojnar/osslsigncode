@@ -237,10 +237,13 @@ FILE_FORMAT file_format_msi = {
 };
 
 /* Prototypes */
-static int msi_verify_header(char *indata, uint32_t filesize, MSI_HEADER *header);
-static PKCS7 *msi_get_sigfile(FILE_FORMAT_CTX *ctx);
-static PKCS7 *msi_create_signature(FILE_FORMAT_CTX *ctx);
+static int msi_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx);
+static MSI_HEADER *msi_header_get(char *indata, uint32_t filesize);
+static PKCS7 *msi_pkcs7_get_file(char *indata, MSI_HEADER *header);
+static PKCS7 *msi_pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
+static PKCS7 *msi_pkcs7_create(FILE_FORMAT_CTX *ctx);
 static PKCS7 *msi_extract_pkcs7(FILE_FORMAT_CTX *ctx, MSI_ENTRY *ds, char **p, uint32_t len);
+static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent);
 static int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint32_t len_msi,
 		u_char *p_msiex, uint32_t len_msiex, BIO *outdata);
 static MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse);
@@ -249,7 +252,10 @@ static int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t na
 static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse);
 static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root);
+static MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi);
 static void msi_file_free(MSI_FILE *msi);
+static MSI_FILE *msi_file_new(char *buffer, uint32_t len);
+static int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT **ret);
 static void msi_dirent_free(MSI_DIRENT *dirent);
 static int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root);
 
@@ -287,10 +293,9 @@ static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options)
 		unmap_file(options->infile, filesize);
 		return NULL; /* FAILED */
 	}
-	header = OPENSSL_zalloc(sizeof(MSI_HEADER));
-	if (!msi_verify_header(options->indata, filesize, header)) {
+	header = msi_header_get(options->indata, filesize);
+	if (!header) {
 		unmap_file(options->infile, filesize);
-		OPENSSL_free(header);
 		return NULL; /* FAILED */
 	}
 	hash = BIO_new(BIO_f_md());
@@ -363,7 +368,7 @@ static ASN1_OBJECT *msi_spc_sip_info(FILE_FORMAT_CTX *ctx, u_char **p, int *plen
 }
 
 /*
- * Retrieve all PKCS#7 (include nested) signedData structures from MSI file,
+ * Retrieve all PKCS#7 (include nested) structures from MSI file,
  * allocate and return signature list
  * [in, out] ctx: structure holds all input and output data
  * [returns] pointer to signature list
@@ -634,15 +639,15 @@ static int msi_prepare_signature(FILE_FORMAT_CTX *ctx)
 			sig = ctx->sign->cursig;
 	}
 	if (ctx->options->cmd == CMD_ATTACH) {
-		/* Obtain an existing signature */
-		sig = msi_get_sigfile(ctx);
+		/* Obtain an existing PKCS#7 signature */
+		sig = msi_pkcs7_get_sigfile(ctx);
 		if (!sig) {
 			printf("Unable to extract valid signature\n");
 			return 1; /* FAILED */
 		}
 	} else if (ctx->options->cmd == CMD_SIGN) {
-		/* Create a new signature */
-		sig = msi_create_signature(ctx);
+		/* Create a new PKCS#7 signature */
+		sig = msi_pkcs7_create(ctx);
 		if (!sig) {
 			printf("Creating a new signature failed\n");
 			return 1; /* FAILED */
@@ -741,8 +746,14 @@ static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 /*
  * MSI helper functions
  */
-/* Compute a simple sha1/sha256 message digest of the MSI file for use with CAT file */
-static int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, MSI_HEADER *header)
+
+/* Compute a simple sha1/sha256 message digest of the MSI file for use with a catalog file
+ * [out] mdbuf: message digest
+ * [in] mdtype: message digest algorithm type
+ * [in] ctx: structure holds all input and output data
+ * [returns] 0 on error or 1 on success
+ */
+static int msi_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx)
 {
 	const EVP_MD *md = EVP_get_digestbynid(mdtype);
 	BIO *bhash = BIO_new(BIO_f_md());
@@ -753,7 +764,7 @@ static int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, MSI_HEADER *
 		return 0;  /* FAILED */
 	}
 	BIO_push(bhash, BIO_new(BIO_s_null()));
-	if (!bio_hash_data(bhash, indata, 0, header->fileend)) {
+	if (!bio_hash_data(bhash, ctx->options->indata, 0, ctx->msi->fileend)) {
 		printf("Unable to calculate digest\n");
 		BIO_free_all(bhash);
 		return 0;  /* FAILED */
@@ -763,7 +774,49 @@ static int msi_calc_digest(char *indata, int mdtype, u_char *mdbuf, MSI_HEADER *
 	return 1; /* OK */
 }
 
-static PKCS7 *msi_extract_existing_pkcs7(char *indata, MSI_HEADER *header)
+/*
+ * Verify mapped MSI file and create MSI format specific structures
+ * [in] indata: mapped MSI file
+ * [in] filesize: size of MSI file
+ * [returns] pointer to MSI format specific structures
+ */
+static MSI_HEADER *msi_header_get(char *indata, uint32_t filesize)
+{
+	MSI_ENTRY *root;
+	MSI_FILE *msi;
+	MSI_DIRENT *dirent;
+	MSI_HEADER *header;
+
+	msi = msi_file_new(indata, filesize);
+	if (!msi) {
+		printf("Failed to parse MSI_FILE struct\n");
+		return NULL; /* FAILED */
+	}
+	root = msi_root_entry_get(msi);
+	if (!root) {
+		printf("Failed to get file entry\n");
+		msi_file_free(msi);
+		return NULL; /* FAILED */
+	}
+	if (!msi_dirent_new(msi, root, NULL, &(dirent))) {
+		printf("Failed to parse MSI_DIRENT struct\n");
+		msi_file_free(msi);
+		return NULL; /* FAILED */
+	}
+	header = OPENSSL_zalloc(sizeof(MSI_HEADER));
+	header->msi = msi;
+	header->dirent = dirent;
+	return header; /* OK */
+}
+
+/*
+ * Retrieve and verify a decoded PKCS#7 struct corresponding
+ * to the existing signature of the MSI file
+ * [in] indata: mapped MSI file
+ * [in] header: MSI format specific structures
+ * [returns] pointer to PKCS#7 structure
+ */
+static PKCS7 *msi_pkcs7_get_file(char *indata, MSI_HEADER *header)
 {
 	PKCS7 *p7 = NULL;
 	const u_char *blob;
@@ -773,7 +826,14 @@ static PKCS7 *msi_extract_existing_pkcs7(char *indata, MSI_HEADER *header)
 	return p7;
 }
 
-static PKCS7 *msi_get_sigfile(FILE_FORMAT_CTX *ctx)
+/*
+ * Retrieve a decoded PKCS#7 struct corresponding to the signature
+ * stored in the "sigin" file
+ * CMD_ATTACH command specific
+ * [in] ctx: structure holds all input and output data
+ * [returns] pointer to PKCS#7 structure
+ */
+static PKCS7 *msi_pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
 {
 	PKCS7 *sig = NULL;
 	uint32_t sigfilesize;
@@ -801,13 +861,18 @@ static PKCS7 *msi_get_sigfile(FILE_FORMAT_CTX *ctx)
 		header.fileend = sigfilesize;
 		header.siglen = sigfilesize;
 		header.sigpos = 0;
-		sig = msi_extract_existing_pkcs7(insigdata, &header);
+		sig = msi_pkcs7_get_file(insigdata, &header);
 	}
 	unmap_file(insigdata, sigfilesize);
 	return sig; /* OK */
 }
 
-static PKCS7 *msi_create_signature(FILE_FORMAT_CTX *ctx)
+/*
+ * Allocate, set type, add content and return a new PKCS#7 signature
+ * [in] ctx: structure holds all input and output data
+ * [returns] pointer to PKCS#7 structure
+ */
+static PKCS7 *msi_pkcs7_create(FILE_FORMAT_CTX *ctx)
 {
 	int i, signer = -1;
 	PKCS7 *sig;
@@ -905,8 +970,6 @@ static PKCS7 *msi_extract_pkcs7(FILE_FORMAT_CTX *ctx, MSI_ENTRY *ds, char **p, u
 	}
 	return p7;
 }
-
-static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent);
 
 /* Get absolute address from sector and offset */
 static const u_char *sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset)
@@ -1445,27 +1508,6 @@ static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent)
 		return 0; /* FAILED */
 	}
 
-	return 1; /* OK */
-}
-
-static int msi_verify_header(char *indata, uint32_t filesize, MSI_HEADER *header)
-{
-	MSI_ENTRY *root;
-
-	header->msi = msi_file_new(indata, filesize);
-	if (!header->msi) {
-		printf("Failed to parse MSI_FILE struct\n");
-		return 0; /* FAILED */
-	}
-	root = msi_root_entry_get(header->msi);
-	if (!root) {
-		printf("Failed to get file entry\n");
-		return 0; /* FAILED */
-	}
-	if (!msi_dirent_new(header->msi, root, NULL, &(header->dirent))) {
-		printf("Failed to parse MSI_DIRENT struct\n");
-		return 0; /* FAILED */
-	}
 	return 1; /* OK */
 }
 

@@ -377,6 +377,7 @@ int signature_list_append_pkcs7(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int
 }
 
 /*
+ * Deallocate a STACK_OF(SIGNATURE) structure
  * [in] signatures: signature list
  * [returns] none
  */

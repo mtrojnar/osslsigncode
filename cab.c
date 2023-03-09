@@ -68,16 +68,15 @@ FILE_FORMAT file_format_cab = {
 };
 
 /* Prototypes */
-static int cab_verify_header(char *indata, uint32_t filesize, CAB_HEADER *header);
-static PKCS7 *cab_get_sigfile(FILE_FORMAT_CTX *ctx);
-static PKCS7 *cab_create_signature(FILE_FORMAT_CTX *ctx);
+static int cab_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx);
+static CAB_HEADER *cab_header_get(char *indata, uint32_t filesize);
+static PKCS7 *cab_pkcs7_get_file(char *indata, CAB_HEADER *header);
+static PKCS7 *cab_pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
+static PKCS7 *cab_pkcs7_create(FILE_FORMAT_CTX *ctx);
 static void cab_add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp);
-static PKCS7 *cab_extract_existing_pkcs7(char *indata, CAB_HEADER *header);
 static void cab_optional_names(uint16_t flags, char *indata, BIO *outdata, size_t *len);
 static int cab_modify_header(FILE_FORMAT_CTX *ctx);
 static int cab_add_header(FILE_FORMAT_CTX *ctx);
-static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, CAB_HEADER *header);
-
 
 /*
  * FILE_FORMAT method definitions
@@ -113,10 +112,9 @@ static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options)
 		unmap_file(options->infile, filesize);
 		return NULL; /* FAILED */
 	}
-	header = OPENSSL_zalloc(sizeof(CAB_HEADER));
-	if (!cab_verify_header(options->indata, filesize, header)) {
+	header = cab_header_get(options->indata, filesize);
+	if (!header) {
 		unmap_file(options->infile, filesize);
-		OPENSSL_free(header);
 		return NULL; /* FAILED */
 	}
 	hash = BIO_new(BIO_f_md());
@@ -178,7 +176,7 @@ static ASN1_OBJECT *cab_obsolete_link(FILE_FORMAT_CTX *ctx, u_char **p, int *ple
 }
 
 /*
- * Retrieve all PKCS#7 (include nested) signedData structures from CAB file,
+ * Retrieve all PKCS#7 (include nested) structures from CAB file,
  * allocate and return signature list
  * [in, out] ctx: structure holds all input and output data
  * [returns] pointer to signature list
@@ -201,7 +199,7 @@ static STACK_OF(SIGNATURE) *cab_signature_list_get(FILE_FORMAT_CTX *ctx)
 		printf("No signature found\n\n");
 		return NULL; /* FAILED */
 	}
-	p7 = cab_extract_existing_pkcs7(ctx->options->indata, ctx->cab);
+	p7 = cab_pkcs7_get_file(ctx->options->indata, ctx->cab);
 	if (!p7) {
 		printf("Failed to extract PKCS7 data\n\n");
 		return NULL; /* FAILED */
@@ -243,7 +241,7 @@ static int cab_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 		printf("Failed to extract current message digest\n\n");
 		return 0; /* FAILED */
 	}
-	if (!cab_calc_digest(ctx->options->indata, mdtype, cmdbuf, ctx->cab)) {
+	if (!cab_digest_calc(cmdbuf, mdtype, ctx)) {
 		printf("Failed to calculate message digest\n\n");
 		return 0; /* FAILED */
 	}
@@ -267,7 +265,7 @@ static int cab_extract_signature(FILE_FORMAT_CTX *ctx)
 
 	(void)BIO_reset(ctx->sign->outdata);
 	if (ctx->options->output_pkcs7) {
-		sig = cab_extract_existing_pkcs7(ctx->options->indata, ctx->cab);
+		sig = cab_pkcs7_get_file(ctx->options->indata, ctx->cab);
 		if (!sig) {
 			printf("Unable to extract existing signature\n");
 			return 1; /* FAILED */
@@ -368,7 +366,7 @@ static int cab_prepare_signature(FILE_FORMAT_CTX *ctx)
 	if ((ctx->options->cmd == CMD_SIGN && ctx->options->nest)
 		|| (ctx->options->cmd == CMD_ATTACH && ctx->options->nest)
 		|| ctx->options->cmd == CMD_ADD) {
-		ctx->sign->cursig = cab_extract_existing_pkcs7(ctx->options->indata, ctx->cab);
+		ctx->sign->cursig = cab_pkcs7_get_file(ctx->options->indata, ctx->cab);
 		if (!ctx->sign->cursig) {
 			printf("Unable to extract existing signature\n");
 			return 1; /* FAILED */
@@ -385,15 +383,15 @@ static int cab_prepare_signature(FILE_FORMAT_CTX *ctx)
 			return 1; /* FAILED */
 	}
 	if (ctx->options->cmd == CMD_ATTACH) {
-		/* Obtain an existing signature */
-		sig = cab_get_sigfile(ctx);
+		/* Obtain an existing PKCS#7 signature */
+		sig = cab_pkcs7_get_sigfile(ctx);
 		if (!sig) {
 			printf("Unable to extract valid signature\n");
 			return 1; /* FAILED */
 		}
 	} else if (ctx->options->cmd == CMD_SIGN) {
-		/* Create a new signature */
-		sig = cab_create_signature(ctx);
+		/* Create a new PKCS#7 signature */
+		sig = cab_pkcs7_create(ctx);
 		if (!sig) {
 			printf("Creating a new signature failed\n");
 			return 1; /* FAILED */
@@ -509,41 +507,173 @@ static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 /*
  * CAB helper functions
  */
-static int cab_verify_header(char *indata, uint32_t filesize, CAB_HEADER *header)
+
+/* Compute a message digest value of the signed or unsigned CAB file
+ * [out] mdbuf: message digest
+ * [in] mdtype: message digest algorithm type
+ * [in] ctx: structure holds all input and output data
+ * [returns] 0 on error or 1 on success
+ */
+static int cab_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx)
 {
-	uint32_t reserved;
+	uint32_t idx, fileend, coffFiles;
+	const EVP_MD *md = EVP_get_digestbynid(mdtype);
+	BIO *bhash = BIO_new(BIO_f_md());
+
+	if (!BIO_set_md(bhash, md)) {
+		printf("Unable to set the message digest of BIO\n");
+		BIO_free_all(bhash);
+		return 0;  /* FAILED */
+	}
+	BIO_push(bhash, BIO_new(BIO_s_null()));
+
+	/* u1 signature[4] 4643534D MSCF: 0-3 */
+	BIO_write(bhash, ctx->options->indata, 4);
+	/* u4 reserved1 00000000: 4-7 skipped */
+	if (ctx->cab->sigpos) {
+		uint16_t nfolders, flags;
+		
+		/*
+		 * u4 cbCabinet - size of this cabinet file in bytes: 8-11
+		 * u4 reserved2 00000000: 12-15
+		 */
+		BIO_write(bhash, ctx->options->indata + 8, 8);
+		 /* u4 coffFiles - offset of the first CFFILE entry: 16-19 */
+		coffFiles = GET_UINT32_LE(ctx->options->indata + 16);
+		BIO_write(bhash, ctx->options->indata + 16, 4);
+		/*
+		 * u4 reserved3 00000000: 20-23
+		 * u1 versionMinor 03: 24
+		 * u1 versionMajor 01: 25
+		 */
+		BIO_write(bhash, ctx->options->indata + 20, 6);
+		/* u2 cFolders - number of CFFOLDER entries in this cabinet: 26-27 */
+		nfolders = GET_UINT16_LE(ctx->options->indata + 26);
+		BIO_write(bhash, ctx->options->indata + 26, 2);
+		/* u2 cFiles - number of CFFILE entries in this cabinet: 28-29 */
+		BIO_write(bhash, ctx->options->indata + 28, 2);
+		/* u2 flags: 30-31 */
+		flags = GET_UINT16_LE(ctx->options->indata + 30);
+		BIO_write(bhash, ctx->options->indata + 30, 2);
+		/* u2 setID must be the same for all cabinets in a set: 32-33 */
+		BIO_write(bhash, ctx->options->indata + 32, 2);
+		/*
+		* u2 iCabinet - number of this cabinet file in a set: 34-35 skipped
+		* u2 cbCFHeader: 36-37 skipped
+		* u1 cbCFFolder: 38 skipped
+		* u1 cbCFData: 39 skipped
+		* u22 abReserve: 40-55 skipped
+		* - Additional data offset: 44-47 skipped
+		* - Additional data size: 48-51 skipped
+		*/
+		/* u22 abReserve: 56-59 */
+		BIO_write(bhash, ctx->options->indata + 56, 4);
+		idx = 60;
+		fileend = ctx->cab->sigpos;
+		/* TODO */
+		if (flags & FLAG_PREV_CABINET) {
+			uint8_t byte;
+			/* szCabinetPrev */
+			do {
+				byte = GET_UINT8_LE(ctx->options->indata + idx);
+				BIO_write(bhash, ctx->options->indata + idx, 1);
+				idx++;
+			} while (byte && idx < fileend);
+			/* szDiskPrev */
+			do {
+				byte = GET_UINT8_LE(ctx->options->indata + idx);
+				BIO_write(bhash, ctx->options->indata + idx, 1);
+				idx++;
+			} while (byte && idx < fileend);
+		}
+		if (flags & FLAG_NEXT_CABINET) {
+			uint8_t byte;
+			/* szCabinetNext */
+			do {
+				byte = GET_UINT8_LE(ctx->options->indata + idx);
+				BIO_write(bhash, ctx->options->indata + idx, 1);
+				idx++;
+			} while (byte && idx < fileend);
+			/* szDiskNext */
+			do {
+				byte = GET_UINT8_LE(ctx->options->indata + idx);
+				BIO_write(bhash, ctx->options->indata + idx, 1);
+				idx++;
+			} while (byte && idx < fileend);
+		}
+		/*
+		 * (u8 * cFolders) CFFOLDER - structure contains information about
+		 * one of the folders or partial folders stored in this cabinet file
+		 */
+		while (nfolders) {
+			BIO_write(bhash, ctx->options->indata + idx, 8);
+			idx += 8;
+			nfolders--;
+		}
+		if (idx != coffFiles) {
+			printf("Corrupt coffFiles value: 0x%08X\n", coffFiles);
+			BIO_free_all(bhash);
+			return 0;  /* FAILED */
+		}
+	} else {
+		/* TESTME with CAT file */
+		/* read what's left of the unsigned CAB file */
+		idx = 8;
+		fileend = ctx->cab->fileend;
+	}
+	/* (variable) ab - the compressed data bytes */
+	if (!bio_hash_data(bhash, ctx->options->indata, idx, fileend)) {
+		printf("Unable to calculate digest\n");
+		BIO_free_all(bhash);
+		return 0;  /* FAILED */
+	}
+	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
+	BIO_free_all(bhash);
+	return 1; /* OK */
+}
+
+/*
+ * Verify mapped CAB file and create CAB format specific structures
+ * [in] indata: mapped CAB file
+ * [in] filesize: size of CAB file
+ * [returns] pointer to CAB format specific structures
+ */
+static CAB_HEADER *cab_header_get(char *indata, uint32_t filesize)
+{
+	CAB_HEADER *header;
+	uint32_t reserved, header_size = 0, sigpos = 0, siglen = 0;
+	uint16_t flags;
 
 	if (filesize < 44) {
 		printf("CAB file is too short\n");
-		return 0; /* FAILED */
+		return NULL; /* FAILED */
 	}
-	header->fileend = filesize;
 	reserved = GET_UINT32_LE(indata + 4);
 	if (reserved) {
 		printf("Reserved1: 0x%08X\n", reserved);
-		return 0; /* FAILED */
+		return NULL; /* FAILED */
 	}
 	/* flags specify bit-mapped values that indicate the presence of optional data */
-	header->flags = GET_UINT16_LE(indata + 30);
-	if (header->flags & FLAG_PREV_CABINET) {
+	flags = GET_UINT16_LE(indata + 30);
+	if (flags & FLAG_PREV_CABINET) {
 		/* FLAG_NEXT_CABINET works */
-		printf("Multivolume cabinet file is unsupported: flags 0x%04X\n", header->flags);
-		return 0; /* FAILED */
+		printf("Multivolume cabinet file is unsupported: flags 0x%04X\n", flags);
+		return NULL; /* FAILED */
 	}
-	if (header->flags & FLAG_RESERVE_PRESENT) {
+	if (flags & FLAG_RESERVE_PRESENT) {
 		/*
 		* Additional headers is located at offset 36 (cbCFHeader, cbCFFolder, cbCFData);
 		* size of header (4 bytes, little-endian order) must be 20 (checkpoint).
 		*/
-		header->header_size = GET_UINT32_LE(indata + 36);
-		if (header->header_size != 20) {
-			printf("Additional header size: 0x%08X\n", header->header_size);
-			return 0; /* FAILED */
+		header_size = GET_UINT32_LE(indata + 36);
+		if (header_size != 20) {
+			printf("Additional header size: 0x%08X\n", header_size);
+			return NULL; /* FAILED */
 		}
 		reserved = GET_UINT32_LE(indata + 40);
 		if (reserved != 0x00100000) {
 			printf("abReserved: 0x%08X\n", reserved);
-			return 0; /* FAILED */
+			return NULL; /* FAILED */
 		}
 		/*
 		* File size is defined at offset 8, however if additional header exists, this size is not valid.
@@ -554,24 +684,53 @@ static int cab_verify_header(char *indata, uint32_t filesize, CAB_HEADER *header
 		* If there are additional headers, size of the CAB archive file is calcualted
 		* as additional data offset plus additional data size.
 		*/
-		header->sigpos = GET_UINT32_LE(indata + 44);
-		header->siglen = GET_UINT32_LE(indata + 48);
-		if ((header->sigpos < filesize && header->sigpos + header->siglen != filesize)
-			|| (header->sigpos >= filesize)) {
+		sigpos = GET_UINT32_LE(indata + 44);
+		siglen = GET_UINT32_LE(indata + 48);
+		if ((sigpos < filesize && sigpos + siglen != filesize) || (sigpos >= filesize)) {
 			printf("Additional data offset:\t%u bytes\nAdditional data size:\t%u bytes\n",
-				header->sigpos, header->siglen);
+				sigpos, siglen);
 			printf("File size:\t\t%u bytes\n", filesize);
-			return 0; /* FAILED */
+			return NULL; /* FAILED */
 		}
-		if ((header->sigpos > 0 && header->siglen == 0) || (header->sigpos == 0 && header->siglen > 0)) {
+		if ((sigpos > 0 && siglen == 0) || (sigpos == 0 && siglen > 0)) {
 			printf("Corrupt signature\n");
-			return 0; /* FAILED */
+			return NULL; /* FAILED */
 		}
 	}
-	return 1; /* OK */
+	header = OPENSSL_zalloc(sizeof(CAB_HEADER));
+	header->header_size = header_size;
+	header->sigpos = sigpos;
+	header->siglen = siglen;
+	header->fileend = filesize;
+	header->flags = flags;
+	return header; /* OK */
 }
 
-static PKCS7 *cab_get_sigfile(FILE_FORMAT_CTX *ctx)
+/*
+ * Retrieve a decoded PKCS#7 struct corresponding to the existing signature
+ * stored in the CAB file
+ * [in] indata: mapped CAB file
+ * [in] header: CAB format specific structures
+ * [returns] pointer to PKCS#7 structure
+ */
+static PKCS7 *cab_pkcs7_get_file(char *indata, CAB_HEADER *header)
+{
+	PKCS7 *p7 = NULL;
+	const u_char *blob;
+
+	blob = (u_char *)indata + header->sigpos;
+	p7 = d2i_PKCS7(NULL, &blob, header->siglen);
+	return p7;
+}
+
+/*
+ * Retrieve a decoded PKCS#7 struct corresponding to the signature
+ * stored in the "sigin" file
+ * CMD_ATTACH command specific
+ * [in] ctx: structure holds all input and output data
+ * [returns] pointer to PKCS#7 structure
+ */
+static PKCS7 *cab_pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
 {
 	PKCS7 *sig = NULL;
 	uint32_t sigfilesize;
@@ -599,13 +758,18 @@ static PKCS7 *cab_get_sigfile(FILE_FORMAT_CTX *ctx)
 		header.fileend = sigfilesize;
 		header.siglen = sigfilesize;
 		header.sigpos = 0;
-		sig = cab_extract_existing_pkcs7(insigdata, &header);
+		sig = cab_pkcs7_get_file(insigdata, &header);
 	}
 	unmap_file(insigdata, sigfilesize);
 	return sig; /* OK */
 }
 
-static PKCS7 *cab_create_signature(FILE_FORMAT_CTX *ctx)
+/*
+ * Allocate, set type, add content and return a new PKCS#7 signature
+ * [in] ctx: structure holds all input and output data
+ * [returns] pointer to PKCS#7 structure
+ */
+static PKCS7 *cab_pkcs7_create(FILE_FORMAT_CTX *ctx)
 {
 	int i, signer = -1;
 	PKCS7 *sig;
@@ -686,135 +850,6 @@ static PKCS7 *cab_create_signature(FILE_FORMAT_CTX *ctx)
 		return NULL; /* FAILED */
 	}
 	return sig; /* OK */
-}
-
-/* Compute a message digest value of the signed or unsigned CAB file */
-static int cab_calc_digest(char *indata, int mdtype, u_char *mdbuf, CAB_HEADER *header)
-{
-	uint32_t idx, fileend, coffFiles;
-	const EVP_MD *md = EVP_get_digestbynid(mdtype);
-	BIO *bhash = BIO_new(BIO_f_md());
-
-	if (!BIO_set_md(bhash, md)) {
-		printf("Unable to set the message digest of BIO\n");
-		BIO_free_all(bhash);
-		return 0;  /* FAILED */
-	}
-	BIO_push(bhash, BIO_new(BIO_s_null()));
-
-	/* u1 signature[4] 4643534D MSCF: 0-3 */
-	BIO_write(bhash, indata, 4);
-	/* u4 reserved1 00000000: 4-7 skipped */
-	if (header->sigpos) {
-		uint16_t nfolders, flags;
-		
-		/*
-		 * u4 cbCabinet - size of this cabinet file in bytes: 8-11
-		 * u4 reserved2 00000000: 12-15
-		 */
-		BIO_write(bhash, indata + 8, 8);
-		 /* u4 coffFiles - offset of the first CFFILE entry: 16-19 */
-		coffFiles = GET_UINT32_LE(indata + 16);
-		BIO_write(bhash, indata + 16, 4);
-		/*
-		 * u4 reserved3 00000000: 20-23
-		 * u1 versionMinor 03: 24
-		 * u1 versionMajor 01: 25
-		 */
-		BIO_write(bhash, indata + 20, 6);
-		/* u2 cFolders - number of CFFOLDER entries in this cabinet: 26-27 */
-		nfolders = GET_UINT16_LE(indata + 26);
-		BIO_write(bhash, indata + 26, 2);
-		/* u2 cFiles - number of CFFILE entries in this cabinet: 28-29 */
-		BIO_write(bhash, indata + 28, 2);
-		/* u2 flags: 30-31 */
-		flags = GET_UINT16_LE(indata + 30);
-		BIO_write(bhash, indata + 30, 2);
-		/* u2 setID must be the same for all cabinets in a set: 32-33 */
-		BIO_write(bhash, indata + 32, 2);
-		/*
-		* u2 iCabinet - number of this cabinet file in a set: 34-35 skipped
-		* u2 cbCFHeader: 36-37 skipped
-		* u1 cbCFFolder: 38 skipped
-		* u1 cbCFData: 39 skipped
-		* u22 abReserve: 40-55 skipped
-		* - Additional data offset: 44-47 skipped
-		* - Additional data size: 48-51 skipped
-		*/
-		/* u22 abReserve: 56-59 */
-		BIO_write(bhash, indata + 56, 4);
-		idx = 60;
-		fileend = header->sigpos;
-		/* TODO */
-		if (flags & FLAG_PREV_CABINET) {
-			uint8_t byte;
-			/* szCabinetPrev */
-			do {
-				byte = GET_UINT8_LE(indata + idx);
-				BIO_write(bhash, indata + idx, 1);
-				idx++;
-			} while (byte && idx < fileend);
-			/* szDiskPrev */
-			do {
-				byte = GET_UINT8_LE(indata + idx);
-				BIO_write(bhash, indata + idx, 1);
-				idx++;
-			} while (byte && idx < fileend);
-		}
-		if (flags & FLAG_NEXT_CABINET) {
-			uint8_t byte;
-			/* szCabinetNext */
-			do {
-				byte = GET_UINT8_LE(indata + idx);
-				BIO_write(bhash, indata + idx, 1);
-				idx++;
-			} while (byte && idx < fileend);
-			/* szDiskNext */
-			do {
-				byte = GET_UINT8_LE(indata + idx);
-				BIO_write(bhash, indata + idx, 1);
-				idx++;
-			} while (byte && idx < fileend);
-		}
-		/*
-		 * (u8 * cFolders) CFFOLDER - structure contains information about
-		 * one of the folders or partial folders stored in this cabinet file
-		 */
-		while (nfolders) {
-			BIO_write(bhash, indata + idx, 8);
-			idx += 8;
-			nfolders--;
-		}
-		if (idx != coffFiles) {
-			printf("Corrupt coffFiles value: 0x%08X\n", coffFiles);
-			BIO_free_all(bhash);
-			return 0;  /* FAILED */
-		}
-	} else {
-		/* TESTME with CAT file */
-		/* read what's left of the unsigned CAB file */
-		idx = 8;
-		fileend = header->fileend;
-	}
-	/* (variable) ab - the compressed data bytes */
-	if (!bio_hash_data(bhash, indata, idx, fileend)) {
-		printf("Unable to calculate digest\n");
-		BIO_free_all(bhash);
-		return 0;  /* FAILED */
-	}
-	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
-	BIO_free_all(bhash);
-	return 1; /* OK */
-}
-
-static PKCS7 *cab_extract_existing_pkcs7(char *indata, CAB_HEADER *header)
-{
-	PKCS7 *p7 = NULL;
-	const u_char *blob;
-
-	blob = (u_char *)indata + header->sigpos;
-	p7 = d2i_PKCS7(NULL, &blob, header->siglen);
-	return p7;
 }
 
 static void cab_add_jp_attribute(PKCS7_SIGNER_INFO *si, int jp)
