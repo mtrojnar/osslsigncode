@@ -46,11 +46,11 @@ static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options);
 static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
 static STACK_OF(SIGNATURE) *pe_signature_list_get(FILE_FORMAT_CTX *ctx);
 static int pe_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature);
-static int pe_extract_signature(FILE_FORMAT_CTX *ctx);
-static int pe_remove_signature(FILE_FORMAT_CTX *ctx);
-static int pe_prepare_signature(FILE_FORMAT_CTX *ctx);
-static int pe_append_signature(FILE_FORMAT_CTX *ctx);
-static void pe_update_data_size(FILE_FORMAT_CTX *ctx);
+static PKCS7 *pe_pkcs7_extract(FILE_FORMAT_CTX *ctx);
+static int pe_remove_pkcs7(FILE_FORMAT_CTX *ctx);
+static PKCS7 *pe_pkcs7_prepare(FILE_FORMAT_CTX *ctx);
+static int pe_append_pkcs7(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
+static void pe_update_data_size(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static void pe_ctx_free(FILE_FORMAT_CTX *ctx);
 static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx);
 
@@ -59,10 +59,10 @@ FILE_FORMAT file_format_pe = {
 	.get_data_blob = pe_spc_image_data,
 	.signature_list_get = pe_signature_list_get,
 	.verify_digests = pe_verify_digests,
-	.extract_signature = pe_extract_signature,
-	.remove_signature = pe_remove_signature,
-	.prepare_signature = pe_prepare_signature,
-	.append_signature = pe_append_signature,
+	.pkcs7_extract = pe_pkcs7_extract,
+	.remove_pkcs7 = pe_remove_pkcs7,
+	.pkcs7_prepare = pe_pkcs7_prepare,
+	.append_pkcs7 = pe_append_pkcs7,
 	.update_data_size = pe_update_data_size,
 	.ctx_free = pe_ctx_free,
 	.ctx_cleanup = pe_ctx_cleanup
@@ -72,7 +72,6 @@ FILE_FORMAT file_format_pe = {
 static int pe_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx);
 static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize);
 static PKCS7 *pe_pkcs7_get_file(char *indata, PE_CTX *pe_ctx);
-static PKCS7 *pe_pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
 static PKCS7 *pe_pkcs7_create(FILE_FORMAT_CTX *ctx);
 static uint32_t pe_calc_checksum(BIO *bio, PE_CTX *pe_ctx);
 static uint32_t pe_calc_realchecksum(FILE_FORMAT_CTX *ctx);
@@ -96,7 +95,6 @@ static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options)
 {
 	FILE_FORMAT_CTX *ctx;
 	PE_CTX *pe_ctx;
-	SIGN_DATA *sign;
 	BIO *hash, *outdata = NULL;
 	uint32_t filesize;
 	
@@ -142,23 +140,18 @@ static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options)
 		}
 		BIO_push(hash, outdata);
 	}
-	sign = OPENSSL_malloc(sizeof(SIGN_DATA));
-	sign->outdata = outdata;
-	sign->hash = hash;
-	sign->sig = sign->cursig = NULL;
-	sign->len = sign->padlen = 0;
-
 	ctx = OPENSSL_malloc(sizeof(FILE_FORMAT_CTX));
 	ctx->format = &file_format_pe;
 	ctx->options = options;
-	ctx->sign = sign;
+	ctx->outdata = outdata;
+	ctx->hash = hash;
 	ctx->pe_ctx = pe_ctx;
 	return ctx;
 }
 
 /*
  * Allocate and return SpcPeImageData object.
- * [in] ctx: structure holds all input and output data
+ * [in] ctx: structure holds input and output data
  * [out] p: SpcPeImageData data
  * [out] plen: SpcPeImageData data length
  * [returns] pointer to ASN1_OBJECT structure corresponding to SPC_PE_IMAGE_DATA_OBJID
@@ -194,7 +187,7 @@ static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *ple
 /*
  * Retrieve all PKCS#7 (include nested) structures from PE file,
  * allocate and return signature list
- * [in, out] ctx: structure holds all input and output data
+ * [in, out] ctx: structure holds input and output data
  * [returns] pointer to signature list
  */
 static STACK_OF(SIGNATURE) *pe_signature_list_get(FILE_FORMAT_CTX *ctx)
@@ -208,16 +201,17 @@ static STACK_OF(SIGNATURE) *pe_signature_list_get(FILE_FORMAT_CTX *ctx)
 		printf("Init error\n\n");
 		return NULL; /* FAILED */
 	}
-	if (ctx->pe_ctx->siglen == 0)
+	if (ctx->pe_ctx->siglen == 0) {
 		ctx->pe_ctx->sigpos = ctx->pe_ctx->fileend;
-
+	}
 	/* check PE checksum */
 	printf("Current PE checksum   : %08X\n", ctx->pe_ctx->pe_checksum);
 	real_pe_checksum = pe_calc_realchecksum(ctx);
-	if (ctx->pe_ctx->pe_checksum && ctx->pe_ctx->pe_checksum != real_pe_checksum)
+	if (ctx->pe_ctx->pe_checksum && ctx->pe_ctx->pe_checksum != real_pe_checksum) {
 		peok = 0;
-	printf("Calculated PE checksum: %08X%s\n\n", real_pe_checksum, peok ? "" : "    MISMATCH!!!");
-
+	}
+	printf("Calculated PE checksum: %08X%s\n\n", real_pe_checksum,
+		peok ? "" : "    MISMATCH!!!");
 	if (ctx->pe_ctx->sigpos == 0 || ctx->pe_ctx->siglen == 0
 		|| ctx->pe_ctx->sigpos > ctx->pe_ctx->fileend) {
 		printf("No signature found\n\n");
@@ -243,7 +237,7 @@ static STACK_OF(SIGNATURE) *pe_signature_list_get(FILE_FORMAT_CTX *ctx)
 
 /*
  * Calculate message digest and page_hash, compare to values retrieved from PKCS#7 signedData
- * [in] ctx: structure holds all input and output data
+ * [in] ctx: structure holds input and output data
  * [in] signature: structure for authenticode and time stamping
  * [returns] 0 on error or 1 on success
  */
@@ -298,143 +292,125 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 
 /*
  * Extract existing signature to DER or PEM format
- * [in, out] ctx: structure holds all input and output data
+ * [in, out] ctx: structure holds input and output data
  * [returns] 1 on error or 0 on success
  */
-static int pe_extract_signature(FILE_FORMAT_CTX *ctx)
+static PKCS7 *pe_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
-	int ret = 0;
-	PKCS7 *sig;
-	size_t written;
-
-	if (ctx->pe_ctx->sigpos == 0) {
-		printf("PE file does not have any signature\n");
-		return 1; /* FAILED */
+	if (ctx->pe_ctx->sigpos == 0 || ctx->pe_ctx->siglen == 0
+		|| ctx->pe_ctx->sigpos > ctx->pe_ctx->fileend) {
+		return NULL; /* FAILED */
 	}
-	(void)BIO_reset(ctx->sign->outdata);
-	if (ctx->options->output_pkcs7) {
-		sig = pe_pkcs7_get_file(ctx->options->indata, ctx->pe_ctx);
-		if (!sig) {
-			printf("Unable to extract existing signature\n");
-			return 1; /* FAILED */
-		}
-		ret = !PEM_write_bio_PKCS7(ctx->sign->outdata, sig);
-		PKCS7_free(sig);
-	} else
-		if (!BIO_write_ex(ctx->sign->outdata,
-			ctx->options->indata + ctx->pe_ctx->sigpos,
-			ctx->pe_ctx->siglen, &written) || written != ctx->pe_ctx->siglen)
-			ret = 1; /* FAILED */
-	return ret;
+	return pe_pkcs7_get_file(ctx->options->indata, ctx->pe_ctx);
 }
 
 /*
  * Remove existing signature
- * [in, out] ctx: structure holds all input and output data
+ * [in, out] ctx: structure holds input and output data
  * [returns] 1 on error or 0 on success
  */
-static int pe_remove_signature(FILE_FORMAT_CTX *ctx)
+static int pe_remove_pkcs7(FILE_FORMAT_CTX *ctx)
 {
 	if (ctx->pe_ctx->sigpos == 0) {
 		printf("PE file does not have any signature\n");
 		return 1; /* FAILED */
 	}
-	return pe_prepare_signature(ctx);
-}
-
-/*
- * Obtain an existing signature or create a new one
- * [in, out] ctx: structure holds all input and output data
- * [returns] 1 on error or 0 on success
- */
-static int pe_prepare_signature(FILE_FORMAT_CTX *ctx)
-{
-	PKCS7 *sig = NULL;
-
-	/* Obtain a current signature from previously-signed file */
-	if ((ctx->options->cmd == CMD_SIGN && ctx->options->nest)
-		|| (ctx->options->cmd == CMD_ATTACH && ctx->options->nest)
-		|| ctx->options->cmd == CMD_ADD) {
-		ctx->sign->cursig = pe_pkcs7_get_file(ctx->options->indata, ctx->pe_ctx);
-		if (!ctx->sign->cursig) {
-			printf("Unable to extract existing signature\n");
-			return 1; /* FAILED */
-		}
-		if (ctx->options->cmd == CMD_ADD)
-			sig = ctx->sign->cursig;
-	}
-	if (ctx->pe_ctx->sigpos > 0) {
-		/* Strip current signature */
-		ctx->pe_ctx->fileend = ctx->pe_ctx->sigpos;
-	}
+	/* Strip current signature */
+	ctx->pe_ctx->fileend = ctx->pe_ctx->sigpos;
 	if (!pe_modify_header(ctx)) {
 		printf("Unable to modify file header\n");
 		return 1; /* FAILED */
 	}
-	if (ctx->options->cmd == CMD_ATTACH) {
-		/* Obtain an existing PKCS#7 signature */
-		sig = pe_pkcs7_get_sigfile(ctx);
-		if (!sig) {
-			printf("Unable to extract valid signature\n");
-			return 1; /* FAILED */
-		}
-	} else if (ctx->options->cmd == CMD_SIGN) {
-		/* Create a new PKCS#7 signature */
-		sig = pe_pkcs7_create(ctx);
-		if (!sig) {
-			printf("Creating a new signature failed\n");
-			return 1; /* FAILED */
-		}
-	}
-	ctx->sign->sig = sig;
 	return 0; /* OK */
 }
 
 /*
- * Append signature to the outfile
- * [in, out] ctx: structure holds all input and output data
+ * Obtain an existing signature or create a new one
+ * [in, out] ctx: structure holds input and output data
  * [returns] 1 on error or 0 on success
  */
-static int pe_append_signature(FILE_FORMAT_CTX *ctx)
+static PKCS7 *pe_pkcs7_prepare(FILE_FORMAT_CTX *ctx)
+{
+	PKCS7 *cursig = NULL, *p7 = NULL;
+
+	/* Strip current signature */
+	if (ctx->pe_ctx->sigpos > 0) {
+		ctx->pe_ctx->fileend = ctx->pe_ctx->sigpos;
+	}
+	if (!pe_modify_header(ctx)) {
+		printf("Unable to modify file header\n");
+		return NULL; /* FAILED */
+	}
+	/* Obtain a current signature from previously-signed file */
+	if ((ctx->options->cmd == CMD_SIGN && ctx->options->nest)
+		|| (ctx->options->cmd == CMD_ATTACH && ctx->options->nest)
+		|| ctx->options->cmd == CMD_ADD) {
+		cursig = pe_pkcs7_get_file(ctx->options->indata, ctx->pe_ctx);
+		if (!cursig) {
+			printf("Unable to extract existing signature\n");
+			return NULL; /* FAILED */
+		}
+		if (ctx->options->cmd == CMD_ADD)
+			p7 = cursig;
+	}
+	if (ctx->options->cmd == CMD_ATTACH) {
+		/* Obtain an existing PKCS#7 signature */
+		p7 = pkcs7_get_sigfile(ctx);
+		if (!p7) {
+			printf("Unable to extract valid signature\n");
+			return NULL; /* FAILED */
+		}
+	} else if (ctx->options->cmd == CMD_SIGN) {
+		/* Create a new PKCS#7 signature */
+		p7 = pe_pkcs7_create(ctx);
+		if (!p7) {
+			printf("Creating a new signature failed\n");
+			return NULL; /* FAILED */
+		}
+	}
+	if (ctx->options->nest) {
+		if (!cursig_set_nested(cursig, p7, ctx)) {
+			printf("Unable to append the nested signature to the current signature\n");
+			PKCS7_free(p7);
+			return NULL; /* FAILED */
+		}
+		PKCS7_free(p7);
+		return cursig;
+	}
+	return p7;
+}
+
+/*
+ * Append signature to the outfile
+ * [in, out] ctx: structure holds input and output data
+ * [returns] 1 on error or 0 on success
+ */
+static int pe_append_pkcs7(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
 	u_char *p = NULL;
-	PKCS7 *outsig;
+	int len;       /* signature length */
+	int padlen;    /* signature padding length */
 	u_char buf[] = {
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 	};
 
-	if (ctx->options->nest) {
-		if (ctx->sign->cursig == NULL) {
-			printf("Internal error: No 'cursig' was extracted\n");
-			return 1; /* FAILED */
-		}
-		if (set_nested_signature(ctx) == 0) {
-			printf("Unable to append the nested signature to the current signature\n");
-			return 1; /* FAILED */
-		}
-		outsig = ctx->sign->cursig;
-	} else {
-		outsig = ctx->sign->sig;
-	}
-	/* Append signature to the outfile */
-	if (((ctx->sign->len = i2d_PKCS7(outsig, NULL)) <= 0)
-		|| (p = OPENSSL_malloc((size_t)ctx->sign->len)) == NULL) {
-		printf("i2d_PKCS memory allocation failed: %d\n", ctx->sign->len);
+	if (((len = i2d_PKCS7(p7, NULL)) <= 0)
+		|| (p = OPENSSL_malloc((size_t)len)) == NULL) {
+		printf("i2d_PKCS memory allocation failed: %d\n", len);
 		return 1; /* FAILED */
 	}
-	i2d_PKCS7(outsig, &p);
-	p -= ctx->sign->len;
-	ctx->sign->padlen = (8 - ctx->sign->len % 8) % 8;
-
-	PUT_UINT32_LE(ctx->sign->len + 8 + ctx->sign->padlen, buf);
+	i2d_PKCS7(p7, &p);
+	p -= len;
+	padlen = (8 - len % 8) % 8;
+	PUT_UINT32_LE(len + 8 + padlen, buf);
 	PUT_UINT16_LE(WIN_CERT_REVISION_2_0, buf + 4);
 	PUT_UINT16_LE(WIN_CERT_TYPE_PKCS_SIGNED_DATA, buf + 6);
-	BIO_write(ctx->sign->outdata, buf, 8);
-	BIO_write(ctx->sign->outdata, p, ctx->sign->len);
+	BIO_write(ctx->outdata, buf, 8);
+	BIO_write(ctx->outdata, p, len);
 	/* pad (with 0's) asn1 blob to 8 byte boundary */
-	if (ctx->sign->padlen > 0) {
-		memset(p, 0, (size_t)ctx->sign->padlen);
-		BIO_write(ctx->sign->outdata, p, ctx->sign->padlen);
+	if (padlen > 0) {
+		memset(p, 0, (size_t)padlen);
+		BIO_write(ctx->outdata, p, padlen);
 	}
 	OPENSSL_free(p);
 	return 0; /* OK */
@@ -442,10 +418,10 @@ static int pe_append_signature(FILE_FORMAT_CTX *ctx)
 
 /*
  * Update signature position and size, write back new checksum
- * [in, out] ctx: structure holds all input and output data
+ * [in, out] ctx: structure holds input and output data
  * [returns] none
  */
-static void pe_update_data_size(FILE_FORMAT_CTX *ctx)
+static void pe_update_data_size(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
 	uint32_t checksum;
 	u_char buf[] = {
@@ -456,44 +432,47 @@ static void pe_update_data_size(FILE_FORMAT_CTX *ctx)
 		return;
 	}
 	if (ctx->options->cmd != CMD_REMOVE) {
+		int len = i2d_PKCS7(p7, NULL);
+		int padlen = (8 - len % 8) % 8;
+
 		/* Update signature position and size */
-		(void)BIO_seek(ctx->sign->outdata,
+		(void)BIO_seek(ctx->outdata,
 			ctx->pe_ctx->header_size + 152 + ctx->pe_ctx->pe32plus * 16);
 		/* Previous file end = signature table start */
 		PUT_UINT32_LE(ctx->pe_ctx->fileend, buf);
-		BIO_write(ctx->sign->outdata, buf, 4);
-		PUT_UINT32_LE(ctx->sign->len + 8 + ctx->sign->padlen, buf);
-		BIO_write(ctx->sign->outdata, buf, 4);
+		BIO_write(ctx->outdata, buf, 4);
+		PUT_UINT32_LE(len + 8 + padlen, buf);
+		BIO_write(ctx->outdata, buf, 4);
 	}
-	checksum = pe_calc_checksum(ctx->sign->outdata, ctx->pe_ctx);	
+	checksum = pe_calc_checksum(ctx->outdata, ctx->pe_ctx);	
 	/* write back checksum */
-	(void)BIO_seek(ctx->sign->outdata, ctx->pe_ctx->header_size + 88);
+	(void)BIO_seek(ctx->outdata, ctx->pe_ctx->header_size + 88);
 	PUT_UINT32_LE(checksum, buf);
-	BIO_write(ctx->sign->outdata, buf, 4);
+	BIO_write(ctx->outdata, buf, 4);
 }
 
 /*
  * Free up an entire hash BIO chain
- * [in, out] ctx: structure holds all input and output data
+ * [in, out] ctx: structure holds input and output data
  * [returns] none
  */
 static void pe_ctx_free(FILE_FORMAT_CTX *ctx)
 {
-	BIO_free_all(ctx->sign->hash);
-	ctx->sign->hash = ctx->sign->outdata = NULL;
+	BIO_free_all(ctx->hash);
+	ctx->hash = ctx->outdata = NULL;
 }
 
 /*
  * Deallocate a FILE_FORMAT_CTX structure, unmap indata file, unlink outfile
- * [in, out] ctx: structure holds all input and output data
+ * [in, out] ctx: structure holds input and output data
  * [returns] none
  */
 static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 {
-	if (ctx->sign->hash) {
-		BIO_free_all(ctx->sign->hash);
+	if (ctx->hash) {
+		BIO_free_all(ctx->hash);
 	}
-	if (ctx->sign->outdata) {
+	if (ctx->outdata) {
 		if (ctx->options->outfile) {
 #ifdef WIN32
 			_unlink(ctx->options->outfile);
@@ -503,10 +482,6 @@ static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 		}
 	}
 	unmap_file(ctx->options->indata, ctx->pe_ctx->fileend);
-	PKCS7_free(ctx->sign->sig);
-	if (ctx->options->cmd != CMD_ADD)
-		PKCS7_free(ctx->sign->cursig);
-	OPENSSL_free(ctx->sign);
 	OPENSSL_free(ctx->pe_ctx);
 	OPENSSL_free(ctx);
 }
@@ -518,7 +493,7 @@ static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 /* Compute a message digest value of a signed PE file.
  * [out] mdbuf: message digest
  * [in] mdtype: message digest algorithm type
- * [in] ctx: structure holds all input and output data
+ * [in] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
 static int pe_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx)
@@ -631,7 +606,6 @@ static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize)
 	/* Certificate Table field specifies the attribute certificate table address (4 bytes) and size (4 bytes) */
 	sigpos = GET_UINT32_LE(indata + header_size + 152 + pe32plus * 16);
 	siglen = GET_UINT32_LE(indata + header_size + 152 + pe32plus * 16 + 4);
-
 	/* Since fix for MS Bulletin MS12-024 we can really assume
 	   that signature should be last part of file */
 	if ((sigpos > 0 && sigpos < filesize && sigpos + siglen != filesize)
@@ -686,59 +660,18 @@ static PKCS7 *pe_pkcs7_get_file(char *indata, PE_CTX *pe_ctx)
 }
 
 /*
- * Retrieve a decoded PKCS#7 struct corresponding to the signature
- * stored in the "sigin" file
- * CMD_ATTACH command specific
- * [in] ctx: structure holds all input and output data
- * [returns] pointer to PKCS#7 structure
- */
-static PKCS7 *pe_pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
-{
-	PKCS7 *sig = NULL;
-	uint32_t sigfilesize;
-	char *insigdata;
-	PE_CTX pe_ctx;
-	BIO *sigbio;
-	const char pemhdr[] = "-----BEGIN PKCS7-----";
-
-	sigfilesize = get_file_size(ctx->options->sigfile);
-	if (!sigfilesize) {
-		return NULL; /* FAILED */
-	}
-	insigdata = map_file(ctx->options->sigfile, sigfilesize);
-	if (!insigdata) {
-		printf("Failed to open file: %s\n", ctx->options->sigfile);
-		return NULL; /* FAILED */
-	}
-	if (sigfilesize >= sizeof pemhdr && !memcmp(insigdata, pemhdr, sizeof pemhdr - 1)) {
-		sigbio = BIO_new_mem_buf(insigdata, (int)sigfilesize);
-		sig = PEM_read_bio_PKCS7(sigbio, NULL, NULL, NULL);
-		BIO_free_all(sigbio);
-	} else {
-		/* reset pe_ctx */
-		memset(&pe_ctx, 0, sizeof(PE_CTX));
-		pe_ctx.fileend = sigfilesize;
-		pe_ctx.siglen = sigfilesize;
-		pe_ctx.sigpos = 0;
-		sig = pe_pkcs7_get_file(insigdata, &pe_ctx);
-	}
-	unmap_file(insigdata, sigfilesize);
-	return sig; /* OK */
-}
-
-/*
  * Allocate, set type, add content and return a new PKCS#7 signature
- * [in] ctx: structure holds all input and output data
+ * [in] ctx: structure holds input and output data
  * [returns] pointer to PKCS#7 structure
  */
 static PKCS7 *pe_pkcs7_create(FILE_FORMAT_CTX *ctx)
 {
 	int i, signer = -1;
-	PKCS7 *sig;
+	PKCS7 *p7;
 	PKCS7_SIGNER_INFO *si = NULL;
 
-	sig = PKCS7_new();
-	PKCS7_set_type(sig, NID_pkcs7_signed);
+	p7 = PKCS7_new();
+	PKCS7_set_type(p7, NID_pkcs7_signed);
 
 	if (ctx->options->cert != NULL) {
 		/*
@@ -746,7 +679,7 @@ static PKCS7 *pe_pkcs7_create(FILE_FORMAT_CTX *ctx)
 		 * structure or loaded from the security token, so we may omit to check
 		 * the consistency of a private key with the public key in an X509 certificate
 		 */
-		si = PKCS7_add_signature(sig, ctx->options->cert, ctx->options->pkey, ctx->options->md);
+		si = PKCS7_add_signature(p7, ctx->options->cert, ctx->options->pkey, ctx->options->md);
 		if (si == NULL)
 			return NULL; /* FAILED */
 	} else {
@@ -754,7 +687,7 @@ static PKCS7 *pe_pkcs7_create(FILE_FORMAT_CTX *ctx)
 		for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
 			X509 *signcert = sk_X509_value(ctx->options->certs, i);
 			if (X509_check_private_key(signcert, ctx->options->pkey)) {
-				si = PKCS7_add_signature(sig, signcert, ctx->options->pkey, ctx->options->md);
+				si = PKCS7_add_signature(p7, signcert, ctx->options->pkey, ctx->options->md);
 				signer = i;
 				break;
 			}
@@ -779,36 +712,36 @@ static PKCS7 *pe_pkcs7_create(FILE_FORMAT_CTX *ctx)
 		printf("Couldn't allocate memory for opus info\n");
 		return NULL; /* FAILED */
 	}
-	PKCS7_content_new(sig, NID_pkcs7_data);
+	PKCS7_content_new(p7, NID_pkcs7_data);
 
 	/* add the signer's certificate */
 	if (ctx->options->cert != NULL)
-		PKCS7_add_certificate(sig, ctx->options->cert);
+		PKCS7_add_certificate(p7, ctx->options->cert);
 	if (signer != -1)
-		PKCS7_add_certificate(sig, sk_X509_value(ctx->options->certs, signer));
+		PKCS7_add_certificate(p7, sk_X509_value(ctx->options->certs, signer));
 
 	/* add the certificate chain */
 	for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
 		if (i == signer)
 			continue;
-		PKCS7_add_certificate(sig, sk_X509_value(ctx->options->certs, i));
+		PKCS7_add_certificate(p7, sk_X509_value(ctx->options->certs, i));
 	}
 	/* add all cross certificates */
 	if (ctx->options->xcerts) {
 		for (i=0; i<sk_X509_num(ctx->options->xcerts); i++)
-			PKCS7_add_certificate(sig, sk_X509_value(ctx->options->xcerts, i));
+			PKCS7_add_certificate(p7, sk_X509_value(ctx->options->xcerts, i));
 	}
 	/* add crls */
 	if (ctx->options->crls) {
 		for (i=0; i<sk_X509_CRL_num(ctx->options->crls); i++)
-			PKCS7_add_crl(sig, sk_X509_CRL_value(ctx->options->crls, i));
+			PKCS7_add_crl(p7, sk_X509_CRL_value(ctx->options->crls, i));
 	}
-	if (!pkcs7_set_data_content(sig, ctx)) {
-		PKCS7_free(sig);
+	if (!pkcs7_set_data_content(p7, ctx)) {
+		PKCS7_free(p7);
 		printf("Signing failed\n");
 		return NULL; /* FAILED */
 	}
-	return sig; /* OK */
+	return p7; /* OK */
 }
 
 /*
@@ -886,26 +819,27 @@ static int pe_modify_header(FILE_FORMAT_CTX *ctx)
 	char *buf;
 
 	i = len = ctx->pe_ctx->header_size + 88;
-	if (!BIO_write_ex(ctx->sign->hash, ctx->options->indata, len, &written)
-		|| written != len)
+	if (!BIO_write_ex(ctx->hash, ctx->options->indata, len, &written)
+		|| written != len) {
 		return 0; /* FAILED */
+	}
 	buf = OPENSSL_malloc(SIZE_64K);
 	memset(buf, 0, 4);
-	BIO_write(ctx->sign->outdata, buf, 4); /* zero out checksum */
+	BIO_write(ctx->outdata, buf, 4); /* zero out checksum */
 	i += 4;
 	len = 60 + ctx->pe_ctx->pe32plus * 16;
-	if (!BIO_write_ex(ctx->sign->hash, ctx->options->indata + i, len, &written)
+	if (!BIO_write_ex(ctx->hash, ctx->options->indata + i, len, &written)
 		|| written != len) {
 		OPENSSL_free(buf);
 		return 0; /* FAILED */
 	}
 	i += 60 + ctx->pe_ctx->pe32plus * 16;
 	memset(buf, 0, 8);
-	BIO_write(ctx->sign->outdata, buf, 8); /* zero out sigtable offset + pos */
+	BIO_write(ctx->outdata, buf, 8); /* zero out sigtable offset + pos */
 	i += 8;
 	len = ctx->pe_ctx->fileend - i;
 	while (len > 0) {
-		if (!BIO_write_ex(ctx->sign->hash, ctx->options->indata + i, len, &written)) {
+		if (!BIO_write_ex(ctx->hash, ctx->options->indata + i, len, &written)) {
 			OPENSSL_free(buf);
 			return 0; /* FAILED */
 		}
@@ -916,7 +850,7 @@ static int pe_modify_header(FILE_FORMAT_CTX *ctx)
 	len = 8 - ctx->pe_ctx->fileend % 8;
 	if (len != 8) {
 		memset(buf, 0, len);
-		if (!BIO_write_ex(ctx->sign->hash, buf, len, &written) || written != len) {
+		if (!BIO_write_ex(ctx->hash, buf, len, &written) || written != len) {
 			OPENSSL_free(buf);
 			return 0; /* FAILED */
 		}

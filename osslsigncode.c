@@ -300,10 +300,11 @@ static void print_timestamp_error(const char *url, long http_code)
 
 /*
  * Encode RFC3161 timestamp request and write it into BIO
- * [in] ctx: structure holds all input and output data
+ * [in] p7: new PKCS#7 signature
+ * [in] md: message digest algorithm type
  * [returns] pointer to BIO with RFC3161 Timestamp Request
  */
-static BIO *bio_encode_rfc3161_request(FILE_FORMAT_CTX *ctx)
+static BIO *bio_encode_rfc3161_request(PKCS7 *p7, const EVP_MD *md)
 {
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 	PKCS7_SIGNER_INFO *si;
@@ -313,7 +314,7 @@ static BIO *bio_encode_rfc3161_request(FILE_FORMAT_CTX *ctx)
 	u_char *p;
 	int len;
 
-	signer_info = PKCS7_get_signer_info(ctx->sign->sig);
+	signer_info = PKCS7_get_signer_info(p7);
 	if (!signer_info)
 		return NULL; /* FAILED */
 
@@ -322,22 +323,22 @@ static BIO *bio_encode_rfc3161_request(FILE_FORMAT_CTX *ctx)
 		return NULL; /* FAILED */
 
 	bhash = BIO_new(BIO_f_md());
-	if (!BIO_set_md(bhash, ctx->options->md)) {
+	if (!BIO_set_md(bhash, md)) {
 		printf("Unable to set the message digest of BIO\n");
 		BIO_free_all(bhash);
 		return NULL;  /* FAILED */
 	}
 	BIO_push(bhash, BIO_new(BIO_s_null()));
 	BIO_write(bhash, si->enc_digest->data, si->enc_digest->length);
-	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(ctx->options->md));
+	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
 	BIO_free_all(bhash);
 
 	req = TimeStampReq_new();
 	ASN1_INTEGER_set(req->version, 1);
-	req->messageImprint->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(ctx->options->md));
+	req->messageImprint->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(md));
 	req->messageImprint->digestAlgorithm->parameters = ASN1_TYPE_new();
 	req->messageImprint->digestAlgorithm->parameters->type = V_ASN1_NULL;
-	ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(ctx->options->md));
+	ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(md));
 	req->certReq = 0xFF;
 
 	len = i2d_TimeStampReq(req, NULL);
@@ -355,10 +356,10 @@ static BIO *bio_encode_rfc3161_request(FILE_FORMAT_CTX *ctx)
 
 /*
  * Encode authenticode timestamp request and write it into BIO
- * [in] ctx: structure holds all input and output data
+ * [in] p7: new PKCS#7 signature
  * [returns] pointer to BIO with authenticode Timestamp Request
  */
-static BIO *bio_encode_authenticode_request(FILE_FORMAT_CTX *ctx)
+static BIO *bio_encode_authenticode_request(PKCS7 *p7)
 {
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 	PKCS7_SIGNER_INFO *si;
@@ -367,7 +368,7 @@ static BIO *bio_encode_authenticode_request(FILE_FORMAT_CTX *ctx)
 	u_char *p;
 	int len;
 
-	signer_info = PKCS7_get_signer_info(ctx->sign->sig);
+	signer_info = PKCS7_get_signer_info(p7);
 	if (!signer_info)
 		return 0; /* FAILED */
 
@@ -400,19 +401,19 @@ static BIO *bio_encode_authenticode_request(FILE_FORMAT_CTX *ctx)
  * Decode a curl response from BIO.
  * If successful the RFC 3161 timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1].
- * [in, out] ctx: structure holds all input and output data
+ * [in, out] p7: new PKCS#7 signature
  * [in] bin: BIO with curl data
  * [in] verbose: additional output mode
  * [returns] CURLcode on error or CURLE_OK (0) on success
  */
-static CURLcode decode_rfc3161_response(FILE_FORMAT_CTX *ctx, BIO *bin, int verbose)
+static CURLcode decode_rfc3161_response(PKCS7 *p7, BIO *bin, int verbose)
 {
 	PKCS7_SIGNER_INFO *si;
 	STACK_OF(X509_ATTRIBUTE) *attrs;
 	TimeStampResp *reply;
 	u_char *p;
 	int i, len;
-	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(ctx->sign->sig);
+	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
 
 	if (!signer_info)
 		return 1; /* FAILED */
@@ -460,15 +461,15 @@ static CURLcode decode_rfc3161_response(FILE_FORMAT_CTX *ctx, BIO *bin, int verb
  * Decode a curl response from BIO.
  * If successful the authenticode timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1]:
- * sig->d.sign->signer_info->unauth_attr
- * [in, out] ctx: structure holds all input and output data
+ * p7->d.sign->signer_info->unauth_attr
+ * [in, out] p7: new PKCS#7 signature
  * [in] bin: BIO with curl data
  * [in] verbose: additional output mode
  * [returns] CURLcode on error or CURLE_OK (0) on success
  */
-static CURLcode decode_authenticode_response(FILE_FORMAT_CTX *ctx, BIO *bin, int verbose)
+static CURLcode decode_authenticode_response(PKCS7 *p7, BIO *bin, int verbose)
 {
-	PKCS7 *p7;
+	PKCS7 *resp;
 	PKCS7_SIGNER_INFO *info, *si;
 	STACK_OF(X509_ATTRIBUTE) *attrs;
 	BIO* b64, *b64_bin;
@@ -480,37 +481,40 @@ static CURLcode decode_authenticode_response(FILE_FORMAT_CTX *ctx, BIO *bin, int
 	if (!blob_has_nl)
 		BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
 	b64_bin = BIO_push(b64, bin);
-	p7 = d2i_PKCS7_bio(b64_bin, NULL);
+	resp = d2i_PKCS7_bio(b64_bin, NULL);
 	BIO_free_all(b64_bin);
-	if (p7 == NULL)
+	if (resp == NULL)
 		return 1; /* FAILED */
 
-	for(i = sk_X509_num(p7->d.sign->cert)-1; i>=0; i--)
-		PKCS7_add_certificate(ctx->sign->sig, sk_X509_value(p7->d.sign->cert, i));
+	for(i = sk_X509_num(resp->d.sign->cert)-1; i>=0; i--)
+		PKCS7_add_certificate(p7, sk_X509_value(resp->d.sign->cert, i));
 
-	signer_info = PKCS7_get_signer_info(p7);
+	signer_info = PKCS7_get_signer_info(resp);
+	PKCS7_free(resp);
 	if (!signer_info)
 		return 1; /* FAILED */
 	info = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
-	if (!info)
+	if (!info) {
+		PKCS7_free(resp);
 		return 1; /* FAILED */
+	}
 	if (((len = i2d_PKCS7_SIGNER_INFO(info, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
 		if (verbose) {
 			printf("Failed to convert signer info: %d\n", len);
 			ERR_print_errors_fp(stdout);
 		}
-		PKCS7_free(p7);
+		PKCS7_free(resp);
 		return 1; /* FAILED */
 	}
 	len = i2d_PKCS7_SIGNER_INFO(info, &p);
 	p -= len;
-	PKCS7_free(p7);
+	PKCS7_free(resp);
 
 	attrs = sk_X509_ATTRIBUTE_new_null();
 	attrs = X509at_add1_attr_by_txt(&attrs, PKCS9_COUNTER_SIGNATURE, V_ASN1_SET, p, len);
 	OPENSSL_free(p);
 
-	signer_info = PKCS7_get_signer_info(ctx->sign->sig);
+	signer_info = PKCS7_get_signer_info(p7);
 	if (!signer_info)
 		return 1; /* FAILED */
 	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
@@ -528,12 +532,13 @@ static CURLcode decode_authenticode_response(FILE_FORMAT_CTX *ctx, BIO *bin, int
 /*
  * Add timestamp to the PKCS7 SignerInfo structure:
  * sig->d.sign->signer_info->unauth_attr
- * [in, out] ctx: structure holds all input and output data
+ * [in, out] p7: new PKCS#7 signature
+ * [in] ctx: structure holds input and output data
  * [in] url: URL of the Time-Stamp Authority server
  * [in] rfc3161: Authenticode / RFC3161 Timestamp switch
  * [returns] 1 on error or 0 on success
  */
-static int add_timestamp(FILE_FORMAT_CTX *ctx, char *url, int rfc3161)
+static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161)
 {
 	CURL *curl;
 	struct curl_slist *slist = NULL;
@@ -548,9 +553,9 @@ static int add_timestamp(FILE_FORMAT_CTX *ctx, char *url, int rfc3161)
 
 	/* Encode timestamp request */
 	if (rfc3161) {
-		bout = bio_encode_rfc3161_request(ctx);
+		bout = bio_encode_rfc3161_request(p7, ctx->options->md);
 	} else {
-		bout = bio_encode_authenticode_request(ctx);
+		bout = bio_encode_authenticode_request(p7);
 	}
 	if (!bout)
 		return 1; /* FAILED */
@@ -644,9 +649,9 @@ static int add_timestamp(FILE_FORMAT_CTX *ctx, char *url, int rfc3161)
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 		/* Decode a curl response from BIO and write it into the PKCS7 structure */
 		if (rfc3161)
-			res = decode_rfc3161_response(ctx, bin, verbose);
+			res = decode_rfc3161_response(p7, bin, verbose);
 		else
-			res = decode_authenticode_response(ctx, bin, verbose);
+			res = decode_authenticode_response(p7, bin, verbose);
 		if (res && verbose)
 			print_timestamp_error(url, http_code);
 	}
@@ -656,28 +661,30 @@ static int add_timestamp(FILE_FORMAT_CTX *ctx, char *url, int rfc3161)
 }
 
 /*
- * [in, out] ctx: structure holds all input and output data
+ * [in, out] p7: new PKCS#7 signature
+ * [in] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
-static int add_timestamp_authenticode(FILE_FORMAT_CTX *ctx)
+static int add_timestamp_authenticode(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 {
 	int i;
 	for (i=0; i<ctx->options->nturl; i++) {
-		if (!add_timestamp(ctx, ctx->options->turl[i], 0))
+		if (!add_timestamp(p7, ctx, ctx->options->turl[i], 0))
 			return 1; /* OK */
 	}
 	return 0; /* FAILED */
 }
 
 /*
- * [in, out] ctx: structure holds all input and output data
+ * [in, out] p7: new PKCS#7 signature
+ * [in] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
-static int add_timestamp_rfc3161(FILE_FORMAT_CTX *ctx)
+static int add_timestamp_rfc3161(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 {
 	int i;
 	for (i=0; i<ctx->options->ntsurl; i++) {
-		if (!add_timestamp(ctx, ctx->options->tsurl[i], 1))
+		if (!add_timestamp(p7, ctx, ctx->options->tsurl[i], 1))
 			return 1; /* OK */
 	}
 	return 0; /* FAILED */
@@ -687,11 +694,11 @@ static int add_timestamp_rfc3161(FILE_FORMAT_CTX *ctx)
 /*
  * If successful the unauthenticated blob will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1]:
- * sig->d.sign->signer_info->unauth_attr
- * [in, out] ctx: structure holds all input and output data
+ * p7->d.sign->signer_info->unauth_attr
+ * [in, out] p7: new PKCS#7 signature
  * [returns] 0 on error or 1 on success
  */
-static int add_unauthenticated_blob(FILE_FORMAT_CTX *ctx)
+static int add_unauthenticated_blob(PKCS7 *p7)
 {
 	PKCS7_SIGNER_INFO *si;
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
@@ -702,10 +709,10 @@ static int add_unauthenticated_blob(FILE_FORMAT_CTX *ctx)
 	const char prefix[] = "\x0c\x82\x04\x00---BEGIN_BLOB---";
 	const char postfix[] = "---END_BLOB---";
 
-	signer_info = PKCS7_get_signer_info(ctx->sign->sig);
+	signer_info = PKCS7_get_signer_info(p7);
 	if (!signer_info)
 		return 0; /* FAILED */
-	si = sk_PKCS7_SIGNER_INFO_value(ctx->sign->sig->d.sign->signer_info, 0);
+	si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
 	if (!si)
 		return 0; /* FAILED */
 	if ((p = OPENSSL_malloc((size_t)len)) == NULL)
@@ -723,25 +730,26 @@ static int add_unauthenticated_blob(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * [in, out] ctx: structure holds all input and output data
+ * [in, out] p7: new PKCS#7 signature
+ * [in, out] ctx: structure holds input and output data
  * [returns] 1 on error or 0 on success
  */
-static int check_timestamp_and_blob(FILE_FORMAT_CTX *ctx)
+static int check_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 {
 #ifdef ENABLE_CURL
 	/* add counter-signature/timestamp */
-	if (ctx->options->nturl && !add_timestamp_authenticode(ctx)) {
+	if (ctx->options->nturl && !add_timestamp_authenticode(p7, ctx)) {
 		printf("%s\n%s\n", "Authenticode timestamping failed",
 			"Use the \"-ts\" option to add the RFC3161 Time-Stamp Authority or choose another one Authenticode Time-Stamp Authority");
 		return 1; /* FAILED */
 	}
-	if (ctx->options->ntsurl && !add_timestamp_rfc3161(ctx)) {
+	if (ctx->options->ntsurl && !add_timestamp_rfc3161(p7, ctx)) {
 		printf("%s\n%s\n", "RFC 3161 timestamping failed",
 			"Use the \"-t\" option to add the Authenticode Time-Stamp Authority or choose another one RFC3161 Time-Stamp Authority");
 		return 1; /* FAILED */
 	}
 #endif /* ENABLE_CURL */
-	if (ctx->options->addBlob && !add_unauthenticated_blob(ctx)) {
+	if (ctx->options->addBlob && !add_unauthenticated_blob(p7)) {
 		printf("Adding unauthenticated blob failed\n");
 		return 1; /* FAILED */
 	}
@@ -1103,7 +1111,7 @@ static int verify_timestamp_token(SIGNATURE *signature)
 }
 
 /*
- * [in] ctx: structure holds all input and output data
+ * [in] ctx: structure holds input and output data
  * [in] signature: structure for authenticode and time stamping
  * [returns] 1 on error or 0 on success
  */
@@ -1188,7 +1196,7 @@ out:
 }
 
 /*
- * [in] ctx: structure holds all input and output data
+ * [in] ctx: structure holds input and output data
  * [in] signature: structure for authenticode and time stamping
  * [in] signer: signer's X509 certificate
  * [returns] 1 on error or 0 on success
@@ -1446,7 +1454,7 @@ static int print_attributes(SIGNATURE *signature, int verbose)
 }
 
 /*
- * [in] ctx: structure holds all input and output data
+ * [in] ctx: structure holds input and output data
  * [in] signature: structure for authenticode and time stamping
  * [returns] 1 on error or 0 on success
  */
@@ -1516,7 +1524,7 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 }
 
 /*
- * [in] ctx: structure holds all input and output data
+ * [in] ctx: structure holds input and output data
  * [returns] 1 on error or 0 on success
  */
 static int verify_signed_file(FILE_FORMAT_CTX *ctx)
@@ -1539,6 +1547,29 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx)
 	signature_list_free(signatures);
 	if (ret)
 		ERR_print_errors_fp(stdout);
+	return ret;
+}
+
+/*
+ * [in, out] ctx: structure holds input and output data
+ * [in] p7: new PKCS#7 signature
+ * [returns] 1 on error or 0 on success
+ */
+static int save_extracted_pkcs7(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
+{
+	int ret;
+
+	(void)BIO_reset(ctx->outdata);
+	if (ctx->options->output_pkcs7) {
+		/* PEM format */
+		ret = !PEM_write_bio_PKCS7(ctx->outdata, p7);
+	} else {
+		/* default DER format */
+		ret = !i2d_PKCS7_bio(ctx->outdata, p7);
+	}
+	if (ret) {
+		printf("Unable to write pkcs7 object\n");
+	}
 	return ret;
 }
 
@@ -1568,7 +1599,7 @@ static int check_attached_data(FILE_FORMAT_CTX *in_ctx)
 	if (!ctx)
 		ctx = file_format_cat.ctx_new(options); */
 	if (!ctx) {
-		printf("Corrupted file.\n");
+		printf("Corrupt attached signature\n");
 		return 1; /* Failed */
 	}
 	if (verify_signed_file(ctx)) {
@@ -2922,6 +2953,7 @@ int main(int argc, char **argv)
 {
 	FILE_FORMAT_CTX *ctx = NULL;
 	GLOBAL_OPTIONS options;
+	PKCS7 *p7 = NULL;
 	int ret = -1;
 
 	/* reset options */
@@ -2970,29 +3002,36 @@ int main(int argc, char **argv)
 		ret = verify_signed_file(ctx);
 		goto skip_signing;
 	} else if (options.cmd == CMD_EXTRACT) {
-		ret = ctx->format->extract_signature(ctx);
+		p7 = ctx->format->pkcs7_extract(ctx);
+		if (!p7) {
+			printf("Unable to extract existing signature\n");
+			goto err_cleanup; /* FAILED */
+		}
+		ret = save_extracted_pkcs7(ctx, p7);
 		goto skip_signing;
 	} else if (options.cmd == CMD_REMOVE) {
-		ret = ctx->format->remove_signature(ctx);
+		ret = ctx->format->remove_pkcs7(ctx);
 		goto skip_signing;
 	} else {
-		ret = ctx->format->prepare_signature(ctx);
-		if (ret)
-			goto err_cleanup;
+		p7 = ctx->format->pkcs7_prepare(ctx);
+		if (!p7) {
+			goto err_cleanup; /* FAILED */
+		}
 	}
-	ret = check_timestamp_and_blob(ctx);
+	ret = check_timestamp_and_blob(p7, ctx);
 	if (ret)
-		goto err_cleanup;
+		goto err_cleanup; /* FAILED */
 
-	ret = ctx->format->append_signature(ctx);
+	ret = ctx->format->append_pkcs7(ctx, p7);
 	if (ret)
 		DO_EXIT_0("Append signature to outfile failed\n");
 
 skip_signing:
 
 	if (ctx->format->update_data_size) {
-		ctx->format->update_data_size(ctx);
+		ctx->format->update_data_size(ctx, p7);
 	}
+	PKCS7_free(p7);
 	ctx->format->ctx_free(ctx);
 
 	if (!ret && options.cmd == CMD_ATTACH) {
@@ -3000,7 +3039,7 @@ skip_signing:
 		if (!ret)
 			printf("Signature successfully attached\n");
 		/* else
-		 * the new signature has been successfully appended to the outfile
+		 * the new PKCS#7 signature has been successfully appended to the outfile
 		 * but only its verification failed (incorrect verification parameters?)
 		 * so the output file is not deleted
 		 */

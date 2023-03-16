@@ -223,18 +223,28 @@ typedef enum {
 
 typedef unsigned char u_char;
 
+/*
+ * Values from PKCS7 SignerInfo structure:
+ * p7->d.sign->signer_info
+ * https://github.com/openssl/openssl/blob/master/include/openssl/pkcs7.h.in#L58
+ */
 typedef struct SIGNATURE_st {
 	PKCS7 *p7;
+	/* digest_alg->algorithm */
 	int md_nid;
-	ASN1_STRING *digest;
-	time_t signtime;
-	char *url;
-	char *desc;
-	const u_char *purpose;
-	const u_char *level;
-	CMS_ContentInfo *timestamp;
-	time_t time;
-	ASN1_STRING *blob;
+	/* authorized attributes (auth_attr): */
+	ASN1_STRING *digest;        /* OID: 1.2.840.113549.1.9.4 */
+	time_t signtime;            /* OID: 1.2.840.113549.1.9.5 */
+	char *url;                  /* OID: 1.3.6.1.4.1.311.2.1.12 */
+	char *desc;                 /* OID: 1.3.6.1.4.1.311.2.1.12 */
+	const u_char *purpose;      /* OID: 1.3.6.1.4.1.311.2.1.11 */
+	const u_char *level;        /* OID: 1.3.6.1.4.1.311.15.1 */
+	/* unauthorized attributes (unauth_attr): */
+	ASN1_STRING *blob;          /* OID: 1.3.6.1.4.1.42921.1.2.1 */
+	CMS_ContentInfo *timestamp; /* Authenticode Timestamp OID: 1.2.840.113549.1.9.6
+                                 * or RFC3161 Timestamp OID: 1.3.6.1.4.1.311.3.3.1 */
+	time_t time;                /* timestamp->signedData->signerInfos->auth_attr
+	                             * OID: 1.2.840.113549.1.9.5 */
 } SIGNATURE;
 
 DEFINE_STACK_OF(SIGNATURE)
@@ -453,18 +463,10 @@ typedef struct cab_ctx_st CAB_CTX;
 typedef struct cat_ctx_st CAT_CTX;
 
 typedef struct {
-	BIO *outdata;
-	BIO *hash;
-	PKCS7 *cursig; /* current signature */
-	PKCS7 *sig;    /* new signature */
-	int len;       /* signature length */
-	int padlen;    /* signature padding length */
-} SIGN_DATA;
-
-typedef struct {
 	FILE_FORMAT *format;
 	GLOBAL_OPTIONS *options;
-	SIGN_DATA *sign;
+	BIO *outdata;
+	BIO *hash;
     union {
         MSI_CTX *msi_ctx;
         PE_CTX *pe_ctx;
@@ -483,11 +485,11 @@ struct file_format_st {
 	ASN1_OBJECT *(*get_data_blob) (FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
 	STACK_OF(SIGNATURE) *(*signature_list_get) (FILE_FORMAT_CTX *ctx);
 	int (*verify_digests) (FILE_FORMAT_CTX *ctx, SIGNATURE *signature);
-	int (*extract_signature) (FILE_FORMAT_CTX *ctx);
-	int (*remove_signature) (FILE_FORMAT_CTX *ctx);
-	int (*prepare_signature) (FILE_FORMAT_CTX *ctx);
-	int (*append_signature) (FILE_FORMAT_CTX *ctx);
-	void (*update_data_size) (FILE_FORMAT_CTX *data);
+	PKCS7 *(*pkcs7_extract) (FILE_FORMAT_CTX *ctx);
+	int (*remove_pkcs7) (FILE_FORMAT_CTX *ctx);
+	PKCS7 *(*pkcs7_prepare) (FILE_FORMAT_CTX *ctx);
+	int (*append_pkcs7) (FILE_FORMAT_CTX *ctx, PKCS7 *p7);
+	void (*update_data_size) (FILE_FORMAT_CTX *data, PKCS7 *p7);
 	void (*ctx_free) (FILE_FORMAT_CTX *ctx);
 	void (*ctx_cleanup) (FILE_FORMAT_CTX *ctx);
 };

@@ -12,7 +12,7 @@
 static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx);
 static int X509_attribute_chain_append_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_char *p, int len);
 static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CTX *ctx);
-static int pkcs7_set_spc_indirect_data_content(PKCS7 *sig, FILE_FORMAT_CTX *ctx, u_char *buf, int len);
+static int pkcs7_set_spc_indirect_data_content(PKCS7 *p7, FILE_FORMAT_CTX *ctx, u_char *buf, int len);
 static void signature_get_signed_attributes(SIGNATURE *signature,
 	STACK_OF(X509_ATTRIBUTE) *auth_attr);
 static void signature_get_unsigned_attributes(SIGNATURE *signature,
@@ -147,7 +147,7 @@ int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CT
 
 /*
  * [in, out] si: PKCS7_SIGNER_INFO structure
- * [in] ctx: structure holds all input and output data
+ * [in] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
 int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
@@ -178,7 +178,7 @@ int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
  * behaviour closer to signtool.exe (which doesn't include any non-trusted
  * time in this case.)
  * [in, out] si: PKCS7_SIGNER_INFO structure
- * [in] ctx: structure holds all input and output data
+ * [in] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
 int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
@@ -190,28 +190,66 @@ int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *c
 }
 
 /*
+ * Retrieve a decoded PKCS#7 struct corresponding to the signature
+ * stored in the "sigin" file
+ * CMD_ATTACH command specific
+ * [in] ctx: structure holds input and output data
+ * [returns] pointer to PKCS#7 structure
+ */
+PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
+{
+	PKCS7 *p7 = NULL;
+	uint32_t filesize;
+	char *indata;
+	BIO *bio;
+	const char pemhdr[] = "-----BEGIN PKCS7-----";
+
+	filesize = get_file_size(ctx->options->sigfile);
+	if (!filesize) {
+		return NULL; /* FAILED */
+	}
+	indata = map_file(ctx->options->sigfile, filesize);
+	if (!indata) {
+		printf("Failed to open file: %s\n", ctx->options->sigfile);
+		return NULL; /* FAILED */
+	}
+	bio = BIO_new_mem_buf(indata, (int)filesize);
+	if (filesize >= sizeof pemhdr && !memcmp(indata, pemhdr, sizeof pemhdr - 1)) {
+		/* PEM format */
+		p7 = PEM_read_bio_PKCS7(bio, NULL, NULL, NULL);
+	} else { /* DER format */
+		p7 = d2i_PKCS7_bio(bio, NULL);
+	}
+	BIO_free_all(bio);
+	unmap_file(indata, filesize);
+	return p7;
+}
+
+/*
  * Add the current signature to the new signature as a nested signature:
  * new unauthorized SPC_NESTED_SIGNATURE_OBJID attribute
- * [in, out] ctx: structure holds all input and output data
+ * [in, out] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
-int set_nested_signature(FILE_FORMAT_CTX *ctx)
+int cursig_set_nested(PKCS7 *cursig, PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 {
 	u_char *p = NULL;
 	int len = 0;
 	PKCS7_SIGNER_INFO *si;
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 
-	signer_info = PKCS7_get_signer_info(ctx->sign->cursig);
+	if (!cursig)
+		return 0; /* FAILED */
+	signer_info = PKCS7_get_signer_info(cursig);
 	if (!signer_info)
 		return 0; /* FAILED */
 	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
 	if (!si)
 		return 0; /* FAILED */
-	if (((len = i2d_PKCS7(ctx->sign->sig, NULL)) <= 0) ||
+	if (((len = i2d_PKCS7(p7, NULL)) <= 0) ||
 		(p = OPENSSL_malloc((size_t)len)) == NULL)
 		return 0; /* FAILED */
-	i2d_PKCS7(ctx->sign->sig, &p);
+	i2d_PKCS7(p7, &p);
 	p -= len;
 
 	pkcs7_signer_info_add_signing_time(si, ctx);
@@ -283,7 +321,7 @@ void print_hash(const char *descript1, const char *descript2, const u_char *mdbu
 }
 
 /*
- * [in] p7: PKCS#7 structure
+ * [in] p7: new PKCS#7 signature
  * [in] objid: Microsoft OID Authenticode
  * [returns] 0 on error or 1 on success
  */
@@ -302,8 +340,8 @@ int is_content_type(PKCS7 *p7, const char *objid)
 }
 
 /*
- * [out] p7: PKCS#7 structure
- * [in] ctx: structure holds all input and output data
+ * [out] p7: new PKCS#7 signature
+ * [in] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
 int pkcs7_set_data_content(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
@@ -330,7 +368,7 @@ int pkcs7_set_data_content(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
  * Create new SIGNATURE structure, get signed and unsigned attributes,
  * insert this signature to signature list
  * [in, out] signatures: signature list
- * [in] p7: PKCS#7 structure
+ * [in] p7: PKCS#7 signature
  * [in] allownest: allow nested signature switch
  * [returns] 0 on error or 1 on success
  */
@@ -406,6 +444,23 @@ SpcLink *spc_link_obsolete_get(void)
 	link->value.file->value.unicode = ASN1_BMPSTRING_new();
 	ASN1_STRING_set(link->value.file->value.unicode, obsolete, sizeof obsolete);
 	return link;
+}
+
+/*
+ * Retrieve a decoded PKCS#7 struct
+ * [in] indata: mapped file
+ * [in] sigpos: signature data offset
+ * [in] siglen: signature data size
+ * [returns] pointer to PKCS#7 structure
+ */
+PKCS7 *pkcs7_get(char *indata, uint32_t sigpos, uint32_t siglen)
+{
+	PKCS7 *p7 = NULL;
+	const u_char *blob;
+
+	blob = (u_char *)indata + sigpos;
+	p7 = d2i_PKCS7(NULL, &blob, siglen);
+	return p7;
 }
 
 /*
@@ -530,7 +585,7 @@ static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CT
 
 /*
  * Replace the data part with the MS Authenticode spcIndirectDataContent blob
- * [out] p7: PKCS#7 structure
+ * [out] p7: new PKCS#7 signature
  * [in] ctx: FILE_FORMAT_CTX structure
  * [in] blob: SpcIndirectDataContent data
  * [in] len: SpcIndirectDataContent data length
@@ -543,7 +598,7 @@ static int pkcs7_set_spc_indirect_data_content(PKCS7 *p7, FILE_FORMAT_CTX *ctx, 
 	BIO *bio;
 	PKCS7 *td7;
 
-	mdlen = BIO_gets(ctx->sign->hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
+	mdlen = BIO_gets(ctx->hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
 	memcpy(buf+len, mdbuf, (size_t)mdlen);
 	seqhdrlen = asn1_simple_hdr_len(buf, len);
 
@@ -660,7 +715,7 @@ static void signature_get_signed_attributes(SIGNATURE *signature,
  * [in, out] signatures: signature list
  * [out] signature: structure for authenticode and time stamping
  * [in] unauth_attr: unauthorized attributes list
- * [in] p7: PKCS#7 structure
+ * [in] p7: new PKCS#7 signature
  * [in] allownest: allow nested signature switch
  * [returns] none
  */
