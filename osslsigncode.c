@@ -234,6 +234,13 @@ ASN1_SEQUENCE(TimeStampToken) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampToken)
 
+/* Prototypes */
+static int signature_list_append_pkcs7(STACK_OF(PKCS7) **signatures, PKCS7 *p7, int allownest);
+static time_t time_t_get_asn1_time(const ASN1_TIME *s);
+static time_t time_t_get_si_time(PKCS7_SIGNER_INFO *si);
+static time_t time_t_get_cms_time(CMS_ContentInfo *cms);
+static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
+	PKCS7_SIGNER_INFO *countersignature);
 
 #ifdef ENABLE_CURL
 
@@ -734,7 +741,7 @@ static int add_unauthenticated_blob(PKCS7 *p7)
  * [in, out] ctx: structure holds input and output data
  * [returns] 1 on error or 0 on success
  */
-static int check_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
+static int add_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 {
 #ifdef ENABLE_CURL
 	/* add counter-signature/timestamp */
@@ -851,18 +858,18 @@ static void print_cert(X509 *cert, int i)
 
 /*
  * Print X509 certificate list from signature->p7->d.sign->cert
- * [in] signature: structure for authenticode and time stamping
+ * [in] p7: PKCS#7 signature
  * [returns] 1 on success
  */
-static int print_certs(SIGNATURE *signature)
+static int print_certs(PKCS7 *p7)
 {
 	X509 *cert;
 	int i, count;
 
-	count = sk_X509_num(signature->p7->d.sign->cert);
+	count = sk_X509_num(p7->d.sign->cert);
 	printf("\nNumber of certificates: %d\n", count);
 	for (i=0; i<count; i++) {
-		cert = sk_X509_value(signature->p7->d.sign->cert, i);
+		cert = sk_X509_value(p7->d.sign->cert, i);
 		if ((cert == NULL))
 			return 0; /* FAILED */
 		print_cert(cert, i);
@@ -1047,10 +1054,11 @@ out:
 /*
  * Compare the hash provided from the TSTInfo object against the hash computed
  * from the signature created by the signing certificate's private key
- * [in] signature: structure for authenticode and time stamping
+ * [in] p7: PKCS#7 signature
+ * [in] timestamp: CMS_ContentInfo struct for Authenticode Timestamp or RFC 3161 Timestamp
  * [returns] 0 on error or 1 on success
  */
-static int verify_timestamp_token(SIGNATURE *signature)
+static int verify_timestamp_token(PKCS7 *p7, CMS_ContentInfo *timestamp)
 {
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 	PKCS7_SIGNER_INFO *si;
@@ -1062,7 +1070,7 @@ static int verify_timestamp_token(SIGNATURE *signature)
 	int md_nid;
 	BIO *bhash;
 
-	signer_info = PKCS7_get_signer_info(signature->p7);
+	signer_info = PKCS7_get_signer_info(p7);
 	if (!signer_info)
 		return 0; /* FAILED */
 
@@ -1070,7 +1078,7 @@ static int verify_timestamp_token(SIGNATURE *signature)
 	if (!si)
 		return 0; /* FAILED */
 
-	pos  = CMS_get0_content(signature->timestamp);
+	pos  = CMS_get0_content(timestamp);
 	if (pos != NULL && *pos != NULL) {
 		p = (*pos)->data;
 		token = d2i_TimeStampToken(NULL, &p, (*pos)->length);
@@ -1112,10 +1120,12 @@ static int verify_timestamp_token(SIGNATURE *signature)
 
 /*
  * [in] ctx: structure holds input and output data
- * [in] signature: structure for authenticode and time stamping
+ * [in] p7: PKCS#7 signature
+ * [in] timestamp: CMS_ContentInfo struct for Authenticode Timestamp or RFC 3161 Timestamp
+ * [in] time: timestamp verification time
  * [returns] 1 on error or 0 on success
  */
-static int verify_timestamp(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
+static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *timestamp, time_t time)
 {
 	X509_STORE *store;
 	STACK_OF(CMS_SignerInfo) *sinfos;
@@ -1138,7 +1148,7 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 		 * Signtool does not respect this RFC and neither we do.
 		 * So verify timestamp against the time of its creation.
 		 */
-		if (!x509_store_set_time(store, signature->time)) {
+		if (!x509_store_set_time(store, time)) {
 			printf("Failed to set store time\n");
 			X509_STORE_free(store);
 			goto out;
@@ -1150,14 +1160,14 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 	}
 
 	/* verify a CMS SignedData structure */
-	if (!CMS_verify(signature->timestamp, NULL, store, 0, NULL, 0)) {
+	if (!CMS_verify(timestamp, NULL, store, 0, NULL, 0)) {
 		printf("\nCMS_verify error\n");
 		X509_STORE_free(store);
 		goto out;
 	}
 	X509_STORE_free(store);
 
-	sinfos = CMS_get0_SignerInfos(signature->timestamp);
+	sinfos = CMS_get0_SignerInfos(timestamp);
 	cmssi = sk_CMS_SignerInfo_value(sinfos, 0);
 	CMS_SignerInfo_get0_algs(cmssi, NULL, &signer, NULL, NULL);
 
@@ -1167,9 +1177,9 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 		OPENSSL_free(url);
 	}
 	/* verify a Certificate Revocation List */
-	crls = signature->p7->d.sign->crl;
+	crls = p7->d.sign->crl;
 	if (ctx->options->tsa_crlfile || crls) {
-		STACK_OF(X509) *chain = CMS_get1_certs(signature->timestamp);
+		STACK_OF(X509) *chain = CMS_get1_certs(timestamp);
 		int crlok = verify_crl(ctx->options->tsa_cafile, ctx->options->tsa_crlfile,
 			crls, signer, chain);
 		sk_X509_pop_free(chain, X509_free);
@@ -1185,7 +1195,7 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 		goto out;
 	}
 	/* verify the hash provided from the trusted timestamp */
-	if (!verify_timestamp_token(signature)) {
+	if (!verify_timestamp_token(p7, timestamp)) {
 		goto out;
 	}
 	verok = 1; /* OK */
@@ -1197,11 +1207,12 @@ out:
 
 /*
  * [in] ctx: structure holds input and output data
- * [in] signature: structure for authenticode and time stamping
+ * [in] p7: PKCS#7 signature
+ * [in] time: signature verification time
  * [in] signer: signer's X509 certificate
  * [returns] 1 on error or 0 on success
  */
-static int verify_authenticode(FILE_FORMAT_CTX *ctx, SIGNATURE *signature, X509 *signer)
+static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X509 *signer)
 {
 	X509_STORE *store;
 	STACK_OF(X509_CRL) *crls;
@@ -1217,10 +1228,10 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, SIGNATURE *signature, X509 
 		X509_STORE_free(store);
 		goto out;
 	}
-	if (signature->time != INVALID_TIME) {
+	if (time != INVALID_TIME) {
 		printf("Signature verification time: ");
-		print_time_t(signature->time);
-		if (!x509_store_set_time(store, signature->time)) {
+		print_time_t(time);
+		if (!x509_store_set_time(store, time)) {
 			printf("Failed to set signature time\n");
 			X509_STORE_free(store);
 			goto out;
@@ -1235,19 +1246,19 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, SIGNATURE *signature, X509 
 		}
 	}
 	/* verify a PKCS#7 signedData structure */
-	if (signature->p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
+	if (p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
 		/* only verify the contents of the sequence */
 		int seqhdrlen;
-		seqhdrlen = asn1_simple_hdr_len(signature->p7->d.sign->contents->d.other->value.sequence->data,
-			signature->p7->d.sign->contents->d.other->value.sequence->length);
-		bio = BIO_new_mem_buf(signature->p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
-			signature->p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
+		seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
+			p7->d.sign->contents->d.other->value.sequence->length);
+		bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
+			p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
 	} else {
 		/* verify the entire value */
-		bio = BIO_new_mem_buf(signature->p7->d.sign->contents->d.other->value.sequence->data,
-			signature->p7->d.sign->contents->d.other->value.sequence->length);
+		bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data,
+			p7->d.sign->contents->d.other->value.sequence->length);
 	}
-	if (!PKCS7_verify(signature->p7, NULL, store, bio, NULL, 0)) {
+	if (!PKCS7_verify(p7, NULL, store, bio, NULL, 0)) {
 		printf("\nPKCS7_verify error\n");
 		X509_STORE_free(store);
 		BIO_free(bio);
@@ -1257,9 +1268,9 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, SIGNATURE *signature, X509 
 	BIO_free(bio);
 
 	/* verify a Certificate Revocation List */
-	crls = signature->p7->d.sign->crl;
+	crls = p7->d.sign->crl;
 	if (ctx->options->crlfile || crls) {
-		STACK_OF(X509) *chain = signature->p7->d.sign->cert;
+		STACK_OF(X509) *chain = p7->d.sign->cert;
 		int crlok = verify_crl(ctx->options->cafile, ctx->options->crlfile,
 			crls, signer, chain);
 		printf("Signature CRL verification: %s\n", crlok ? "ok" : "failed");
@@ -1352,10 +1363,11 @@ static int verify_leaf_hash(X509 *cert, const char *leafhash)
 }
 
 /*
- * [in] signature: structure for authenticode and time stamping
+ * [in] timestamp: CMS_ContentInfo struct for Authenticode Timestamp or RFC 3161 Timestamp
+ * [in] time: timestamp verification time
  * [returns] 0 on error or 1 on success
  */
-static int print_cms_timestamp(SIGNATURE *signature)
+static int print_cms_timestamp(CMS_ContentInfo *timestamp, time_t time)
 {
 	STACK_OF(CMS_SignerInfo) *sinfos;
 	CMS_SignerInfo *si;
@@ -1366,14 +1378,14 @@ static int print_cms_timestamp(SIGNATURE *signature)
 	X509_ALGOR *pdig;
 	X509_NAME *issuer = NULL;
 
-	sinfos = CMS_get0_SignerInfos(signature->timestamp);
+	sinfos = CMS_get0_SignerInfos(timestamp);
 	if (sinfos == NULL)
 		return 0; /* FAILED */
 	si = sk_CMS_SignerInfo_value(sinfos, 0);
 	if (si == NULL)
 		return 0; /* FAILED */
 	printf("\nThe signature is timestamped: ");
-	print_time_t(signature->time);
+	print_time_t(time);
 	CMS_SignerInfo_get0_algs(si, NULL, NULL, &pdig, NULL);
 	if (pdig == NULL || pdig->algorithm == NULL)
 		return 0; /* FAILED */
@@ -1394,78 +1406,341 @@ static int print_cms_timestamp(SIGNATURE *signature)
 /*
  * RFC3852: the message-digest authenticated attribute type MUST be
  * present when there are any authenticated attributes present
- * [in] signature: structure for authenticode and time stamping
+ * [in] timestamp: CMS_ContentInfo struct for Authenticode Timestamp or RFC 3161 Timestamp
+ * [in] p7: PKCS#7 signature
  * [in] verbose: additional output mode
  * [returns] 0 on error or 1 on success
  */
-static int print_attributes(SIGNATURE *signature, int verbose)
+static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7 *p7, int verbose)
 {
-	const u_char *mdbuf;
-	int len;
-
-	if (!signature->digest)
-		return 0; /* FAILED */
-
+	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
+	PKCS7_SIGNER_INFO *si;
+	int md_nid, i;
+	STACK_OF(X509_ATTRIBUTE) *auth_attr, *unauth_attr;
+	X509_ATTRIBUTE *attr;
+	ASN1_OBJECT *object;
+	ASN1_STRING *value;
+	char object_txt[128];
+	time_t time = INVALID_TIME;
+	
+	signer_info = PKCS7_get_signer_info(p7);
+	if (!signer_info)
+		return INVALID_TIME; /* FAILED */
+	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
+	if (!si)
+		return INVALID_TIME; /* FAILED */
+	md_nid = OBJ_obj2nid(si->digest_alg->algorithm);
+	printf("\nMessage digest algorithm: %s\n",
+		(md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2sn(md_nid));
 	printf("\nAuthenticated attributes:\n");
-	printf("\tMessage digest algorithm: %s\n",
-		(signature->md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2sn(signature->md_nid));
-	mdbuf = ASN1_STRING_get0_data(signature->digest);
-	len = ASN1_STRING_length(signature->digest);
-	print_hash("\tMessage digest", "", mdbuf, len);
-	printf("\tSigning time: ");
-	print_time_t(signature->signtime);
-
-	if (signature->purpose) {
-		if (!memcmp(signature->purpose, purpose_comm, sizeof purpose_comm))
-			printf("\tMicrosoft Commercial Code Signing purpose\n");
-		else if (!memcmp(signature->purpose, purpose_ind, sizeof purpose_ind))
-			printf("\tMicrosoft Individual Code Signing purpose\n");
-		else
-			printf("\tUnrecognized Code Signing purpose\n");
-	}
-	if (signature->url) {
-		printf("\tURL description: %s\n", signature->url);
-	}
-	if (signature->desc) {
-		printf("\tText description: %s\n", signature->desc);
-	}
-	if (signature->level) {
-		if (!memcmp(signature->level, java_attrs_low, sizeof java_attrs_low))
-			printf("\tLow level of permissions in Microsoft Internet Explorer 4.x for CAB files\n");
-		else
-			printf("\tUnrecognized level of permissions in Microsoft Internet Explorer 4.x for CAB files\n");
+	auth_attr = PKCS7_get_signed_attributes(si);  /* cont[0] */
+	for (i=0; i<X509at_get_attr_count(auth_attr); i++) {
+		attr = X509at_get_attr(auth_attr, i);
+		object = X509_ATTRIBUTE_get0_object(attr);
+		if (object == NULL)
+			continue;
+		object_txt[0] = 0x00;
+		OBJ_obj2txt(object_txt, sizeof object_txt, object, 1);
+		if (!strcmp(object_txt, PKCS9_MESSAGE_DIGEST)) {
+			/* PKCS#9 message digest - Policy OID: 1.2.840.113549.1.9.4 */
+			ASN1_STRING *digest  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_OCTET_STRING, NULL);
+			const u_char *mdbuf = ASN1_STRING_get0_data(digest);
+			int len = ASN1_STRING_length(digest);
+			print_hash("\tMessage digest", "", mdbuf, len);
+		} else if (!strcmp(object_txt, PKCS9_SIGNING_TIME)) {
+			/* PKCS#9 signing time - Policy OID: 1.2.840.113549.1.9.5 */
+			ASN1_UTCTIME *signtime = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
+			printf("\tSigning time: ");
+			print_time_t(time_t_get_asn1_time(signtime));
+		} else if (!strcmp(object_txt, SPC_SP_OPUS_INFO_OBJID)) {
+			/* Microsoft OID: 1.3.6.1.4.1.311.2.1.12 */
+			SpcSpOpusInfo *opus;
+			const u_char *data;
+			value  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
+			if (value == NULL)
+				continue;
+			data = ASN1_STRING_get0_data(value);
+			opus = d2i_SpcSpOpusInfo(NULL, &data, ASN1_STRING_length(value));
+			if (opus == NULL)
+				continue;
+			if (opus->moreInfo && opus->moreInfo->type == 0) {
+				char *url = OPENSSL_strdup((char *)opus->moreInfo->value.url->data);
+				printf("\tURL description: %s\n", url);
+				OPENSSL_free(url);
+			}
+			if (opus->programName) {
+				char *desc;
+				if (opus->programName->type == 0) {
+					u_char *opusdata;
+					int len = ASN1_STRING_to_UTF8(&opusdata, opus->programName->value.unicode);
+					if (len >= 0) {
+						desc = OPENSSL_strndup((char *)opusdata, (size_t)len);
+						OPENSSL_free(opusdata);
+					}
+				} else {
+					desc = OPENSSL_strdup((char *)opus->programName->value.ascii->data);
+				}
+				printf("\tText description: %s\n", desc);
+				OPENSSL_free(desc);
+			}
+			SpcSpOpusInfo_free(opus);
+		} else if (!strcmp(object_txt, SPC_STATEMENT_TYPE_OBJID)) {
+			/* Microsoft OID: 1.3.6.1.4.1.311.2.1.11 */
+			const u_char *purpose;
+			value  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
+			if (value == NULL)
+				continue;
+			purpose = ASN1_STRING_get0_data(value);
+			if (!memcmp(purpose, purpose_comm, sizeof purpose_comm))
+				printf("\tMicrosoft Commercial Code Signing purpose\n");
+			else if (!memcmp(purpose, purpose_ind, sizeof purpose_ind))
+				printf("\tMicrosoft Individual Code Signing purpose\n");
+			else
+				printf("\tUnrecognized Code Signing purpose\n");
+		} else if (!strcmp(object_txt, MS_JAVA_SOMETHING)) {
+			/* Microsoft OID: 1.3.6.1.4.1.311.15.1 */
+			const u_char *level;
+			value  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
+			if (value == NULL)
+				continue;
+			level = ASN1_STRING_get0_data(value);
+			if (!memcmp(level, java_attrs_low, sizeof java_attrs_low))
+				printf("\tLow level of permissions in Microsoft Internet Explorer 4.x for CAB files\n");
+			else
+				printf("\tUnrecognized level of permissions in Microsoft Internet Explorer 4.x for CAB files\n");
+			}
 	}
 
 	/* Unauthenticated attributes */
-	if (signature->timestamp) {
-		if (!print_cms_timestamp(signature))
-			return 0; /* FAILED */
-	}
-	if (signature->blob) {
-		if (verbose) {
-			char *data_blob;
-			data_blob = OPENSSL_buf2hexstr(signature->blob->data, signature->blob->length);
-			printf("\nUnauthenticated Data Blob:\n%s\n", data_blob);
-			OPENSSL_free(data_blob);
+	unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
+	for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
+		attr = X509at_get_attr(unauth_attr, i);
+		object = X509_ATTRIBUTE_get0_object(attr);
+		if (object == NULL)
+			continue;
+		object_txt[0] = 0x00;
+		OBJ_obj2txt(object_txt, sizeof object_txt, object, 1);	
+		if (!strcmp(object_txt, PKCS9_COUNTER_SIGNATURE)) {
+			/* Authenticode Timestamp - Policy OID: 1.2.840.113549.1.9.6 */
+			const u_char *data;
+			PKCS7_SIGNER_INFO *countersi;
+			value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
+			if (value == NULL)
+				continue;
+			data = ASN1_STRING_get0_data(value);
+			countersi = d2i_PKCS7_SIGNER_INFO(NULL, &data, ASN1_STRING_length(value));
+			if (countersi == NULL) {
+				printf("Error: Authenticode Timestamp could not be decoded correctly\n");
+				ERR_print_errors_fp(stdout);
+				continue;
+			}
+			time = time_t_get_si_time(countersi);
+			if (time != INVALID_TIME) {
+				*timestamp = cms_get_timestamp(p7->d.sign, countersi);
+				if (*timestamp) {
+					if (!print_cms_timestamp(*timestamp, time))
+						return INVALID_TIME; /* FAILED */
+				} else {
+					printf("Error: Corrupt Authenticode Timestamp embedded content\n");
+				}
+			} else {
+				printf("Error: PKCS9_TIMESTAMP_SIGNING_TIME attribute not found\n");
+				PKCS7_SIGNER_INFO_free(countersi);
+			}
+		} else if (!strcmp(object_txt, SPC_RFC3161_OBJID)) {
+			/* RFC3161 Timestamp - Policy OID: 1.3.6.1.4.1.311.3.3.1 */
+			const u_char *data;
+			value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
+			if (value == NULL)
+				continue;
+			data = ASN1_STRING_get0_data(value);
+			*timestamp = d2i_CMS_ContentInfo(NULL, &data, ASN1_STRING_length(value));
+			if (*timestamp == NULL) {
+				printf("Error: RFC3161 Timestamp could not be decoded correctly\n");
+				ERR_print_errors_fp(stdout);
+				continue;
+			}
+			time = time_t_get_cms_time(*timestamp);
+			if (time != INVALID_TIME) {
+				if (!print_cms_timestamp(*timestamp, time))
+					return INVALID_TIME; /* FAILED */
+			} else {
+				printf("Error: Corrupt RFC3161 Timestamp embedded content\n");
+				CMS_ContentInfo_free(*timestamp);
+				ERR_print_errors_fp(stdout);
+			}
+		} else if (!strcmp(object_txt, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
+			/* Unauthenticated Data Blob - Policy OID: 1.3.6.1.4.1.42921.1.2.1 */
+			ASN1_STRING *blob = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTF8STRING, NULL);
+			if (verbose) {
+				char *data_blob = OPENSSL_buf2hexstr(blob->data, blob->length);
+				printf("\nUnauthenticated Data Blob:\n%s\n", data_blob);
+				OPENSSL_free(data_blob);
+			} else {
+				printf("\nUnauthenticated Data Blob length: %d bytes\n", blob->length);
+			}
 		}
-		printf("\nUnauthenticated Data Blob length: %d bytes\n",signature->blob->length);
 	}
-	return 1; /* OK */
+	return time;
+}
+
+/*
+ * Convert ASN1_TIME to time_t
+ * [in] s: ASN1_TIME structure
+ * [returns] INVALID_TIME on error or time_t on success
+ */
+static time_t time_t_get_asn1_time(const ASN1_TIME *s)
+{
+	struct tm tm;
+
+	if ((s == NULL) || (!ASN1_TIME_check(s))) {
+		return INVALID_TIME;
+	}
+	if (ASN1_TIME_to_tm(s, &tm)) {
+#ifdef _WIN32
+		return _mkgmtime(&tm);
+#else
+		return timegm(&tm);
+#endif
+	} else {
+		return INVALID_TIME;
+	}
+}
+
+/*
+ * Get signing time from authorized attributes
+ * [in] si: PKCS7_SIGNER_INFO structure
+ * [returns] INVALID_TIME on error or time_t on success
+ */
+static time_t time_t_get_si_time(PKCS7_SIGNER_INFO *si)
+{
+	STACK_OF(X509_ATTRIBUTE) *auth_attr;
+	X509_ATTRIBUTE *attr;
+	ASN1_OBJECT *object;
+	ASN1_UTCTIME *time = NULL;
+	time_t posix_time;
+	char object_txt[128];
+	int i;
+
+	auth_attr = PKCS7_get_signed_attributes(si);  /* cont[0] */
+	if (auth_attr)
+		for (i=0; i<X509at_get_attr_count(auth_attr); i++) {
+			attr = X509at_get_attr(auth_attr, i);
+			object = X509_ATTRIBUTE_get0_object(attr);
+			if (object == NULL)
+				return INVALID_TIME; /* FAILED */
+			object_txt[0] = 0x00;
+			OBJ_obj2txt(object_txt, sizeof object_txt, object, 1);
+			if (!strcmp(object_txt, PKCS9_SIGNING_TIME)) {
+				/* PKCS#9 signing time - Policy OID: 1.2.840.113549.1.9.5 */
+				time = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
+			}
+		}
+	posix_time = time_t_get_asn1_time(time);
+	return posix_time;
+}
+
+/*
+ * Get timestamping time from embedded content in a CMS_ContentInfo structure
+ * [in] si: CMS_ContentInfo structure
+ * [returns] INVALID_TIME on error or time_t on success
+ */
+static time_t time_t_get_cms_time(CMS_ContentInfo *cms)
+{
+	ASN1_OCTET_STRING **pos;
+	const u_char *p = NULL;
+	TimeStampToken *token = NULL;
+	ASN1_GENERALIZEDTIME *asn1_time = NULL;
+	time_t posix_time = INVALID_TIME;
+
+	pos  = CMS_get0_content(cms);
+	if (pos != NULL && *pos != NULL) {
+		p = (*pos)->data;
+		token = d2i_TimeStampToken(NULL, &p, (*pos)->length);
+		if (token) {
+			asn1_time = token->time;
+			posix_time = time_t_get_asn1_time(asn1_time);
+			TimeStampToken_free(token);
+		}
+	}
+	return posix_time;
+}
+
+/*
+ * Create new CMS_ContentInfo struct for Authenticode Timestamp.
+ * This struct does not contain any TimeStampToken as specified in RFC 3161.
+ * [in] p7_signed: PKCS#7 signedData structure
+ * [in] countersignature: Authenticode Timestamp decoded to PKCS7_SIGNER_INFO
+ * [returns] pointer to CMS_ContentInfo structure
+ */
+static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
+	PKCS7_SIGNER_INFO *countersignature)
+{
+	CMS_ContentInfo *cms = NULL;
+	PKCS7_SIGNER_INFO *si;
+	PKCS7 *p7 = NULL, *content = NULL;
+	u_char *p = NULL;
+	const u_char *q;
+	int i, len = 0;
+
+	p7 = PKCS7_new();
+	si = sk_PKCS7_SIGNER_INFO_value(p7_signed->signer_info, 0);
+	if (si == NULL)
+		goto out;
+
+	/* Create new signed PKCS7 timestamp structure. */
+	if (!PKCS7_set_type(p7, NID_pkcs7_signed))
+		goto out;
+	if (!PKCS7_add_signer(p7, countersignature))
+		goto out;
+	for (i = 0; i < sk_X509_num(p7_signed->cert); i++) {
+		if (!PKCS7_add_certificate(p7, sk_X509_value(p7_signed->cert, i)))
+			goto out;
+	}
+	/* Create new encapsulated NID_id_smime_ct_TSTInfo content. */
+	content = PKCS7_new();
+	content->d.other = ASN1_TYPE_new();
+	content->type = OBJ_nid2obj(NID_id_smime_ct_TSTInfo);
+	ASN1_TYPE_set1(content->d.other, V_ASN1_OCTET_STRING, si->enc_digest);
+	/* Add encapsulated content to signed PKCS7 timestamp structure:
+	   p7->d.sign->contents = content */
+	if (!PKCS7_set_content(p7, content)) {
+		PKCS7_free(content);
+		goto out;
+	}
+	/* Convert PKCS7 into CMS_ContentInfo */
+	if (((len = i2d_PKCS7(p7, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
+		printf("Failed to convert pkcs7: %d\n", len);
+		goto out;
+	}
+	len = i2d_PKCS7(p7, &p);
+	p -= len;
+	q = p;
+	cms = d2i_CMS_ContentInfo(NULL, &q, len);
+	OPENSSL_free(p);
+
+out:
+	if (!cms)
+		ERR_print_errors_fp(stdout);
+	PKCS7_free(p7);
+	return cms;
 }
 
 /*
  * [in] ctx: structure holds input and output data
- * [in] signature: structure for authenticode and time stamping
+ * [in] p7: PKCS#7 signature
  * [returns] 1 on error or 0 on success
  */
-static int verify_signature(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
+static int verify_signature(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
 	int leafok, verok;
 	STACK_OF(X509) *signers;
 	X509 *signer;
 	char *url;
+    CMS_ContentInfo *timestamp = NULL;
+	time_t time;
 
-	signers = PKCS7_get0_signers(signature->p7, NULL, 0);
+	signers = PKCS7_get0_signers(p7, NULL, 0);
 	if (!signers || sk_X509_num(signers) != 1) {
 		printf("PKCS7_get0_signers error\n");
 		return 1; /* FAILED */
@@ -1475,10 +1750,9 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 	printf("Signer's certificate:\n");
 	print_cert(signer, 0);
 
-	if (!print_certs(signature))
+	if (!print_certs(p7))
 		printf("Print certs error\n");
-	if (!print_attributes(signature, ctx->options->verbose))
-		printf("Print attributes error\n");
+	time = time_t_timestamp_get_attributes(&timestamp, p7, ctx->options->verbose);
 	if (ctx->options->leafhash != NULL) {
 		leafok = verify_leaf_hash(signer, ctx->options->leafhash);
 		printf("\nLeaf hash match: %s\n", leafok ? "ok" : "failed");
@@ -1501,26 +1775,87 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 		printf("CRL distribution point: %s\n", url);
 		OPENSSL_free(url);
 	}
-
-	if (signature->timestamp) {
-		if (!ctx->options->ignore_timestamp) {
-			int timeok = verify_timestamp(ctx, signature);
+	if (timestamp) {
+		if (ctx->options->ignore_timestamp) {
+			printf("\nTimestamp Server Signature verification is disabled\n\n");
+			time = INVALID_TIME;
+		} else {
+			int timeok = verify_timestamp(ctx, p7, timestamp, time);
 			printf("Timestamp Server Signature verification: %s\n", timeok ? "ok" : "failed");
 			if (!timeok) {
-				signature->time = INVALID_TIME;
+				time = INVALID_TIME;
 			}
-		} else {
-			printf("\nTimestamp Server Signature verification is disabled\n\n");
-			signature->time = INVALID_TIME;
 		}
+		CMS_ContentInfo_free(timestamp);
+		ERR_clear_error();
 	} else
 		printf("\nTimestamp is not available\n\n");
-	verok = verify_authenticode(ctx, signature, signer);
+	verok = verify_authenticode(ctx, p7, time, signer);
 	printf("Signature verification: %s\n\n", verok ? "ok" : "failed");
 	if (!verok)
 		return 1; /* FAILED */
 
 	return 0; /* OK */
+}
+
+/*
+ * Create new SIGNATURE structure, get signed and unsigned attributes,
+ * insert this signature to signature list
+ * [in, out] signatures: signature list
+ * [in] p7: PKCS#7 signature
+ * [in] allownest: allow nested signature switch
+ * [returns] 0 on error or 1 on success
+ */
+static int signature_list_append_pkcs7(STACK_OF(PKCS7) **signatures, PKCS7 *p7, int allownest)
+{
+	PKCS7_SIGNER_INFO *si;
+	STACK_OF(X509_ATTRIBUTE) *unauth_attr;
+	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
+
+	if (!signer_info)
+		return 0; /* FAILED */
+	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
+	if (!si)
+		return 0; /* FAILED */
+
+	unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
+	if (unauth_attr) {
+		/* find Nested Signature - Policy OID: 1.3.6.1.4.1.311.2.4.1 */
+		int i;
+		for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
+			ASN1_STRING *value;
+			char object_txt[128];
+			const u_char *data;
+			int j;
+			X509_ATTRIBUTE *attr = X509at_get_attr(unauth_attr, i);
+			ASN1_OBJECT *object = X509_ATTRIBUTE_get0_object(attr);
+			if (object == NULL)
+				continue;
+			object_txt[0] = 0x00;
+			OBJ_obj2txt(object_txt, sizeof object_txt, object, 1);
+			if (allownest && !strcmp(object_txt, SPC_NESTED_SIGNATURE_OBJID)) {
+				PKCS7 *nested;
+				for (j=0; j<X509_ATTRIBUTE_count(attr); j++) {
+					value = X509_ATTRIBUTE_get0_data(attr, j, V_ASN1_SEQUENCE, NULL);
+					if (value == NULL)
+						continue;
+					data = ASN1_STRING_get0_data(value);
+					nested = d2i_PKCS7(NULL, &data, ASN1_STRING_length(value));
+					if (nested) {
+						if (!signature_list_append_pkcs7(signatures, nested, 0)) {
+							printf("Failed to append signature list\n\n");
+							PKCS7_free(nested);
+						}
+					}
+				}
+			}
+		}
+	}
+	if (!sk_PKCS7_unshift(*signatures, p7)) {
+		printf("Failed to insert signature\n");
+		return 0; /* FAILED */
+	}
+	return 1; /* OK */
 }
 
 /*
@@ -1530,21 +1865,29 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 static int verify_signed_file(FILE_FORMAT_CTX *ctx)
 {
 	int i, ret = 1;
-	STACK_OF(SIGNATURE) *signatures;
-	
-	signatures = ctx->format->signature_list_get(ctx);
-	if (!signatures)
-		return 1; /* FAILED */
+	PKCS7 *p7;
+	STACK_OF(PKCS7) *signatures;
 
-	for (i = 0; i < sk_SIGNATURE_num(signatures); i++) {
-		SIGNATURE *signature = sk_SIGNATURE_value(signatures, i);
+	if (!ctx->format->check_file(ctx))
+		return 1; /* FAILED */
+	p7 = ctx->format->pkcs7_extract(ctx);
+	if (!p7)
+		return 1; /* FAILED */
+	signatures = sk_PKCS7_new_null();
+	if (!signature_list_append_pkcs7(&signatures, p7, 1)) {
+		printf("Failed to create signature list\n\n");
+		sk_PKCS7_pop_free(signatures, PKCS7_free);
+		return 1; /* FAILED */
+	}
+	for (i = 0; i < sk_PKCS7_num(signatures); i++) {
+		PKCS7 *sig = sk_PKCS7_value(signatures, i);
 		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-		if (ctx->format->verify_digests(ctx, signature)) {
-			ret &= verify_signature(ctx, signature);
+		if (ctx->format->verify_digests(ctx, sig)) {
+			ret &= verify_signature(ctx, sig);
 		}
 	}
 	printf("Number of verified signatures: %d\n", i);
-	signature_list_free(signatures);
+	sk_PKCS7_pop_free(signatures, PKCS7_free);
 	if (ret)
 		ERR_print_errors_fp(stdout);
 	return ret;
@@ -1552,20 +1895,21 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx)
 
 /*
  * [in, out] ctx: structure holds input and output data
- * [in] p7: new PKCS#7 signature
+ * [out] outdata: BIO outdata file
+ * [in] p7: PKCS#7 signature
  * [returns] 1 on error or 0 on success
  */
-static int save_extracted_pkcs7(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
+static int save_extracted_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 {
 	int ret;
 
-	(void)BIO_reset(ctx->outdata);
+	(void)BIO_reset(outdata);
 	if (ctx->options->output_pkcs7) {
 		/* PEM format */
-		ret = !PEM_write_bio_PKCS7(ctx->outdata, p7);
+		ret = !PEM_write_bio_PKCS7(outdata, p7);
 	} else {
 		/* default DER format */
-		ret = !i2d_PKCS7_bio(ctx->outdata, p7);
+		ret = !i2d_PKCS7_bio(outdata, p7);
 	}
 	if (ret) {
 		printf("Unable to write pkcs7 object\n");
@@ -1574,30 +1918,30 @@ static int save_extracted_pkcs7(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 }
 
 /*
- * [in] in_ctx: input file context
+ * [in] options: structure holds the input data
  * [returns] 1 on error or 0 on success
  */
-static int check_attached_data(FILE_FORMAT_CTX *in_ctx)
+static int check_attached_data(GLOBAL_OPTIONS *options)
 {
 	FILE_FORMAT_CTX *ctx;
-	GLOBAL_OPTIONS *options = NULL;
+	GLOBAL_OPTIONS *tmp_options = NULL;
 
-	options = OPENSSL_memdup(in_ctx->options, sizeof(GLOBAL_OPTIONS));
-	if (!options) {
+	tmp_options = OPENSSL_memdup(options, sizeof(GLOBAL_OPTIONS));
+	if (!tmp_options) {
 		printf("OPENSSL_memdup error.\n");
 		return 1; /* Failed */
 	}
-	options->infile = in_ctx->options->outfile;
-	options->cmd = CMD_VERIFY;
+	tmp_options->infile = options->outfile;
+	tmp_options->cmd = CMD_VERIFY;
 
-	ctx = file_format_msi.ctx_new(options);
+	ctx = file_format_msi.ctx_new(tmp_options, NULL, NULL);
 	if (!ctx)
-		ctx = file_format_pe.ctx_new(options);
+		ctx = file_format_pe.ctx_new(tmp_options, NULL, NULL);
 	if (!ctx)
-		ctx = file_format_cab.ctx_new(options);
+		ctx = file_format_cab.ctx_new(tmp_options, NULL, NULL);
 	/* TODO CAT files
 	if (!ctx)
-		ctx = file_format_cat.ctx_new(options); */
+		ctx = file_format_cat.ctx_new(tmp_options, NULL, NULL); */
 	if (!ctx) {
 		printf("Corrupt attached signature\n");
 		return 1; /* Failed */
@@ -1606,9 +1950,8 @@ static int check_attached_data(FILE_FORMAT_CTX *in_ctx)
 		printf("Signature mismatch\n");
 		return 1; /* Failed */
 	}
-	ctx->format->ctx_free(ctx);
-	ctx->format->ctx_cleanup(ctx);
-	OPENSSL_free(options);
+	ctx->format->ctx_cleanup(ctx, NULL);
+	OPENSSL_free(tmp_options);
 	return 0; /* OK */
 }
 
@@ -2954,6 +3297,8 @@ int main(int argc, char **argv)
 	FILE_FORMAT_CTX *ctx = NULL;
 	GLOBAL_OPTIONS options;
 	PKCS7 *p7 = NULL;
+	BIO *outdata = NULL;
+	BIO *hash = NULL;
 	int ret = -1;
 
 	/* reset options */
@@ -2977,65 +3322,80 @@ int main(int argc, char **argv)
 	if (!main_configure(argc, argv, &options))
 		goto err_cleanup;
 	if (!read_password(&options)) {
-		printf("Failed to read password from file: %s\n", options.readpass);
-		goto err_cleanup;
+		DO_EXIT_1("Failed to read password from file: %s\n", options.readpass);
 	}
 
 	/* read key and certificates */
 	if (options.cmd == CMD_SIGN && !read_crypto_params(&options))
-		goto err_cleanup;
+		DO_EXIT_0("Failed to read key or certificates\n");
 
-	ctx = file_format_msi.ctx_new(&options);
+	if (options.cmd != CMD_VERIFY) {
+		/* Create message digest BIO */
+		hash = BIO_new(BIO_f_md());
+		if (!BIO_set_md(hash, options.md)) {
+			DO_EXIT_0("Unable to set the message digest of BIO\n");
+		}
+		/* Create outdata file */
+		outdata = BIO_new_file(options.outfile, FILE_CREATE_MODE);
+		if (outdata == NULL) {
+			DO_EXIT_1("Failed to create file: %s\n", options.outfile);
+		}
+	}
+	ctx = file_format_msi.ctx_new(&options, hash, outdata);
 	if (!ctx)
-		ctx = file_format_pe.ctx_new(&options);
+		ctx = file_format_pe.ctx_new(&options, hash, outdata);
 	if (!ctx)
-		ctx = file_format_cab.ctx_new(&options);
+		ctx = file_format_cab.ctx_new(&options, hash, outdata);
 	/* TODO CAT files
 	if (!ctx)
 		ctx = file_format_cat.ctx_new(&options); */
 	if (!ctx) {
 		ret = 1; /* FAILED */
-		printf("Initialization error or unsupported input file type.\n");
-		goto err_cleanup;
+		DO_EXIT_0("Initialization error or unsupported input file type.\n");
 	}
 	if (options.cmd == CMD_VERIFY) {
 		ret = verify_signed_file(ctx);
 		goto skip_signing;
-	} else if (options.cmd == CMD_EXTRACT) {
+	} else if (options.cmd == CMD_EXTRACT && ctx->format->pkcs7_extract) {
 		p7 = ctx->format->pkcs7_extract(ctx);
 		if (!p7) {
-			printf("Unable to extract existing signature\n");
-			goto err_cleanup; /* FAILED */
+			DO_EXIT_0("Unable to extract existing signature\n");
 		}
-		ret = save_extracted_pkcs7(ctx, p7);
+		ret = save_extracted_pkcs7(ctx, outdata, p7);
+		PKCS7_free(p7);
 		goto skip_signing;
-	} else if (options.cmd == CMD_REMOVE) {
-		ret = ctx->format->remove_pkcs7(ctx);
+	} else if (options.cmd == CMD_REMOVE && ctx->format->remove_pkcs7) {
+		ret = ctx->format->remove_pkcs7(ctx, hash, outdata);
 		goto skip_signing;
-	} else {
-		p7 = ctx->format->pkcs7_prepare(ctx);
+	} else if (ctx->format->pkcs7_prepare) {
+		p7 = ctx->format->pkcs7_prepare(ctx, hash, outdata);
 		if (!p7) {
-			goto err_cleanup; /* FAILED */
+			DO_EXIT_0("Unable to prepare new signature\n");
 		}
 	}
-	ret = check_timestamp_and_blob(p7, ctx);
-	if (ret)
-		goto err_cleanup; /* FAILED */
-
-	ret = ctx->format->append_pkcs7(ctx, p7);
-	if (ret)
-		DO_EXIT_0("Append signature to outfile failed\n");
-
-skip_signing:
-
+	ret = add_timestamp_and_blob(p7, ctx);
+	if (ret) {
+		PKCS7_free(p7);
+		DO_EXIT_0("Unable to set unauthenticated attributes\n");
+	}
+	if (ctx->format->append_pkcs7) {
+		ret = ctx->format->append_pkcs7(ctx, outdata, p7);
+		if (ret) {
+			PKCS7_free(p7);
+			DO_EXIT_0("Append signature to outfile failed\n");
+		}
+	}
 	if (ctx->format->update_data_size) {
-		ctx->format->update_data_size(ctx, p7);
+		ctx->format->update_data_size(ctx, outdata, p7);
 	}
 	PKCS7_free(p7);
-	ctx->format->ctx_free(ctx);
 
+skip_signing:
+	if (ctx->format->bio_free) {
+		outdata = ctx->format->bio_free(hash, outdata);
+	}
 	if (!ret && options.cmd == CMD_ATTACH) {
-		ret = check_attached_data(ctx);
+		ret = check_attached_data(&options);
 		if (!ret)
 			printf("Signature successfully attached\n");
 		/* else
@@ -3047,9 +3407,11 @@ skip_signing:
 
 err_cleanup:
 
-	if (ctx)
-		ctx->format->ctx_cleanup(ctx);
-
+	if (ctx && ctx->format->ctx_cleanup) {
+		ctx->format->ctx_cleanup(ctx, outdata);
+	} else if (hash) {
+		BIO_free_all(hash);
+	}
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
 	providers_cleanup();
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */

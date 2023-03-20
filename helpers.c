@@ -12,18 +12,10 @@
 static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx);
 static int X509_attribute_chain_append_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_char *p, int len);
 static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CTX *ctx);
-static int pkcs7_set_spc_indirect_data_content(PKCS7 *p7, FILE_FORMAT_CTX *ctx, u_char *buf, int len);
-static void signature_get_signed_attributes(SIGNATURE *signature,
-	STACK_OF(X509_ATTRIBUTE) *auth_attr);
-static void signature_get_unsigned_attributes(SIGNATURE *signature,
-	STACK_OF(SIGNATURE) **signatures, STACK_OF(X509_ATTRIBUTE) *unauth_attr,
-	PKCS7 *p7, int allownest);
-static time_t time_t_get_asn1_time(const ASN1_TIME *s);
-static time_t time_t_get_si_time(PKCS7_SIGNER_INFO *si);
-static time_t time_t_get_cms_time(CMS_ContentInfo *cms);
-static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
-	PKCS7_SIGNER_INFO *countersignature);
-static void signature_free(SIGNATURE *signature);
+static int pkcs7_set_spc_indirect_data_content(PKCS7 *p7, BIO *hash, u_char *buf, int len);
+int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
+int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
+int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 
 /*
  * Common functions
@@ -226,9 +218,144 @@ PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * Add the current signature to the new signature as a nested signature:
+ * Allocate, set type, add content and return a new PKCS#7 signature
+ * [in] ctx: structure holds input and output data
+ * [returns] pointer to PKCS#7 structure
+ */
+PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx)
+{
+	int i, signer = -1;
+	PKCS7 *p7;
+	PKCS7_SIGNER_INFO *si = NULL;
+
+	p7 = PKCS7_new();
+	PKCS7_set_type(p7, NID_pkcs7_signed);
+
+	if (ctx->options->cert != NULL) {
+		/*
+		 * the private key and corresponding certificate are parsed from the PKCS12
+		 * structure or loaded from the security token, so we may omit to check
+		 * the consistency of a private key with the public key in an X509 certificate
+		 */
+		si = PKCS7_add_signature(p7, ctx->options->cert, ctx->options->pkey,
+			ctx->options->md);
+		if (si == NULL)
+			return NULL; /* FAILED */
+	} else {
+		/* find the signer's certificate located somewhere in the whole certificate chain */
+		for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
+			X509 *signcert = sk_X509_value(ctx->options->certs, i);
+			if (X509_check_private_key(signcert, ctx->options->pkey)) {
+				si = PKCS7_add_signature(p7, signcert, ctx->options->pkey, ctx->options->md);
+				signer = i;
+				break;
+			}
+		}
+		if (si == NULL) {
+		    printf("Failed to checking the consistency of a private key: %s\n",
+				ctx->options->keyfile);
+		    printf("          with a public key in any X509 certificate: %s\n\n",
+				ctx->options->certfile);
+		    return NULL; /* FAILED */
+		}
+	}
+	pkcs7_signer_info_add_signing_time(si, ctx);
+
+	if (!pkcs7_signer_info_add_purpose(si, ctx))
+		return NULL; /* FAILED */
+
+	if ((ctx->options->desc || ctx->options->url) &&
+			!pkcs7_signer_info_add_spc_sp_opus_info(si, ctx)) {
+		printf("Couldn't allocate memory for opus info\n");
+		return NULL; /* FAILED */
+	}
+	PKCS7_content_new(p7, NID_pkcs7_data);
+
+	/* add the signer's certificate */
+	if (ctx->options->cert != NULL)
+		PKCS7_add_certificate(p7, ctx->options->cert);
+	if (signer != -1)
+		PKCS7_add_certificate(p7, sk_X509_value(ctx->options->certs, signer));
+
+	/* add the certificate chain */
+	for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
+		if (i == signer)
+			continue;
+		PKCS7_add_certificate(p7, sk_X509_value(ctx->options->certs, i));
+	}
+	/* add all cross certificates */
+	if (ctx->options->xcerts) {
+		for (i=0; i<sk_X509_num(ctx->options->xcerts); i++)
+			PKCS7_add_certificate(p7, sk_X509_value(ctx->options->xcerts, i));
+	}
+	/* add crls */
+	if (ctx->options->crls) {
+		for (i=0; i<sk_X509_CRL_num(ctx->options->crls); i++)
+			PKCS7_add_crl(p7, sk_X509_CRL_value(ctx->options->crls, i));
+	}
+	return p7; /* OK */
+}
+
+/*
+ * [in, out] p7: new PKCS#7 signature
+ * [in] hash: message digest BIO
+ * [returns] 0 on error or 1 on success
+ */
+int add_indirect_data_object(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx)
+{
+	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
+	PKCS7_SIGNER_INFO *si;
+	
+	signer_info = PKCS7_get_signer_info(p7);
+	if (!signer_info)
+		return 0; /* FAILED */
+	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
+	if (!si)
+		return 0; /* FAILED */
+	if (!PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
+		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1)))
+		return 0; /* FAILED */
+	if (!pkcs7_set_data_content(p7, hash, ctx)) {
+		PKCS7_free(p7);
+		printf("Signing failed\n");
+		return 0; /* FAILED */
+	}
+	return 1; /* OK */
+}
+
+/*
+ * [in, out] p7: new PKCS#7 signature
+ * [in] hash: message digest BIO
+ * [returns] 0 on error or 1 on success
+ */
+int add_ms_ctl_object(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx)
+{
+	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
+	PKCS7_SIGNER_INFO *si;
+	
+	signer_info = PKCS7_get_signer_info(p7);
+	if (!signer_info)
+		return 0; /* FAILED */
+	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
+	if (!si)
+		return 0; /* FAILED */
+	if (!PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
+		V_ASN1_OBJECT, OBJ_txt2obj(MS_CTL_OBJID, 1)))
+		return 0; /* FAILED */
+	if (!pkcs7_set_data_content(p7, hash, ctx)) {
+		PKCS7_free(p7);
+		printf("Signing failed\n");
+		return 0; /* FAILED */
+	}
+	return 1; /* OK */
+}
+
+/*
+ * Add the new signature to the current signature as a nested signature:
  * new unauthorized SPC_NESTED_SIGNATURE_OBJID attribute
- * [in, out] ctx: structure holds input and output data
+ * [out] cursig: current PKCS#7 signature
+ * [in] p7: new PKCS#7 signature
+ * [in] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
 int cursig_set_nested(PKCS7 *cursig, PKCS7 *p7, FILE_FORMAT_CTX *ctx)
@@ -341,10 +468,11 @@ int is_content_type(PKCS7 *p7, const char *objid)
 
 /*
  * [out] p7: new PKCS#7 signature
+ * [in] hash: message digest BIO
  * [in] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
-int pkcs7_set_data_content(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
+int pkcs7_set_data_content(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx)
 {
 	u_char *p = NULL;
 	int len = 0;
@@ -355,73 +483,13 @@ int pkcs7_set_data_content(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 	buf = OPENSSL_malloc(SIZE_64K);
 	memcpy(buf, p, (size_t)len);
 	OPENSSL_free(p);
-	if (!pkcs7_set_spc_indirect_data_content(p7, ctx, buf, len)) {
+	if (!pkcs7_set_spc_indirect_data_content(p7, hash, buf, len)) {
 		OPENSSL_free(buf);
 		return 0; /* FAILED */
 	}
 	OPENSSL_free(buf);
 
 	return 1; /* OK */
-}
-
-/*
- * Create new SIGNATURE structure, get signed and unsigned attributes,
- * insert this signature to signature list
- * [in, out] signatures: signature list
- * [in] p7: PKCS#7 signature
- * [in] allownest: allow nested signature switch
- * [returns] 0 on error or 1 on success
- */
-int signature_list_append_pkcs7(STACK_OF(SIGNATURE) **signatures, PKCS7 *p7, int allownest)
-{
-	SIGNATURE *signature = NULL;
-	PKCS7_SIGNER_INFO *si;
-	STACK_OF(X509_ATTRIBUTE) *auth_attr, *unauth_attr;
-	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
-
-	if (!signer_info)
-		return 0; /* FAILED */
-	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
-	if (!si)
-		return 0; /* FAILED */
-
-	signature = OPENSSL_malloc(sizeof(SIGNATURE));
-	signature->p7 = p7;
-	signature->md_nid = OBJ_obj2nid(si->digest_alg->algorithm);
-	signature->digest = NULL;
-	signature->signtime = INVALID_TIME;
-	signature->url = NULL;
-	signature->desc = NULL;
-	signature->purpose = NULL;
-	signature->level = NULL;
-	signature->timestamp = NULL;
-	signature->time = INVALID_TIME;
-	signature->blob = NULL;
-
-	auth_attr = PKCS7_get_signed_attributes(si);  /* cont[0] */
-	if (auth_attr)
-		signature_get_signed_attributes(signature, auth_attr);
-
-	unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
-	if (unauth_attr)
-		signature_get_unsigned_attributes(signature, signatures, unauth_attr, p7, allownest);
-
-	if (!sk_SIGNATURE_unshift(*signatures, signature)) {
-		printf("Failed to insert signature\n");
-		signature_free(signature);
-		return 0; /* FAILED */
-	}
-	return 1; /* OK */
-}
-
-/*
- * Deallocate a STACK_OF(SIGNATURE) structure
- * [in] signatures: signature list
- * [returns] none
- */
-void signature_list_free(STACK_OF(SIGNATURE) *signatures)
-{
-	sk_SIGNATURE_pop_free(signatures, signature_free);
 }
 
 /*
@@ -586,19 +654,19 @@ static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CT
 /*
  * Replace the data part with the MS Authenticode spcIndirectDataContent blob
  * [out] p7: new PKCS#7 signature
- * [in] ctx: FILE_FORMAT_CTX structure
+ * [in] hash: message digest BIO
  * [in] blob: SpcIndirectDataContent data
  * [in] len: SpcIndirectDataContent data length
  * [returns] 0 on error or 1 on success
  */
-static int pkcs7_set_spc_indirect_data_content(PKCS7 *p7, FILE_FORMAT_CTX *ctx, u_char *buf, int len)
+static int pkcs7_set_spc_indirect_data_content(PKCS7 *p7, BIO *hash, u_char *buf, int len)
 {
 	u_char mdbuf[EVP_MAX_MD_SIZE];
 	int mdlen, seqhdrlen;
 	BIO *bio;
 	PKCS7 *td7;
 
-	mdlen = BIO_gets(ctx->hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
+	mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
 	memcpy(buf+len, mdbuf, (size_t)mdlen);
 	seqhdrlen = asn1_simple_hdr_len(buf, len);
 
@@ -627,348 +695,6 @@ static int pkcs7_set_spc_indirect_data_content(PKCS7 *p7, FILE_FORMAT_CTX *ctx, 
 		return 0; /* FAILED */
 	}
 	return 1; /* OK */
-}
-
-/*
- * Enumerate and get authorized attributes:
- * - PKCS#9 message digest - Policy OID: 1.2.840.113549.1.9.4
- * - PKCS#9 signing time - Policy OID: 1.2.840.113549.1.9.5
- * - URL and text description - Microsoft OID: 1.3.6.1.4.1.311.2.1.12
- * - Code Signing purpose - Microsoft OID: 1.3.6.1.4.1.311.2.1.11
- * - Level of permissions for CAB files - Microsoft OID: 1.3.6.1.4.1.311.15.1
- * [out] signature: structure for authenticode and time stamping
- * [in] auth_attr: signed attributes list
- * [returns] none
- */
-static void signature_get_signed_attributes(SIGNATURE *signature,
-	STACK_OF(X509_ATTRIBUTE) *auth_attr)
-{
-	X509_ATTRIBUTE *attr;
-	ASN1_OBJECT *object;
-	ASN1_STRING *value;
-	char object_txt[128];
-	const u_char *data;
-	int i;
-
-	for (i=0; i<X509at_get_attr_count(auth_attr); i++) {
-		attr = X509at_get_attr(auth_attr, i);
-		object = X509_ATTRIBUTE_get0_object(attr);
-		if (object == NULL)
-			continue;
-		object_txt[0] = 0x00;
-		OBJ_obj2txt(object_txt, sizeof object_txt, object, 1);
-		if (!strcmp(object_txt, PKCS9_MESSAGE_DIGEST)) {
-			/* PKCS#9 message digest - Policy OID: 1.2.840.113549.1.9.4 */
-			signature->digest  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_OCTET_STRING, NULL);
-		} else if (!strcmp(object_txt, PKCS9_SIGNING_TIME)) {
-			/* PKCS#9 signing time - Policy OID: 1.2.840.113549.1.9.5 */
-			ASN1_UTCTIME *time;
-			time = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
-			signature->signtime = time_t_get_asn1_time(time);
-		} else if (!strcmp(object_txt, SPC_SP_OPUS_INFO_OBJID)) {
-			/* Microsoft OID: 1.3.6.1.4.1.311.2.1.12 */
-			SpcSpOpusInfo *opus;
-			value  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
-			if (value == NULL)
-				continue;
-			data = ASN1_STRING_get0_data(value);
-			opus = d2i_SpcSpOpusInfo(NULL, &data, ASN1_STRING_length(value));
-			if (opus == NULL)
-				continue;
-			if (opus->moreInfo && opus->moreInfo->type == 0)
-				signature->url = OPENSSL_strdup((char *)opus->moreInfo->value.url->data);
-			if (opus->programName) {
-				if (opus->programName->type == 0) {
-					u_char *desc;
-					int len = ASN1_STRING_to_UTF8(&desc, opus->programName->value.unicode);
-					if (len >= 0) {
-						signature->desc = OPENSSL_strndup((char *)desc, (size_t)len);
-						OPENSSL_free(desc);
-					}
-				} else {
-					signature->desc = OPENSSL_strdup((char *)opus->programName->value.ascii->data);
-				}
-			}
-			SpcSpOpusInfo_free(opus);
-		} else if (!strcmp(object_txt, SPC_STATEMENT_TYPE_OBJID)) {
-			/* Microsoft OID: 1.3.6.1.4.1.311.2.1.11 */
-			value  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
-			if (value == NULL)
-				continue;
-			signature->purpose = ASN1_STRING_get0_data(value);
-		} else if (!strcmp(object_txt, MS_JAVA_SOMETHING)) {
-			/* Microsoft OID: 1.3.6.1.4.1.311.15.1 */
-			value  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
-			if (value == NULL)
-				continue;
-			signature->level = ASN1_STRING_get0_data(value);
-		}
-	}
-}
-
-/*
- * Enumerate and get unauthorized attributes:
- * - Authenticode Timestamp - Policy OID: 1.2.840.113549.1.9.6
- * - RFC3161 Timestamp - Policy OID: 1.3.6.1.4.1.311.3.3.1
- * - Nested Signature - Policy OID: 1.3.6.1.4.1.311.2.4.1
- * - Unauthenticated Data Blob - Policy OID: 1.3.6.1.4.1.42921.1.2.1
- * [in, out] signatures: signature list
- * [out] signature: structure for authenticode and time stamping
- * [in] unauth_attr: unauthorized attributes list
- * [in] p7: new PKCS#7 signature
- * [in] allownest: allow nested signature switch
- * [returns] none
- */
-static void signature_get_unsigned_attributes(SIGNATURE *signature,
-	STACK_OF(SIGNATURE) **signatures, STACK_OF(X509_ATTRIBUTE) *unauth_attr,
-	PKCS7 *p7, int allownest)
-{
-	X509_ATTRIBUTE *attr;
-	ASN1_OBJECT *object;
-	ASN1_STRING *value;
-	char object_txt[128];
-	const u_char *data;
-	int i, j;
-
-	for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
-		attr = X509at_get_attr(unauth_attr, i);
-		object = X509_ATTRIBUTE_get0_object(attr);
-		if (object == NULL)
-			continue;
-		object_txt[0] = 0x00;
-		OBJ_obj2txt(object_txt, sizeof object_txt, object, 1);
-		if (!strcmp(object_txt, PKCS9_COUNTER_SIGNATURE)) {
-			/* Authenticode Timestamp - Policy OID: 1.2.840.113549.1.9.6 */
-			PKCS7_SIGNER_INFO *countersi;
-			CMS_ContentInfo *timestamp = NULL;
-			time_t time;
-			value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
-			if (value == NULL)
-				continue;
-			data = ASN1_STRING_get0_data(value);
-			countersi = d2i_PKCS7_SIGNER_INFO(NULL, &data, ASN1_STRING_length(value));
-			if (countersi == NULL) {
-				printf("Error: Authenticode Timestamp could not be decoded correctly\n");
-				ERR_print_errors_fp(stdout);
-				continue;
-			}
-			time = time_t_get_si_time(countersi);
-			if (time != INVALID_TIME) {
-				timestamp = cms_get_timestamp(p7->d.sign, countersi);
-				if (timestamp) {
-					signature->time = time;
-					signature->timestamp = timestamp;
-				} else {
-					printf("Error: Corrupt Authenticode Timestamp embedded content\n");
-				}
-			} else {
-				printf("Error: PKCS9_TIMESTAMP_SIGNING_TIME attribute not found\n");
-				PKCS7_SIGNER_INFO_free(countersi);
-			}
-		} else if (!strcmp(object_txt, SPC_RFC3161_OBJID)) {
-			/* RFC3161 Timestamp - Policy OID: 1.3.6.1.4.1.311.3.3.1 */
-			CMS_ContentInfo *timestamp = NULL;
-			time_t time;
-			value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
-			if (value == NULL)
-				continue;
-			data = ASN1_STRING_get0_data(value);
-			timestamp = d2i_CMS_ContentInfo(NULL, &data, ASN1_STRING_length(value));
-			if (timestamp == NULL) {
-				printf("Error: RFC3161 Timestamp could not be decoded correctly\n");
-				ERR_print_errors_fp(stdout);
-				continue;
-			}
-			time = time_t_get_cms_time(timestamp);
-			if (time != INVALID_TIME) {
-				signature->time = time;
-				signature->timestamp = timestamp;
-			} else {
-				printf("Error: Corrupt RFC3161 Timestamp embedded content\n");
-				CMS_ContentInfo_free(timestamp);
-				ERR_print_errors_fp(stdout);
-			}
-		} else if (allownest && !strcmp(object_txt, SPC_NESTED_SIGNATURE_OBJID)) {
-			/* Nested Signature - Policy OID: 1.3.6.1.4.1.311.2.4.1 */
-			PKCS7 *nested;
-			for (j=0; j<X509_ATTRIBUTE_count(attr); j++) {
-				value = X509_ATTRIBUTE_get0_data(attr, j, V_ASN1_SEQUENCE, NULL);
-				if (value == NULL)
-					continue;
-				data = ASN1_STRING_get0_data(value);
-				nested = d2i_PKCS7(NULL, &data, ASN1_STRING_length(value));
-				if (nested)
-					if (!signature_list_append_pkcs7(signatures, nested, 0)) {
-						printf("Failed to append signature list\n\n");
-						PKCS7_free(nested);
-					}
-			}
-		} else if (!strcmp(object_txt, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
-			/* Unauthenticated Data Blob - Policy OID: 1.3.6.1.4.1.42921.1.2.1 */
-			signature->blob = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTF8STRING, NULL);
-		} else
-			printf("Unsupported Policy OID: %s\n\n", object_txt);
-	}
-}
-
-/*
- * Convert ASN1_TIME to time_t
- * [in] s: ASN1_TIME structure
- * [returns] INVALID_TIME on error or time_t on success
- */
-static time_t time_t_get_asn1_time(const ASN1_TIME *s)
-{
-	struct tm tm;
-
-	if ((s == NULL) || (!ASN1_TIME_check(s))) {
-		return INVALID_TIME;
-	}
-	if (ASN1_TIME_to_tm(s, &tm)) {
-#ifdef _WIN32
-		return _mkgmtime(&tm);
-#else
-		return timegm(&tm);
-#endif
-	} else {
-		return INVALID_TIME;
-	}
-}
-
-/*
- * Get signing time from authorized attributes
- * [in] si: PKCS7_SIGNER_INFO structure
- * [returns] INVALID_TIME on error or time_t on success
- */
-static time_t time_t_get_si_time(PKCS7_SIGNER_INFO *si)
-{
-	STACK_OF(X509_ATTRIBUTE) *auth_attr;
-	X509_ATTRIBUTE *attr;
-	ASN1_OBJECT *object;
-	ASN1_UTCTIME *time = NULL;
-	time_t posix_time;
-	char object_txt[128];
-	int i;
-
-	auth_attr = PKCS7_get_signed_attributes(si);  /* cont[0] */
-	if (auth_attr)
-		for (i=0; i<X509at_get_attr_count(auth_attr); i++) {
-			attr = X509at_get_attr(auth_attr, i);
-			object = X509_ATTRIBUTE_get0_object(attr);
-			if (object == NULL)
-				return INVALID_TIME; /* FAILED */
-			object_txt[0] = 0x00;
-			OBJ_obj2txt(object_txt, sizeof object_txt, object, 1);
-			if (!strcmp(object_txt, PKCS9_SIGNING_TIME)) {
-				/* PKCS#9 signing time - Policy OID: 1.2.840.113549.1.9.5 */
-				time = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
-			}
-		}
-	posix_time = time_t_get_asn1_time(time);
-	return posix_time;
-}
-
-/*
- * Get timestamping time from embedded content in a CMS_ContentInfo structure
- * [in] si: CMS_ContentInfo structure
- * [returns] INVALID_TIME on error or time_t on success
- */
-static time_t time_t_get_cms_time(CMS_ContentInfo *cms)
-{
-	ASN1_OCTET_STRING **pos;
-	const u_char *p = NULL;
-	TimeStampToken *token = NULL;
-	ASN1_GENERALIZEDTIME *asn1_time = NULL;
-	time_t posix_time = INVALID_TIME;
-
-	pos  = CMS_get0_content(cms);
-	if (pos != NULL && *pos != NULL) {
-		p = (*pos)->data;
-		token = d2i_TimeStampToken(NULL, &p, (*pos)->length);
-		if (token) {
-			asn1_time = token->time;
-			posix_time = time_t_get_asn1_time(asn1_time);
-			TimeStampToken_free(token);
-		}
-	}
-	return posix_time;
-}
-
-/*
- * Create new CMS_ContentInfo struct for Authenticode Timestamp.
- * This struct does not contain any TimeStampToken as specified in RFC 3161.
- * [in] p7_signed: PKCS#7 signedData structure
- * [in] countersignature: Authenticode Timestamp decoded to PKCS7_SIGNER_INFO
- * [returns] pointer to CMS_ContentInfo structure
- */
-static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
-	PKCS7_SIGNER_INFO *countersignature)
-{
-	CMS_ContentInfo *cms = NULL;
-	PKCS7_SIGNER_INFO *si;
-	PKCS7 *p7 = NULL, *content = NULL;
-	u_char *p = NULL;
-	const u_char *q;
-	int i, len = 0;
-
-	p7 = PKCS7_new();
-	si = sk_PKCS7_SIGNER_INFO_value(p7_signed->signer_info, 0);
-	if (si == NULL)
-		goto out;
-
-	/* Create new signed PKCS7 timestamp structure. */
-	if (!PKCS7_set_type(p7, NID_pkcs7_signed))
-		goto out;
-	if (!PKCS7_add_signer(p7, countersignature))
-		goto out;
-	for (i = 0; i < sk_X509_num(p7_signed->cert); i++) {
-		if (!PKCS7_add_certificate(p7, sk_X509_value(p7_signed->cert, i)))
-			goto out;
-	}
-	/* Create new encapsulated NID_id_smime_ct_TSTInfo content. */
-	content = PKCS7_new();
-	content->d.other = ASN1_TYPE_new();
-	content->type = OBJ_nid2obj(NID_id_smime_ct_TSTInfo);
-	ASN1_TYPE_set1(content->d.other, V_ASN1_OCTET_STRING, si->enc_digest);
-	/* Add encapsulated content to signed PKCS7 timestamp structure:
-	   p7->d.sign->contents = content */
-	if (!PKCS7_set_content(p7, content)) {
-		PKCS7_free(content);
-		goto out;
-	}
-	/* Convert PKCS7 into CMS_ContentInfo */
-	if (((len = i2d_PKCS7(p7, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
-		printf("Failed to convert pkcs7: %d\n", len);
-		goto out;
-	}
-	len = i2d_PKCS7(p7, &p);
-	p -= len;
-	q = p;
-	cms = d2i_CMS_ContentInfo(NULL, &q, len);
-	OPENSSL_free(p);
-
-out:
-	if (!cms)
-		ERR_print_errors_fp(stdout);
-	PKCS7_free(p7);
-	return cms;
-}
-
-/*
- * Deallocate a SIGNATURE structure
- * [in, out] signature: structure for authenticode and time stamping
- * [returns] none
- */
-static void signature_free(SIGNATURE *signature)
-{
-	if (signature->timestamp) {
-		CMS_ContentInfo_free(signature->timestamp);
-		ERR_clear_error();
-	}
-	PKCS7_free(signature->p7);
-	/* If memory has not been allocated nothing is done */
-	OPENSSL_free(signature->url);
-	OPENSSL_free(signature->desc);
-	OPENSSL_free(signature);
 }
 
 /*

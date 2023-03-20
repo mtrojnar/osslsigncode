@@ -212,27 +212,27 @@ struct msi_ctx_st {
 };
 
 /* FILE_FORMAT method prototypes */
-static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options);
+static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
 static ASN1_OBJECT *msi_spc_sip_info(FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
-static STACK_OF(SIGNATURE) *msi_signature_list_get(FILE_FORMAT_CTX *ctx);
-static int msi_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature);
+static int msi_check_file(FILE_FORMAT_CTX *ctx);
+static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *msi_pkcs7_extract(FILE_FORMAT_CTX *ctx);
-static int msi_remove_pkcs7(FILE_FORMAT_CTX *ctx);
-static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx);
-static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
-static void msi_ctx_free(FILE_FORMAT_CTX *ctx);
-static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx);
+static int msi_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
+static BIO *msi_bio_free(BIO *hash, BIO *outdata);
+static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *outdata);
 
 FILE_FORMAT file_format_msi = {
 	.ctx_new = msi_ctx_new,
 	.get_data_blob = msi_spc_sip_info,
-	.signature_list_get = msi_signature_list_get,
+	.check_file = msi_check_file,
 	.verify_digests = msi_verify_digests,
 	.pkcs7_extract = msi_pkcs7_extract,
 	.remove_pkcs7 = msi_remove_pkcs7,
 	.pkcs7_prepare = msi_pkcs7_prepare,
 	.append_pkcs7 = msi_append_pkcs7,
-	.ctx_free = msi_ctx_free,
+	.bio_free = msi_bio_free,
 	.ctx_cleanup = msi_ctx_cleanup
 };
 
@@ -241,7 +241,6 @@ static int msi_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx);
 static MSI_CTX *msi_ctx_get(char *indata, uint32_t filesize);
 static PKCS7 *msi_pkcs7_get_digital_signature(FILE_FORMAT_CTX *ctx, MSI_ENTRY *ds,
 	char **p, uint32_t len);
-static PKCS7 *msi_pkcs7_create(FILE_FORMAT_CTX *ctx);
 static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent);
 static int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint32_t len_msi,
 		u_char *p_msiex, uint32_t len_msiex, BIO *outdata);
@@ -265,19 +264,18 @@ static int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root);
 /*
  * Allocate and return a MSI file format context.
  * [in, out] options: structure holds the input data
+ * [out] hash: message digest BIO
+ * [in] outdata: outdata file BIO (unused)
  * [returns] pointer to MSI file format context
  */
-static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options)
+static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata)
 {
 	FILE_FORMAT_CTX *ctx;
 	MSI_CTX *msi_ctx;
-	BIO *hash, *outdata = NULL;
 	uint32_t filesize;
 
-	if (options->pagehash == 1)
-		printf("Warning: -ph option is only valid for PE files\n");
-	if (options->jp >= 0)
-		printf("Warning: -jp option is only valid for CAB files\n");
+	/* squash the unused parameter warning */
+	(void)outdata;
 
 	filesize = get_file_size(options->infile);
 	if (filesize == 0)
@@ -296,32 +294,18 @@ static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options)
 		unmap_file(options->infile, filesize);
 		return NULL; /* FAILED */
 	}
-	hash = BIO_new(BIO_f_md());
-	if (!BIO_set_md(hash, options->md)) {
-		printf("Unable to set the message digest of BIO\n");
-		unmap_file(options->infile, filesize);
-		BIO_free_all(hash);
-		OPENSSL_free(msi_ctx);
-		return NULL; /* FAILED */
-	}
-	if (options->cmd != CMD_VERIFY) {
-		/* Create outdata file */
-		outdata = BIO_new_file(options->outfile, FILE_CREATE_MODE);
-		if (outdata == NULL) {
-			printf("Failed to create file: %s\n", options->outfile);
-			unmap_file(options->infile, filesize);
-			BIO_free_all(hash);
-			OPENSSL_free(msi_ctx);
-			return NULL; /* FAILED */
-		}
-		BIO_push(hash, BIO_new(BIO_s_null()));
-	}
 	ctx = OPENSSL_malloc(sizeof(FILE_FORMAT_CTX));
 	ctx->format = &file_format_msi;
 	ctx->options = options;
-	ctx->outdata = outdata;
-	ctx->hash = hash;
 	ctx->msi_ctx = msi_ctx;
+
+	if (hash)
+		BIO_push(hash, BIO_new(BIO_s_null()));
+
+	if (options->pagehash == 1)
+		printf("Warning: -ph option is only valid for PE files\n");
+	if (options->jp >= 0)
+		printf("Warning: -jp option is only valid for CAB files\n");
 	return ctx;
 }
 
@@ -361,38 +345,33 @@ static ASN1_OBJECT *msi_spc_sip_info(FILE_FORMAT_CTX *ctx, u_char **p, int *plen
 }
 
 /*
- * Retrieve all PKCS#7 (include nested) structures from MSI file,
- * allocate and return signature list
  * [in, out] ctx: structure holds input and output data
- * [returns] pointer to signature list
+ * [returns] 0 on error or 1 on success
  */
-static STACK_OF(SIGNATURE) *msi_signature_list_get(FILE_FORMAT_CTX *ctx)
+static int msi_check_file(FILE_FORMAT_CTX *ctx)
 {
 	char *indata = NULL;
-	const u_char *blob;
 	uint32_t inlen;
-	PKCS7 *p7;
-	STACK_OF(SIGNATURE) *signatures;
 	MSI_ENTRY *ds, *dse = NULL;
 
 	if (!ctx) {
 		printf("Init error\n\n");
-		return NULL; /* FAILED */
+		return 0; /* FAILED */
 	}
 	ds = msi_signatures_get(ctx->msi_ctx->dirent, &dse);
 	if (!ds) {
 		printf("MSI file has no signature\n\n");
-		return NULL; /* FAILED */
+		return 0; /* FAILED */
 	}
 	inlen = GET_UINT32_LE(ds->size);
 	if (inlen == 0 || inlen >= MAXREGSECT) {
 		printf("Corrupted DigitalSignature stream length 0x%08X\n", inlen);
-		return NULL; /* FAILED */
+		return 0; /* FAILED */
 	}
 	indata = OPENSSL_malloc((size_t)inlen);
 	if (!msi_file_read(ctx->msi_ctx->msi, ds, 0, indata, inlen)) {
 		printf("DigitalSignature stream data error\n\n");
-		return NULL; /* FAILED */
+		return 0; /* FAILED */
 	}
 	if (!dse) {
 		printf("Warning: MsiDigitalSignatureEx stream doesn't exist\n");
@@ -402,40 +381,28 @@ static STACK_OF(SIGNATURE) *msi_signature_list_get(FILE_FORMAT_CTX *ctx)
 			printf("Corrupted MsiDigitalSignatureEx stream length 0x%08X\n",
 				ctx->msi_ctx->len_msiex);
 			OPENSSL_free(indata);
-			return NULL; /* FAILED */
+			return 0; /* FAILED */
 		}
 		ctx->msi_ctx->p_msiex = OPENSSL_malloc((size_t)ctx->msi_ctx->len_msiex);
 		if (!msi_file_read(ctx->msi_ctx->msi, dse, 0, (char *)ctx->msi_ctx->p_msiex,
 				ctx->msi_ctx->len_msiex)) {
 			printf("MsiDigitalSignatureEx stream data error\n\n");
 			OPENSSL_free(indata);
-			return NULL; /* FAILED */
+			return 0; /* FAILED */
 		}
 	}
-	blob = (u_char *)indata;
-	p7 = d2i_PKCS7(NULL, &blob, inlen);
 	OPENSSL_free(indata);
-	if (!p7) {
-		printf("Failed to extract PKCS7 data\n\n");
-		return NULL; /* FAILED */
-	}
-	signatures = sk_SIGNATURE_new_null();
-	if (!signature_list_append_pkcs7(&signatures, p7, 1)) {
-		printf("Failed to create signature list\n\n");
-		PKCS7_free(p7);
-		return NULL; /* FAILED */
-	}
-	return signatures;
+	return 1; /* OK */
 }
 
 /*
  * Calculate DigitalSignature and MsiDigitalSignatureEx, compare to values
  * retrieved from PKCS#7 signedData
  * [in] ctx: structure holds input and output data
- * [in] signature: structure for authenticode and time stamping
+ * [in] p7: PKCS#7 signature
  * [returns] 0 on error or 1 on success
  */
-static int msi_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
+static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
 	int mdok, mdtype = -1;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
@@ -444,8 +411,8 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, SIGNATURE *signature)
 	const EVP_MD *md;
 	BIO *hash;
 
-	if (is_content_type(signature->p7, SPC_INDIRECT_DATA_OBJID)) {
-		ASN1_STRING *content_val = signature->p7->d.sign->contents->d.other->value.sequence;
+	if (is_content_type(p7, SPC_INDIRECT_DATA_OBJID)) {
+		ASN1_STRING *content_val = p7->d.sign->contents->d.other->value.sequence;
 		const u_char *p = content_val->data;
 		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
 		if (idc) {
@@ -546,10 +513,15 @@ static PKCS7 *msi_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 /*
  * Remove existing signature
  * [in, out] ctx: structure holds input and output data
+ * [out] hash: message digest BIO (unused)
+ * [out] outdata: outdata file BIO
  * [returns] 1 on error or 0 on success
  */
-static int msi_remove_pkcs7(FILE_FORMAT_CTX *ctx)
+static int msi_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
+	/* squash the unused parameter warning */
+	(void)hash;
+
 	if (!msi_dirent_delete(ctx->msi_ctx->dirent, digital_signature_ex,
 			sizeof digital_signature_ex)) {
 		return 1; /* FAILED */
@@ -559,7 +531,7 @@ static int msi_remove_pkcs7(FILE_FORMAT_CTX *ctx)
 		return 1; /* FAILED */
 	}
 	if (!msi_file_write(ctx->msi_ctx->msi, ctx->msi_ctx->dirent,
-			NULL, 0, NULL, 0, ctx->outdata)) {
+			NULL, 0, NULL, 0, outdata)) {
 		printf("Saving the msi file failed\n");
 		return 1; /* FAILED */
 	}
@@ -569,19 +541,24 @@ static int msi_remove_pkcs7(FILE_FORMAT_CTX *ctx)
 /*
  * Obtain an existing signature or create a new one
  * [in, out] ctx: structure holds input and output data
+ * [out] hash: message digest BIO
+ * [out] outdata: outdata file BIO (unused)
  * [returns] 1 on error or 0 on success
  */
-static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx)
+static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
 	PKCS7 *cursig = NULL, *p7 = NULL;
 	uint32_t len;
 	char *p;
+	
+	/* squash the unused parameter warning */
+	(void)outdata;
 
-	if (ctx->options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ctx, ctx->hash)) {
+	if (ctx->options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ctx, hash)) {
 		printf("Unable to calc MsiDigitalSignatureEx\n");
 		return NULL; /* FAILED */
 	}
-	if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, ctx->hash, 1)) {
+	if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1)) {
 		printf("Unable to msi_handle_dir()\n");
 		return NULL; /* FAILED */
 	}
@@ -623,9 +600,13 @@ static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx)
 		}
 	} else if (ctx->options->cmd == CMD_SIGN) {
 		/* Create a new PKCS#7 signature */
-		p7 = msi_pkcs7_create(ctx);
+		p7 = pkcs7_create(ctx);
 		if (!p7) {
 			printf("Creating a new signature failed\n");
+			return NULL; /* FAILED */
+		}
+		if (!add_indirect_data_object(p7, hash, ctx)) {
+			printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
 			return NULL; /* FAILED */
 		}
 	}
@@ -644,9 +625,11 @@ static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx)
 /*
  * Append signature to the outfile
  * [in, out] ctx: structure holds input and output data
+ * [out] outdata: outdata file BIO
+ * [in] p7: PKCS#7 signature
  * [returns] 1 on error or 0 on success
  */
-static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
+static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 {
 	u_char *p = NULL;
 	int len;  	   /* signature length */
@@ -660,7 +643,7 @@ static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 	p -= len;
 
 	if (!msi_file_write(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, p, (uint32_t)len,
-		ctx->msi_ctx->p_msiex, ctx->msi_ctx->len_msiex, ctx->outdata)) {
+		ctx->msi_ctx->p_msiex, ctx->msi_ctx->len_msiex, outdata)) {
 		printf("Saving the msi file failed\n");
 		OPENSSL_free(p);
 		return 1; /* FAILED */
@@ -670,30 +653,31 @@ static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 }
 
 /*
- * Deallocate MSI format specific structures, free up an entire outdata BIO chain
- * [in, out] ctx: structure holds input and output data
+ * Free up an entire outdata BIO chain
+ * [out] hash: message digest BIO
+ * [out] outdata: outdata file BIO
  * [returns] none
  */
-static void msi_ctx_free(FILE_FORMAT_CTX *ctx)
+static BIO *msi_bio_free(BIO *hash, BIO *outdata)
 {
-	msi_file_free(ctx->msi_ctx->msi);
-	msi_dirent_free(ctx->msi_ctx->dirent);
-	OPENSSL_free(ctx->msi_ctx->p_msiex);
-
-	BIO_free_all(ctx->outdata);
-	ctx->outdata = NULL;
+	BIO_free_all(hash);
+	BIO_free_all(outdata);
+	return NULL;
 }
 
 /*
- * Deallocate a FILE_FORMAT_CTX structure, unmap indata file, unlink outfile
+ * Free up an entire outdata BIO chain,
+ * deallocate a FILE_FORMAT_CTX structure and MSI format specific structures,
+ * unmap indata file, unlink outfile
  * [in, out] ctx: structure holds input and output data
+ * [out] outdata: outdata file BIO
  * [returns] none
  */
-static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx)
+static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *outdata)
 {
-	if (ctx->outdata) {
-		BIO_free_all(ctx->outdata);
-		ctx->outdata = NULL;
+	if (outdata) {
+		BIO_free_all(outdata);
+		outdata = NULL;
 		if (ctx->options->outfile) {
 #ifdef WIN32
 			_unlink(ctx->options->outfile);
@@ -703,7 +687,9 @@ static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 		}
 	}
 	unmap_file(ctx->options->indata, ctx->msi_ctx->fileend);
-	BIO_free_all(ctx->hash);
+	msi_file_free(ctx->msi_ctx->msi);
+	msi_dirent_free(ctx->msi_ctx->dirent);
+	OPENSSL_free(ctx->msi_ctx->p_msiex);
 	OPENSSL_free(ctx->msi_ctx);
 	OPENSSL_free(ctx);
 }
@@ -791,92 +777,6 @@ static PKCS7 *msi_pkcs7_get_digital_signature(FILE_FORMAT_CTX *ctx, MSI_ENTRY *d
 		return NULL;
 	}
 	return p7;
-}
-
-/*
- * Allocate, set type, add content and return a new PKCS#7 signature
- * [in] ctx: structure holds input and output data
- * [returns] pointer to PKCS#7 structure
- */
-static PKCS7 *msi_pkcs7_create(FILE_FORMAT_CTX *ctx)
-{
-	int i, signer = -1;
-	PKCS7 *p7;
-	PKCS7_SIGNER_INFO *si = NULL;
-
-	p7 = PKCS7_new();
-	PKCS7_set_type(p7, NID_pkcs7_signed);
-
-	if (ctx->options->cert != NULL) {
-		/*
-		 * the private key and corresponding certificate are parsed from the PKCS12
-		 * structure or loaded from the security token, so we may omit to check
-		 * the consistency of a private key with the public key in an X509 certificate
-		 */
-		si = PKCS7_add_signature(p7, ctx->options->cert, ctx->options->pkey,
-			ctx->options->md);
-		if (si == NULL)
-			return NULL; /* FAILED */
-	} else {
-		/* find the signer's certificate located somewhere in the whole certificate chain */
-		for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
-			X509 *signcert = sk_X509_value(ctx->options->certs, i);
-			if (X509_check_private_key(signcert, ctx->options->pkey)) {
-				si = PKCS7_add_signature(p7, signcert, ctx->options->pkey, ctx->options->md);
-				signer = i;
-				break;
-			}
-		}
-		if (si == NULL) {
-		    printf("Failed to checking the consistency of a private key: %s\n",
-				ctx->options->keyfile);
-		    printf("          with a public key in any X509 certificate: %s\n\n",
-				ctx->options->certfile);
-		    return NULL; /* FAILED */
-		}
-	}
-	pkcs7_signer_info_add_signing_time(si, ctx);
-	PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
-		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1));
-
-	if (!pkcs7_signer_info_add_purpose(si, ctx))
-		return NULL; /* FAILED */
-
-	if ((ctx->options->desc || ctx->options->url) &&
-			!pkcs7_signer_info_add_spc_sp_opus_info(si, ctx)) {
-		printf("Couldn't allocate memory for opus info\n");
-		return NULL; /* FAILED */
-	}
-	PKCS7_content_new(p7, NID_pkcs7_data);
-
-	/* add the signer's certificate */
-	if (ctx->options->cert != NULL)
-		PKCS7_add_certificate(p7, ctx->options->cert);
-	if (signer != -1)
-		PKCS7_add_certificate(p7, sk_X509_value(ctx->options->certs, signer));
-
-	/* add the certificate chain */
-	for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
-		if (i == signer)
-			continue;
-		PKCS7_add_certificate(p7, sk_X509_value(ctx->options->certs, i));
-	}
-	/* add all cross certificates */
-	if (ctx->options->xcerts) {
-		for (i=0; i<sk_X509_num(ctx->options->xcerts); i++)
-			PKCS7_add_certificate(p7, sk_X509_value(ctx->options->xcerts, i));
-	}
-	/* add crls */
-	if (ctx->options->crls) {
-		for (i=0; i<sk_X509_CRL_num(ctx->options->crls); i++)
-			PKCS7_add_crl(p7, sk_X509_CRL_value(ctx->options->crls, i));
-	}
-	if (!pkcs7_set_data_content(p7, ctx)) {
-		PKCS7_free(p7);
-		printf("Signing failed\n");
-		return NULL; /* FAILED */
-	}
-	return p7; /* OK */
 }
 
 /* Get absolute address from sector and offset */
