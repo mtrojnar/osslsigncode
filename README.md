@@ -54,7 +54,7 @@ You may need to use `cmake3` instead of `cmake` to complete the following steps 
 ```
   mkdir build && cd build && cmake -S ..
 ```
-  with specific compile options:
+  optional CMake parameters:
 ```
   -DCMAKE_BUILD_TYPE=Debug
   -DCMAKE_C_COMPILER=clang
