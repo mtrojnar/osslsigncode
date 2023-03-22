@@ -13,7 +13,7 @@ PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
 PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx);
 void add_content_type(PKCS7 *p7);
 int add_indirect_data_object(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx);
-int add_ms_ctl_object(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx);
+int add_ms_ctl_object(PKCS7 *p7, PKCS7 *cursig);
 int cursig_set_nested(PKCS7 *cursig, PKCS7 *p7, FILE_FORMAT_CTX *ctx);
 int asn1_simple_hdr_len(const u_char *p, int len);
 int bio_hash_data(BIO *hash, char *indata, size_t idx, size_t fileend);

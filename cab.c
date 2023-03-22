@@ -348,10 +348,12 @@ static PKCS7 *cab_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 		}
 		if (ctx->options->jp >= 0 && !cab_add_jp_attribute(p7, ctx->options->jp)) {
 			printf("Adding jp attribute failed\n");
+			PKCS7_free(p7);
 			return NULL; /* FAILED */
 		}
 		if (!add_indirect_data_object(p7, hash, ctx)) {
 			printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
+			PKCS7_free(p7);
 			return NULL; /* FAILED */
 		}
 	}
@@ -359,6 +361,7 @@ static PKCS7 *cab_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 		if (!cursig_set_nested(cursig, p7, ctx)) {
 			printf("Unable to append the nested signature to the current signature\n");
 			PKCS7_free(p7);
+			PKCS7_free(cursig);
 			return NULL; /* FAILED */
 		}
 		PKCS7_free(p7);

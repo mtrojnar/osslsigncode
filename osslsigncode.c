@@ -1868,8 +1868,13 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx)
 	PKCS7 *p7;
 	STACK_OF(PKCS7) *signatures;
 
-	if (!ctx->format->check_file(ctx))
+	if (ctx->format->check_file && ctx->format->verify_digests) {
+		if (!ctx->format->check_file(ctx))
+			return 1; /* FAILED */
+	} else {
+		printf("Unsupported command\n");
 		return 1; /* FAILED */
+	}
 	p7 = ctx->format->pkcs7_extract(ctx);
 	if (!p7)
 		return 1; /* FAILED */
@@ -1939,9 +1944,8 @@ static int check_attached_data(GLOBAL_OPTIONS *options)
 		ctx = file_format_pe.ctx_new(tmp_options, NULL, NULL);
 	if (!ctx)
 		ctx = file_format_cab.ctx_new(tmp_options, NULL, NULL);
-	/* TODO CAT files
 	if (!ctx)
-		ctx = file_format_cat.ctx_new(tmp_options, NULL, NULL); */
+		ctx = file_format_cat.ctx_new(tmp_options, NULL, NULL);
 	if (!ctx) {
 		printf("Corrupt attached signature\n");
 		return 1; /* Failed */
@@ -3338,6 +3342,7 @@ int main(int argc, char **argv)
 		/* Create outdata file */
 		outdata = BIO_new_file(options.outfile, FILE_CREATE_MODE);
 		if (outdata == NULL) {
+			BIO_free_all(hash);
 			DO_EXIT_1("Failed to create file: %s\n", options.outfile);
 		}
 	}
@@ -3346,11 +3351,12 @@ int main(int argc, char **argv)
 		ctx = file_format_pe.ctx_new(&options, hash, outdata);
 	if (!ctx)
 		ctx = file_format_cab.ctx_new(&options, hash, outdata);
-	/* TODO CAT files
 	if (!ctx)
-		ctx = file_format_cat.ctx_new(&options); */
+		ctx = file_format_cat.ctx_new(&options, hash, outdata);
 	if (!ctx) {
 		ret = 1; /* FAILED */
+		BIO_free_all(hash);
+		BIO_free_all(outdata);
 		DO_EXIT_0("Initialization error or unsupported input file type.\n");
 	}
 	if (options.cmd == CMD_VERIFY) {
@@ -3372,6 +3378,8 @@ int main(int argc, char **argv)
 		if (!p7) {
 			DO_EXIT_0("Unable to prepare new signature\n");
 		}
+	} else {
+		DO_EXIT_0("Unsupported command\n");
 	}
 	ret = add_timestamp_and_blob(p7, ctx);
 	if (ret) {
@@ -3406,11 +3414,8 @@ skip_signing:
 	}
 
 err_cleanup:
-
 	if (ctx && ctx->format->ctx_cleanup) {
 		ctx->format->ctx_cleanup(ctx, outdata);
-	} else if (hash) {
-		BIO_free_all(hash);
 	}
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
 	providers_cleanup();

@@ -9,13 +9,14 @@
 #include "helpers.h"
 
 /* Prototypes */
+static int pkcs7_set_content_blob(PKCS7 *sig, PKCS7 *cursig);
 static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx);
 static int X509_attribute_chain_append_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_char *p, int len);
 static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CTX *ctx);
 static int pkcs7_set_spc_indirect_data_content(PKCS7 *p7, BIO *hash, u_char *buf, int len);
-int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
-int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
-int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
+static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
+static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
+static int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 
 /*
  * Common functions
@@ -114,7 +115,7 @@ void unmap_file(char *indata, const size_t size)
  * [in] ctx: FILE_FORMAT_CTX structure
  * [returns] 0 on error or 1 on success
  */
-int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
+static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
 {
 	SpcSpOpusInfo *opus;
 	ASN1_STRING *astr;
@@ -142,7 +143,7 @@ int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CT
  * [in] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
-int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
+static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
 {
 	static const u_char purpose_ind[] = {
 		0x30, 0x0c, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04,
@@ -173,7 +174,7 @@ int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
  * [in] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
-int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
+static int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
 {
 	if (ctx->options->time == INVALID_TIME) /* -time option was not specified */
 		return 1; /* SUCCESS */
@@ -316,7 +317,6 @@ int add_indirect_data_object(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx)
 		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1)))
 		return 0; /* FAILED */
 	if (!pkcs7_set_data_content(p7, hash, ctx)) {
-		PKCS7_free(p7);
 		printf("Signing failed\n");
 		return 0; /* FAILED */
 	}
@@ -325,10 +325,10 @@ int add_indirect_data_object(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx)
 
 /*
  * [in, out] p7: new PKCS#7 signature
- * [in] hash: message digest BIO
+ * [in] cursig: current PKCS#7 signature
  * [returns] 0 on error or 1 on success
  */
-int add_ms_ctl_object(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx)
+int add_ms_ctl_object(PKCS7 *p7, PKCS7 *cursig)
 {
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 	PKCS7_SIGNER_INFO *si;
@@ -342,9 +342,39 @@ int add_ms_ctl_object(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx)
 	if (!PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
 		V_ASN1_OBJECT, OBJ_txt2obj(MS_CTL_OBJID, 1)))
 		return 0; /* FAILED */
-	if (!pkcs7_set_data_content(p7, hash, ctx)) {
-		PKCS7_free(p7);
+	if (!pkcs7_set_content_blob(p7, cursig)) {
 		printf("Signing failed\n");
+		return 0; /* FAILED */
+	}
+	return 1; /* OK */
+}
+
+static int pkcs7_set_content_blob(PKCS7 *sig, PKCS7 *cursig)
+{
+	PKCS7 *contents;
+	u_char *content;
+	int seqhdrlen, content_length;
+	BIO *sigbio;
+
+	contents = cursig->d.sign->contents;
+	seqhdrlen = asn1_simple_hdr_len(contents->d.other->value.sequence->data,
+		contents->d.other->value.sequence->length);
+	content = contents->d.other->value.sequence->data + seqhdrlen;
+	content_length = contents->d.other->value.sequence->length - seqhdrlen;
+
+	if ((sigbio = PKCS7_dataInit(sig, NULL)) == NULL) {
+		printf("PKCS7_dataInit failed\n");
+		return 0; /* FAILED */
+	}
+	BIO_write(sigbio, content, content_length);
+	(void)BIO_flush(sigbio);
+	if (!PKCS7_dataFinal(sig, sigbio)) {
+		printf("PKCS7_dataFinal failed\n");
+		return 0; /* FAILED */
+	}
+	BIO_free_all(sigbio);
+	if (!PKCS7_set_content(sig, PKCS7_dup(contents))) {
+		printf("PKCS7_set_content failed\n");
 		return 0; /* FAILED */
 	}
 	return 1; /* OK */
