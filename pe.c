@@ -43,7 +43,7 @@ struct pe_ctx_st {
 
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
-static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
+static ASN1_OBJECT *pe_spc_image_data_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
 static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static u_char *pe_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
@@ -58,7 +58,7 @@ static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 
 FILE_FORMAT file_format_pe = {
 	.ctx_new = pe_ctx_new,
-	.get_data_blob = pe_spc_image_data,
+	.data_blob_get = pe_spc_image_data_get,
 	.check_file = pe_check_file,
 	.digest_calc = pe_digest_calc,
 	.verify_digests = pe_verify_digests,
@@ -78,9 +78,10 @@ static PKCS7 *pe_pkcs7_get_file(char *indata, PE_CTX *pe_ctx);
 static uint32_t pe_calc_checksum(BIO *bio, uint32_t header_size);
 static uint32_t pe_calc_realchecksum(FILE_FORMAT_CTX *ctx);
 static int pe_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
-static SpcLink *pe_page_hash_link_get(FILE_FORMAT_CTX *ctx, int phtype);
 static int pe_page_hash_get(u_char **ph, int *phtype, SpcAttributeTypeAndOptionalValue *obj);
+static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype);
 static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype);
+static SpcLink *pe_page_hash_link_get(FILE_FORMAT_CTX *ctx, int phtype);
 
 
 /*
@@ -134,12 +135,12 @@ static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outd
 
 /*
  * Allocate and return SpcPeImageData object.
- * [in] ctx: structure holds input and output data
  * [out] p: SpcPeImageData data
  * [out] plen: SpcPeImageData data length
+ * [in] ctx: structure holds input and output data
  * [returns] pointer to ASN1_OBJECT structure corresponding to SPC_PE_IMAGE_DATA_OBJID
  */
-static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *plen)
+static ASN1_OBJECT *pe_spc_image_data_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx)
 {
 	int phtype;
 	ASN1_OBJECT *dtype;
@@ -168,6 +169,8 @@ static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *ple
 }
 
 /*
+ * Print current and calculated PE checksum,
+ * check if the signature exists.
  * [in, out] ctx: structure holds input and output data
  * [in] detached: embedded/detached PKCS#7 signature switch
  * [returns] 0 on error or 1 on success
@@ -181,10 +184,6 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached)
 		printf("Init error\n\n");
 		return 0; /* FAILED */
 	}
-	//if (ctx->pe_ctx->siglen == 0) {
-	//	ctx->pe_ctx->sigpos = ctx->pe_ctx->fileend;
-	//}
-	/* check PE checksum */
 	printf("Current PE checksum   : %08X\n", ctx->pe_ctx->pe_checksum);
 	real_pe_checksum = pe_calc_realchecksum(ctx);
 	if (ctx->pe_ctx->pe_checksum && ctx->pe_ctx->pe_checksum != real_pe_checksum) {
@@ -269,7 +268,8 @@ static u_char *pe_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
 
 
 /*
- * Calculate message digest and page_hash, compare to values retrieved from PKCS#7 signedData
+ * Calculate message digest and page_hash and compare to values retrieved
+ * from PKCS#7 signedData.
  * [in] ctx: structure holds input and output data
  * [in] p7: PKCS#7 signature
  * [returns] 0 on error or 1 on success
@@ -331,9 +331,9 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 }
 
 /*
- * Try to get a page hash if the file is signed
+ * Verify page hash.
  * [in] ctx: structure holds input and output data
- * [in] obj: MS_SPC_LINK OID: 1.3.6.1.4.1.311.2.1.28 containing page hash
+ * [in] obj: SPC_INDIRECT_DATA OID: 1.3.6.1.4.1.311.2.1.4 containing page hash
  * [returns] 0 on error or 1 on success
  */
 static int pe_verify_indirect_data(FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOptionalValue *obj)
@@ -354,9 +354,9 @@ static int pe_verify_indirect_data(FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOpti
 }
 
 /*
- * Extract existing signature to DER or PEM format
- * [in, out] ctx: structure holds input and output data
- * [returns] 1 on error or 0 on success
+ * Extract existing signature in DER format.
+ * [in] ctx: structure holds input and output data
+ * [returns] pointer to PKCS#7 structure
  */
 static PKCS7 *pe_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
@@ -368,7 +368,7 @@ static PKCS7 *pe_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * Remove existing signature
+ * Remove existing signature.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO
  * [out] outdata: outdata file BIO
@@ -390,11 +390,11 @@ static int pe_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 }
 
 /*
- * Obtain an existing signature or create a new one
+ * Obtain an existing signature or create a new one.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO
  * [out] outdata: outdata file BIO
- * [returns] 1 on error or 0 on success
+ * [returns] pointer to PKCS#7 structure
  */
 static PKCS7 *pe_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
@@ -455,7 +455,7 @@ static PKCS7 *pe_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 }
 
 /*
- * Append signature to the outfile
+ * Append signature to the outfile.
  * [in, out] ctx: structure holds input and output data (unused)
  * [out] outdata: outdata file BIO
  * [in] p7: PKCS#7 signature
@@ -496,7 +496,7 @@ static int pe_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 }
 
 /*
- * Update signature position and size, write back new checksum
+ * Update signature position and size, write back new checksum.
  * [in, out] ctx: structure holds input and output data
  * [out] outdata: outdata file BIO
  * [in] p7: PKCS#7 signature
@@ -533,9 +533,9 @@ static void pe_update_data_size(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 }
 
 /*
- * Free up an entire message digest BIO chain
+ * Free up an entire message digest BIO chain.
  * [out] hash: message digest BIO
- * [out] outdata: outdata file BIO
+ * [out] outdata: outdata file BIO (unused)
  * [returns] none
  */
 static BIO *pe_bio_free(BIO *hash, BIO *outdata)
@@ -548,11 +548,11 @@ static BIO *pe_bio_free(BIO *hash, BIO *outdata)
 }
 
 /*
- * Free up an entire outdata BIO chain,
- * deallocate a FILE_FORMAT_CTX structure and MSI format specific structures,
- * unmap indata file, unlink outfile
+ * Deallocate a FILE_FORMAT_CTX structure and PE format specific structure,
+ * unmap indata file, unlink outfile.
  * [out] ctx: structure holds input and output data
- * [out] outdata: outdata file BIO
+ * [out] hash: message digest BIO
+ * [in] outdata: outdata file BIO
  * [returns] none
  */
 static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
@@ -577,10 +577,10 @@ static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
  */
 
 /*
- * Verify mapped PE file and create PE format specific structures
+ * Verify mapped PE file and create PE format specific structure.
  * [in] indata: mapped PE file
  * [in] filesize: size of PE file
- * [returns] pointer to PE format specific structures
+ * [returns] pointer to PE format specific structure
  */
 static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize)
 {
@@ -658,8 +658,8 @@ static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize)
 }
 
 /*
- * Retrieve and verify a decoded PKCS#7 struct corresponding
- * to the existing signature of the PE file
+ * Retrieve and verify a decoded PKCS#7 structure corresponding
+ * to the existing signature of the PE file.
  * [in] indata: mapped PE file
  * [in] pe_ctx: PE format specific structures
  * [returns] pointer to PKCS#7 structure
@@ -688,8 +688,9 @@ static PKCS7 *pe_pkcs7_get_file(char *indata, PE_CTX *pe_ctx)
 }
 
 /*
- * A signed PE file is padded (with 0's) to 8 byte boundary.
- * Ignore any last odd byte in an unsigned file.
+ * Calculate checksum.
+ * A signed PE file is padded (with 0's) to 8 byte boundary,
+ * ignore any last odd byte in an unsigned file.
  * [in] outdata: outdata file BIO
  * [in] header_size: PE header size
  * [returns] checksum
@@ -720,7 +721,8 @@ static uint32_t pe_calc_checksum(BIO *outdata, uint32_t header_size)
 	return checkSum;
 }
 
-/* Compute a checkSum value of the signed or unsigned PE file.
+/*
+ * Compute a checkSum value of the signed or unsigned PE file.
  * [in] ctx: structure holds input and output data
  * [returns] checksum
  */
@@ -763,7 +765,7 @@ err:
 }
 
 /*
- * Modify PE header
+ * Modify PE header.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO
  * [out] outdata: outdata file BIO
@@ -821,8 +823,11 @@ static int pe_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
  */
 
 /*
- * Get page hash from SPC_PE_IMAGE_DATA
- *
+ * Retrieve a page hash from SPC_INDIRECT_DATA structure.
+ * [out] ph: page hash
+ * [out] phtype: NID_sha1 or NID_sha256
+ * [in] obj: SPC_INDIRECT_DATA OID: 1.3.6.1.4.1.311.2.1.4 containing page hash
+ * [returns] 0 on error or 1 on success
  */
 static int pe_page_hash_get(u_char **ph, int *phtype, SpcAttributeTypeAndOptionalValue *obj)
 {
@@ -884,8 +889,14 @@ static int pe_page_hash_get(u_char **ph, int *phtype, SpcAttributeTypeAndOptiona
 	return phlen; /* OK */
 }
 
-
-static u_char *pe_calc_page_hash(FILE_FORMAT_CTX *ctx, int phtype, int *rphlen)
+/*
+ * Calculate page hash for the PE file.
+ * [out] rphlen: page hash length
+ * [in] ctx: structure holds input and output data
+ * [in] phtype: NID_sha1 or NID_sha256
+ * [returns] pointer to calculated page hash
+ */
+static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
 {
 	uint16_t nsections, opthdr_size;
 	uint32_t alignment, pagesize, hdrsize;
@@ -1034,12 +1045,20 @@ static u_char *pe_calc_page_hash(FILE_FORMAT_CTX *ctx, int phtype, int *rphlen)
 	return res;
 }
 
+/*
+ * Calculate page hash for the PE file, compare with the given value and print values.
+ * [in] ctx: structure holds input and output data
+ * [in] ph: page hash
+ * [in] phlen: page hash length
+ * [in] phtype: NID_sha1 or NID_sha256
+ * [returns] 0 on error or 1 on success
+ */
 static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype)
 {
 	int mdok, cphlen = 0;
 	u_char *cph;
 
-	cph = pe_calc_page_hash(ctx, phtype, &cphlen);
+	cph = pe_page_hash_calc(&cphlen, ctx, phtype);
 	mdok = (phlen == cphlen) && !memcmp(ph, cph, (size_t)phlen);
 	printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
 	if (ctx->options->verbose) {
@@ -1053,6 +1072,12 @@ static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int 
 	return mdok;
 }
 
+/*
+ * Create a new SpcLink structure.
+ * [in] ctx: structure holds input and output data
+ * [in] phtype: NID_sha1 or NID_sha256
+ * [returns] pointer to SpcLink structure
+ */
 static SpcLink *pe_page_hash_link_get(FILE_FORMAT_CTX *ctx, int phtype)
 {
 	u_char *ph, *p, *tmp;
@@ -1064,7 +1089,7 @@ static SpcLink *pe_page_hash_link_get(FILE_FORMAT_CTX *ctx, int phtype)
 	SpcLink *link;
 	STACK_OF(ASN1_TYPE) *oset, *aset;
 
-	ph = pe_calc_page_hash(ctx, phtype, &phlen);
+	ph = pe_page_hash_calc(&phlen, ctx, phtype);
 	if (!ph) {
 		printf("Failed to calculate page hash\n");
 		return NULL; /* FAILED */

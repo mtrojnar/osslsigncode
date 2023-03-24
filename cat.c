@@ -110,9 +110,9 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
 }
 
 /*
- * Extract existing signature to DER or PEM format
- * [in, out] ctx: structure holds input and output data
- * [returns] 1 on error or 0 on success
+ * Extract existing signature in DER format.
+ * [in] ctx: structure holds input and output data
+ * [returns] pointer to PKCS#7 structure
  */
 static PKCS7 *cat_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
@@ -120,11 +120,11 @@ static PKCS7 *cat_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * Obtain an existing signature or create a new one
+ * Obtain an existing signature or create a new one.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO (unused)
  * [out] outdata: outdata file BIO (unused)
- * [returns] 1 on error or 0 on success
+ * [returns] pointer to PKCS#7 structure
  */
 static PKCS7 *cat_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
@@ -162,7 +162,7 @@ static PKCS7 *cat_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 }
 
 /*
- * Append signature to the outfile
+ * Append signature to the outfile.
  * [in, out] ctx: structure holds input and output data (unused)
  * [out] outdata: outdata file BIO
  * [in] p7: PKCS#7 signature
@@ -171,7 +171,7 @@ static PKCS7 *cat_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 static int cat_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 {
 	u_char *p = NULL;
-	int len;       /* signature length */
+	int len; /* signature length */
 
 	/* squash the unused parameter warning */
 	(void)ctx;
@@ -189,9 +189,9 @@ static int cat_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 }
 
 /*
- * Free up an entire message digest BIO chain
+ * Free up an entire message digest BIO chain.
  * [out] hash: message digest BIO
- * [out] outdata: outdata file BIO
+ * [out] outdata: outdata file BIO (unused)
  * [returns] none
  */
 static BIO *cat_bio_free(BIO *hash, BIO *outdata)
@@ -204,8 +204,11 @@ static BIO *cat_bio_free(BIO *hash, BIO *outdata)
 }
 
 /*
- * Deallocate a FILE_FORMAT_CTX structure, unmap indata file, unlink outfile
+ * Deallocate a FILE_FORMAT_CTX structure and CAT format specific structure,
+ * unmap indata file, unlink outfile.
  * [in, out] ctx: structure holds all input and output data
+ * [out] hash: message digest BIO
+ * [in] outdata: outdata file BIO
  * [returns] none
  */
 static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
@@ -230,10 +233,10 @@ static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
  */
 
 /*
- * Verify mapped CAT file TODO and create CAT format specific structures
+ * Verify mapped CAT file TODO and create CAT format specific structure.
  * [in] indata: mapped CAT file (unused)
  * [in] filesize: size of CAT file
- * [returns] pointer to CAT format specific structures
+ * [returns] pointer to CAT format specific structure
  */
 static CAT_CTX *cat_ctx_get(char *indata, uint32_t filesize)
 {

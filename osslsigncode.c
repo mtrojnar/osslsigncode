@@ -888,7 +888,7 @@ static int print_certs(PKCS7 *p7)
 	printf("\nNumber of certificates: %d\n", count);
 	for (i=0; i<count; i++) {
 		cert = sk_X509_value(p7->d.sign->cert, i);
-		if ((cert == NULL))
+		if (!cert)
 			return 0; /* FAILED */
 		print_cert(cert, i);
 	}
@@ -1487,7 +1487,7 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
 				OPENSSL_free(url);
 			}
 			if (opus->programName) {
-				char *desc;
+				char *desc = NULL;
 				if (opus->programName->type == 0) {
 					u_char *opusdata;
 					int len = ASN1_STRING_to_UTF8(&opusdata, opus->programName->value.unicode);
@@ -1498,8 +1498,10 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
 				} else {
 					desc = OPENSSL_strdup((char *)opus->programName->value.ascii->data);
 				}
-				printf("\tText description: %s\n", desc);
-				OPENSSL_free(desc);
+				if (desc) {
+					printf("\tText description: %s\n", desc);
+					OPENSSL_free(desc);
+				}
 			}
 			SpcSpOpusInfo_free(opus);
 		} else if (!strcmp(object_txt, SPC_STATEMENT_TYPE_OBJID)) {

@@ -42,7 +42,7 @@ struct cab_ctx_st {
 
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
-static ASN1_OBJECT *cab_obsolete_link(FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
+static ASN1_OBJECT *cab_obsolete_link_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
 static int cab_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int cab_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
@@ -56,7 +56,7 @@ static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 
 FILE_FORMAT file_format_cab = {
 	.ctx_new = cab_ctx_new,
-	.get_data_blob = cab_obsolete_link,
+	.data_blob_get = cab_obsolete_link_get,
 	.check_file = cab_check_file,
 	.digest_calc = cab_digest_calc,
 	.verify_digests = cab_verify_digests,
@@ -72,7 +72,7 @@ FILE_FORMAT file_format_cab = {
 /* Prototypes */
 static CAB_CTX *cab_ctx_get(char *indata, uint32_t filesize);
 static int cab_add_jp_attribute(PKCS7 *p7, int jp);
-static void cab_optional_names(uint16_t flags, char *indata, BIO *outdata, size_t *len);
+static size_t cab_write_optional_names(BIO *outdata, char *indata, size_t len, uint16_t flags);
 static int cab_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static int cab_add_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 
@@ -127,12 +127,12 @@ static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
 
 /*
  * Allocate and return SpcLink object.
- * [in] ctx: structure holds input and output data (unused)
  * [out] p: SpcLink data
  * [out] plen: SpcLink data length
+ * [in] ctx: structure holds input and output data (unused)
  * [returns] pointer to ASN1_OBJECT structure corresponding to SPC_CAB_DATA_OBJID
  */
-static ASN1_OBJECT *cab_obsolete_link(FILE_FORMAT_CTX *ctx, u_char **p, int *plen)
+static ASN1_OBJECT *cab_obsolete_link_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx)
 {
 	ASN1_OBJECT *dtype;
 	SpcLink *link = spc_link_obsolete_get();
@@ -150,6 +150,7 @@ static ASN1_OBJECT *cab_obsolete_link(FILE_FORMAT_CTX *ctx, u_char **p, int *ple
 }
 
 /*
+ * Check if the signature exists.
  * [in, out] ctx: structure holds input and output data
  * [in] detached: embedded/detached PKCS#7 signature switch
  * [returns] 0 on error or 1 on success
@@ -177,7 +178,7 @@ static int cab_check_file(FILE_FORMAT_CTX *ctx, int detached)
 }
 
 /*
- * Compute a message digest value of the signed or unsigned CAB file
+ * Compute a message digest value of the signed or unsigned CAB file.
  * [in] ctx: structure holds input and output data
  * [in] md: message digest algorithm
  * [returns] pointer to calculated message digest
@@ -301,10 +302,10 @@ static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
 }
 
 /*
- * Calculate message digest and compare to value retrieved from PKCS#7 signedData
+ * Calculate message digest and compare to value retrieved from PKCS#7 signedData.
  * [in] ctx: structure holds input and output data
  * [in] p7: PKCS#7 signature
- * [returns] pointer to calculated message digest
+ * [returns] 0 on error or 1 on success
  */
 static int cab_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
@@ -345,9 +346,9 @@ static int cab_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 }
 
 /*
- * Extract existing signature to DER or PEM format
- * [in, out] ctx: structure holds input and output data
- * [returns] 1 on error or 0 on success
+ * Extract existing signature in DER format.
+ * [in] ctx: structure holds input and output data
+ * pointer to PKCS#7 structure
  */
 static PKCS7 *cab_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
@@ -359,7 +360,7 @@ static PKCS7 *cab_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * Remove existing signature
+ * Remove existing signature.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO (unused)
  * [out] outdata: outdata file BIO
@@ -408,8 +409,7 @@ static int cab_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 	 * u2 iCabinet - number of this cabinet file in a set: 34-35
 	 */
 	BIO_write(outdata, ctx->options->indata + 32, 4);
-	i = 60;
-	cab_optional_names(flags, ctx->options->indata, outdata, &i);
+	i = cab_write_optional_names(outdata, ctx->options->indata, 60, flags);
 	/*
 	 * (u8 * cFolders) CFFOLDER - structure contains information about
 	 * one of the folders or partial folders stored in this cabinet file
@@ -437,11 +437,11 @@ static int cab_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 }
 
 /*
- * Obtain an existing signature or create a new one
+ * Obtain an existing signature or create a new one.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO
  * [out] outdata: outdata file BIO
- * [returns] 1 on error or 0 on success
+ * [returns] pointer to PKCS#7 structure
  */
 static PKCS7 *cab_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
@@ -507,7 +507,7 @@ static PKCS7 *cab_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 }
 
 /*
- * Append signature to the outfile
+ * Append signature to the outfile.
  * [in, out] ctx: structure holds input and output data (unused)
  * [out] outdata: outdata file BIO
  * [in] p7: PKCS#7 signature
@@ -568,9 +568,9 @@ static void cab_update_data_size(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 }
 
 /*
- * Free up an entire message digest BIO chain
+ * Free up an entire message digest BIO chain.
  * [out] hash: message digest BIO
- * [out] outdata: outdata file BIO
+ * [out] outdata: outdata file BIO (unused)
  * [returns] none
  */
 static BIO *cab_bio_free(BIO *hash, BIO *outdata)
@@ -583,11 +583,11 @@ static BIO *cab_bio_free(BIO *hash, BIO *outdata)
 }
 
 /*
- * Free up an entire outdata BIO chain,
- * deallocate a FILE_FORMAT_CTX structure and MSI format specific structures,
- * unmap indata file, unlink outfile
+ * Deallocate a FILE_FORMAT_CTX structure and CAB format specific structure,
+ * unmap indata file, unlink outfile.
  * [in, out] ctx: structure holds input and output data
- * [out] outdata: outdata file BIO
+ * [out] hash: message digest BIO
+ * [in] outdata: outdata file BIO
  * [returns] none
  */
 static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
@@ -612,10 +612,10 @@ static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
  */
 
 /*
- * Verify mapped CAB file and create CAB format specific structures
+ * Verify mapped CAB file and create CAB format specific structure.
  * [in] indata: mapped CAB file
  * [in] filesize: size of CAB file
- * [returns] pointer to CAB format specific structures
+ * [returns] pointer to CAB format specific structure
  */
 static CAB_CTX *cab_ctx_get(char *indata, uint32_t filesize)
 {
@@ -686,7 +686,10 @@ static CAB_CTX *cab_ctx_get(char *indata, uint32_t filesize)
 }
 
 /*
+ * Add level of permissions in Microsoft Internet Explorer 4.x for CAB files,
+ * only low level is supported.
  * [in, out] p7: PKCS#7 signature
+ * [in] jp: low (0) level
  * [returns] 0 on error or 1 on success
  */
 static int cab_add_jp_attribute(PKCS7 *p7, int jp)
@@ -725,11 +728,17 @@ static int cab_add_jp_attribute(PKCS7 *p7, int jp)
 	return 1; /* OK */
 }
 
-static void cab_optional_names(uint16_t flags, char *indata, BIO *outdata, size_t *len)
+/*
+ * Write name of previous and next cabinet file.
+ * Multivolume cabinet file is unsupported TODO.
+ * [out] outdata: outdata file BIO
+ * [in] indata: mapped CAB file
+ * [in] len: offset
+ * [in] flags: FLAG_PREV_CABINET, FLAG_NEXT_CABINET
+ * [returns] offset
+ */
+static size_t cab_write_optional_names(BIO *outdata, char *indata, size_t i, uint16_t flags)
 {
-	size_t i = *len;
-
-	/* TODO */
 	if (flags & FLAG_PREV_CABINET) {
 		/* szCabinetPrev */
 		while (GET_UINT8_LE(indata + i)) {
@@ -762,11 +771,11 @@ static void cab_optional_names(uint16_t flags, char *indata, BIO *outdata, size_
 		BIO_write(outdata, indata + i, 1);
 		i++;
 	}
-	*len = i;
+	return i;
 }
 
 /*
- * Modify header
+ * Modify CAB header.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO
  * [out] outdata: outdata file BIO
@@ -812,8 +821,7 @@ static int cab_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 	/* u4 abReserve: 56-59 */
 	BIO_write(hash, ctx->options->indata + 56, 4);
 
-	i = 60;
-	cab_optional_names(flags, ctx->options->indata, hash, &i);
+	i = cab_write_optional_names(outdata, ctx->options->indata, 60, flags);
 	/*
 	 * (u8 * cFolders) CFFOLDER - structure contains information about
 	 * one of the folders or partial folders stored in this cabinet file
@@ -836,7 +844,7 @@ static int cab_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 }
 
 /*
- * Add signed CAB header
+ * Add signed CAB header.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO
  * [out] outdata: outdata file BIO
@@ -889,8 +897,7 @@ static int cab_add_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 	BIO_write(outdata, cabsigned, 20);
 	BIO_write(hash, cabsigned+20, 4);
 
-	i = 36;
-	cab_optional_names(flags, ctx->options->indata, hash, &i);
+	i = cab_write_optional_names(outdata, ctx->options->indata, 36, flags);
 	/*
 	 * (u8 * cFolders) CFFOLDER - structure contains information about
 	 * one of the folders or partial folders stored in this cabinet file

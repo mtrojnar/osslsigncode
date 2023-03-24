@@ -183,7 +183,7 @@ static int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT
 }
 
 /*
- * Retrieve a decoded PKCS#7 struct corresponding to the signature
+ * Retrieve a decoded PKCS#7 structure corresponding to the signature
  * stored in the "sigin" file
  * CMD_ATTACH command specific
  * [in] ctx: structure holds input and output data
@@ -543,7 +543,7 @@ SpcLink *spc_link_obsolete_get(void)
 }
 
 /*
- * Retrieve a decoded PKCS#7 struct
+ * Retrieve a decoded PKCS#7 structure
  * [in] indata: mapped file
  * [in] sigpos: signature data offset
  * [in] siglen: signature data size
@@ -657,7 +657,7 @@ static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CT
 	idc->data->value = ASN1_TYPE_new();
 	idc->data->value->type = V_ASN1_SEQUENCE;
 	idc->data->value->value.sequence = ASN1_STRING_new();
-	idc->data->type = ctx->format->get_data_blob(ctx, &p, &l);
+	idc->data->type = ctx->format->data_blob_get(&p, &l, ctx);
 	idc->data->value->value.sequence->data = p;
 	idc->data->value->value.sequence->length = l;
 	idc->messageDigest->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(ctx->options->md));

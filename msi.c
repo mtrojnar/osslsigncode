@@ -211,7 +211,7 @@ struct msi_ctx_st {
 
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
-static ASN1_OBJECT *msi_spc_sip_info(FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
+static ASN1_OBJECT *msi_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
 static int msi_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static u_char *msi_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
@@ -224,7 +224,7 @@ static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 
 FILE_FORMAT file_format_msi = {
 	.ctx_new = msi_ctx_new,
-	.get_data_blob = msi_spc_sip_info,
+	.data_blob_get = msi_spc_sip_info_get,
 	.check_file = msi_check_file,
 	.digest_calc = msi_digest_calc,
 	.verify_digests = msi_verify_digests,
@@ -310,12 +310,12 @@ static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
 
 /*
  * Allocate and return SpcSipInfo object.
- * [in] ctx: structure holds input and output data (unused)
  * [out] p: SpcSipInfo data
  * [out] plen: SpcSipInfo data length
+ * [in] ctx: structure holds input and output data (unused)
  * [returns] pointer to ASN1_OBJECT structure corresponding to SPC_SIPINFO_OBJID
  */
-static ASN1_OBJECT *msi_spc_sip_info(FILE_FORMAT_CTX *ctx, u_char **p, int *plen)
+static ASN1_OBJECT *msi_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx)
 {
 	const u_char msistr[] = {
 		0xf1, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -344,9 +344,11 @@ static ASN1_OBJECT *msi_spc_sip_info(FILE_FORMAT_CTX *ctx, u_char **p, int *plen
 }
 
 /*
+ * Get DigitalSignature and MsiDigitalSignatureEx streams,
+ * check if the signature exists.
  * [in, out] ctx: structure holds input and output data
  * [in] detached: embedded/detached PKCS#7 signature switch (unused)
- * [returns] 0 on error or 1 on success
+ * [returns] 0 on error or 1 on successs
  */
 static int msi_check_file(FILE_FORMAT_CTX *ctx, int detached)
 {
@@ -402,7 +404,9 @@ static int msi_check_file(FILE_FORMAT_CTX *ctx, int detached)
 	return 1; /* OK */
 }
 
-/* Compute a simple sha1/sha256 message digest of the MSI file for use with a catalog file
+/*
+ * Compute a simple sha1/sha256 message digest of the MSI file
+ * for use with a catalog file.
  * [in] ctx: structure holds input and output data
  * [in] md: message digest algorithm
  * [returns] pointer to calculated message digest
@@ -430,9 +434,8 @@ static u_char *msi_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
 }
 
 /*
- * Calculate DigitalSignature and MsiDigitalSignatureEx, compare to values
- * retrieved from PKCS#7 signedData,
- * returns a simple sha1/sha256 message digest of the MSI file
+ * Calculate DigitalSignature and MsiDigitalSignatureEx and compare to values
+ * retrieved from PKCS#7 signedData.
  * [in] ctx: structure holds input and output data
  * [in] p7: PKCS#7 signature
  * [returns] 0 on error or 1 on success
@@ -529,9 +532,9 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 }
 
 /*
- * Extract existing signature to DER or PEM format
- * [in, out] ctx: structure holds input and output data
- * [returns] 1 on error or 0 on success
+ * Extract existing signature in DER format.
+ * [in] ctx: structure holds input and output data
+ * [returns] pointer to PKCS#7 structure
  */
 static PKCS7 *msi_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
@@ -555,7 +558,7 @@ static PKCS7 *msi_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * Remove existing signature
+ * Remove existing signature.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO (unused)
  * [out] outdata: outdata file BIO
@@ -583,11 +586,11 @@ static int msi_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 }
 
 /*
- * Obtain an existing signature or create a new one
+ * Obtain an existing signature or create a new one.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO
  * [out] outdata: outdata file BIO (unused)
- * [returns] 1 on error or 0 on success
+ * [returns] pointer to PKCS#7 structure
  */
 static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
@@ -670,7 +673,7 @@ static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 }
 
 /*
- * Append signature to the outfile
+ * Append signature to the outfile.
  * [in, out] ctx: structure holds input and output data
  * [out] outdata: outdata file BIO
  * [in] p7: PKCS#7 signature
@@ -700,7 +703,7 @@ static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 }
 
 /*
- * Free up an entire outdata BIO chain
+ * Free up an entire outdata BIO chain.
  * [out] hash: message digest BIO
  * [out] outdata: outdata file BIO
  * [returns] none
@@ -713,10 +716,10 @@ static BIO *msi_bio_free(BIO *hash, BIO *outdata)
 }
 
 /*
- * Free up an entire outdata BIO chain,
- * deallocate a FILE_FORMAT_CTX structure and MSI format specific structures,
- * unmap indata file, unlink outfile
+ * Deallocate a FILE_FORMAT_CTX structure and MSI format specific structures,
+ * unmap indata file, unlink outfile.
  * [in, out] ctx: structure holds input and output data
+ * [out] hash: message digest BIO
  * [out] outdata: outdata file BIO
  * [returns] none
  */
@@ -746,10 +749,10 @@ static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
  */
 
 /*
- * Verify mapped MSI file and create MSI format specific structures
+ * Verify mapped MSI file and create MSI format specific structure.
  * [in] indata: mapped MSI file
  * [in] filesize: size of MSI file
- * [returns] pointer to MSI format specific structures
+ * [returns] pointer to MSI format specific structure
  */
 static MSI_CTX *msi_ctx_get(char *indata, uint32_t filesize)
 {
