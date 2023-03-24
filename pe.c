@@ -44,21 +44,25 @@ struct pe_ctx_st {
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
 static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
-static int pe_check_file(FILE_FORMAT_CTX *ctx);
+static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached);
+static u_char *pe_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
+static int pe_verify_indirect_data(FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOptionalValue *obj);
 static PKCS7 *pe_pkcs7_extract(FILE_FORMAT_CTX *ctx);
 static int pe_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static PKCS7 *pe_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static int pe_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static void pe_update_data_size(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static BIO *pe_bio_free(BIO *hash, BIO *outdata);
-static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *outdata);
+static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 
 FILE_FORMAT file_format_pe = {
 	.ctx_new = pe_ctx_new,
 	.get_data_blob = pe_spc_image_data,
 	.check_file = pe_check_file,
+	.digest_calc = pe_digest_calc,
 	.verify_digests = pe_verify_digests,
+	.verify_indirect_data = pe_verify_indirect_data,
 	.pkcs7_extract = pe_pkcs7_extract,
 	.remove_pkcs7 = pe_remove_pkcs7,
 	.pkcs7_prepare = pe_pkcs7_prepare,
@@ -69,16 +73,14 @@ FILE_FORMAT file_format_pe = {
 };
 
 /* Prototypes */
-static int pe_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx);
 static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize);
 static PKCS7 *pe_pkcs7_get_file(char *indata, PE_CTX *pe_ctx);
 static uint32_t pe_calc_checksum(BIO *bio, uint32_t header_size);
 static uint32_t pe_calc_realchecksum(FILE_FORMAT_CTX *ctx);
 static int pe_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
-static SpcLink *get_page_hash_link(FILE_FORMAT_CTX *ctx, int phtype);
-static int pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
-	u_char **ph, int *phlen, int *phtype);
-static int pe_compare_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype);
+static SpcLink *pe_page_hash_link_get(FILE_FORMAT_CTX *ctx, int phtype);
+static int pe_page_hash_get(u_char **ph, int *phtype, SpcAttributeTypeAndOptionalValue *obj);
+static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype);
 
 
 /*
@@ -149,7 +151,7 @@ static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *ple
 		phtype = NID_sha1;
 		if (EVP_MD_size(ctx->options->md) > EVP_MD_size(EVP_sha1()))
 			phtype = NID_sha256;
-		link = get_page_hash_link(ctx, phtype);
+		link = pe_page_hash_link_get(ctx, phtype);
 		if (!link)
 			return NULL; /* FAILED */
 		pid->file = link;
@@ -166,12 +168,11 @@ static ASN1_OBJECT *pe_spc_image_data(FILE_FORMAT_CTX *ctx, u_char **p, int *ple
 }
 
 /*
- * Retrieve all PKCS#7 (include nested) structures from PE file,
- * allocate and return signature list
  * [in, out] ctx: structure holds input and output data
+ * [in] detached: embedded/detached PKCS#7 signature switch
  * [returns] 0 on error or 1 on success
  */
-static int pe_check_file(FILE_FORMAT_CTX *ctx)
+static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached)
 {
 	int peok = 1;
 	uint32_t real_pe_checksum;
@@ -180,9 +181,9 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx)
 		printf("Init error\n\n");
 		return 0; /* FAILED */
 	}
-	if (ctx->pe_ctx->siglen == 0) {
-		ctx->pe_ctx->sigpos = ctx->pe_ctx->fileend;
-	}
+	//if (ctx->pe_ctx->siglen == 0) {
+	//	ctx->pe_ctx->sigpos = ctx->pe_ctx->fileend;
+	//}
 	/* check PE checksum */
 	printf("Current PE checksum   : %08X\n", ctx->pe_ctx->pe_checksum);
 	real_pe_checksum = pe_calc_realchecksum(ctx);
@@ -191,6 +192,11 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx)
 	}
 	printf("Calculated PE checksum: %08X%s\n\n", real_pe_checksum,
 		peok ? "" : "    MISMATCH!!!");
+
+	if (detached) {
+		printf("Checking the specified catalog file\n\n");
+		return 1; /* OK */
+	}
 	if (ctx->pe_ctx->sigpos == 0 || ctx->pe_ctx->siglen == 0
 		|| ctx->pe_ctx->sigpos > ctx->pe_ctx->fileend) {
 		printf("No signature found\n\n");
@@ -203,6 +209,65 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx)
 	return 1; /* OK */
 }
 
+/* Compute a message digest value of a signed or unsigned PE file.
+ * [in] ctx: structure holds input and output data
+ * [in] md: message digest algorithm
+ * [returns] pointer to calculated message digest
+ */
+static u_char *pe_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
+{
+	size_t written;
+	uint32_t idx = 0, fileend;
+	u_char *mdbuf = NULL;
+	BIO *bhash = BIO_new(BIO_f_md());
+
+	if (!BIO_set_md(bhash, md)) {
+		printf("Unable to set the message digest of BIO\n");
+		BIO_free_all(bhash);
+		return 0;  /* FAILED */
+	}
+	BIO_push(bhash, BIO_new(BIO_s_null()));
+	if (ctx->pe_ctx->sigpos)
+		fileend = ctx->pe_ctx->sigpos;
+	else
+		fileend = ctx->pe_ctx->fileend;
+
+	/* ctx->pe_ctx->header_size + 88 + 4 + 60 + ctx->pe_ctx->pe32plus * 16 + 8 */
+	if (!BIO_write_ex(bhash, ctx->options->indata, ctx->pe_ctx->header_size + 88, &written)
+		|| written != ctx->pe_ctx->header_size + 88) {
+		BIO_free_all(bhash);
+		return 0; /* FAILED */
+	}
+	idx += (uint32_t)written + 4;
+	if (!BIO_write_ex(bhash, ctx->options->indata + idx,
+			60 + ctx->pe_ctx->pe32plus * 16, &written)
+		|| written != 60 + ctx->pe_ctx->pe32plus * 16) {
+		BIO_free_all(bhash);
+		return 0; /* FAILED */
+	}
+	idx += (uint32_t)written + 8;
+	if (!bio_hash_data(bhash, ctx->options->indata, idx, fileend)) {
+		printf("Unable to calculate digest\n");
+		BIO_free_all(bhash);
+		return 0;  /* FAILED */
+	}
+	if (!ctx->pe_ctx->sigpos) {
+		/* pad (with 0's) unsigned PE file to 8 byte boundary */
+		int len = 8 - ctx->pe_ctx->fileend % 8;
+		if (len > 0 && len != 8) {
+			char *buf = OPENSSL_malloc(8);
+			memset(buf, 0, (size_t)len);
+			BIO_write(bhash, buf, len);
+			OPENSSL_free(buf);
+		}
+	}
+	mdbuf = OPENSSL_malloc((size_t)EVP_MD_size(md));
+	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
+	BIO_free_all(bhash);
+	return mdbuf;  /* OK */
+}
+
+
 /*
  * Calculate message digest and page_hash, compare to values retrieved from PKCS#7 signedData
  * [in] ctx: structure holds input and output data
@@ -212,8 +277,9 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx)
 static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
 	int mdtype = -1, phtype = -1;
+	const EVP_MD *md;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
-	u_char cmdbuf[EVP_MAX_MD_SIZE];
+	u_char *cmdbuf = NULL;
 	u_char *ph = NULL;
 	int phlen = 0;
 
@@ -222,7 +288,8 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 		const u_char *p = content_val->data;
 		SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
 		if (idc) {
-			if (!pe_extract_page_hash(idc->data, &ph, &phlen, &phtype)) {
+			phlen = pe_page_hash_get(&ph, &phtype, idc->data);
+			if (phlen == 0) {
 				printf("Failed to extract a page hash\n\n");
 				SpcIndirectDataContent_free(idc);
 				return 0; /* FAILED */
@@ -239,7 +306,9 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 		OPENSSL_free(ph);
 		return 0; /* FAILED */
 	}
-	if (!pe_digest_calc(cmdbuf, mdtype, ctx)) {
+	md = EVP_get_digestbynid(mdtype);
+	cmdbuf = pe_digest_calc(ctx, md);
+	if (!cmdbuf) {
 		printf("Failed to calculate message digest\n\n");
 		OPENSSL_free(ph);
 		return 0; /* FAILED */
@@ -247,14 +316,40 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 	if (!compare_digests(mdbuf, cmdbuf, mdtype)) {
 		printf("Signature verification: failed\n\n");
 		OPENSSL_free(ph);
+		OPENSSL_free(cmdbuf);
 		return 0; /* FAILED */
 	}
-	if (phlen > 0 && !pe_compare_page_hash(ctx, ph, phlen, phtype)) {
+	if (phlen > 0 && !pe_verify_page_hash(ctx, ph, phlen, phtype)) {
 		printf("Signature verification: failed\n\n");
 		OPENSSL_free(ph);
+		OPENSSL_free(cmdbuf);
 		return 0; /* FAILED */
 	}
 	OPENSSL_free(ph);
+	OPENSSL_free(cmdbuf);
+	return 1; /* OK */
+}
+
+/*
+ * Try to get a page hash if the file is signed
+ * [in] ctx: structure holds input and output data
+ * [in] obj: MS_SPC_LINK OID: 1.3.6.1.4.1.311.2.1.28 containing page hash
+ * [returns] 0 on error or 1 on success
+ */
+static int pe_verify_indirect_data(FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOptionalValue *obj)
+{
+	int phtype = -1, phlen = 0;
+	u_char *ph = NULL;
+
+	phlen = pe_page_hash_get(&ph, &phtype, obj);
+	if (phlen == 0) {
+		printf("Failed to extract a page hash\n\n");
+		return 0; /* FAILED */
+	}
+	if (!pe_verify_page_hash(ctx, ph, phlen, phtype)) {
+		printf("Page hash verification: failed\n\n");
+		return 0; /* FAILED */
+	}
 	return 1; /* OK */
 }
 
@@ -330,6 +425,7 @@ static PKCS7 *pe_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 		p7 = pkcs7_get_sigfile(ctx);
 		if (!p7) {
 			printf("Unable to extract valid signature\n");
+			PKCS7_free(cursig);
 			return NULL; /* FAILED */
 		}
 	} else if (ctx->options->cmd == CMD_SIGN) {
@@ -459,9 +555,10 @@ static BIO *pe_bio_free(BIO *hash, BIO *outdata)
  * [out] outdata: outdata file BIO
  * [returns] none
  */
-static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *outdata)
+static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
 	if (outdata) {
+		BIO_free_all(hash);
 		if (ctx->options->outfile) {
 #ifdef WIN32
 			_unlink(ctx->options->outfile);
@@ -478,64 +575,6 @@ static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *outdata)
 /*
  * PE helper functions
  */
-
-/* Compute a message digest value of a signed PE file.
- * [out] mdbuf: message digest
- * [in] mdtype: message digest algorithm type
- * [in] ctx: structure holds input and output data
- * [returns] 0 on error or 1 on success
- */
-static int pe_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx)
-{
-	size_t written;
-	uint32_t idx = 0, fileend;
-	const EVP_MD *md = EVP_get_digestbynid(mdtype);
-	BIO *bhash = BIO_new(BIO_f_md());
-
-	if (!BIO_set_md(bhash, md)) {
-		printf("Unable to set the message digest of BIO\n");
-		BIO_free_all(bhash);
-		return 0;  /* FAILED */
-	}
-	BIO_push(bhash, BIO_new(BIO_s_null()));
-	if (ctx->pe_ctx->sigpos)
-		fileend = ctx->pe_ctx->sigpos;
-	else
-		fileend = ctx->pe_ctx->fileend;
-
-	/* ctx->pe_ctx->header_size + 88 + 4 + 60 + ctx->pe_ctx->pe32plus * 16 + 8 */
-	if (!BIO_write_ex(bhash, ctx->options->indata, ctx->pe_ctx->header_size + 88, &written)
-		|| written != ctx->pe_ctx->header_size + 88) {
-		BIO_free_all(bhash);
-		return 0; /* FAILED */
-	}
-	idx += (uint32_t)written + 4;
-	if (!BIO_write_ex(bhash, ctx->options->indata + idx,
-			60 + ctx->pe_ctx->pe32plus * 16, &written)
-		|| written != 60 + ctx->pe_ctx->pe32plus * 16) {
-		BIO_free_all(bhash);
-		return 0; /* FAILED */
-	}
-	idx += (uint32_t)written + 8;
-	if (!bio_hash_data(bhash, ctx->options->indata, idx, fileend)) {
-		printf("Unable to calculate digest\n");
-		BIO_free_all(bhash);
-		return 0;  /* FAILED */
-	}
-	if (!ctx->pe_ctx->sigpos) {
-		/* pad (with 0's) unsigned PE file to 8 byte boundary */
-		int len = 8 - ctx->pe_ctx->fileend % 8;
-		if (len > 0 && len != 8) {
-			char *buf = OPENSSL_malloc(8);
-			memset(buf, 0, (size_t)len);
-			BIO_write(bhash, buf, len);
-			OPENSSL_free(buf);
-		}
-	}
-	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
-	BIO_free_all(bhash);
-	return 1;  /* OK */
-}
 
 /*
  * Verify mapped PE file and create PE format specific structures
@@ -645,7 +684,7 @@ static PKCS7 *pe_pkcs7_get_file(char *indata, PE_CTX *pe_ctx)
 			l += (8 - l%8);
 		pos += l;
 	}
-	return NULL;
+	return NULL; /* FAILED */
 }
 
 /*
@@ -780,16 +819,19 @@ static int pe_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 /*
  * Page hash support
  */
-static int pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
-	u_char **ph, int *phlen, int *phtype)
+
+/*
+ * Get page hash from SPC_PE_IMAGE_DATA
+ *
+ */
+static int pe_page_hash_get(u_char **ph, int *phtype, SpcAttributeTypeAndOptionalValue *obj)
 {
 	const u_char *blob;
 	SpcPeImageData *id;
 	SpcSerializedObject *so;
-	int l, l2;
+	int l, l2, phlen = 0;
 	char buf[128];
 
-	*phlen = 0;
 	if (!obj || !obj->value)
 		return 0; /* FAILED */
 	blob = obj->value->value.sequence->data;
@@ -803,7 +845,7 @@ static int pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	}
 	if (id->file->type != 1) {
 		SpcPeImageData_free(id);
-		return 1; /* OK - this is not SpcSerializedObject structure that contains page hashes */
+		return 0; /* This is not SpcSerializedObject structure that contains page hashes */
 	}
 	so = id->file->value.moniker;
 	if (so->classId->length != sizeof classid_page_hash ||
@@ -835,11 +877,11 @@ static int pe_extract_page_hash(SpcAttributeTypeAndOptionalValue *obj,
 	/* Skip ASN.1 OCTET STRING hdr */
 	l = asn1_simple_hdr_len(obj->value->value.sequence->data + l2, obj->value->value.sequence->length - l2);
 	l += l2;
-	*phlen = obj->value->value.sequence->length - l;
-	*ph = OPENSSL_malloc((size_t)*phlen);
-	memcpy(*ph, obj->value->value.sequence->data + l, (size_t)*phlen);
+	phlen = obj->value->value.sequence->length - l;
+	*ph = OPENSSL_malloc((size_t)phlen);
+	memcpy(*ph, obj->value->value.sequence->data + l, (size_t)phlen);
 	SpcAttributeTypeAndOptionalValue_free(obj);
-	return 1; /* OK */
+	return phlen; /* OK */
 }
 
 
@@ -934,16 +976,16 @@ static u_char *pe_calc_page_hash(FILE_FORMAT_CTX *ctx, int phtype, int *rphlen)
 	memset(res, 0, 4);
 	BIO_gets(bhash, (char*)res + 4, EVP_MD_size(md));
 	BIO_free_all(bhash);
-
 	sections = ctx->options->indata + ctx->pe_ctx->header_size + 24 + opthdr_size;
 	for (i=0; i<nsections; i++) {
 		/* Resource Table address and size */
 		rs = GET_UINT32_LE(sections + 16);
 		ro = GET_UINT32_LE(sections + 20);
 		if (rs == 0 || rs >= UINT32_MAX) {
+			sections += 40;
 			continue;
 		}
-		for (l=0; l < rs; l+=pagesize, pi++) {
+		for (l=0; l<rs; l+=pagesize, pi++) {
 			PUT_UINT32_LE(ro + l, res + pi*pphlen);
 			bhash = BIO_new(BIO_f_md());
 			if (!BIO_set_md(bhash, md)) {
@@ -992,21 +1034,26 @@ static u_char *pe_calc_page_hash(FILE_FORMAT_CTX *ctx, int phtype, int *rphlen)
 	return res;
 }
 
-static int pe_compare_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype)
+static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype)
 {
 	int mdok, cphlen = 0;
 	u_char *cph;
 
-	printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
-	print_hash("Page hash            ", "...", ph, (phlen < 32) ? phlen : 32);
 	cph = pe_calc_page_hash(ctx, phtype, &cphlen);
 	mdok = (phlen == cphlen) && !memcmp(ph, cph, (size_t)phlen);
-	print_hash("Calculated page hash ", mdok ? "...\n" : "... MISMATCH!!!\n", cph, (cphlen < 32) ? cphlen : 32);
+	printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
+	if (ctx->options->verbose) {
+		print_hash("Page hash            ", "", ph, phlen);
+		print_hash("Calculated page hash ", mdok ? "\n" : "... MISMATCH!!!\n", cph, cphlen);
+	} else {
+		print_hash("Page hash            ", "...", ph, (phlen < 32) ? phlen : 32);
+		print_hash("Calculated page hash ", mdok ? "...\n" : "... MISMATCH!!!\n", cph, (cphlen < 32) ? cphlen : 32);
+	}
 	OPENSSL_free(cph);
 	return mdok;
 }
 
-static SpcLink *get_page_hash_link(FILE_FORMAT_CTX *ctx, int phtype)
+static SpcLink *pe_page_hash_link_get(FILE_FORMAT_CTX *ctx, int phtype)
 {
 	u_char *ph, *p, *tmp;
 	int l, phlen;
@@ -1022,7 +1069,10 @@ static SpcLink *get_page_hash_link(FILE_FORMAT_CTX *ctx, int phtype)
 		printf("Failed to calculate page hash\n");
 		return NULL; /* FAILED */
 	}
-	print_hash("Calculated page hash            ", "...", ph, (phlen < 32) ? phlen : 32);
+	if (ctx->options->verbose)
+		print_hash("Calculated page hash            ", "", ph, phlen);
+	else
+		print_hash("Calculated page hash            ", "...", ph, (phlen < 32) ? phlen : 32);
 
 	tostr = ASN1_TYPE_new();
 	tostr->type = V_ASN1_OCTET_STRING;

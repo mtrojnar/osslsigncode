@@ -429,6 +429,29 @@ typedef struct {
 
 DECLARE_ASN1_FUNCTIONS(TimeStampToken)
 
+typedef struct {
+	ASN1_OCTET_STRING *digest;
+	STACK_OF(CatalogAuthAttr) *attributes;
+} CatalogInfo;
+
+DEFINE_STACK_OF(CatalogInfo)
+DECLARE_ASN1_FUNCTIONS(CatalogInfo)
+
+typedef struct {
+	/* 1.3.6.1.4.1.311.12.1.1 MS_CATALOG_LIST */
+	SpcAttributeTypeAndOptionalValue *type;
+	ASN1_OCTET_STRING *identifier;
+	ASN1_UTCTIME *time;
+	/* 1.3.6.1.4.1.311.12.1.2 CatalogVersion = 1
+	 * 1.3.6.1.4.1.311.12.1.3 CatalogVersion = 2 */
+	SpcAttributeTypeAndOptionalValue *version;
+	STACK_OF(CatalogInfo) *header_attributes;
+	/* 1.3.6.1.4.1.311.12.2.1 CAT_NAMEVALUE_OBJID */
+	ASN1_TYPE *filename;
+} MsCtlContent;
+
+DECLARE_ASN1_FUNCTIONS(MsCtlContent)
+
 typedef struct file_format_st FILE_FORMAT;
 typedef struct msi_ctx_st MSI_CTX;
 typedef struct pe_ctx_st PE_CTX;
@@ -454,15 +477,17 @@ extern FILE_FORMAT file_format_cat;
 struct file_format_st {
 	FILE_FORMAT_CTX *(*ctx_new) (GLOBAL_OPTIONS *option, BIO *hash, BIO *outdata);
 	ASN1_OBJECT *(*get_data_blob) (FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
-	int (*check_file) (FILE_FORMAT_CTX *ctx);
+	int (*check_file) (FILE_FORMAT_CTX *ctx, int detached);
+	u_char *(*digest_calc) (FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 	int (*verify_digests) (FILE_FORMAT_CTX *ctx, PKCS7 *p7);
+	int (*verify_indirect_data) (FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOptionalValue *obj);
 	PKCS7 *(*pkcs7_extract) (FILE_FORMAT_CTX *ctx);
 	int (*remove_pkcs7) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 	PKCS7 *(*pkcs7_prepare) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 	int (*append_pkcs7) (FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 	void (*update_data_size) (FILE_FORMAT_CTX *data, BIO *outdata, PKCS7 *p7);
 	BIO *(*bio_free) (BIO *hash, BIO *outdata);
-	void (*ctx_cleanup) (FILE_FORMAT_CTX *ctx, BIO *outdata);
+	void (*ctx_cleanup) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 };
 
 /*

@@ -15,47 +15,6 @@ const u_char pkcs7_signed_data[] = {
 	0x01, 0x07, 0x02,
 };
 
-typedef struct {
-	ASN1_OCTET_STRING *digest;
-	STACK_OF(CatalogAuthAttr) *attributes;
-} CatalogInfo;
-
-DEFINE_STACK_OF(CatalogInfo)
-DECLARE_ASN1_FUNCTIONS(CatalogInfo)
-
-ASN1_SEQUENCE(CatalogInfo) = {
-	ASN1_SIMPLE(CatalogInfo, digest, ASN1_OCTET_STRING),
-	ASN1_SET_OF(CatalogInfo, attributes, CatalogAuthAttr)
-} ASN1_SEQUENCE_END(CatalogInfo)
-
-IMPLEMENT_ASN1_FUNCTIONS(CatalogInfo)
-
-typedef struct {
-	/* 1.3.6.1.4.1.311.12.1.1 szOID_CATALOG_LIST */
-	SpcAttributeTypeAndOptionalValue *type;
-	ASN1_OCTET_STRING *identifier;
-	ASN1_UTCTIME *time;
-	/* 1.3.6.1.4.1.311.12.1.2 CatalogVersion = 1
-	 * 1.3.6.1.4.1.311.12.1.3 CatalogVersion = 2 */
-	SpcAttributeTypeAndOptionalValue *version;
-	STACK_OF(CatalogInfo) *header_attributes;
-	/* 1.3.6.1.4.1.311.12.2.1 CAT_NAMEVALUE_OBJID */
-	ASN1_TYPE *filename;
-} MsCtlContent;
-
-DECLARE_ASN1_FUNCTIONS(MsCtlContent)
-
-ASN1_SEQUENCE(MsCtlContent) = {
-	ASN1_SIMPLE(MsCtlContent, type, SpcAttributeTypeAndOptionalValue),
-	ASN1_SIMPLE(MsCtlContent, identifier, ASN1_OCTET_STRING),
-	ASN1_SIMPLE(MsCtlContent, time, ASN1_UTCTIME),
-	ASN1_SIMPLE(MsCtlContent, version, SpcAttributeTypeAndOptionalValue),
-	ASN1_SEQUENCE_OF(MsCtlContent, header_attributes, CatalogInfo),
-	ASN1_OPT(MsCtlContent, filename, ASN1_ANY)
-} ASN1_SEQUENCE_END(MsCtlContent)
-
-IMPLEMENT_ASN1_FUNCTIONS(MsCtlContent)
-
 struct cat_ctx_st {
 	uint32_t sigpos;
 	uint32_t siglen;
@@ -64,13 +23,15 @@ struct cat_ctx_st {
 
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
+static PKCS7 *cat_pkcs7_extract(FILE_FORMAT_CTX *ctx);
 static PKCS7 *cat_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static int cat_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static BIO *cat_bio_free(BIO *hash, BIO *outdata);
-static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *outdata);
+static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 
 FILE_FORMAT file_format_cat = {
 	.ctx_new = cat_ctx_new,
+	.pkcs7_extract = cat_pkcs7_extract,
 	.pkcs7_prepare = cat_pkcs7_prepare,
 	.append_pkcs7 = cat_append_pkcs7,
 	.bio_free = cat_bio_free,
@@ -101,7 +62,7 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
 	(void)outdata;
 	(void)hash;
 
-	if (options->cmd == CMD_REMOVE || options->cmd == CMD_EXTRACT || options->cmd==CMD_ATTACH) {
+	if (options->cmd == CMD_REMOVE || options->cmd==CMD_ATTACH) {
 		printf("Unsupported command\n");
 		return NULL; /* FAILED */
 	}
@@ -146,6 +107,16 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
 	if (options->add_msi_dse == 1)
 		printf("Warning: -add-msi-dse option is only valid for MSI files\n");
 	return ctx;
+}
+
+/*
+ * Extract existing signature to DER or PEM format
+ * [in, out] ctx: structure holds input and output data
+ * [returns] 1 on error or 0 on success
+ */
+static PKCS7 *cat_pkcs7_extract(FILE_FORMAT_CTX *ctx)
+{
+	return pkcs7_get(ctx->options->indata, ctx->cat_ctx->sigpos, ctx->cat_ctx->siglen);
 }
 
 /*
@@ -237,9 +208,10 @@ static BIO *cat_bio_free(BIO *hash, BIO *outdata)
  * [in, out] ctx: structure holds all input and output data
  * [returns] none
  */
-static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *outdata)
+static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
 	if (outdata) {
+		BIO_free_all(hash);
 		if (ctx->options->outfile) {
 #ifdef WIN32
 			_unlink(ctx->options->outfile);

@@ -234,6 +234,24 @@ ASN1_SEQUENCE(TimeStampToken) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampToken)
 
+ASN1_SEQUENCE(CatalogInfo) = {
+	ASN1_SIMPLE(CatalogInfo, digest, ASN1_OCTET_STRING),
+	ASN1_SET_OF(CatalogInfo, attributes, CatalogAuthAttr)
+} ASN1_SEQUENCE_END(CatalogInfo)
+
+IMPLEMENT_ASN1_FUNCTIONS(CatalogInfo)
+
+ASN1_SEQUENCE(MsCtlContent) = {
+	ASN1_SIMPLE(MsCtlContent, type, SpcAttributeTypeAndOptionalValue),
+	ASN1_SIMPLE(MsCtlContent, identifier, ASN1_OCTET_STRING),
+	ASN1_SIMPLE(MsCtlContent, time, ASN1_UTCTIME),
+	ASN1_SIMPLE(MsCtlContent, version, SpcAttributeTypeAndOptionalValue),
+	ASN1_SEQUENCE_OF(MsCtlContent, header_attributes, CatalogInfo),
+	ASN1_OPT(MsCtlContent, filename, ASN1_ANY)
+} ASN1_SEQUENCE_END(MsCtlContent)
+
+IMPLEMENT_ASN1_FUNCTIONS(MsCtlContent)
+
 /* Prototypes */
 static int signature_list_append_pkcs7(STACK_OF(PKCS7) **signatures, PKCS7 *p7, int allownest);
 static time_t time_t_get_asn1_time(const ASN1_TIME *s);
@@ -857,7 +875,7 @@ static void print_cert(X509 *cert, int i)
 }
 
 /*
- * Print X509 certificate list from signature->p7->d.sign->cert
+ * Print X509 certificate list from p7->d.sign->cert
  * [in] p7: PKCS#7 signature
  * [returns] 1 on success
  */
@@ -965,7 +983,7 @@ static int x509_store_load_crlfile(X509_STORE *store, char *cafile, char *crlfil
  * based on given parameters
  * [in] cafile: file contains concatenated CA certificates in PEM format
  * [in] crlfile: file contains Certificate Revocation List (CRLs)
- * [in] crls: additional CRLs obtained from signature->p7->d.sign->crl
+ * [in] crls: additional CRLs obtained from p7->d.sign->crl
  * [in] signer: signer's X509 certificate
  * [in] chain: list of additional certificates which will be untrusted but be used to build the chain
  * [returns] 0 on error or 1 on success
@@ -1727,6 +1745,129 @@ out:
 }
 
 /*
+ * The attribute type is SPC_INDIRECT_DATA_OBJID, so get a digest algorithm and a message digest
+ * from the content and compare the message digest against the computed message digest of the file
+ * [in] ctx: structure holds input and output data
+ * [in] attribute: structure holds input and output data
+ * [returns] 1 on error or 0 on success
+ */
+static int verify_member(FILE_FORMAT_CTX *ctx, CatalogAuthAttr *attribute)
+{
+	int mdlen, mdtype = -1;
+	u_char mdbuf[EVP_MAX_MD_SIZE];
+	SpcIndirectDataContent *idc;
+	const u_char *data;
+	ASN1_STRING *value;
+	STACK_OF(ASN1_TYPE) *contents;
+	ASN1_TYPE *content;
+	const EVP_MD *md;
+	u_char *cmdbuf = NULL;		
+
+	value = attribute->contents->value.sequence;
+	data = value->data;
+	contents = d2i_ASN1_SET_ANY(NULL, &data, value->length);
+	if (contents == NULL) {
+		return 1; /* FAILED */
+	}
+	content = sk_ASN1_TYPE_value(contents, 0);
+	sk_ASN1_TYPE_free(contents);
+	value = content->value.sequence;
+	data = value->data;
+	idc = d2i_SpcIndirectDataContent(NULL, &data, value->length);
+	if (!idc) {
+		printf("Failed to extract SpcIndirectDataContent data\n");
+		ASN1_TYPE_free(content);
+		return 1; /* FAILED */
+	}
+	if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
+		/* get a digest algorithm a message digest of the file from the content */
+		mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
+		memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
+	}
+	ASN1_TYPE_free(content);
+	if (mdtype == -1) {
+		printf("Failed to extract current message digest\n\n");
+		return 1; /* FAILED */
+	}
+	md = EVP_get_digestbynid(mdtype);
+	cmdbuf = ctx->format->digest_calc(ctx, md);
+	if (!cmdbuf) {
+		printf("Failed to compute a message digest value\n\n");
+		return 1; /* Failed */
+	}
+	mdlen = EVP_MD_size(EVP_get_digestbynid(mdtype));
+	if (memcmp(mdbuf, cmdbuf, (size_t)mdlen)) {
+		OPENSSL_free(cmdbuf);
+		return 1; /* FAILED */
+	} else {
+		printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));
+		print_hash("Current message digest    ", "", mdbuf, mdlen);
+		print_hash("Calculated message digest ", "\n", cmdbuf, mdlen);
+	}
+	OPENSSL_free(cmdbuf);
+
+	if (idc->data && ctx->format->verify_indirect_data
+		&& !ctx->format->verify_indirect_data(ctx, idc->data)) {
+		SpcIndirectDataContent_free(idc);
+		return 1; /* FAILED */
+	}
+	SpcIndirectDataContent_free(idc);
+	return 0; /* OK */
+}
+
+/*
+ * Find the message digest of the file for all files added to the catalog file
+ * CTL (MS_CTL_OBJID) is a list of hashes of certificates or a list of hashes files
+ * [in] ctx: structure holds input and output data
+ * [in] p7: PKCS#7 signature
+ * [returns] 1 on error or 0 on success
+ */
+static int verify_content(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
+{
+	ASN1_STRING *value;
+	const u_char *data;
+	MsCtlContent *ctlc;
+	int i, j;
+
+	if (!is_content_type(p7, MS_CTL_OBJID)) {
+		printf("Failed to find MS_CTL_OBJID\n");
+		return 1; /* FAILED */
+	}
+	value = p7->d.sign->contents->d.other->value.sequence;
+	data = value->data;
+	ctlc = d2i_MsCtlContent(NULL, &data, value->length);
+	if (!ctlc) {
+		printf("Failed to extract MS_CTL_OBJID data\n");
+		return 1; /* FAILED */
+	}
+	ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+	for (i = 0; i < sk_CatalogInfo_num(ctlc->header_attributes); i++) {
+		STACK_OF(CatalogAuthAttr) *attributes;
+		CatalogInfo *header_attr = sk_CatalogInfo_value(ctlc->header_attributes, i);
+		if (header_attr == NULL)
+			continue;
+		attributes = header_attr->attributes;
+		for (j = 0; j < sk_CatalogAuthAttr_num(attributes); j++) {
+			CatalogAuthAttr *attribute = sk_CatalogAuthAttr_value(attributes, j);
+			if (!attribute)
+				continue;
+			if (OBJ_cmp(attribute->type, indir_objid))
+				continue;
+			if (!verify_member(ctx, attribute)) {
+				/* computed message digest of the file is found in the catalog file */
+				MsCtlContent_free(ctlc);
+				ASN1_OBJECT_free(indir_objid);
+				return 0; /* OK */
+			}
+		}
+	}
+	MsCtlContent_free(ctlc);
+	ASN1_OBJECT_free(indir_objid);
+	ERR_print_errors_fp(stdout);
+	return 1; /* FAILED */
+}
+
+/*
  * [in] ctx: structure holds input and output data
  * [in] p7: PKCS#7 signature
  * [returns] 1 on error or 0 on success
@@ -1812,12 +1953,15 @@ static int signature_list_append_pkcs7(STACK_OF(PKCS7) **signatures, PKCS7 *p7, 
 	STACK_OF(X509_ATTRIBUTE) *unauth_attr;
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
 
-	if (!signer_info)
+	if (!signer_info) {
+		printf("Failed to obtain PKCS#7 signer info list\n");
 		return 0; /* FAILED */
+	}
 	si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
-	if (!si)
+	if (!si) {
+		printf("Failed to obtain PKCS#7 signer info value\n");
 		return 0; /* FAILED */
-
+	}
 	unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
 	if (unauth_attr) {
 		/* find Nested Signature - Policy OID: 1.3.6.1.4.1.311.2.4.1 */
@@ -1862,22 +2006,41 @@ static int signature_list_append_pkcs7(STACK_OF(PKCS7) **signatures, PKCS7 *p7, 
  * [in] ctx: structure holds input and output data
  * [returns] 1 on error or 0 on success
  */
-static int verify_signed_file(FILE_FORMAT_CTX *ctx)
+static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
 {
 	int i, ret = 1;
 	PKCS7 *p7;
 	STACK_OF(PKCS7) *signatures;
+	int detached = options->catalog ? 1 : 0;
+	
+	if (!ctx->format->check_file(ctx, detached))
+		return 1; /* FAILED */
 
-	if (ctx->format->check_file && ctx->format->verify_digests) {
-		if (!ctx->format->check_file(ctx))
-			return 1; /* FAILED */
+	if (detached) {
+		GLOBAL_OPTIONS *cat_options;
+		FILE_FORMAT_CTX *cat_ctx;
+		cat_options = OPENSSL_memdup(options, sizeof(GLOBAL_OPTIONS));
+		if (!cat_options) {
+			printf("OPENSSL_memdup error.\n");
+			return 1; /* Failed */
+		}
+		cat_options->infile = options->catalog;
+		cat_options->cmd = CMD_EXTRACT;
+		cat_ctx = file_format_cat.ctx_new(cat_options, NULL, NULL);
+		if (!cat_ctx) {
+			printf("CAT file initialization error\n");
+			return 1; /* Failed */
+		}
+		p7 = cat_ctx->format->pkcs7_extract(cat_ctx);
+		cat_ctx->format->ctx_cleanup(cat_ctx, NULL, NULL);
+		OPENSSL_free(cat_options);
 	} else {
-		printf("Unsupported command\n");
+		p7 = ctx->format->pkcs7_extract(ctx);
+	}
+	if (!p7) {
+		printf("Unable to extract existing signature\n");
 		return 1; /* FAILED */
 	}
-	p7 = ctx->format->pkcs7_extract(ctx);
-	if (!p7)
-		return 1; /* FAILED */
 	signatures = sk_PKCS7_new_null();
 	if (!signature_list_append_pkcs7(&signatures, p7, 1)) {
 		printf("Failed to create signature list\n\n");
@@ -1886,8 +2049,14 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx)
 	}
 	for (i = 0; i < sk_PKCS7_num(signatures); i++) {
 		PKCS7 *sig = sk_PKCS7_value(signatures, i);
-		printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-		if (ctx->format->verify_digests(ctx, sig)) {
+		if (detached) {
+			if (!verify_content(ctx, sig)) {
+				ret &= verify_signature(ctx, sig);	
+			} else {
+				printf("Catalog verification: failed\n\n");
+			}		
+		} else if (ctx->format->verify_digests(ctx, sig)) {
+			printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
 			ret &= verify_signature(ctx, sig);
 		}
 	}
@@ -1948,13 +2117,16 @@ static int check_attached_data(GLOBAL_OPTIONS *options)
 		ctx = file_format_cat.ctx_new(tmp_options, NULL, NULL);
 	if (!ctx) {
 		printf("Corrupt attached signature\n");
+		OPENSSL_free(tmp_options);
 		return 1; /* Failed */
 	}
-	if (verify_signed_file(ctx)) {
+	if (verify_signed_file(ctx, tmp_options)) {
 		printf("Signature mismatch\n");
+		ctx->format->ctx_cleanup(ctx, NULL, NULL);
+		OPENSSL_free(tmp_options);
 		return 1; /* Failed */
 	}
-	ctx->format->ctx_cleanup(ctx, NULL);
+	ctx->format->ctx_cleanup(ctx, NULL, NULL);
 	OPENSSL_free(tmp_options);
 	return 0; /* OK */
 }
@@ -3360,7 +3532,7 @@ int main(int argc, char **argv)
 		DO_EXIT_0("Initialization error or unsupported input file type.\n");
 	}
 	if (options.cmd == CMD_VERIFY) {
-		ret = verify_signed_file(ctx);
+		ret = verify_signed_file(ctx, &options);
 		goto skip_signing;
 	} else if (options.cmd == CMD_EXTRACT && ctx->format->pkcs7_extract) {
 		p7 = ctx->format->pkcs7_extract(ctx);
@@ -3415,7 +3587,7 @@ skip_signing:
 
 err_cleanup:
 	if (ctx && ctx->format->ctx_cleanup) {
-		ctx->format->ctx_cleanup(ctx, outdata);
+		ctx->format->ctx_cleanup(ctx, hash, outdata);
 	}
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
 	providers_cleanup();

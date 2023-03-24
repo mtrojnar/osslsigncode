@@ -459,22 +459,20 @@ int bio_hash_data(BIO *hash, char *indata, size_t idx, size_t fileend)
  */
 void print_hash(const char *descript1, const char *descript2, const u_char *mdbuf, int len)
 {
-	char hexbuf[EVP_MAX_MD_SIZE*2+1];
-	int i, j = 0;
+	char *hexbuf = NULL;
+	int size, i, j = 0;
 
-	if (len > EVP_MAX_MD_SIZE) {
-		printf("Invalid message digest size\n");
-		return;
-	}
+	size = 2 * len + 1;
+	hexbuf = OPENSSL_malloc((size_t)size);
 	for (i = 0; i < len; i++) {
 #ifdef WIN32
-		int size = EVP_MAX_MD_SIZE*2 + 1;
 		j += sprintf_s(hexbuf + j, size - j, "%02X", mdbuf[i]);
 #else
 		j += sprintf(hexbuf + j, "%02X", mdbuf[i]);
 #endif /* WIN32 */
 	}
 	printf("%s: %s %s\n", descript1, hexbuf, descript2);
+	OPENSSL_free(hexbuf);
 }
 
 /*

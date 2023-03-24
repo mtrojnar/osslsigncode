@@ -206,27 +206,27 @@ struct msi_ctx_st {
 	MSI_DIRENT *dirent;
 	u_char *p_msiex; /* MsiDigitalSignatureEx stream data */
 	uint32_t len_msiex; /* MsiDigitalSignatureEx stream data length */
-	uint32_t sigpos;
-	uint32_t siglen;
 	uint32_t fileend;
 };
 
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
 static ASN1_OBJECT *msi_spc_sip_info(FILE_FORMAT_CTX *ctx, u_char **p, int *plen);
-static int msi_check_file(FILE_FORMAT_CTX *ctx);
+static int msi_check_file(FILE_FORMAT_CTX *ctx, int detached);
+static u_char *msi_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *msi_pkcs7_extract(FILE_FORMAT_CTX *ctx);
 static int msi_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static BIO *msi_bio_free(BIO *hash, BIO *outdata);
-static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *outdata);
+static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 
 FILE_FORMAT file_format_msi = {
 	.ctx_new = msi_ctx_new,
 	.get_data_blob = msi_spc_sip_info,
 	.check_file = msi_check_file,
+	.digest_calc = msi_digest_calc,
 	.verify_digests = msi_verify_digests,
 	.pkcs7_extract = msi_pkcs7_extract,
 	.remove_pkcs7 = msi_remove_pkcs7,
@@ -237,7 +237,6 @@ FILE_FORMAT file_format_msi = {
 };
 
 /* Prototypes */
-static int msi_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx);
 static MSI_CTX *msi_ctx_get(char *indata, uint32_t filesize);
 static PKCS7 *msi_pkcs7_get_digital_signature(FILE_FORMAT_CTX *ctx, MSI_ENTRY *ds,
 	char **p, uint32_t len);
@@ -346,17 +345,25 @@ static ASN1_OBJECT *msi_spc_sip_info(FILE_FORMAT_CTX *ctx, u_char **p, int *plen
 
 /*
  * [in, out] ctx: structure holds input and output data
+ * [in] detached: embedded/detached PKCS#7 signature switch (unused)
  * [returns] 0 on error or 1 on success
  */
-static int msi_check_file(FILE_FORMAT_CTX *ctx)
+static int msi_check_file(FILE_FORMAT_CTX *ctx, int detached)
 {
 	char *indata = NULL;
 	uint32_t inlen;
 	MSI_ENTRY *ds, *dse = NULL;
 
+	/* squash the unused parameter warning */
+	(void)detached;
+
 	if (!ctx) {
 		printf("Init error\n\n");
 		return 0; /* FAILED */
+	}
+	if (detached) {
+		printf("Checking the specified catalog file\n\n");
+		return 1; /* OK */
 	}
 	ds = msi_signatures_get(ctx->msi_ctx->dirent, &dse);
 	if (!ds) {
@@ -395,19 +402,48 @@ static int msi_check_file(FILE_FORMAT_CTX *ctx)
 	return 1; /* OK */
 }
 
+/* Compute a simple sha1/sha256 message digest of the MSI file for use with a catalog file
+ * [in] ctx: structure holds input and output data
+ * [in] md: message digest algorithm
+ * [returns] pointer to calculated message digest
+ */
+static u_char *msi_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
+{
+	u_char *mdbuf = NULL;
+	BIO *bhash = BIO_new(BIO_f_md());
+
+	if (!BIO_set_md(bhash, md)) {
+		printf("Unable to set the message digest of BIO\n");
+		BIO_free_all(bhash);
+		return NULL;  /* FAILED */
+	}
+	BIO_push(bhash, BIO_new(BIO_s_null()));
+	if (!bio_hash_data(bhash, ctx->options->indata, 0, ctx->msi_ctx->fileend)) {
+		printf("Unable to calculate digest\n");
+		BIO_free_all(bhash);
+		return NULL;  /* FAILED */
+	}
+	mdbuf = OPENSSL_malloc((size_t)EVP_MD_size(md));
+	BIO_gets(bhash, (char *)mdbuf, EVP_MD_size(md));
+	BIO_free_all(bhash);
+	return mdbuf; /* OK */
+}
+
 /*
  * Calculate DigitalSignature and MsiDigitalSignatureEx, compare to values
- * retrieved from PKCS#7 signedData
+ * retrieved from PKCS#7 signedData,
+ * returns a simple sha1/sha256 message digest of the MSI file
  * [in] ctx: structure holds input and output data
  * [in] p7: PKCS#7 signature
  * [returns] 0 on error or 1 on success
  */
 static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
-	int mdok, mdtype = -1;
+	int mdok, mdlen, mdtype = -1;
 	u_char mdbuf[EVP_MAX_MD_SIZE];
 	u_char cmdbuf[EVP_MAX_MD_SIZE];
 	u_char cexmdbuf[EVP_MAX_MD_SIZE];
+	u_char *cdigest = NULL;
 	const EVP_MD *md;
 	BIO *hash;
 
@@ -475,12 +511,20 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 	BIO_gets(hash, (char*)cmdbuf, EVP_MAX_MD_SIZE);
 	BIO_free_all(hash);
 	mdok = !memcmp(mdbuf, cmdbuf, (size_t)EVP_MD_size(md));
-	print_hash("Calculated DigitalSignature      ", mdok ? "\n" : "    MISMATCH!!!\n",
+	print_hash("Calculated DigitalSignature      ", mdok ? "" : "    MISMATCH!!!\n",
 		cmdbuf, EVP_MD_size(md));
 	if (!mdok) {
 		printf("Signature verification: failed\n\n");
 		return 0; /* FAILED */
 	}
+	cdigest = msi_digest_calc(ctx, md);
+	if (!cdigest) {
+		printf("Failed to calculate simple message digest\n\n");
+		return 0; /* FAILED */
+	}
+	mdlen = EVP_MD_size(EVP_get_digestbynid(mdtype));
+	print_hash("Calculated message digest        ", "\n", cdigest, mdlen);
+	OPENSSL_free(cdigest);
 	return 1; /* OK */
 }
 
@@ -596,6 +640,7 @@ static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 		p7 = pkcs7_get_sigfile(ctx);
 		if (!p7) {
 			printf("Unable to extract valid signature\n");
+			PKCS7_free(cursig);
 			return NULL; /* FAILED */
 		}
 	} else if (ctx->options->cmd == CMD_SIGN) {
@@ -675,11 +720,11 @@ static BIO *msi_bio_free(BIO *hash, BIO *outdata)
  * [out] outdata: outdata file BIO
  * [returns] none
  */
-static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *outdata)
+static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
 	if (outdata) {
+		BIO_free_all(hash);
 		BIO_free_all(outdata);
-		outdata = NULL;
 		if (ctx->options->outfile) {
 #ifdef WIN32
 			_unlink(ctx->options->outfile);
@@ -699,33 +744,6 @@ static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *outdata)
 /*
  * MSI helper functions
  */
-
-/* Compute a simple sha1/sha256 message digest of the MSI file for use with a catalog file
- * [out] mdbuf: message digest
- * [in] mdtype: message digest algorithm type
- * [in] ctx: structure holds input and output data
- * [returns] 0 on error or 1 on success
- */
-static int msi_digest_calc(u_char *mdbuf, int mdtype, FILE_FORMAT_CTX *ctx)
-{
-	const EVP_MD *md = EVP_get_digestbynid(mdtype);
-	BIO *bhash = BIO_new(BIO_f_md());
-
-	if (!BIO_set_md(bhash, md)) {
-		printf("Unable to set the message digest of BIO\n");
-		BIO_free_all(bhash);
-		return 0;  /* FAILED */
-	}
-	BIO_push(bhash, BIO_new(BIO_s_null()));
-	if (!bio_hash_data(bhash, ctx->options->indata, 0, ctx->msi_ctx->fileend)) {
-		printf("Unable to calculate digest\n");
-		BIO_free_all(bhash);
-		return 0;  /* FAILED */
-	}
-	BIO_gets(bhash, (char *)mdbuf, EVP_MD_size(md));
-	BIO_free_all(bhash);
-	return 1; /* OK */
-}
 
 /*
  * Verify mapped MSI file and create MSI format specific structures
@@ -759,6 +777,7 @@ static MSI_CTX *msi_ctx_get(char *indata, uint32_t filesize)
 	msi_ctx = OPENSSL_zalloc(sizeof(MSI_CTX));
 	msi_ctx->msi = msi;
 	msi_ctx->dirent = dirent;
+	msi_ctx->fileend = filesize;
 	return msi_ctx; /* OK */
 }
 
