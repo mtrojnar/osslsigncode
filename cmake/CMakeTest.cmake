@@ -63,7 +63,6 @@ set(verify_opt "-CAfile" "${CERTS}/CACert.pem"
 # TODO "cat" extension
 set(extensions_4 "exe" "ex_" "msi" "cat")
 set(extensions_3 "exe" "ex_" "msi")
-set(extensions_1 "cat")
 set(files_4 "legacy" "signed" "nested" "added")
 set(files_3 "removed" "attached_pem" "attached_der")
 set(sign_formats "pem" "der")
@@ -167,6 +166,22 @@ foreach(ext ${extensions_4})
   set_tests_properties(nested_${ext} PROPERTIES
     DEPENDS sign_${ext}
     REQUIRED_FILES "${FILES}/signed.${ext}"
+  )
+endforeach()
+
+foreach(ext ${extensions_3})
+  # Signature verification time: Sep  1 00:00:00 2019 GMT
+  add_test(
+    NAME verify_catalog_${ext}
+    COMMAND osslsigncode "verify" ${verify_opt}
+      "-catalog" "${FILES}/signed.cat"
+      "-time" "1567296000"
+      "-require-leaf-hash" "SHA256:${leafhash}"
+      "-in" "${FILES}/unsigned.${ext}"
+  )
+  set_tests_properties(verify_catalog_${ext} PROPERTIES
+    DEPENDS ${file}_${ext}
+    REQUIRED_FILES "${FILES}/unsigned.${ext}"
   )
 endforeach()
 
