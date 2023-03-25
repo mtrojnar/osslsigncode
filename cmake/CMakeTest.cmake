@@ -60,6 +60,7 @@ set(verify_opt "-CAfile" "${CERTS}/CACert.pem"
   "-CRLfile" "${CERTS}/CACertCRL.pem"
   "-TSA-CAfile" "${CERTS}/TSACA.pem"
 )
+# TODO "cat" extension
 set(extensions_4 "exe" "ex_" "msi" "cat")
 set(extensions_3 "exe" "ex_" "msi")
 set(files_4 "legacy" "signed" "nested" "added")
@@ -168,9 +169,25 @@ foreach(ext ${extensions_4})
   )
 endforeach()
 
+foreach(ext ${extensions_3})
+  # Signature verification time: Sep  1 00:00:00 2019 GMT
+  add_test(
+    NAME verify_catalog_${ext}
+    COMMAND osslsigncode "verify" ${verify_opt}
+      "-catalog" "${FILES}/signed.cat"
+      "-time" "1567296000"
+      "-require-leaf-hash" "SHA256:${leafhash}"
+      "-in" "${FILES}/unsigned.${ext}"
+  )
+  set_tests_properties(verify_catalog_${ext} PROPERTIES
+    DEPENDS ${file}_${ext}
+    REQUIRED_FILES "${FILES}/unsigned.${ext}"
+  )
+endforeach()
+
 
 foreach(file ${files_4})
-  foreach(ext ${extensions_4})
+  foreach(ext ${extensions_3})
     # Signature verification time: Sep  1 00:00:00 2019 GMT
     add_test(
       NAME verify_${file}_${ext}
@@ -222,7 +239,7 @@ if(Python3_FOUND)
     endforeach()
   endforeach()
 
-  foreach(ext ${extensions_4})
+  foreach(ext ${extensions_3})
     # Signature verification time: Sep  1 00:00:00 2019 GMT
     add_test(
       NAME verify_ts_cert_${ext}
@@ -237,7 +254,7 @@ if(Python3_FOUND)
   endforeach()
 
   # Signature verification time: Jan  1 00:00:00 2035 GMT
-  foreach(ext ${extensions_4})
+  foreach(ext ${extensions_3})
     add_test(
       NAME verify_ts_future_${ext}
       COMMAND osslsigncode "verify" ${verify_opt}
@@ -252,7 +269,7 @@ if(Python3_FOUND)
 
   # Signature verification time: Jan  1 00:00:00 2035 GMT
   # enabled "-ignore-timestamp" option
-  foreach(ext ${extensions_4})
+  foreach(ext ${extensions_3})
     add_test(
       NAME verify_ts_ignore_${ext}
       COMMAND osslsigncode "verify" ${verify_opt}
@@ -269,7 +286,7 @@ if(Python3_FOUND)
 
   # Signature verification time: Sep  1 00:00:00 2019 GMT
   # Certificate has expired or revoked
-  foreach(ext ${extensions_4})
+  foreach(ext ${extensions_3})
     foreach(cert ${failed_certs})
       add_test(
         NAME verify_ts_${cert}_${ext}
