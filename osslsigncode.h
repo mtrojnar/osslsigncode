@@ -211,151 +211,151 @@
 #define DO_EXIT_2(x, y, z) { printf(x, y, z); goto err_cleanup; }
 
 typedef enum {
-	CMD_SIGN,
-	CMD_EXTRACT,
-	CMD_REMOVE,
-	CMD_VERIFY,
-	CMD_ADD,
-	CMD_ATTACH,
-	CMD_HELP,
-	CMD_DEFAULT
+    CMD_SIGN,
+    CMD_EXTRACT,
+    CMD_REMOVE,
+    CMD_VERIFY,
+    CMD_ADD,
+    CMD_ATTACH,
+    CMD_HELP,
+    CMD_DEFAULT
 } cmd_type_t;
 
 typedef unsigned char u_char;
 
 typedef struct {
-	char *infile;
-	char *outfile;
-	char *sigfile;
-	char *certfile;
-	char *xcertfile;
-	char *keyfile;
-	char *pvkfile;
-	char *pkcs12file;
-	int output_pkcs7;
+    char *infile;
+    char *outfile;
+    char *sigfile;
+    char *certfile;
+    char *xcertfile;
+    char *keyfile;
+    char *pvkfile;
+    char *pkcs12file;
+    int output_pkcs7;
 #ifndef OPENSSL_NO_ENGINE
-	char *p11engine;
-	char *p11module;
-	char *p11cert;
+    char *p11engine;
+    char *p11module;
+    char *p11cert;
 #endif /* OPENSSL_NO_ENGINE */
-	int askpass;
-	char *readpass;
-	char *pass;
-	int comm;
-	int pagehash;
-	char *desc;
-	const EVP_MD *md;
-	char *url;
-	time_t time;
+    int askpass;
+    char *readpass;
+    char *pass;
+    int comm;
+    int pagehash;
+    char *desc;
+    const EVP_MD *md;
+    char *url;
+    time_t time;
 #ifdef ENABLE_CURL
-	char *turl[MAX_TS_SERVERS];
-	int nturl;
-	char *tsurl[MAX_TS_SERVERS];
-	int ntsurl;
-	char *proxy;
-	int noverifypeer;
+    char *turl[MAX_TS_SERVERS];
+    int nturl;
+    char *tsurl[MAX_TS_SERVERS];
+    int ntsurl;
+    char *proxy;
+    int noverifypeer;
 #endif /* ENABLE_CURL */
-	int addBlob;
-	int nest;
-	int ignore_timestamp;
-	int verbose;
-	int add_msi_dse;
-	char *catalog;
-	char *cafile;
-	char *crlfile;
-	char *tsa_cafile;
-	char *tsa_crlfile;
-	char *leafhash;
-	int jp;
+    int addBlob;
+    int nest;
+    int ignore_timestamp;
+    int verbose;
+    int add_msi_dse;
+    char *catalog;
+    char *cafile;
+    char *crlfile;
+    char *tsa_cafile;
+    char *tsa_crlfile;
+    char *leafhash;
+    int jp;
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
-	int legacy;
+    int legacy;
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
-	EVP_PKEY *pkey;
-	X509 *cert;
-	STACK_OF(X509) *certs;
-	STACK_OF(X509) *xcerts;
-	STACK_OF(X509_CRL) *crls;
-	cmd_type_t cmd;
-	char *indata;
+    EVP_PKEY *pkey;
+    X509 *cert;
+    STACK_OF(X509) *certs;
+    STACK_OF(X509) *xcerts;
+    STACK_OF(X509_CRL) *crls;
+    cmd_type_t cmd;
+    char *indata;
 } GLOBAL_OPTIONS;
 
 /*
  * ASN.1 definitions (more or less from official MS Authenticode docs)
  */
 typedef struct {
-	int type;
-	union {
-		ASN1_BMPSTRING *unicode;
-		ASN1_IA5STRING *ascii;
-	} value;
+    int type;
+    union {
+        ASN1_BMPSTRING *unicode;
+        ASN1_IA5STRING *ascii;
+    } value;
 } SpcString;
 
 DECLARE_ASN1_FUNCTIONS(SpcString)
 
 typedef struct {
-	ASN1_OCTET_STRING *classId;
-	ASN1_OCTET_STRING *serializedData;
+    ASN1_OCTET_STRING *classId;
+    ASN1_OCTET_STRING *serializedData;
 } SpcSerializedObject;
 
 DECLARE_ASN1_FUNCTIONS(SpcSerializedObject)
 
 typedef struct {
-	int type;
-	union {
-		ASN1_IA5STRING *url;
-		SpcSerializedObject *moniker;
-		SpcString *file;
-	} value;
+    int type;
+    union {
+        ASN1_IA5STRING *url;
+        SpcSerializedObject *moniker;
+        SpcString *file;
+    } value;
 } SpcLink;
 
 DECLARE_ASN1_FUNCTIONS(SpcLink)
 
 typedef struct {
-	SpcString *programName;
-	SpcLink   *moreInfo;
+    SpcString *programName;
+    SpcLink   *moreInfo;
 } SpcSpOpusInfo;
 
 DECLARE_ASN1_FUNCTIONS(SpcSpOpusInfo)
 
 typedef struct {
-	ASN1_OBJECT *type;
-	ASN1_TYPE *value;
+    ASN1_OBJECT *type;
+    ASN1_TYPE *value;
 } SpcAttributeTypeAndOptionalValue;
 
 DECLARE_ASN1_FUNCTIONS(SpcAttributeTypeAndOptionalValue)
 
 typedef struct {
-	ASN1_OBJECT *algorithm;
-	ASN1_TYPE *parameters;
+    ASN1_OBJECT *algorithm;
+    ASN1_TYPE *parameters;
 } AlgorithmIdentifier;
 
 DECLARE_ASN1_FUNCTIONS(AlgorithmIdentifier)
 
 typedef struct {
-	AlgorithmIdentifier *digestAlgorithm;
-	ASN1_OCTET_STRING *digest;
+    AlgorithmIdentifier *digestAlgorithm;
+    ASN1_OCTET_STRING *digest;
 } DigestInfo;
 
 DECLARE_ASN1_FUNCTIONS(DigestInfo)
 
 typedef struct {
-	SpcAttributeTypeAndOptionalValue *data;
-	DigestInfo *messageDigest;
+    SpcAttributeTypeAndOptionalValue *data;
+    DigestInfo *messageDigest;
 } SpcIndirectDataContent;
 
 DECLARE_ASN1_FUNCTIONS(SpcIndirectDataContent)
 
 typedef struct CatalogAuthAttr_st {
-	ASN1_OBJECT *type;
-	ASN1_TYPE *contents;
+    ASN1_OBJECT *type;
+    ASN1_TYPE *contents;
 } CatalogAuthAttr;
 
 DEFINE_STACK_OF(CatalogAuthAttr)
 DECLARE_ASN1_FUNCTIONS(CatalogAuthAttr)
 
 typedef struct {
-	AlgorithmIdentifier *digestAlgorithm;
-	ASN1_OCTET_STRING *digest;
+    AlgorithmIdentifier *digestAlgorithm;
+    ASN1_OCTET_STRING *digest;
 } MessageImprint;
 
 DECLARE_ASN1_FUNCTIONS(MessageImprint)
@@ -363,15 +363,15 @@ DECLARE_ASN1_FUNCTIONS(MessageImprint)
 #ifdef ENABLE_CURL
 
 typedef struct {
-	ASN1_OBJECT *type;
-	ASN1_OCTET_STRING *signature;
+    ASN1_OBJECT *type;
+    ASN1_OCTET_STRING *signature;
 } TimeStampRequestBlob;
 
 DECLARE_ASN1_FUNCTIONS(TimeStampRequestBlob)
 
 typedef struct {
-	ASN1_OBJECT *type;
-	TimeStampRequestBlob *blob;
+    ASN1_OBJECT *type;
+    TimeStampRequestBlob *blob;
 } TimeStampRequest;
 
 DECLARE_ASN1_FUNCTIONS(TimeStampRequest)
@@ -379,27 +379,27 @@ DECLARE_ASN1_FUNCTIONS(TimeStampRequest)
 /* RFC3161 Time stamping */
 
 typedef struct {
-	ASN1_INTEGER *status;
-	STACK_OF(ASN1_UTF8STRING) *statusString;
-	ASN1_BIT_STRING *failInfo;
+    ASN1_INTEGER *status;
+    STACK_OF(ASN1_UTF8STRING) *statusString;
+    ASN1_BIT_STRING *failInfo;
 } PKIStatusInfo;
 
 DECLARE_ASN1_FUNCTIONS(PKIStatusInfo)
 
 typedef struct {
-	PKIStatusInfo *status;
-	PKCS7 *token;
+    PKIStatusInfo *status;
+    PKCS7 *token;
 } TimeStampResp;
 
 DECLARE_ASN1_FUNCTIONS(TimeStampResp)
 
 typedef struct {
-	ASN1_INTEGER *version;
-	MessageImprint *messageImprint;
-	ASN1_OBJECT *reqPolicy;
-	ASN1_INTEGER *nonce;
-	ASN1_BOOLEAN certReq;
-	STACK_OF(X509_EXTENSION) *extensions;
+    ASN1_INTEGER *version;
+    MessageImprint *messageImprint;
+    ASN1_OBJECT *reqPolicy;
+    ASN1_INTEGER *nonce;
+    ASN1_BOOLEAN certReq;
+    STACK_OF(X509_EXTENSION) *extensions;
 } TimeStampReq;
 
 DECLARE_ASN1_FUNCTIONS(TimeStampReq)
@@ -407,47 +407,47 @@ DECLARE_ASN1_FUNCTIONS(TimeStampReq)
 #endif /* ENABLE_CURL */
 
 typedef struct {
-	ASN1_INTEGER *seconds;
-	ASN1_INTEGER *millis;
-	ASN1_INTEGER *micros;
+    ASN1_INTEGER *seconds;
+    ASN1_INTEGER *millis;
+    ASN1_INTEGER *micros;
 } TimeStampAccuracy;
 
 DECLARE_ASN1_FUNCTIONS(TimeStampAccuracy)
 
 typedef struct {
-	ASN1_INTEGER *version;
-	ASN1_OBJECT *policy_id;
-	MessageImprint *messageImprint;
-	ASN1_INTEGER *serial;
-	ASN1_GENERALIZEDTIME *time;
-	TimeStampAccuracy *accuracy;
-	ASN1_BOOLEAN ordering;
-	ASN1_INTEGER *nonce;
-	GENERAL_NAME *tsa;
-	STACK_OF(X509_EXTENSION) *extensions;
+    ASN1_INTEGER *version;
+    ASN1_OBJECT *policy_id;
+    MessageImprint *messageImprint;
+    ASN1_INTEGER *serial;
+    ASN1_GENERALIZEDTIME *time;
+    TimeStampAccuracy *accuracy;
+    ASN1_BOOLEAN ordering;
+    ASN1_INTEGER *nonce;
+    GENERAL_NAME *tsa;
+    STACK_OF(X509_EXTENSION) *extensions;
 } TimeStampToken;
 
 DECLARE_ASN1_FUNCTIONS(TimeStampToken)
 
 typedef struct {
-	ASN1_OCTET_STRING *digest;
-	STACK_OF(CatalogAuthAttr) *attributes;
+    ASN1_OCTET_STRING *digest;
+    STACK_OF(CatalogAuthAttr) *attributes;
 } CatalogInfo;
 
 DEFINE_STACK_OF(CatalogInfo)
 DECLARE_ASN1_FUNCTIONS(CatalogInfo)
 
 typedef struct {
-	/* 1.3.6.1.4.1.311.12.1.1 MS_CATALOG_LIST */
-	SpcAttributeTypeAndOptionalValue *type;
-	ASN1_OCTET_STRING *identifier;
-	ASN1_UTCTIME *time;
-	/* 1.3.6.1.4.1.311.12.1.2 CatalogVersion = 1
-	 * 1.3.6.1.4.1.311.12.1.3 CatalogVersion = 2 */
-	SpcAttributeTypeAndOptionalValue *version;
-	STACK_OF(CatalogInfo) *header_attributes;
-	/* 1.3.6.1.4.1.311.12.2.1 CAT_NAMEVALUE_OBJID */
-	ASN1_TYPE *filename;
+    /* 1.3.6.1.4.1.311.12.1.1 MS_CATALOG_LIST */
+    SpcAttributeTypeAndOptionalValue *type;
+    ASN1_OCTET_STRING *identifier;
+    ASN1_UTCTIME *time;
+    /* 1.3.6.1.4.1.311.12.1.2 CatalogVersion = 1
+     * 1.3.6.1.4.1.311.12.1.3 CatalogVersion = 2 */
+    SpcAttributeTypeAndOptionalValue *version;
+    STACK_OF(CatalogInfo) *header_attributes;
+    /* 1.3.6.1.4.1.311.12.2.1 CAT_NAMEVALUE_OBJID */
+    ASN1_TYPE *filename;
 } MsCtlContent;
 
 DECLARE_ASN1_FUNCTIONS(MsCtlContent)
@@ -459,8 +459,8 @@ typedef struct cab_ctx_st CAB_CTX;
 typedef struct cat_ctx_st CAT_CTX;
 
 typedef struct {
-	FILE_FORMAT *format;
-	GLOBAL_OPTIONS *options;
+    FILE_FORMAT *format;
+    GLOBAL_OPTIONS *options;
     union {
         MSI_CTX *msi_ctx;
         PE_CTX *pe_ctx;
@@ -475,27 +475,27 @@ extern FILE_FORMAT file_format_cab;
 extern FILE_FORMAT file_format_cat;
 
 struct file_format_st {
-	FILE_FORMAT_CTX *(*ctx_new) (GLOBAL_OPTIONS *option, BIO *hash, BIO *outdata);
-	ASN1_OBJECT *(*data_blob_get) (u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
-	int (*check_file) (FILE_FORMAT_CTX *ctx, int detached);
-	u_char *(*digest_calc) (FILE_FORMAT_CTX *ctx, const EVP_MD *md);
-	int (*verify_digests) (FILE_FORMAT_CTX *ctx, PKCS7 *p7);
-	int (*verify_indirect_data) (FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOptionalValue *obj);
-	PKCS7 *(*pkcs7_extract) (FILE_FORMAT_CTX *ctx);
-	int (*remove_pkcs7) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
-	PKCS7 *(*pkcs7_prepare) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
-	int (*append_pkcs7) (FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
-	void (*update_data_size) (FILE_FORMAT_CTX *data, BIO *outdata, PKCS7 *p7);
-	BIO *(*bio_free) (BIO *hash, BIO *outdata);
-	void (*ctx_cleanup) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+    FILE_FORMAT_CTX *(*ctx_new) (GLOBAL_OPTIONS *option, BIO *hash, BIO *outdata);
+    ASN1_OBJECT *(*data_blob_get) (u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
+    int (*check_file) (FILE_FORMAT_CTX *ctx, int detached);
+    u_char *(*digest_calc) (FILE_FORMAT_CTX *ctx, const EVP_MD *md);
+    int (*verify_digests) (FILE_FORMAT_CTX *ctx, PKCS7 *p7);
+    int (*verify_indirect_data) (FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOptionalValue *obj);
+    PKCS7 *(*pkcs7_extract) (FILE_FORMAT_CTX *ctx);
+    int (*remove_pkcs7) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+    PKCS7 *(*pkcs7_prepare) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+    int (*append_pkcs7) (FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
+    void (*update_data_size) (FILE_FORMAT_CTX *data, BIO *outdata, PKCS7 *p7);
+    BIO *(*bio_free) (BIO *hash, BIO *outdata);
+    void (*ctx_cleanup) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 };
 
 /*
 Local Variables:
    c-basic-offset: 4
    tab-width: 4
-   indent-tabs-mode: t
+   indent-tabs-mode: nil
 End:
 
-  vim: set ts=4 noexpandtab:
+  vim: set ts=4 expandtab:
 */

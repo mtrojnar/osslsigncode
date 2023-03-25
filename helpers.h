@@ -28,8 +28,8 @@ int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype);
 Local Variables:
    c-basic-offset: 4
    tab-width: 4
-   indent-tabs-mode: t
+   indent-tabs-mode: nil
 End:
 
-  vim: set ts=4 noexpandtab:
+  vim: set ts=4 expandtab:
 */
