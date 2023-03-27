@@ -1328,6 +1328,7 @@ static int verify_leaf_hash(X509 *cert, const char *leafhash)
     char *hash = strchr(mdid, ':');
     if (hash == NULL) {
         printf("\nUnable to parse -require-leaf-hash parameter: %s\n", leafhash);
+        OPENSSL_free(mdid);
         return 0; /* FAILED */
     }
     *hash++ = '\0';
