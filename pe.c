@@ -78,7 +78,7 @@ static PKCS7 *pe_pkcs7_get_file(char *indata, PE_CTX *pe_ctx);
 static uint32_t pe_calc_checksum(BIO *bio, uint32_t header_size);
 static uint32_t pe_calc_realchecksum(FILE_FORMAT_CTX *ctx);
 static int pe_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
-static int pe_page_hash_get(u_char **ph, int *phtype, SpcAttributeTypeAndOptionalValue *obj);
+static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype, SpcAttributeTypeAndOptionalValue *obj);
 static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype);
 static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype);
 static SpcLink *pe_page_hash_link_get(FILE_FORMAT_CTX *ctx, int phtype);
@@ -276,20 +276,18 @@ static u_char *pe_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
  */
 static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
-    int mdtype = -1, phtype = -1;
+    int mdtype = -1, phtype = -1, phlen = 0;
     const EVP_MD *md;
     u_char mdbuf[EVP_MAX_MD_SIZE];
     u_char *cmdbuf = NULL;
     u_char *ph = NULL;
-    int phlen = 0;
 
     if (is_content_type(p7, SPC_INDIRECT_DATA_OBJID)) {
         ASN1_STRING *content_val = p7->d.sign->contents->d.other->value.sequence;
         const u_char *p = content_val->data;
         SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
         if (idc) {
-            phlen = pe_page_hash_get(&ph, &phtype, idc->data);
-            if (phlen == 0) {
+            if (!pe_page_hash_get(&ph, &phlen, &phtype, idc->data)) {
                 printf("Failed to extract a page hash\n\n");
                 SpcIndirectDataContent_free(idc);
                 return 0; /* FAILED */
@@ -319,7 +317,7 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         OPENSSL_free(cmdbuf);
         return 0; /* FAILED */
     }
-    if (phlen > 0 && !pe_verify_page_hash(ctx, ph, phlen, phtype)) {
+    if (!pe_verify_page_hash(ctx, ph, phlen, phtype)) {
         printf("Signature verification: failed\n\n");
         OPENSSL_free(ph);
         OPENSSL_free(cmdbuf);
@@ -341,8 +339,7 @@ static int pe_verify_indirect_data(FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOpti
     int phtype = -1, phlen = 0;
     u_char *ph = NULL;
 
-    phlen = pe_page_hash_get(&ph, &phtype, obj);
-    if (phlen == 0) {
+    if (!pe_page_hash_get(&ph, &phlen, &phtype, obj)) {
         printf("Failed to extract a page hash\n\n");
         return 0; /* FAILED */
     }
@@ -825,16 +822,17 @@ static int pe_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 /*
  * Retrieve a page hash from SPC_INDIRECT_DATA structure.
  * [out] ph: page hash
+ * [out] phlen: page hash length
  * [out] phtype: NID_sha1 or NID_sha256
  * [in] obj: SPC_INDIRECT_DATA OID: 1.3.6.1.4.1.311.2.1.4 containing page hash
  * [returns] 0 on error or 1 on success
  */
-static int pe_page_hash_get(u_char **ph, int *phtype, SpcAttributeTypeAndOptionalValue *obj)
+static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype, SpcAttributeTypeAndOptionalValue *obj)
 {
     const u_char *blob;
     SpcPeImageData *id;
     SpcSerializedObject *so;
-    int l, l2, phlen = 0;
+    int l, l2;
     char buf[128];
 
     if (!obj || !obj->value)
@@ -850,7 +848,7 @@ static int pe_page_hash_get(u_char **ph, int *phtype, SpcAttributeTypeAndOptiona
     }
     if (id->file->type != 1) {
         SpcPeImageData_free(id);
-        return 0; /* This is not SpcSerializedObject structure that contains page hashes */
+        return 1; /* OK - This is not SpcSerializedObject structure that contains page hashes */
     }
     so = id->file->value.moniker;
     if (so->classId->length != sizeof classid_page_hash ||
@@ -882,11 +880,11 @@ static int pe_page_hash_get(u_char **ph, int *phtype, SpcAttributeTypeAndOptiona
     /* Skip ASN.1 OCTET STRING hdr */
     l = asn1_simple_hdr_len(obj->value->value.sequence->data + l2, obj->value->value.sequence->length - l2);
     l += l2;
-    phlen = obj->value->value.sequence->length - l;
-    *ph = OPENSSL_malloc((size_t)phlen);
-    memcpy(*ph, obj->value->value.sequence->data + l, (size_t)phlen);
+    *phlen = obj->value->value.sequence->length - l;
+    *ph = OPENSSL_malloc((size_t)*phlen);
+    memcpy(*ph, obj->value->value.sequence->data + l, (size_t)*phlen);
     SpcAttributeTypeAndOptionalValue_free(obj);
-    return phlen; /* OK */
+    return 1; /* OK */
 }
 
 /*
@@ -1058,6 +1056,8 @@ static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int 
     int mdok, cphlen = 0;
     u_char *cph;
 
+    if (!ph)
+        return 1; /* OK */
     cph = pe_page_hash_calc(&cphlen, ctx, phtype);
     mdok = (phlen == cphlen) && !memcmp(ph, cph, (size_t)phlen);
     printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
