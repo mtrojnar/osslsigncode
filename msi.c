@@ -380,6 +380,7 @@ static int msi_check_file(FILE_FORMAT_CTX *ctx, int detached)
     indata = OPENSSL_malloc((size_t)inlen);
     if (!msi_file_read(ctx->msi_ctx->msi, ds, 0, indata, inlen)) {
         printf("DigitalSignature stream data error\n\n");
+        OPENSSL_free(indata);
         return 0; /* FAILED */
     }
     if (!dse) {
