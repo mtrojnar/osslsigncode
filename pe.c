@@ -519,10 +519,7 @@ static void pe_update_data_size(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     };
 
-    if (ctx->options->cmd == CMD_VERIFY || ctx->options->cmd == CMD_EXTRACT) {
-        return;
-    }
-    if (ctx->options->cmd != CMD_REMOVE) {
+    if (p7) {
         int len = i2d_PKCS7(p7, NULL);
         int padlen = len % 8 ? 8 - len % 8 : 0;
 
@@ -534,9 +531,10 @@ static void pe_update_data_size(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
         BIO_write(outdata, buf, 4);
         PUT_UINT32_LE(len + 8 + padlen, buf);
         BIO_write(outdata, buf, 4);
-    }
-    checksum = pe_calc_checksum(outdata, ctx->pe_ctx->header_size);
+    } /* else CMD_REMOVE */
+
     /* write back checksum */
+    checksum = pe_calc_checksum(outdata, ctx->pe_ctx->header_size);
     (void)BIO_seek(outdata, ctx->pe_ctx->header_size + 88);
     PUT_UINT32_LE(checksum, buf);
     BIO_write(outdata, buf, 4);

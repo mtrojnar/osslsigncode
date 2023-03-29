@@ -3547,6 +3547,9 @@ int main(int argc, char **argv)
         goto skip_signing;
     } else if (options.cmd == CMD_REMOVE && ctx->format->remove_pkcs7) {
         ret = ctx->format->remove_pkcs7(ctx, hash, outdata);
+        if (ctx->format->update_data_size) {
+            ctx->format->update_data_size(ctx, outdata, NULL);
+        }
         goto skip_signing;
     } else if (ctx->format->pkcs7_prepare) {
         p7 = ctx->format->pkcs7_prepare(ctx, hash, outdata);
