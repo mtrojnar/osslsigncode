@@ -177,21 +177,20 @@ static ASN1_OBJECT *pe_spc_image_data_get(u_char **p, int *plen, FILE_FORMAT_CTX
  */
 static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached)
 {
-    int peok = 1;
     uint32_t real_pe_checksum;
 
     if (!ctx) {
         printf("Init error\n\n");
         return 0; /* FAILED */
     }
-    printf("Current PE checksum   : %08X\n", ctx->pe_ctx->pe_checksum);
     real_pe_checksum = pe_calc_realchecksum(ctx);
-    if (ctx->pe_ctx->pe_checksum && ctx->pe_ctx->pe_checksum != real_pe_checksum) {
-        peok = 0;
+    if (ctx->pe_ctx->pe_checksum == real_pe_checksum) {
+        printf("PE checksum   : %08X\n\n", real_pe_checksum);
+    } else {
+        printf("Current PE checksum   : %08X\n", ctx->pe_ctx->pe_checksum);
+        printf("Calculated PE checksum: %08X\n", real_pe_checksum);
+        printf("Warning: invalid PE checksum\n\n");
     }
-    printf("Calculated PE checksum: %08X%s\n\n", real_pe_checksum,
-        peok ? "" : "    MISMATCH!!!");
-
     if (detached) {
         printf("Checking the specified catalog file\n\n");
         return 1; /* OK */
