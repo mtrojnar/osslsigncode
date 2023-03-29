@@ -281,23 +281,6 @@ static size_t curl_write(void *ptr, size_t sz, size_t nmemb, void *stream)
 }
 
 /*
- * [in] url: URL of the Time-Stamp Authority server
- * [in] http_code: curlinfo response code
- * [returns] none
- */
-static void print_timestamp_error(const char *url, long http_code)
-{
-    if (http_code != -1) {
-        printf("Failed to convert timestamp reply from %s; "
-                "HTTP status %ld\n", url, http_code);
-    } else {
-        printf("Failed to convert timestamp reply from %s; "
-                "no HTTP status available", url);
-    }
-    ERR_print_errors_fp(stdout);
-}
-
-/*
   A timestamp request looks like this:
 
   POST <someurl> HTTP/1.1
@@ -423,15 +406,15 @@ static BIO *bio_encode_authenticode_request(PKCS7 *p7)
 }
 
 /*
- * Decode a curl response from BIO.
+ * Decode a RFC 3161 response from BIO.
  * If successful the RFC 3161 timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1].
  * [in, out] p7: new PKCS#7 signature
- * [in] bin: BIO with curl data
+ * [in] bin: BIO with http data
  * [in] verbose: additional output mode
- * [returns] CURLcode on error or CURLE_OK (0) on success
+ * [returns] 1 on error or 0 on success
  */
-static CURLcode decode_rfc3161_response(PKCS7 *p7, BIO *bin, int verbose)
+static int decode_rfc3161_response(PKCS7 *p7, BIO *bin, int verbose)
 {
     PKCS7_SIGNER_INFO *si;
     STACK_OF(X509_ATTRIBUTE) *attrs;
@@ -447,7 +430,6 @@ static CURLcode decode_rfc3161_response(PKCS7 *p7, BIO *bin, int verbose)
         return 1; /* FAILED */
 
     reply = ASN1_item_d2i_bio(ASN1_ITEM_rptr(TimeStampResp), bin, NULL);
-    BIO_free_all(bin);
     if (!reply || !reply->status)
         return 1; /* FAILED */
     if (ASN1_INTEGER_get(reply->status->status) != 0) {
@@ -483,41 +465,37 @@ static CURLcode decode_rfc3161_response(PKCS7 *p7, BIO *bin, int verbose)
 }
 
 /*
- * Decode a curl response from BIO.
+ * Decode an authenticode response from BIO.
  * If successful the authenticode timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1]:
  * p7->d.sign->signer_info->unauth_attr
  * [in, out] p7: new PKCS#7 signature
- * [in] bin: BIO with curl data
+ * [in] bin: base64 BIO with http data
  * [in] verbose: additional output mode
- * [returns] CURLcode on error or CURLE_OK (0) on success
+ * [returns] 1 on error or 0 on success
  */
-static CURLcode decode_authenticode_response(PKCS7 *p7, BIO *bin, int verbose)
+static int decode_authenticode_response(PKCS7 *p7, BIO *b64_bin, int verbose)
 {
     PKCS7 *resp;
     PKCS7_SIGNER_INFO *info, *si;
     STACK_OF(X509_ATTRIBUTE) *attrs;
-    BIO* b64, *b64_bin;
+
     u_char *p;
     int len, i;
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 
-    b64 = BIO_new(BIO_f_base64());
-    if (!blob_has_nl)
-        BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
-    b64_bin = BIO_push(b64, bin);
     resp = d2i_PKCS7_bio(b64_bin, NULL);
-    BIO_free_all(b64_bin);
-    if (resp == NULL)
+    if (!resp) {
         return 1; /* FAILED */
-
-    for(i = sk_X509_num(resp->d.sign->cert)-1; i>=0; i--)
+    }
+    for(i = sk_X509_num(resp->d.sign->cert)-1; i>=0; i--) {
         PKCS7_add_certificate(p7, sk_X509_value(resp->d.sign->cert, i));
-
+    }
     signer_info = PKCS7_get_signer_info(resp);
-    PKCS7_free(resp);
-    if (!signer_info)
+    if (!signer_info) {
+        PKCS7_free(resp);
         return 1; /* FAILED */
+    }
     info = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!info) {
         PKCS7_free(resp);
@@ -555,50 +533,43 @@ static CURLcode decode_authenticode_response(PKCS7 *p7, BIO *bin, int verbose)
 }
 
 /*
- * Add timestamp to the PKCS7 SignerInfo structure:
- * sig->d.sign->signer_info->unauth_attr
- * [in, out] p7: new PKCS#7 signature
- * [in] ctx: structure holds input and output data
- * [in] url: URL of the Time-Stamp Authority server
- * [in] rfc3161: Authenticode / RFC3161 Timestamp switch
- * [returns] 1 on error or 0 on success
+ * Get data from HTTP server.
+ * [out] http_code: HTTP status
+ * [in] url: URL of the CRL distribution point or Time-Stamp Authority HTTP server
+ * [in] bout: timestamp request
+ * [in] proxy: proxy to getting the timestamp through
+ * [in] noverifypeer: do not verify the Time-Stamp Authority's SSL certificate
+ * [in] verbose: additional output mode
+ * [in] content: CRL distribution point (0), RFC3161 TSA (1), Authenticode TSA (2)
+ * [returns] pointer to BIO with X509 Certificate Revocation List
  */
-static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161)
+static BIO *bio_get_http(long *http_code, char *url, BIO *bout, char *proxy,
+    int noverifypeer, int verbose, int content)
 {
     CURL *curl;
     struct curl_slist *slist = NULL;
     CURLcode res;
-    BIO *bout, *bin;
+    BIO *bin;
     u_char *p = NULL;
     long len = 0;
-    int verbose = ctx->options->verbose || ctx->options->ntsurl == 1;
 
-    if (!url)
-        return 1; /* FAILED */
-
-    /* Encode timestamp request */
-    if (rfc3161) {
-        bout = bio_encode_rfc3161_request(p7, ctx->options->md);
-    } else {
-        bout = bio_encode_authenticode_request(p7);
+    if (!url) {
+        return NULL; /* FAILED */
     }
-    if (!bout)
-        return 1; /* FAILED */
-
     /* Start a libcurl easy session and set options for a curl easy handle */
     curl = curl_easy_init();
-    if (ctx->options->proxy) {
-        res = curl_easy_setopt(curl, CURLOPT_PROXY, ctx->options->proxy);
+    if (proxy) {
+        res = curl_easy_setopt(curl, CURLOPT_PROXY, proxy);
         if (res != CURLE_OK) {
             printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
         }
-        if (!strncmp("http:", ctx->options->proxy, 5)) {
+        if (!strncmp("http:", proxy, 5)) {
             res = curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_HTTP);
             if (res != CURLE_OK) {
                 printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
             }
         }
-        if (!strncmp("socks:", ctx->options->proxy, 6)) {
+        if (!strncmp("socks:", proxy, 6)) {
             res = curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5);
             if (res != CURLE_OK) {
                 printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
@@ -613,43 +584,45 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
      * ask libcurl to show us the verbose output
      * curl_easy_setopt(curl, CURLOPT_VERBOSE, 42);
      */
-    if (ctx->options->noverifypeer) {
+    if (noverifypeer) {
         res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, FALSE);
         if (res != CURLE_OK) {
             printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
         }
     }
-
-    if (rfc3161) {
+    if (content == 1) {
+        /* RFC3161 Timestamp */
         slist = curl_slist_append(slist, "Content-Type: application/timestamp-query");
         slist = curl_slist_append(slist, "Accept: application/timestamp-reply");
-    } else {
+    } else if (content == 2) {
+        /* Authenticode Timestamp */
         slist = curl_slist_append(slist, "Content-Type: application/octet-stream");
         slist = curl_slist_append(slist, "Accept: application/octet-stream");
     }
-    slist = curl_slist_append(slist, "User-Agent: Transport");
-    slist = curl_slist_append(slist, "Cache-Control: no-cache");
-    res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
-    if (res != CURLE_OK) {
-        printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+    if (content > 0) {
+        /* Timestamp */
+        slist = curl_slist_append(slist, "User-Agent: Transport");
+        slist = curl_slist_append(slist, "Cache-Control: no-cache");
+        res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
+        if (res != CURLE_OK) {
+            printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+        }
+        len = BIO_get_mem_data(bout, &p);
+        res = curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, len);
+        if (res != CURLE_OK) {
+            printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+        }
+        res = curl_easy_setopt(curl, CURLOPT_POSTFIELDS, (char*)p);
+        if (res != CURLE_OK) {
+            printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+        }
+        res = curl_easy_setopt(curl, CURLOPT_POST, 1);
+        if (res != CURLE_OK) {
+            printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+        }
     }
-
-    len = BIO_get_mem_data(bout, &p);
-    res = curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, len);
-    if (res != CURLE_OK) {
-        printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
-    }
-    res = curl_easy_setopt(curl, CURLOPT_POSTFIELDS, (char*)p);
-    if (res != CURLE_OK) {
-        printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
-    }
-
     bin = BIO_new(BIO_s_mem());
     BIO_set_mem_eof_return(bin, 0);
-    res = curl_easy_setopt(curl, CURLOPT_POST, 1);
-    if (res != CURLE_OK) {
-        printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
-    }
     res = curl_easy_setopt(curl, CURLOPT_WRITEDATA, bin);
     if (res != CURLE_OK) {
         printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
@@ -661,28 +634,85 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
     /* Perform the request */
     res = curl_easy_perform(curl);
     curl_slist_free_all(slist);
-    BIO_free_all(bout);
 
     if (res != CURLE_OK) {
         BIO_free_all(bin);
         if (verbose)
             printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+        curl_easy_cleanup(curl);
+        return NULL; /* FAILED */
     } else {
         /* CURLE_OK (0) */
-        long http_code = -1;
         (void)BIO_flush(bin);
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-        /* Decode a curl response from BIO and write it into the PKCS7 structure */
-        if (rfc3161)
-            res = decode_rfc3161_response(p7, bin, verbose);
-        else
-            res = decode_authenticode_response(p7, bin, verbose);
-        if (res && verbose)
-            print_timestamp_error(url, http_code);
     }
     /* End a libcurl easy handle */
     curl_easy_cleanup(curl);
-    return (int)res;
+    return bin;
+}
+
+/*
+ * Decode a curl response from BIO and write it into the PKCS7 structure
+ * Add timestamp to the PKCS7 SignerInfo structure:
+ * sig->d.sign->signer_info->unauth_attr
+ * [in, out] p7: new PKCS#7 signature
+ * [in] ctx: structure holds input and output data
+ * [in] url: URL of the Time-Stamp Authority server
+ * [in] rfc3161: Authenticode / RFC3161 Timestamp switch
+ * [returns] 1 on error or 0 on success
+ */
+static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161)
+{
+    BIO *bout, *bin;
+    int verbose = ctx->options->verbose || ctx->options->ntsurl == 1;
+    int res = 1;
+    long http_code = -1;
+
+    /* Encode timestamp request */
+    if (rfc3161) {
+        bout = bio_encode_rfc3161_request(p7, ctx->options->md);
+    } else {
+        bout = bio_encode_authenticode_request(p7);
+    }
+    if (!bout) {
+        return 1; /* FAILED */
+    }
+    if (rfc3161) {
+        bin = bio_get_http(&http_code, url, bout, ctx->options->proxy,
+            ctx->options->noverifypeer, verbose, 1);
+    } else {
+        bin = bio_get_http(&http_code, url, bout, ctx->options->proxy,
+            ctx->options->noverifypeer, verbose, 2);
+    }
+    BIO_free_all(bout);
+
+    if (!bin) {
+        if (verbose)
+            printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+    } else {
+        if (rfc3161) {
+            res = decode_rfc3161_response(p7, bin, verbose);
+            BIO_free_all(bin);
+        } else {
+            BIO *b64 = BIO_new(BIO_f_base64());
+            if (!blob_has_nl)
+                BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+            BIO *b64_bin = BIO_push(b64, bin);
+            res = decode_authenticode_response(p7, b64_bin, verbose);
+            BIO_free_all(b64_bin);
+        }
+        if (res && verbose) {
+            if (http_code != -1) {
+                printf("Failed to convert timestamp reply from %s; "
+                "HTTP status %ld\n", url, http_code);
+            } else {
+                printf("Failed to convert timestamp reply from %s; "
+                "no HTTP status available", url);
+            }
+            ERR_print_errors_fp(stdout);
+        }
+    }
+    return res;
 }
 
 /*
@@ -1070,6 +1100,57 @@ out:
 }
 
 /*
+ * Get Certificate Revocation List from a CRL distribution point
+ * and write it into the X509_CRL structure.
+ * [in] url: URL of the CRL distribution point server
+ * [returns] X509 Certificate Revocation List
+ */
+static X509_CRL *x509_crl_get(char *url)
+{
+    X509_CRL *crl;
+    BIO *bio;
+    long http_code = -1;
+
+    bio = bio_get_http(&http_code, url, NULL, NULL, 0, 1, 0);
+    if (!bio) {
+        printf("Warning: Faild to get CRL from %s\n\n", url);
+        return NULL; /* FAILED */
+    }
+    crl = d2i_X509_CRL_bio(bio, NULL);
+    BIO_free_all(bio);
+    if (!crl) {
+         printf("Warning: Faild to decode CRL from %s\n\n", url);
+         return NULL; /* FAILED */
+    }
+    return crl; /* OK */
+}
+
+/*
+ * Create CRLs from p7->d.sign->crl and x509_CRL (from CRL distribution point).
+ * [in] p7: PKCS#7 signature
+ * [in] crl: X509 Certificate Revocation List
+ * [returns] X509 Certificate Revocation Lists (CRLs)
+ */
+static STACK_OF(X509_CRL) *x509_crl_list_get(PKCS7 *p7, X509_CRL *crl)
+{
+    int i;
+    STACK_OF(X509_CRL) *crls = sk_X509_CRL_new_null();
+
+    for (i = 0; i < sk_X509_CRL_num(p7->d.sign->crl); i++) {
+        if (!sk_X509_CRL_push(crls, sk_X509_CRL_value(p7->d.sign->crl, i))) {
+            sk_X509_CRL_pop_free(crls, X509_CRL_free);
+            return NULL;
+        }
+    }
+    if (crl && !sk_X509_CRL_push(crls, crl)) {
+        sk_X509_CRL_pop_free(crls, X509_CRL_free);
+        X509_CRL_free(crl);
+        return NULL;
+    }
+    return crls;
+}
+
+/*
  * Compare the hash provided from the TSTInfo object against the hash computed
  * from the signature created by the signing certificate's private key
  * [in] p7: PKCS#7 signature
@@ -1141,7 +1222,7 @@ static int verify_timestamp_token(PKCS7 *p7, CMS_ContentInfo *timestamp)
  * [in] p7: PKCS#7 signature
  * [in] timestamp: CMS_ContentInfo struct for Authenticode Timestamp or RFC 3161 Timestamp
  * [in] time: timestamp verification time
- * [returns] 1 on error or 0 on success
+ * [returns] 0 on error or 1 on success
  */
 static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *timestamp, time_t time)
 {
@@ -1149,7 +1230,8 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
     STACK_OF(CMS_SignerInfo) *sinfos;
     CMS_SignerInfo *cmssi;
     X509 *signer;
-    STACK_OF(X509_CRL) *crls;
+    X509_CRL *crl = NULL;
+    STACK_OF(X509_CRL) *crls = NULL;
     char *url;
     int verok = 0;
 
@@ -1189,18 +1271,32 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
     cmssi = sk_CMS_SignerInfo_value(sinfos, 0);
     CMS_SignerInfo_get0_algs(cmssi, NULL, &signer, NULL, NULL);
 
+    /* verify a Certificate Revocation List */
     url = clrdp_url_get_x509(signer);
+#ifdef ENABLE_CURL
     if (url) {
         printf("TSA's CRL distribution point: %s\n", url);
+        crl = x509_crl_get(url);
         OPENSSL_free(url);
+        if (!crl && !ctx->options->tsa_crlfile) {
+            printf("Use the \"-TSA-CRLfile\" option to add one or more Time-Stamp Authority CRLs in PEM format.\n\n");
+            goto out;
+        }
     }
-    /* verify a Certificate Revocation List */
-    crls = p7->d.sign->crl;
+#endif /* ENABLE_CURL */
+    if (p7->d.sign->crl || crl) {
+        crls = x509_crl_list_get(p7, crl);
+        if (!crls) {
+            printf("Failed to use CRL distribution point\n");
+            goto out;
+        }
+    }
     if (ctx->options->tsa_crlfile || crls) {
         STACK_OF(X509) *chain = CMS_get1_certs(timestamp);
         int crlok = verify_crl(ctx->options->tsa_cafile, ctx->options->tsa_crlfile,
             crls, signer, chain);
         sk_X509_pop_free(chain, X509_free);
+        sk_X509_CRL_pop_free(crls, X509_CRL_free);
         printf("Timestamp Server Signature CRL verification: %s\n", crlok ? "ok" : "failed");
         if (!crlok)
             goto out;
@@ -1233,9 +1329,11 @@ out:
 static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X509 *signer)
 {
     X509_STORE *store;
-    STACK_OF(X509_CRL) *crls;
+    X509_CRL *crl = NULL;
+    STACK_OF(X509_CRL) *crls = NULL;
     BIO *bio = NULL;
     int verok = 0;
+    char *url;
 
     store = X509_STORE_new();
     if (!store)
@@ -1286,16 +1384,34 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
     BIO_free(bio);
 
     /* verify a Certificate Revocation List */
-    crls = p7->d.sign->crl;
+    url = clrdp_url_get_x509(signer);
+#ifdef ENABLE_CURL
+    if (url) {
+        printf("CRL distribution point: %s\n", url);
+        crl = x509_crl_get(url);
+        OPENSSL_free(url);
+        if (!crl && !ctx->options->crlfile) {
+            printf("Use the \"-CRLfile\" option to add one or more CRLs in PEM format.\n\n");
+            goto out;
+        }
+    }
+#endif /* ENABLE_CURL */
+    if (p7->d.sign->crl || crl) {
+        crls = x509_crl_list_get(p7, crl);
+        if (!crls) {
+            printf("Failed to use CRL distribution point\n");
+            goto out;
+        }
+    }
     if (ctx->options->crlfile || crls) {
         STACK_OF(X509) *chain = p7->d.sign->cert;
         int crlok = verify_crl(ctx->options->cafile, ctx->options->crlfile,
             crls, signer, chain);
+        sk_X509_CRL_pop_free(crls, X509_CRL_free);
         printf("Signature CRL verification: %s\n", crlok ? "ok" : "failed");
         if (!crlok)
             goto out;
     }
-
     /* check extended key usage flag XKU_CODE_SIGN */
     if (!(X509_get_extended_key_usage(signer) & XKU_CODE_SIGN)) {
         printf("Unsupported Signer's certificate purpose XKU_CODE_SIGN\n");
@@ -1880,7 +1996,6 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
     int leafok, verok;
     STACK_OF(X509) *signers;
     X509 *signer;
-    char *url;
     CMS_ContentInfo *timestamp = NULL;
     time_t time;
 
@@ -1914,11 +2029,6 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         printf("TSA's certificates file: %s\n", ctx->options->tsa_cafile);
     if (ctx->options->tsa_crlfile)
         printf("TSA's CRL file: %s\n", ctx->options->tsa_crlfile);
-    url = clrdp_url_get_x509(signer);
-    if (url) {
-        printf("CRL distribution point: %s\n", url);
-        OPENSSL_free(url);
-    }
     if (timestamp) {
         if (ctx->options->ignore_timestamp) {
             printf("\nTimestamp Server Signature verification is disabled\n\n");

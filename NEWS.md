@@ -2,6 +2,8 @@
 
 ### 2.6 (unreleased)
 
+- get Certificate Revocation List from a CRL distribution point
+
 ### 2.5 (2022.08.12)
 
 - fixed the Unix executable install path
