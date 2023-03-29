@@ -345,8 +345,10 @@ static int pe_verify_indirect_data(FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOpti
     }
     if (!pe_verify_page_hash(ctx, ph, phlen, phtype)) {
         printf("Page hash verification: failed\n\n");
+        OPENSSL_free(ph);
         return 0; /* FAILED */
     }
+    OPENSSL_free(ph);
     return 1; /* OK */
 }
 
