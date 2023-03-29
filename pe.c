@@ -206,8 +206,8 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached)
      */
     while (sum < ctx->pe_ctx->siglen) {
         uint32_t len = GET_UINT32_LE(ctx->options->indata + ctx->pe_ctx->sigpos + sum);
-        if (len % 8)
-            len += (8 - len % 8);
+        /* quadword align data */
+        len += len % 8 ? 8 - len % 8 : 0;
         sum += len;
     }
     if (sum != ctx->pe_ctx->siglen) {
@@ -490,7 +490,7 @@ static int pe_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     }
     i2d_PKCS7(p7, &p);
     p -= len;
-    padlen = (8 - len % 8) % 8;
+    padlen = len % 8 ? 8 - len % 8 : 0;
     PUT_UINT32_LE(len + 8 + padlen, buf);
     PUT_UINT16_LE(WIN_CERT_REVISION_2_0, buf + 4);
     PUT_UINT16_LE(WIN_CERT_TYPE_PKCS_SIGNED_DATA, buf + 6);
@@ -524,7 +524,7 @@ static void pe_update_data_size(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     }
     if (ctx->options->cmd != CMD_REMOVE) {
         int len = i2d_PKCS7(p7, NULL);
-        int padlen = (8 - len % 8) % 8;
+        int padlen = len % 8 ? 8 - len % 8 : 0;
 
         /* Update signature position and size */
         (void)BIO_seek(outdata,
@@ -692,8 +692,7 @@ static PKCS7 *pe_pkcs7_get_file(char *indata, PE_CTX *pe_ctx)
             return d2i_PKCS7(NULL, &blob, len - 8);
         }
         /* quadword align data */
-        if (len % 8)
-            len += (8 - len % 8);
+        len += len % 8 ? 8 - len % 8 : 0;
         pos += len;
     }
     return NULL; /* FAILED */
