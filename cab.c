@@ -529,7 +529,7 @@ static int cab_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     }
     i2d_PKCS7(p7, &p);
     p -= len;
-    padlen = (8 - len % 8) % 8;
+    padlen = len % 8 ? 8 - len % 8 : 0;
     BIO_write(outdata, p, len);
     /* pad (with 0's) asn1 blob to 8 byte boundary */
     if (padlen > 0) {
@@ -562,7 +562,7 @@ static void cab_update_data_size(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     }
     (void)BIO_seek(outdata, 0x30);
     len = i2d_PKCS7(p7, NULL);
-    padlen = (8 - len % 8) % 8;
+    padlen = len % 8 ? 8 - len % 8 : 0;
     PUT_UINT32_LE(len + padlen, buf);
     BIO_write(outdata, buf, 4);
 }
