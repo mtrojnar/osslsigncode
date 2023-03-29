@@ -177,7 +177,7 @@ static ASN1_OBJECT *pe_spc_image_data_get(u_char **p, int *plen, FILE_FORMAT_CTX
  */
 static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached)
 {
-    uint32_t real_pe_checksum;
+    uint32_t real_pe_checksum, sum = 0;
 
     if (!ctx) {
         printf("Init error\n\n");
@@ -200,8 +200,20 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached)
         printf("No signature found\n\n");
         return 0; /* FAILED */
     }
-    if (ctx->pe_ctx->siglen != GET_UINT32_LE(ctx->options->indata + ctx->pe_ctx->sigpos)) {
-        printf("Invalid signature\n\n");
+    /*
+     * If the sum of the rounded dwLength values does not equal the Size value,
+     * then either the attribute certificate table or the Size field is corrupted.
+     */
+    while (sum < ctx->pe_ctx->siglen) {
+        uint32_t len = GET_UINT32_LE(ctx->options->indata + ctx->pe_ctx->sigpos + sum);
+        if (len % 8)
+            len += (8 - len % 8);
+        sum += len;
+    }
+    if (sum != ctx->pe_ctx->siglen) {
+        printf("Corrupted attribute certificate table\n");
+        printf("Attribute certificate table size  : %08X\n", ctx->pe_ctx->siglen);
+        printf("Sum of the rounded dwLength values: %08X\n\n", sum);
         return 0; /* FAILED */
     }
     return 1; /* OK */
@@ -671,16 +683,18 @@ static PKCS7 *pe_pkcs7_get_file(char *indata, PE_CTX *pe_ctx)
         return NULL; /* FAILED */
     }
     while (pos < pe_ctx->siglen) {
-        uint32_t l = GET_UINT32_LE(indata + pe_ctx->sigpos + pos);
-        uint16_t certrev  = GET_UINT16_LE(indata + pe_ctx->sigpos + pos + 4);
+        uint32_t len = GET_UINT32_LE(indata + pe_ctx->sigpos + pos);
+        uint16_t certrev = GET_UINT16_LE(indata + pe_ctx->sigpos + pos + 4);
         uint16_t certtype = GET_UINT16_LE(indata + pe_ctx->sigpos + pos + 6);
         if (certrev == WIN_CERT_REVISION_2_0 && certtype == WIN_CERT_TYPE_PKCS_SIGNED_DATA) {
+            /* skip 8 bytes from the attribute certificate table */
             const u_char *blob = (u_char *)indata + pe_ctx->sigpos + pos + 8;
-            return d2i_PKCS7(NULL, &blob, l - 8);
+            return d2i_PKCS7(NULL, &blob, len - 8);
         }
-        if (l%8)
-            l += (8 - l%8);
-        pos += l;
+        /* quadword align data */
+        if (len % 8)
+            len += (8 - len % 8);
+        pos += len;
     }
     return NULL; /* FAILED */
 }
