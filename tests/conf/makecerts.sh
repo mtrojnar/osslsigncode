@@ -54,14 +54,14 @@ make_certs() {
   test_result $?
 
   printf "\nGenerate intermediate CA certificate\n" >> "makecerts.log"
-  "$OPENSSL" genrsa -out CA/intermediate.key \
+  "$OPENSSL" genrsa -out CA/intermediateCA.key \
         2>> "makecerts.log" 1>&2
     TZ=GMT faketime -f '@2017-01-01 00:00:00' /bin/bash -c '
     script_path=$(pwd)
     OPENSSL="$0"
     export LD_LIBRARY_PATH="$1"
     CONF="${script_path}/openssl_intermediate.cnf"
-    "$OPENSSL" req -config "$CONF" -new -key CA/intermediate.key -out CA/intermediate.csr \
+    "$OPENSSL" req -config "$CONF" -new -key CA/intermediateCA.key -out CA/intermediateCA.csr \
         -subj "/C=PL/O=osslsigncode/OU=Certification Authority/CN=Intermediate CA" \
         2>> "makecerts.log" 1>&2' "$OPENSSL" "$LD_LIBRARY_PATH"
   test_result $?
@@ -70,10 +70,10 @@ make_certs() {
     OPENSSL="$0"
     export LD_LIBRARY_PATH="$1"
     CONF="${script_path}/openssl_root.cnf"
-    "$OPENSSL" ca -config "$CONF" -batch -in CA/intermediate.csr -out CA/intermediate.cer \
+    "$OPENSSL" ca -config "$CONF" -batch -in CA/intermediateCA.csr -out CA/intermediateCA.cer \
         2>> "makecerts.log" 1>&2' "$OPENSSL" "$LD_LIBRARY_PATH"
   test_result $?
-  "$OPENSSL" x509 -in CA/intermediate.cer -out tmp/intermediate.pem \
+  "$OPENSSL" x509 -in CA/intermediateCA.cer -out tmp/intermediateCA.pem \
       2>> "makecerts.log" 1>&2
   test_result $?
 
@@ -107,7 +107,7 @@ make_certs() {
   test_result $?
 
   printf "\nAttach intermediate certificate to revoked certificate\n" >> "makecerts.log"
-  cat tmp/intermediate.pem >> tmp/revoked.pem 2>> "makecerts.log"
+  cat tmp/intermediateCA.pem >> tmp/revoked.pem 2>> "makecerts.log"
   test_result $?
 
   printf "\nGenerate CRL file\n" >> "makecerts.log"
@@ -118,6 +118,11 @@ make_certs() {
     CONF="${script_path}/openssl_intermediate.cnf"
     "$OPENSSL" ca -config "$CONF" -gencrl -crldays 8766 -out tmp/CACertCRL.pem \
         2>> "makecerts.log" 1>&2' "$OPENSSL" "$LD_LIBRARY_PATH"
+  test_result $?
+
+  printf "\nConvert a CRL file from PEM to DER\n" >> "makecerts.log"
+  "$OPENSSL" crl -in tmp/CACertCRL.pem -inform PEM -out tmp/CACertCRL.der -outform DER \
+      2>> "makecerts.log" 1>&2
   test_result $?
 
   printf "\nConvert revoked certificate to SPC format\n" >> "makecerts.log"
@@ -166,7 +171,7 @@ make_certs() {
   test_result $?
 
   printf "\nAttach intermediate certificate to code signing certificate\n" >> "makecerts.log"
-  cat tmp/intermediate.pem >> tmp/cert.pem 2>> "makecerts.log"
+  cat tmp/intermediateCA.pem >> tmp/cert.pem 2>> "makecerts.log"
   test_result $?
 
   printf "\nConvert the certificate to SPC format\n" >> "makecerts.log"
@@ -211,7 +216,7 @@ make_certs() {
   test_result $?
 
   printf "\nAttach intermediate certificate to expired certificate\n" >> "makecerts.log"
-  cat tmp/intermediate.pem >> tmp/expired.pem 2>> "makecerts.log"
+  cat tmp/intermediateCA.pem >> tmp/expired.pem 2>> "makecerts.log"
   test_result $?
 
   printf "\nGenerate Root CA TSA certificate\n" >> "makecerts.log"
@@ -224,6 +229,40 @@ make_certs() {
     CONF="${script_path}/openssl_tsa_root.cnf"
     "$OPENSSL" req -config "$CONF" -new -x509 -days 3600 -key CA/TSACA.key -out tmp/TSACA.pem \
         2>> "makecerts.log" 1>&2' "$OPENSSL" "$LD_LIBRARY_PATH"
+  test_result $?
+
+  printf "\nGenerate TSA certificate to revoke\n" >> "makecerts.log"
+  CONF="${script_path}/openssl_tsa_root.cnf"
+  "$OPENSSL" req -config "$CONF" -new -nodes -keyout tmp/TSA_revoked.key -out CA/TSA_revoked.csr \
+      -subj "/C=PL/O=osslsigncode/OU=TSA/CN=Revoked/emailAddress=osslsigncode@example.com" \
+      2>> "makecerts.log" 1>&2
+  test_result $?
+  CONF="${script_path}/openssl_tsa_root.cnf"
+  "$OPENSSL" ca -config "$CONF" -batch -in CA/TSA_revoked.csr -out CA/TSA_revoked.cer \
+      2>> "makecerts.log" 1>&2
+  test_result $?
+  "$OPENSSL" x509 -in CA/TSA_revoked.cer -out tmp/TSA_revoked.pem \
+      2>> "makecerts.log" 1>&2
+  test_result $?
+
+  printf "\nRevoke above certificate\n" >> "makecerts.log"
+  "$OPENSSL" ca -config "$CONF" -revoke CA/TSA_revoked.cer \
+      2>> "makecerts.log" 1>&2
+  test_result $?
+
+  printf "\nGenerate TSA CRL file\n" >> "makecerts.log"
+  TZ=GMT faketime -f '@2019-01-01 00:00:00' /bin/bash -c '
+    script_path=$(pwd)
+    OPENSSL="$0"
+    export LD_LIBRARY_PATH="$1"
+    CONF="${script_path}/openssl_tsa_root.cnf"
+    "$OPENSSL" ca -config "$CONF" -gencrl -crldays 8766 -out tmp/TSACertCRL.pem \
+        2>> "makecerts.log" 1>&2' "$OPENSSL" "$LD_LIBRARY_PATH"
+  test_result $?
+
+  printf "\nConvert TSA CRL file from PEM to DER\n" >> "makecerts.log"
+  "$OPENSSL" crl -in tmp/TSACertCRL.pem -inform PEM -out tmp/TSACertCRL.der -outform DER \
+      2>> "makecerts.log" 1>&2
   test_result $?
 
   printf "\nGenerate TSA certificate\n" >> "makecerts.log"
@@ -243,10 +282,13 @@ make_certs() {
   cat tmp/TSA.pem tmp/TSACA.pem > tmp/tsa-chain.pem 2>> "makecerts.log"
 
 # copy new files
-  if test -s tmp/intermediate.pem -a -s tmp/CACert.pem -a -s tmp/CACertCRL.pem \
+  if test -s tmp/intermediateCA.pem -a -s tmp/CACert.pem \
+      -a -s tmp/CACertCRL.pem -a -s tmp/CACertCRL.der \
+      -a -s tmp/TSACertCRL.pem -a -s tmp/TSACertCRL.der \
       -a -s tmp/key.pem -a -s tmp/keyp.pem -a -s tmp/key.der -a -s tmp/key.pvk \
       -a -s tmp/cert.pem -a -s tmp/cert.p12 -a -s tmp/cert.der -a -s tmp/cert.spc \
-      -a -s tmp/crosscert.pem -a -s tmp/expired.pem -a -s tmp/revoked.pem -a -s tmp/revoked.spc \
+      -a -s tmp/crosscert.pem -a -s tmp/expired.pem -a -s tmp/revoked.pem \
+       -a -s tmp/revoked.spc -a -s tmp/TSA_revoked.pem \
       -a -s tmp/TSA.pem -a -s tmp/TSA.key -a -s tmp/tsa-chain.pem -a -s tmp/legacy.p12
   then
     mkdir -p "../certs"
