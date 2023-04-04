@@ -59,6 +59,7 @@ string(SUBSTRING ${sha256sum} 0 64 leafhash)
 set(verify_opt "-CAfile" "${CERTS}/CACert.pem"
   "-CRLfile" "${CERTS}/CACertCRL.pem"
   "-TSA-CAfile" "${CERTS}/TSACA.pem"
+  "-TSA-CRLfile" "${CERTS}/TSACertCRL.pem"
 )
 # TODO "cat" extension
 set(extensions_4 "exe" "ex_" "msi" "cat")

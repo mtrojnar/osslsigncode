@@ -1,8 +1,9 @@
 # OpenSSL intermediate CA configuration file
 
 [ default ]
-name                            = intermediate
+name                            = intermediateCA
 default_ca                      = CA_default
+crl_url                         = http://127.0.0.1:8080/$name
 
 [ CA_default ]
 # Directory and file locations
@@ -15,6 +16,7 @@ serial                          = $dir/CA/serial
 rand_serial                     = yes
 private_key                     = $dir/CA/$name.key
 certificate                     = $dir/tmp/$name.pem
+crlnumber                       = $dir/CA/crlnumber
 crl_extensions                  = crl_ext
 default_md                      = sha256
 preserve                        = no
@@ -50,6 +52,10 @@ basicConstraints                = CA:FALSE
 subjectKeyIdentifier            = hash
 authorityKeyIdentifier          = keyid, issuer
 extendedKeyUsage                = codeSigning
+crlDistributionPoints           = @crl_info
+
+[ crl_info ]
+URI.0                           = $crl_url
 
 [ policy_loose ]
 # Allow the intermediate CA to sign a more diverse range of certificates.

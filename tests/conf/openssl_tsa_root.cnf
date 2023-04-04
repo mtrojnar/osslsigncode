@@ -2,10 +2,8 @@
 
 [ default ]
 name                            = TSACA
-domain_suffix                   = timestampauthority.com
-aia_url                         = http://$name.$domain_suffix/$name.crt
-crl_url                         = http://$name.$domain_suffix/$name.crl
-ocsp_url                        = http://ocsp.$name.$domain_suffix:9080
+domain_suffix                   = timestampauthority
+crl_url                         = http://127.0.0.1:8080/$name
 name_opt                        = utf8, esc_ctrl, multiline, lname, align
 default_ca                      = CA_default
 
@@ -17,6 +15,7 @@ new_certs_dir                   = $dir/CA
 database                        = $dir/CA/index.txt
 serial                          = $dir/CA/serial
 crlnumber                       = $dir/CA/crlnumber
+crl_extensions                  = crl_ext
 rand_serial                     = yes
 private_key                     = $dir/CA/$name.key
 certificate                     = $dir/tmp/$name.pem
@@ -43,16 +42,15 @@ basicConstraints                = critical, CA:false
 extendedKeyUsage                = critical, timeStamping
 subjectKeyIdentifier            = hash
 authorityKeyIdentifier          = keyid:always
-authorityInfoAccess             = @issuer_info
 crlDistributionPoints           = @crl_info
 nameConstraints                 = @name_constraints
 
-[ issuer_info ]
-caIssuers;URI.0                 = $aia_url
-OCSP;URI.0                      = $ocsp_url
-
 [ crl_info ]
 URI.0                           = $crl_url
+
+[ crl_ext ]
+# Extension for CRLs
+authorityKeyIdentifier          = keyid:always
 
 [ name_constraints ]
 permitted;DNS.0=test.com
