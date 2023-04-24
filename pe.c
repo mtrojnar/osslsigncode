@@ -421,7 +421,8 @@ static PKCS7 *pe_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         }
         if (ctx->options->cmd == CMD_ADD)
             p7 = cursig;
-    } else if (ctx->pe_ctx->sigpos > 0) {
+    } 
+    if (ctx->pe_ctx->sigpos > 0) {
         /* Strip current signature */
         ctx->pe_ctx->fileend = ctx->pe_ctx->sigpos;
     }
