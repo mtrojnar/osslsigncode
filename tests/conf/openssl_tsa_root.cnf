@@ -3,7 +3,7 @@
 [ default ]
 name                            = TSACA
 domain_suffix                   = timestampauthority
-crl_url                         = http://127.0.0.1:8080/$name
+crl_url                         = http://127.0.0.1:19254/$name
 name_opt                        = utf8, esc_ctrl, multiline, lname, align
 default_ca                      = CA_default
 
@@ -46,6 +46,7 @@ crlDistributionPoints           = @crl_info
 nameConstraints                 = @name_constraints
 
 [ crl_info ]
+# X509v3 CRL Distribution Points extension
 URI.0                           = $crl_url
 
 [ crl_ext ]

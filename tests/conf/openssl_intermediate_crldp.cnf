@@ -3,6 +3,7 @@
 [ default ]
 name                            = intermediateCA
 default_ca                      = CA_default
+crl_url                         = http://127.0.0.1:19254/$name
 
 [ CA_default ]
 # Directory and file locations
@@ -13,8 +14,8 @@ new_certs_dir                   = $dir/CA
 database                        = $dir/CA/index.txt
 serial                          = $dir/CA/serial
 rand_serial                     = yes
-private_key                     = $dir/CA/$name.key
-certificate                     = $dir/tmp/$name.pem
+private_key                     = $dir/CA/$name\_crldp.key
+certificate                     = $dir/tmp/$name\_crldp.pem
 crlnumber                       = $dir/CA/crlnumber
 crl_extensions                  = crl_ext
 default_md                      = sha256
@@ -51,6 +52,11 @@ basicConstraints                = CA:FALSE
 subjectKeyIdentifier            = hash
 authorityKeyIdentifier          = keyid, issuer
 extendedKeyUsage                = codeSigning
+crlDistributionPoints           = @crl_info
+
+[ crl_info ]
+# X509v3 CRL Distribution Points extension
+URI.0                           = $crl_url
 
 [ policy_loose ]
 # Allow the intermediate CA to sign a more diverse range of certificates.
