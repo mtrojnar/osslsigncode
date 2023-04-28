@@ -410,14 +410,6 @@ static PKCS7 *pe_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
     PKCS7 *cursig = NULL, *p7 = NULL;
 
-    /* Strip current signature */
-    if (ctx->pe_ctx->sigpos > 0) {
-        ctx->pe_ctx->fileend = ctx->pe_ctx->sigpos;
-    }
-    if (!pe_modify_header(ctx, hash, outdata)) {
-        printf("Unable to modify file header\n");
-        return NULL; /* FAILED */
-    }
     /* Obtain a current signature from previously-signed file */
     if ((ctx->options->cmd == CMD_SIGN && ctx->options->nest)
         || (ctx->options->cmd == CMD_ATTACH && ctx->options->nest)
@@ -429,6 +421,14 @@ static PKCS7 *pe_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         }
         if (ctx->options->cmd == CMD_ADD)
             p7 = cursig;
+    } 
+    if (ctx->pe_ctx->sigpos > 0) {
+        /* Strip current signature */
+        ctx->pe_ctx->fileend = ctx->pe_ctx->sigpos;
+    }
+    if (!pe_modify_header(ctx, hash, outdata)) {
+        printf("Unable to modify file header\n");
+        return NULL; /* FAILED */
     }
     if (ctx->options->cmd == CMD_ATTACH) {
         /* Obtain an existing PKCS#7 signature */
