@@ -8,16 +8,25 @@
 # https://github.com/scop/bash-completion/blob/master/bash-completion-config.cmake.in
 
 if(NOT MSVC)
-  if(BASH_COMPLETION_USER_DIR)
-    set(BASH_COMPLETION_COMPLETIONSDIR "${BASH_COMPLETION_USER_DIR}/bash-completion/completions")
-  else(BASH_COMPLETION_USER_DIR)
-    find_package(bash-completion QUIET)
-    if(NOT BASH_COMPLETION_FOUND)
-      set(SHAREDIR "${CMAKE_INSTALL_PREFIX}/share")
-      set(BASH_COMPLETION_COMPLETIONSDIR "${SHAREDIR}/bash-completion/completions")
-    endif(NOT BASH_COMPLETION_FOUND)
-  endif(BASH_COMPLETION_USER_DIR)
+    if(BASH_COMPLETION_USER_DIR)
+        set(BASH_COMPLETION_COMPLETIONSDIR "${BASH_COMPLETION_USER_DIR}/bash-completion/completions")
+    else(BASH_COMPLETION_USER_DIR)
+        find_package(bash-completion QUIET)
+        if(NOT BASH_COMPLETION_FOUND)
+            set(SHAREDIR "${CMAKE_INSTALL_PREFIX}/share")
+            set(BASH_COMPLETION_COMPLETIONSDIR "${SHAREDIR}/bash-completion/completions")
+        endif(NOT BASH_COMPLETION_FOUND)
+    endif(BASH_COMPLETION_USER_DIR)
 
-  message(STATUS "Using bash completions dir ${BASH_COMPLETION_COMPLETIONSDIR}")
-  install(FILES "osslsigncode.bash" DESTINATION ${BASH_COMPLETION_COMPLETIONSDIR})
+    message(STATUS "Using bash completions dir ${BASH_COMPLETION_COMPLETIONSDIR}")
+    install(FILES "osslsigncode.bash" DESTINATION ${BASH_COMPLETION_COMPLETIONSDIR})
 endif(NOT MSVC)
+
+#[[
+Local Variables:
+    c-basic-offset: 4
+    tab-width: 4
+    indent-tabs-mode: nil
+End:
+    vim: set ts=4 expandtab:
+]]

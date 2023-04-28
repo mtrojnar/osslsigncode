@@ -25,3 +25,12 @@ list(APPEND CPACK_SOURCE_IGNORE_FILES "/build/")
 
 include(CPack)
 add_custom_target(dist COMMAND ${CMAKE_MAKE_PROGRAM} package_source)
+
+#[[
+Local Variables:
+    c-basic-offset: 4
+    tab-width: 4
+    indent-tabs-mode: nil
+End:
+    vim: set ts=4 expandtab:
+]]
