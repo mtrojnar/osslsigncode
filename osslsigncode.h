@@ -277,6 +277,7 @@ typedef struct {
     STACK_OF(X509_CRL) *crls;
     cmd_type_t cmd;
     char *indata;
+    PKCS7 *prevsig;
 } GLOBAL_OPTIONS;
 
 /*

@@ -660,17 +660,9 @@ static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             return NULL; /* FAILED */
         }
     }
-    if (ctx->options->nest) {
-        if (!cursig_set_nested(cursig, p7, ctx)) {
-            printf("Unable to append the nested signature to the current signature\n");
-            PKCS7_free(p7);
-            PKCS7_free(cursig);
-            return NULL; /* FAILED */
-        }
-        PKCS7_free(p7);
-        return cursig;
-    }
-    return p7;
+    if (ctx->options->nest)
+        ctx->options->prevsig = cursig;
+        return p7;
 }
 
 /*
