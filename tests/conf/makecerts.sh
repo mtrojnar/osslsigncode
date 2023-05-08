@@ -391,9 +391,9 @@ make_certs() {
   then
     mkdir -p "../certs"
     cp tmp/* ../certs
-    printf "%s" "keys & certificates successfully generated"
+    printf "%s" "Keys & certificates successfully generated"
   else
-    printf "%s" "error logs ${result_path}/makecerts.log"
+    printf "%s" "Error logs ${result_path}/makecerts.log"
     result=1
   fi
 
