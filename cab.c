@@ -556,6 +556,9 @@ static void cab_update_data_size(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
     };
 
+    /* squash the unused parameter warning */
+    (void)ctx;
+
     if (!p7) {
         /* CMD_REMOVE
          * additional header does not exist so additional data size is unused */
