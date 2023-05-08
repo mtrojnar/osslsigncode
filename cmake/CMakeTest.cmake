@@ -7,11 +7,11 @@ option(STOP_SERVER "Stop HTTP server after tests" ON)
 
 include(FindPython3)
 
-set(TEST_DIR "${PROJECT_BINARY_DIR}/Testing/")
+set(TEST_DIR "${PROJECT_BINARY_DIR}/Testing")
 file(COPY
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/files"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/conf"
-	"${CMAKE_CURRENT_SOURCE_DIR}/tests/client_http.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/client_http.py"
     DESTINATION "${TEST_DIR}/")
 
 file(MAKE_DIRECTORY "${TEST_DIR}/logs")
@@ -22,30 +22,37 @@ set(CONF "${TEST_DIR}/conf")
 set(LOGS "${TEST_DIR}/logs")
 set(CLIENT_HTTP "${TEST_DIR}/client_http.py")
 
-if(CMAKE_HOST_UNIX)
+if(UNIX)
     file(COPY
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_http.py"
         DESTINATION "${TEST_DIR}/")
     set(SERVER_HTTP "${TEST_DIR}/server_http.py")
-else(CMAKE_HOST_UNIX)
+else(UNIX)
     file(COPY
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_http.pyw"
         DESTINATION "${TEST_DIR}/")
     set(SERVER_HTTP "${TEST_DIR}/server_http.pyw")
-endif(CMAKE_HOST_UNIX)
+endif(UNIX)
 
 file(COPY
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/certs/ca-bundle.crt"
     DESTINATION "${CONF}")
 
-# Stop server if running
-if(CMAKE_HOST_UNIX)
-	if(Python3_FOUND)
-	    if(EXISTS ${LOGS}/port.log)
-	        # Try to kill HTTP server
-	        message(STATUS "Try to kill HTTP server")
+if(WIN32 OR APPLE)
+    if(WIN32)
+        message(STATUS "Use pythonw to start HTTP server: \"pythonw.exe Testing\\server_http.pyw\"")
+    else(WIN32)
+        message(STATUS "Use python3 to start HTTP server: \"python3 Testing/server_http.py --port 19254\"")
+    endif(WIN32)
+    set(default_certs 1)
+else(WIN32 OR APPLE)
+    if(Python3_FOUND)
+        if(EXISTS ${LOGS}/port.log)
+            # Stop HTTP server if running
+            message(STATUS "Try to kill HTTP server")
             execute_process(
                 COMMAND ${Python3_EXECUTABLE} "${CLIENT_HTTP}"
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
                 OUTPUT_VARIABLE client_output
                 RESULT_VARIABLE client_result)
             if(NOT client_result)
@@ -55,50 +62,55 @@ if(CMAKE_HOST_UNIX)
         endif(EXISTS ${LOGS}/port.log)
 
         # Start Time Stamping Authority and CRL distribution point HTTP server
-	    execute_process(
-	        COMMAND ${Python3_EXECUTABLE} "${SERVER_HTTP}"
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE} "${SERVER_HTTP}"
+            WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
             OUTPUT_FILE ${LOGS}/server.log
             ERROR_FILE ${LOGS}/server.log
             RESULT_VARIABLE server_error)
-	endif(Python3_FOUND)
+        if(server_error)
+            message(STATUS "HTTP server failed: ${server_error}")
+        else(server_error)
+            # Check if file exists and is no-empty
+            while(NOT EXISTS ${LOGS}/port.log)
+                execute_process(COMMAND sleep 1)
+            endwhile(NOT EXISTS ${LOGS}/port.log)
+            file(READ ${LOGS}/port.log PORT)
+            while(NOT PORT)
+                execute_process(COMMAND sleep 1)
+                file(READ ${LOGS}/port.log PORT)
+            endwhile(NOT PORT)
+            file(STRINGS ${LOGS}/server.log server_log)
+            message(STATUS "${server_log}")
 
-	if(NOT EXISTS ${LOGS}/port.log OR server_error)
-        # Failed to start HTTP server
-		set(PORT 19254)
-		message(STATUS "Fail to start HTTP server, CTest skips some tests")
-	else(NOT EXISTS ${LOGS}/port.log OR server_error)
-        file(READ ${LOGS}/port.log PORT)
-        message(STATUS "HTTP server started, URL http://127.0.0.1:${PORT}")
-    endif(NOT EXISTS ${LOGS}/port.log OR server_error)
+            # Generate new cTest certificates
+            if(NOT SED_EXECUTABLE)
+                find_program(SED_EXECUTABLE sed)
+                mark_as_advanced(SED_EXECUTABLE)
+            endif(NOT SED_EXECUTABLE)
+            execute_process(
+                COMMAND ${SED_EXECUTABLE}
+                    -i.bak s/:19254/:${PORT}/ "${CONF}/openssl_intermediate_crldp.cnf"
+                COMMAND ${SED_EXECUTABLE}
+                    -i.bak s/:19254/:${PORT}/ "${CONF}/openssl_tsa_root.cnf")
+            execute_process(
+                COMMAND "${CONF}/makecerts.sh"
+                WORKING_DIRECTORY ${CONF}
+                OUTPUT_VARIABLE makecerts_output
+                RESULT_VARIABLE default_certs)
+            message(STATUS "${makecerts_output}")
+        endif(server_error)
+    endif(Python3_FOUND)
 
-    # Generate new test certificates
-    if(NOT SED_EXECUTABLE)
-        find_program(SED_EXECUTABLE sed)
-        mark_as_advanced(SED_EXECUTABLE)
-    endif(NOT SED_EXECUTABLE)
-    execute_process(
-        COMMAND ${SED_EXECUTABLE} "-i" "s/:19254/:${PORT}/" "${CONF}/openssl_intermediate_crldp.cnf"
-        COMMAND ${SED_EXECUTABLE} "-i" "s/:19254/:${PORT}/" "${CONF}/openssl_tsa_root.cnf")
-    execute_process(
-        COMMAND "${CONF}/makecerts.sh"
-        WORKING_DIRECTORY ${CONF}
-        OUTPUT_VARIABLE makecerts_output
-        RESULT_VARIABLE makecerts_result)
-else(CMAKE_HOST_UNIX)
-	message(STATUS "To start HTTP server, URL http://127.0.0.1:19254, run: \"pythonw.exe Testing\\server_http.pyw\"")
-	set(PORT 19254)
-    set(makecerts_result 1)
-endif(CMAKE_HOST_UNIX)
+endif(WIN32 OR APPLE)
 
-# If makecerts.sh failed copy the set of default certificates
-if(makecerts_result)
-    message(STATUS "makecerts.sh failed")
-    if(makecerts_output)
-        message(STATUS "${makecerts_output}")
-    endif(makecerts_output)
+# Copy the set of default certificates
+if(default_certs)
+    message(STATUS "Default certificates used by cTest")
+    set(PORT 19254)
     file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/tests/certs"
         DESTINATION "${TEST_DIR}")
-endif(makecerts_result)
+endif(default_certs)
 
 # Compute a SHA256 hash of the leaf certificate (in DER form)
 execute_process(
@@ -388,7 +400,7 @@ foreach(file ${files})
     endforeach(ext ${extensions_3})
 endforeach(file ${files})
 
-if(Python3_FOUND)
+if(Python3_FOUND OR server_error)
 
 ### Sign with Time-Stamp Authority ###
 
@@ -566,9 +578,9 @@ if(Python3_FOUND)
         message(STATUS "Keep HTTP server after tests")
     endif(STOP_SERVER)
 
-else(Python3_FOUND)
+else(Python3_FOUND OR server_error)
     message(STATUS "CTest skips some tests")
-endif(Python3_FOUND)
+endif(Python3_FOUND OR server_error)
 
 
 # Test 112
