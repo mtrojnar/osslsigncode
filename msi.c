@@ -1672,7 +1672,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
             }
         } else { /* DIR_STREAM */
             char buf[MAX_SECTOR_SIZE];
-            char *indata;
+            char *indata = NULL;
             uint32_t inlen = GET_UINT32_LE(child->entry->size);
             if (inlen >= MAXREGSECT) {
                 printf("Corrupted stream length 0x%08X\n", inlen);
