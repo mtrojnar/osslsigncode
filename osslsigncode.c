@@ -686,10 +686,7 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
     }
     BIO_free_all(bout);
 
-    if (!bin) {
-        if (verbose)
-            printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
-    } else {
+    if (bin) {
         if (rfc3161) {
             res = decode_rfc3161_response(p7, bin, verbose);
             BIO_free_all(bin);
