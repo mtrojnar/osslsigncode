@@ -125,6 +125,25 @@ jobs:
         --build ${{github.workspace}}/build
         --config ${{env.BUILD_TYPE}}
 
+    - name: Start HTTP server (macOS)
+      working-directory: ${{github.workspace}}/build
+      if: runner.os == 'macOS'
+      run: |
+        python3 --version
+        python3 ./Testing/server_http.py --port 19254
+        while test ! -s ./Testing/logs/port.log; do sleep 1; done
+
+    - name: Start HTTP server (Windows)
+      working-directory: ${{github.workspace}}\build
+      if: runner.os == 'Windows'
+      run: |
+        python.exe --version
+        $Args = '.\Testing\server_http.pyw --port 19254'
+        $File = '.\Testing\logs\port.log'
+        Start-Process -FilePath pythonw.exe -ArgumentList $Args
+        while(-not(Test-Path -Path $File -PathType Leaf) -or [String]::IsNullOrWhiteSpace((Get-Content $File))) {Start-Sleep -Seconds 1}
+        Get-Content '.\Testing\logs\server.log'
+
     - name: List files (Linux/macOS)
       if: runner.os != 'Windows'
       run: find .. -ls
@@ -145,6 +164,8 @@ jobs:
         path: |
           ${{github.workspace}}/build/Testing/Temporary/LastTest.log
           ${{github.workspace}}/build/Testing/conf/makecerts.log
+          ${{github.workspace}}/build/Testing/logs/server.log
+          ${{github.workspace}}/build/Testing/logs/port.log
 
     - name: Install
       run: cmake --install ${{github.workspace}}/build
