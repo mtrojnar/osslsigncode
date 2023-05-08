@@ -1,5 +1,6 @@
 """Implementation of a HTTP server"""
 
+import argparse
 import os
 import subprocess
 import sys
@@ -91,9 +92,9 @@ class HttpServerThread():
         self.server = None
         self.server_thread = None
 
-    def start_server(self) -> (int):
+    def start_server(self, port) -> (int):
         """Starting HTTP server on localhost and a random available port for binding"""
-        self.server = ThreadingHTTPServer(('localhost', 0), RequestHandler)
+        self.server = ThreadingHTTPServer(('localhost', port), RequestHandler)
         self.server_thread = threading.Thread(target=self.server.serve_forever)
         self.server_thread.start()
         hostname, port = self.server.server_address[:2]
@@ -104,9 +105,17 @@ class HttpServerThread():
 def main() -> None:
     """Start HTTP server"""
     ret = 0
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="port number"
+    )
+    args = parser.parse_args()
     try:
         server = HttpServerThread()
-        port = server.start_server()
+        port = server.start_server(args.port)
         with open(PORT_LOG, mode="w") as file:
             file.write("{}".format(port))
     except OSError as err:
