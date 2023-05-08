@@ -644,7 +644,7 @@ static BIO *bio_get_http(long *http_code, char *url, BIO *bout, char *proxy,
     } else {
         /* CURLE_OK (0) */
         (void)BIO_flush(bin);
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
     }
     /* End a libcurl easy handle */
     curl_easy_cleanup(curl);
