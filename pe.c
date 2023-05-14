@@ -421,7 +421,7 @@ static PKCS7 *pe_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         }
         if (ctx->options->cmd == CMD_ADD)
             p7 = cursig;
-    } 
+    }
     if (ctx->pe_ctx->sigpos > 0) {
         /* Strip current signature */
         ctx->pe_ctx->fileend = ctx->pe_ctx->sigpos;
@@ -451,16 +451,8 @@ static PKCS7 *pe_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             return NULL; /* FAILED */
         }
     }
-    if (ctx->options->nest) {
-        if (!cursig_set_nested(cursig, p7, ctx)) {
-            printf("Unable to append the nested signature to the current signature\n");
-            PKCS7_free(p7);
-            PKCS7_free(cursig);
-            return NULL; /* FAILED */
-        }
-        PKCS7_free(p7);
-        return cursig;
-    }
+    if (ctx->options->nest)
+        ctx->options->prevsig = cursig;
     return p7;
 }
 

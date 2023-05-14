@@ -2258,6 +2258,9 @@ static void free_options(GLOBAL_OPTIONS *options)
     /* If X509 structure is NULL nothing is done */
     X509_free(options->cert);
     options->cert = NULL;
+    /* If PKCS7 structure is NULL nothing is done */
+    PKCS7_free(options->prevsig);
+    options->prevsig = NULL;
     /* Free up all elements of sk structure and sk itself */
     sk_X509_pop_free(options->certs, X509_free);
     options->certs = NULL;
@@ -3670,6 +3673,13 @@ int main(int argc, char **argv)
     if (ret) {
         PKCS7_free(p7);
         DO_EXIT_0("Unable to set unauthenticated attributes\n");
+    }
+    if (options.prevsig) {
+        if (!cursig_set_nested(options.prevsig, p7, ctx))
+            DO_EXIT_0("Unable to append the nested signature to the current signature\n");
+        PKCS7_free(p7);
+        p7 = options.prevsig;
+        options.prevsig = NULL;
     }
     if (ctx->format->append_pkcs7) {
         ret = ctx->format->append_pkcs7(ctx, outdata, p7);
