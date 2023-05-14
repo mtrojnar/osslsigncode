@@ -662,7 +662,7 @@ static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     }
     if (ctx->options->nest)
         ctx->options->prevsig = cursig;
-        return p7;
+    return p7;
 }
 
 /*
