@@ -1946,37 +1946,89 @@ static void dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
     out->sectorNum += out->dirtreeSectorsCount;
 }
 
+static void fat_pad_last_sector(MSI_OUT *out, int padValue, char *buf)
+{
+    if (out->fatLen % out->sectorSize > 0) {
+        uint32_t remain = out->sectorSize - out->fatLen % out->sectorSize;
+        memset(buf, padValue, (size_t)remain);
+        fat_append(out, buf, remain);
+    }
+}
+
 static int fat_save(BIO *outdata, MSI_OUT *out)
 {
     char buf[MAX_SECTOR_SIZE];
-    uint32_t i, remain;
+    uint32_t i, j, remain, difatSectors, difatEntriesPerSector, fatSectorIndex, lastFatSectorIndex;
 
     remain = (out->fatLen + out->sectorSize - 1) / out->sectorSize;
     out->fatSectorsCount = (out->fatLen + remain * 4 + out->sectorSize - 1) / out->sectorSize;
 
-    /* mark FAT sectors in the FAT chain */
-    PUT_UINT32_LE(FATSECT, buf);
-    for (i=0; i<out->fatSectorsCount; i++) {
-        fat_append(out, buf, 4);
+    fat_pad_last_sector(out, 0, buf);
+
+    if (out->fatSectorsCount > DIFAT_IN_HEADER) {
+        difatEntriesPerSector = (out->sectorSize / 4) - 1;
+        difatSectors = (out->fatSectorsCount - DIFAT_IN_HEADER + difatEntriesPerSector - 1) / difatEntriesPerSector;
+    } else {
+        difatSectors = 0;
     }
+
     /* set 109 FAT sectors in HEADER_DIFAT table */
-    for (i=0; i<MIN(out->fatSectorsCount, DIFAT_IN_HEADER); i++) {
+    for (i = 0; i < MIN(out->fatSectorsCount, DIFAT_IN_HEADER); i++) {
         PUT_UINT32_LE(out->sectorNum + i, buf);
         memcpy(out->header + HEADER_DIFAT + i * 4, buf, 4);
     }
     out->sectorNum += out->fatSectorsCount;
 
     if (out->fatSectorsCount > DIFAT_IN_HEADER) {
-        /* TODO set FAT sectors in DIFAT sector */
-        printf("DIFAT sectors are not supported\n");
-        return 0; /* FAILED */
+        /* Set DIFAT start sector number in header */
+        PUT_UINT32_LE(out->sectorNum, buf);
+        memcpy(out->header + HEADER_DIFAT_SECTOR_LOC, buf, 4);
+
+        /* Set total DIFAT sectors number in header */
+        PUT_UINT32_LE(difatSectors, buf);
+        memcpy(out->header + HEADER_DIFAT_SECTORS_NUM, buf, 4);
+
+        remain = out->fatSectorsCount - DIFAT_IN_HEADER;
+        fatSectorIndex = out->sectorNum - remain;
+        lastFatSectorIndex = out->sectorNum;
+
+        /* Fill DIFAT sectors */
+        for (i = 0; i < difatSectors; i++) {
+            for (j = 0; j < difatEntriesPerSector; j++, fatSectorIndex++) {
+                if (fatSectorIndex < lastFatSectorIndex) {
+                    PUT_UINT32_LE(fatSectorIndex, buf + j * 4);
+                } else {
+                    PUT_UINT32_LE(FREESECT, buf + j * 4);
+                }
+            }
+
+            /* Add next DIFAT sector link or mark end of chain */
+            if (i + 1 >= difatSectors) {
+                PUT_UINT32_LE(ENDOFCHAIN, buf + out->sectorSize - 4);
+            } else {
+                PUT_UINT32_LE(out->sectorNum + 1, buf + out->sectorSize - 4);
+            }
+
+            fat_append(out, buf, out->sectorSize);
+            out->sectorNum++;
+        }
     }
+
+    /* mark FAT sectors in the FAT chain */
+    PUT_UINT32_LE(FATSECT, buf);
+    for (i=0; i<out->fatSectorsCount; i++) {
+        fat_append(out, buf, 4);
+    }
+
+    /* mark DIFAT sectors in the FAT chain */
+    PUT_UINT32_LE(DIFSECT, buf);
+    for (i = 0; i < difatSectors; i++) {
+        fat_append(out, buf, 4);
+    }
+
     /* empty unallocated free sectors in the last FAT sector */
-    if (out->fatLen % out->sectorSize > 0) {
-        remain = out->sectorSize - out->fatLen % out->sectorSize;
-        memset(buf, (int)FREESECT, (size_t)remain);
-        fat_append(out, buf, remain);
-    }
+    fat_pad_last_sector(out, (int)FREESECT, buf);
+
     BIO_write(outdata, out->fat, (int)out->fatLen);
     return 1; /* OK */
 }
@@ -2077,10 +2129,6 @@ static int msiout_set(MSI_FILE *msi, uint32_t len_msi, uint32_t len_msiex, MSI_O
      */
     if (msi->m_bufferLen + msi_size + msiex_size > 7143936) {
         out->sectorSize = 4096;
-    }
-    if (msi->m_bufferLen + msi_size + msiex_size > 457183232) {
-        printf("DIFAT sectors are not supported\n");
-        return 0;/* FAILED */
     }
     out->header = header_new(msi->m_hdr, out);
     out->minifatMemallocCount = msi->m_hdr->numMiniFATSector;
