@@ -1946,7 +1946,8 @@ static void dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
     out->sectorNum += out->dirtreeSectorsCount;
 }
 
-static void fat_pad_last_sector(MSI_OUT* out, int padValue, char* buf) {
+static void fat_pad_last_sector(MSI_OUT *out, int padValue, char *buf)
+{
     if (out->fatLen % out->sectorSize > 0) {
         uint32_t remain = out->sectorSize - out->fatLen % out->sectorSize;
         memset(buf, padValue, (size_t)remain);
@@ -1957,7 +1958,7 @@ static void fat_pad_last_sector(MSI_OUT* out, int padValue, char* buf) {
 static int fat_save(BIO *outdata, MSI_OUT *out)
 {
     char buf[MAX_SECTOR_SIZE];
-    uint32_t i, j, remain, difatSectors, difatEntriesPerSector;
+    uint32_t i, j, remain, difatSectors, difatEntriesPerSector, fatSectorIndex, lastFatSectorIndex;
 
     remain = (out->fatLen + out->sectorSize - 1) / out->sectorSize;
     out->fatSectorsCount = (out->fatLen + remain * 4 + out->sectorSize - 1) / out->sectorSize;
@@ -1988,18 +1989,15 @@ static int fat_save(BIO *outdata, MSI_OUT *out)
         memcpy(out->header + HEADER_DIFAT_SECTORS_NUM, buf, 4);
 
         remain = out->fatSectorsCount - DIFAT_IN_HEADER;
-        uint32_t fatSectorIndex = out->sectorNum - remain;
-        uint32_t lastFatSectorIndex = out->sectorNum;
+        fatSectorIndex = out->sectorNum - remain;
+        lastFatSectorIndex = out->sectorNum;
 
         /* Fill DIFAT sectors */
         for (i = 0; i < difatSectors; i++) {
             for (j = 0; j < difatEntriesPerSector; j++, fatSectorIndex++) {
-                if (fatSectorIndex < lastFatSectorIndex)
-                {
+                if (fatSectorIndex < lastFatSectorIndex) {
                     PUT_UINT32_LE(fatSectorIndex, buf + j * 4);
-                }
-                else
-                {
+                } else {
                     PUT_UINT32_LE(FREESECT, buf + j * 4);
                 }
             }
