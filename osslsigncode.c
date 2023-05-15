@@ -557,6 +557,7 @@ static BIO *bio_get_http(long *http_code, char *url, BIO *bout, char *proxy,
         return NULL; /* FAILED */
     }
     /* Start a libcurl easy session and set options for a curl easy handle */
+    printf("Connecting to %s\n", url);
     curl = curl_easy_init();
     if (proxy) {
         res = curl_easy_setopt(curl, CURLOPT_PROXY, proxy);
