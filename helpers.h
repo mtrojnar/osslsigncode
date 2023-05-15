@@ -9,12 +9,12 @@
 uint32_t get_file_size(const char *infile);
 char *map_file(const char *infile, const size_t size);
 void unmap_file(char *indata, const size_t size);
+int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
 PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx);
 void add_content_type(PKCS7 *p7);
 int add_indirect_data_object(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx);
 int add_ms_ctl_object(PKCS7 *p7, PKCS7 *cursig);
-int cursig_set_nested(PKCS7 *cursig, PKCS7 *p7, FILE_FORMAT_CTX *ctx);
 int asn1_simple_hdr_len(const u_char *p, int len);
 int bio_hash_data(BIO *hash, char *indata, size_t idx, size_t fileend);
 void print_hash(const char *descript1, const char *descript2, const u_char *hashbuf, int length);
