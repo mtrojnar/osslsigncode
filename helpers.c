@@ -11,12 +11,10 @@
 /* Prototypes */
 static int pkcs7_set_content_blob(PKCS7 *sig, PKCS7 *cursig);
 static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx);
-static int X509_attribute_chain_append_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_char *p, int len);
 static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CTX *ctx);
 static int pkcs7_set_spc_indirect_data_content(PKCS7 *p7, BIO *hash, u_char *buf, int len);
 static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
-static int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 
 /*
  * Common functions
@@ -174,7 +172,7 @@ static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX 
  * [in] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
-static int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
+int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
 {
     if (ctx->options->time == INVALID_TIME) /* -time option was not specified */
         return 1; /* SUCCESS */
@@ -380,44 +378,6 @@ static int pkcs7_set_content_blob(PKCS7 *sig, PKCS7 *cursig)
     return 1; /* OK */
 }
 
-/*
- * Add the new signature to the current signature as a nested signature:
- * new unauthorized SPC_NESTED_SIGNATURE_OBJID attribute
- * [out] cursig: current PKCS#7 signature
- * [in] p7: new PKCS#7 signature
- * [in] ctx: structure holds input and output data
- * [returns] 0 on error or 1 on success
- */
-int cursig_set_nested(PKCS7 *cursig, PKCS7 *p7, FILE_FORMAT_CTX *ctx)
-{
-    u_char *p = NULL;
-    int len = 0;
-    PKCS7_SIGNER_INFO *si;
-    STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
-
-    if (!cursig)
-        return 0; /* FAILED */
-    signer_info = PKCS7_get_signer_info(cursig);
-    if (!signer_info)
-        return 0; /* FAILED */
-    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
-    if (!si)
-        return 0; /* FAILED */
-    if (((len = i2d_PKCS7(p7, NULL)) <= 0) ||
-        (p = OPENSSL_malloc((size_t)len)) == NULL)
-        return 0; /* FAILED */
-    i2d_PKCS7(p7, &p);
-    p -= len;
-
-    pkcs7_signer_info_add_signing_time(si, ctx);
-    if (!X509_attribute_chain_append_signature(&(si->unauth_attr), p, len)) {
-        OPENSSL_free(p);
-        return 0; /* FAILED */
-    }
-    OPENSSL_free(p);
-    return 1; /* OK */
-}
-
 /* Return the header length (tag and length octets) of the ASN.1 type
  * [in] p: ASN.1 data
  * [in] len: ASN.1 data length
@@ -601,44 +561,6 @@ static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx)
                 ctx->options->url, (int)strlen(ctx->options->url));
     }
     return info;
-}
-
-/*
- * [in, out] unauth_attr: unauthorized attributes list
- * [in] p: PKCS#7 data
- * [in] len: PKCS#7 data length
- * [returns] 0 on error or 1 on success
- */
-static int X509_attribute_chain_append_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_char *p, int len)
-{
-    X509_ATTRIBUTE *attr = NULL;
-    int nid = OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID);
-
-    if (*unauth_attr == NULL) {
-        if ((*unauth_attr = sk_X509_ATTRIBUTE_new_null()) == NULL)
-            return 0; /* FAILED */
-    } else {
-        /* try to find SPC_NESTED_SIGNATURE_OBJID attribute */
-        int i;
-        for (i = 0; i < sk_X509_ATTRIBUTE_num(*unauth_attr); i++) {
-            attr = sk_X509_ATTRIBUTE_value(*unauth_attr, i);
-            if (OBJ_obj2nid(X509_ATTRIBUTE_get0_object(attr)) == nid) {
-                /* append p to the V_ASN1_SEQUENCE */
-                if (!X509_ATTRIBUTE_set1_data(attr, V_ASN1_SEQUENCE, p, len))
-                    return 0; /* FAILED */
-                return 1; /* OK */
-            }
-        }
-    }
-    /* create new unauthorized SPC_NESTED_SIGNATURE_OBJID attribute */
-    attr = X509_ATTRIBUTE_create_by_NID(NULL, nid, V_ASN1_SEQUENCE, p, len);
-    if (!attr)
-        return 0; /* FAILED */
-    if (!sk_X509_ATTRIBUTE_push(*unauth_attr, attr)) {
-        X509_ATTRIBUTE_free(attr);
-        return 0; /* FAILED */
-    }
-    return 1; /* OK */
 }
 
 /*
