@@ -206,6 +206,12 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached)
      */
     while (sum < ctx->pe_ctx->siglen) {
         uint32_t len = GET_UINT32_LE(ctx->options->indata + ctx->pe_ctx->sigpos + sum);
+        if (ctx->pe_ctx->siglen - len > 8) {
+            printf("Corrupted attribute certificate table\n");
+            printf("Attribute certificate table size  : %08X\n", ctx->pe_ctx->siglen);
+            printf("Attribute certificate entry length: %08X\n\n", len);
+            return 0; /* FAILED */
+        }
         /* quadword align data */
         len += len % 8 ? 8 - len % 8 : 0;
         sum += len;
