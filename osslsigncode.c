@@ -1734,6 +1734,7 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
         if (!strcmp(object_txt, PKCS9_COUNTER_SIGNATURE)) {
             /* Authenticode Timestamp - Policy OID: 1.2.840.113549.1.9.6 */
             const u_char *data;
+            CMS_ContentInfo *cms;
             PKCS7_SIGNER_INFO *countersi;
             value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
             if (value == NULL)
@@ -1747,10 +1748,13 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
             }
             time = time_t_get_si_time(countersi);
             if (time != INVALID_TIME) {
-                *timestamp = cms_get_timestamp(p7->d.sign, countersi);
-                if (*timestamp) {
-                    if (!print_cms_timestamp(*timestamp, time))
+                cms = cms_get_timestamp(p7->d.sign, countersi);
+                if (cms) {
+                    if (!print_cms_timestamp(cms, time)) {
+                        CMS_ContentInfo_free(cms);
                         return INVALID_TIME; /* FAILED */
+                    }
+                    *timestamp = cms;
                 } else {
                     printf("Error: Corrupt Authenticode Timestamp embedded content\n");
                 }
@@ -1761,23 +1765,27 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
         } else if (!strcmp(object_txt, SPC_RFC3161_OBJID)) {
             /* RFC3161 Timestamp - Policy OID: 1.3.6.1.4.1.311.3.3.1 */
             const u_char *data;
+            CMS_ContentInfo *cms;
             value = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
             if (value == NULL)
                 continue;
             data = ASN1_STRING_get0_data(value);
-            *timestamp = d2i_CMS_ContentInfo(NULL, &data, ASN1_STRING_length(value));
-            if (*timestamp == NULL) {
+            cms = d2i_CMS_ContentInfo(NULL, &data, ASN1_STRING_length(value));
+            if (cms == NULL) {
                 printf("Error: RFC3161 Timestamp could not be decoded correctly\n");
                 ERR_print_errors_fp(stdout);
                 continue;
             }
-            time = time_t_get_cms_time(*timestamp);
+            time = time_t_get_cms_time(cms);
             if (time != INVALID_TIME) {
-                if (!print_cms_timestamp(*timestamp, time))
+                if (!print_cms_timestamp(cms, time)) {
+                    CMS_ContentInfo_free(cms);
                     return INVALID_TIME; /* FAILED */
+                }
+                *timestamp = cms;
             } else {
                 printf("Error: Corrupt RFC3161 Timestamp embedded content\n");
-                CMS_ContentInfo_free(*timestamp);
+                CMS_ContentInfo_free(cms);
                 ERR_print_errors_fp(stdout);
             }
         } else if (!strcmp(object_txt, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
