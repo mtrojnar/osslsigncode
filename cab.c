@@ -274,7 +274,7 @@ static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
          * (u8 * cFolders) CFFOLDER - structure contains information about
          * one of the folders or partial folders stored in this cabinet file
          */
-        while (nfolders) {
+        while (nfolders && idx < fileend) {
             BIO_write(bhash, ctx->options->indata + idx, 8);
             idx += 8;
             nfolders--;
