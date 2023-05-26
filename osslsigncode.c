@@ -1652,13 +1652,19 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
         OBJ_obj2txt(object_txt, sizeof object_txt, object, 1);
         if (!strcmp(object_txt, PKCS9_MESSAGE_DIGEST)) {
             /* PKCS#9 message digest - Policy OID: 1.2.840.113549.1.9.4 */
+            const u_char *mdbuf;
+            int len;
             ASN1_STRING *digest  = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_OCTET_STRING, NULL);
-            const u_char *mdbuf = ASN1_STRING_get0_data(digest);
-            int len = ASN1_STRING_length(digest);
+            if (digest == NULL)
+                continue;
+            mdbuf = ASN1_STRING_get0_data(digest);
+            len = ASN1_STRING_length(digest);
             print_hash("\tMessage digest", "", mdbuf, len);
         } else if (!strcmp(object_txt, PKCS9_SIGNING_TIME)) {
             /* PKCS#9 signing time - Policy OID: 1.2.840.113549.1.9.5 */
             ASN1_UTCTIME *signtime = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
+            if (signtime == NULL)
+                continue;
             printf("\tSigning time: ");
             print_time_t(time_t_get_asn1_time(signtime));
         } else if (!strcmp(object_txt, SPC_SP_OPUS_INFO_OBJID)) {
@@ -1791,6 +1797,10 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
         } else if (!strcmp(object_txt, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
             /* Unauthenticated Data Blob - Policy OID: 1.3.6.1.4.1.42921.1.2.1 */
             ASN1_STRING *blob = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTF8STRING, NULL);
+            if (blob == NULL) {
+                printf("Error: Unauthenticated Data Blob could not be decoded correctly\n");
+                continue;
+            }
             if (verbose) {
                 char *data_blob = OPENSSL_buf2hexstr(blob->data, blob->length);
                 printf("\nUnauthenticated Data Blob:\n%s\n", data_blob);
@@ -1853,6 +1863,8 @@ static time_t time_t_get_si_time(PKCS7_SIGNER_INFO *si)
             if (!strcmp(object_txt, PKCS9_SIGNING_TIME)) {
                 /* PKCS#9 signing time - Policy OID: 1.2.840.113549.1.9.5 */
                 time = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
+                if (time == NULL)
+                    return INVALID_TIME; /* FAILED */
             }
         }
     posix_time = time_t_get_asn1_time(time);
