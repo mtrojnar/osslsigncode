@@ -1,8 +1,12 @@
 # osslsigncode change log
 
-### 2.6 (unreleased)
+### 2.6 (2023.05.29)
 
-- get Certificate Revocation List from a CRL distribution point
+- modular architecture implemented to simplify adding file formats
+- added verification of CRLs specified in the signing certificate
+- added MSI DIFAT sectors support (by Max Bagryantsev)
+- added legacy provider support for OpenSSL 3.0.0 and later
+- fixed numerous bugs
 
 ### 2.5 (2022.08.12)
 
