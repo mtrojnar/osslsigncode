@@ -46,7 +46,7 @@ We highly recommend downloading a [release tarball](https://github.com/mtrojnar/
   brew install cmake pkg-config openssl@1.1
   export PKG_CONFIG_PATH="/usr/local/opt/openssl@1.1/lib/pkgconfig"
 ```
-**NOTE:** osslsigncode requires CMake 3.6 or newer.
+**NOTE:** osslsigncode requires CMake 3.17 or newer.
 
 You may need to use `cmake3` instead of `cmake` to complete the following steps on your system.
 * Navigate to the build directory and run CMake to configure the osslsigncode project
