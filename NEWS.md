@@ -1,5 +1,7 @@
 # osslsigncode change log
 
+### 2.7 (unreleased)
+
 ### 2.6 (2023.05.29)
 
 - modular architecture implemented to simplify adding file formats
