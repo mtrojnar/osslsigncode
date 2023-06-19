@@ -3735,6 +3735,8 @@ int main(int argc, char **argv)
         ctx = file_format_cab.ctx_new(&options, hash, outdata);
     if (!ctx)
         ctx = file_format_cat.ctx_new(&options, hash, outdata);
+    if (!ctx)
+        ctx = file_format_appx.ctx_new(&options, hash, outdata);
     if (!ctx) {
         ret = 1; /* FAILED */
         BIO_free_all(hash);
