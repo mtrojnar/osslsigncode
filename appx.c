@@ -1026,11 +1026,28 @@ void zipWriteCentralDirectoryEntry(BIO *bio, zipCentralDirectoryEntry_t *entry, 
 		BIO_write(bio, entry->fileName, entry->fileNameLen);
 	}
 
-	if (entry->extraFieldLen > 0 && entry->extraField)
+	int zip64ChunkSize = 0;
+	if (entry->uncompressedSizeInZip64) zip64ChunkSize += 8;
+	if (entry->compressedSizeInZip64) zip64ChunkSize += 8;
+	if (entry->offsetInZip64) zip64ChunkSize += 8;
+	if (entry->diskNoInZip64) zip64ChunkSize += 4;
+
+	if (zip64ChunkSize > 0)
 	{
-		//todo, if override daata, need to rewrite the extra field
-		BIO_write(bio, entry->extraField, entry->extraFieldLen);
+		bioAddU16(bio, ZIP64_HEADER);
+		bioAddU16(bio, zip64ChunkSize);
+
+		if (entry->uncompressedSizeInZip64) bioAddU64(bio, entry->overrideData ? entry->overrideData->uncompressedSize : entry->uncompressedSize);
+		if (entry->compressedSizeInZip64) bioAddU64(bio, entry->overrideData ? entry->overrideData->compressedSize : entry->compressedSize);
+		if (entry->offsetInZip64) bioAddU64(bio, entry->offsetOfLocalHeader + offsetDiff);
+		if (entry->diskNoInZip64) bioAddU32(bio, entry->diskNoStart);
 	}
+
+	//if (entry->extraFieldLen > 0 && entry->extraField)
+	//{
+	//	//todo, if override daata, need to rewrite the extra field
+	//	BIO_write(bio, entry->extraField, entry->extraFieldLen);
+	//}
 
 	if (entry->fileCommentLen > 0 && entry->fileComment)
 	{
