@@ -45,6 +45,8 @@ static const char *APP_SIGNATURE_FILENAME = "AppxSignature.p7x";
 static const char *CONTENT_TYPES_FILENAME = "[Content_Types].xml";
 static const char *BLOCK_MAP_FILENAME = "AppxBlockMap.xml";
 static const char *CODE_INTEGRITY_FILENAME = "AppxMetadata/CodeIntegrity.cat";
+static const char *SIGNATURE_CONTENT_TYPES_ENTRY = "<Override PartName=\"/AppxSignature.p7x\" ContentType=\"application/vnd.ms-appx.signature\"/>";
+static const char *SIGNATURE_CONTENT_TYPES_CLOSING_TAG = "</Types>";
 
 static const char PKCX_SIGNATURE[4] = { 'P', 'K', 'C', 'X' }; //Main header header
 static const char APPX_SIGNATURE[4] = { 'A', 'P', 'P', 'X' }; //APPX header
@@ -56,7 +58,7 @@ static const char AXCI_SIGNATURE[4] = { 'A', 'X', 'C', 'I' }; //digest of uncomp
 
 #define EOCDR_SIZE 22
 #define ZIP64_EOCD_LOCATOR_SIZE 20
-#define ZIP64_HEADER 0x100
+#define ZIP64_HEADER 0x01
 #define COMPRESSION_NONE 0
 #define COMPRESSION_DEFLATE 8
 #define DATA_DESCRIPTOR_BIT (1 << 3)
@@ -75,7 +77,18 @@ typedef struct zipLocalHeader_s
 	uint16_t extraFieldLen;
 	char *fileName;
 	uint8_t *extraField;
+
+	bool compressedSizeInZip64;
+	bool uncompressedSizeInZip64;
 } zipLocalHeader_t;
+
+typedef struct zipOverrideData_s
+{
+	uint32_t crc32;
+	uint64_t compressedSize;
+	uint64_t uncompressedSize;
+	uint8_t *data;
+} zipOverrideData_t;
 
 typedef struct zipCentralDirectoryEntry_s
 {
@@ -100,6 +113,13 @@ typedef struct zipCentralDirectoryEntry_s
 	char *fileComment;
 	int64_t fileOffset;
 	int64_t entryLen;
+
+	bool compressedSizeInZip64;
+	bool uncompressedSizeInZip64;
+	bool offsetInZip64;
+	bool diskNoInZip64;
+
+	zipOverrideData_t *overrideData;
 
 	struct zipCentralDirectoryEntry_s *next;
 } zipCentralDirectoryEntry_t;
@@ -228,36 +248,40 @@ uint64_t bufferGetU64(uint8_t *buffer, uint64_t *pos)
 	return ret;
 }
 
-void bufferAddU8(uint8_t *buffer, uint64_t *pos, uint8_t v)
+void bioAddU8(BIO *bio, uint8_t v)
 {
-	buffer[*pos] = v;
-	*pos += 1;
+	BIO_write(bio, &v, 1);
 }
 
-void bufferAddU16(uint8_t *buffer, uint64_t *pos, uint16_t v)
+void bioAddU16(BIO *bio, uint16_t v)
 {
-	buffer[*pos] = v & 0xFF;
-	buffer[*pos + 1] = (v >> 8) & 0xFF;
-	*pos += 2;
+	uint8_t b[2];
+
+	b[0] = v & 0xFF;
+	b[1] = (v >> 8) & 0xFF;
+
+	BIO_write(bio, b, 2);
 }
 
-void bufferAddU32(uint8_t *buffer, uint64_t *pos, uint32_t v)
+void bioAddU32(BIO *bio, uint32_t v)
 {
-	buffer[*pos] = v & 0xFF;
-	buffer[*pos + 1] = (v >> 8) & 0xFF;
-	buffer[*pos + 2] = (v >> 16) & 0xFF;
-	buffer[*pos + 3] = (v >> 24) & 0xFF;
+	uint8_t b[4];
 
-	*pos += 4;
+	b[0] = v & 0xFF;
+	b[1] = (v >> 8) & 0xFF;
+	b[2] = (v >> 16) & 0xFF;
+	b[3] = (v >> 24) & 0xFF;
+
+	BIO_write(bio, b, 4);
 }
 
-void bufferAddU64(uint8_t *buffer, uint64_t *pos, uint64_t v)
+void bioAddU64(BIO *bio, uint64_t v)
 {
 	uint32_t l = v & 0xFFFFFFFF;
 	uint32_t h = (v >> 32) & 0xFFFFFFFF;
 
-	bufferAddU32(buffer, pos, l);
-	bufferAddU32(buffer, pos, h);
+	bioAddU32(bio, l);
+	bioAddU32(bio, h);
 }
 
 bool readZipEOCDR(zipEOCDR_t *eocdr, FILE *f)
@@ -282,13 +306,13 @@ bool readZipEOCDR(zipEOCDR_t *eocdr, FILE *f)
 	eocdr->centralDirectoryOffset = fileGetU32(f);
 	eocdr->commentLen = fileGetU16(f);
 
-	if (eocdr->centralDirectoryDiskNumber > 1 || eocdr->diskNumber > 1 ||
+	/*if (eocdr->centralDirectoryDiskNumber > 1 || eocdr->diskNumber > 1 ||
 		eocdr->centralDirectoryDiskNumber != eocdr->diskNumber ||
 		eocdr->diskEntries != eocdr->totalEntries)
 	{
 		printf("The input file is a multipart archive - not supported\n");
 		return false;
-	}
+	}*/
 
 	if (eocdr->commentLen > 0)
 	{
@@ -371,6 +395,12 @@ void freeZipCentralDirectoryEntry(zipCentralDirectoryEntry_t *entry)
 	free(entry->fileName);
 	free(entry->extraField);
 	free(entry->fileComment);
+	if (entry->overrideData)
+	{
+		free(entry->overrideData->data);
+	}
+
+	free(entry->overrideData);
 	free(entry);
 }
 
@@ -392,39 +422,17 @@ void freeZip(zipFile_t *zip)
 	free(zip);
 }
 
-uint64_t zipGetLocalHeaderSize(zipFile_t *zip, bool includeDataDescriptor)
+zipCentralDirectoryEntry_t *zipGetCDEntryByName(zipFile_t *zip, const char *name)
 {
-	char signature[4];
-
-	fread(signature, 1, 4, zip->f);
-
-	if (memcmp(signature, PKZIP_LH_SIGNATURE, 4))
+	for (zipCentralDirectoryEntry_t *entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next)
 	{
-		printf("The input file is not a valip zip file - local header signature does not match\n");
-		return 0;
-	}
-
-	uint64_t ret = 30;
-
-	fseeko(zip->f, 2, SEEK_CUR);
-	uint16_t flags = fileGetU16(zip->f);
-	fseeko(zip->f, 18, SEEK_CUR);
-	ret += fileGetU16(zip->f);
-	ret += fileGetU16(zip->f);
-
-	if (includeDataDescriptor && (flags & DATA_DESCRIPTOR_BIT))
-	{
-		if (zip->isZip64)
+		if (!strcmp(entry->fileName, name))
 		{
-			ret += 24;
-		}
-		else
-		{
-			ret += 16;
+			return entry;
 		}
 	}
 
-	return ret;
+	return NULL;
 }
 
 bool zipReadLocalHeader(zipLocalHeader_t *header, zipFile_t *zip, uint32_t compressedSize)
@@ -524,11 +532,12 @@ bool zipReadLocalHeader(zipLocalHeader_t *header, zipFile_t *zip, uint32_t compr
 
 			uint16_t len = bufferGetU16(header->extraField, &pos);
 
-			if (header->compressedSize == 0xFFFFFFFF)
+			if (header->uncompressedSize == 0xFFFFFFFF)
 			{
 				if (len >= 8)
 				{
-					header->compressedSize = bufferGetU64(header->extraField, &pos);
+					header->uncompressedSize = bufferGetU64(header->extraField, &pos);
+					header->uncompressedSizeInZip64 = true;
 				}
 				else
 				{
@@ -542,11 +551,12 @@ bool zipReadLocalHeader(zipLocalHeader_t *header, zipFile_t *zip, uint32_t compr
 				}
 			}
 
-			if (header->uncompressedSize == 0xFFFFFFFF)
+			if (header->compressedSize == 0xFFFFFFFF)
 			{
 				if (len >= 16)
 				{
-					header->uncompressedSize = bufferGetU64(header->extraField, &pos);
+					header->compressedSize = bufferGetU64(header->extraField, &pos);
+					header->compressedSizeInZip64 = true;
 				}
 				else
 				{
@@ -613,7 +623,7 @@ zipCentralDirectoryEntry_t *zipReadNextCentralDirectoryEntry(FILE *f)
 		fread(entry->fileName, 1, entry->fileNameLen, f);
 	}
 
-	if (entry->extraField > 0)
+	if (entry->extraFieldLen > 0)
 	{
 		entry->extraField = calloc(1, entry->extraFieldLen);
 		fread(entry->extraField, 1, entry->extraFieldLen, f);
@@ -642,11 +652,12 @@ zipCentralDirectoryEntry_t *zipReadNextCentralDirectoryEntry(FILE *f)
 
 			uint64_t len = bufferGetU16(entry->extraField, &pos);
 
-			if (entry->compressedSize == 0xFFFFFFFF)
+			if (entry->uncompressedSize == 0xFFFFFFFF)
 			{
 				if (len >= 8)
 				{
-					entry->compressedSize = bufferGetU64(entry->extraField, &pos);
+					entry->uncompressedSize = bufferGetU64(entry->extraField, &pos);
+					entry->uncompressedSizeInZip64 = true;
 				}
 				else
 				{
@@ -656,11 +667,12 @@ zipCentralDirectoryEntry_t *zipReadNextCentralDirectoryEntry(FILE *f)
 				}
 			}
 
-			if (entry->uncompressedSize == 0xFFFFFFFF)
+			if (entry->compressedSize == 0xFFFFFFFF)
 			{
 				if (len >= 16)
 				{
-					entry->uncompressedSize = bufferGetU64(entry->extraField, &pos);
+					entry->compressedSize = bufferGetU64(entry->extraField, &pos);
+					entry->compressedSizeInZip64 = true;
 				}
 				else
 				{
@@ -675,6 +687,7 @@ zipCentralDirectoryEntry_t *zipReadNextCentralDirectoryEntry(FILE *f)
 				if (len >= 24)
 				{
 					entry->offsetOfLocalHeader = bufferGetU64(entry->extraField, &pos);
+					entry->offsetInZip64 = true;
 				}
 				else
 				{
@@ -689,6 +702,7 @@ zipCentralDirectoryEntry_t *zipReadNextCentralDirectoryEntry(FILE *f)
 				if (len >= 28)
 				{
 					entry->diskNoStart = bufferGetU32(entry->extraField, &pos);
+					entry->diskNoInZip64 = true;
 				}
 				else
 				{
@@ -820,43 +834,105 @@ int zipInflate(Bytef *dest, uLongf *destLen, const Bytef *source, uLong *sourceL
 		err;
 }
 
+int zipDeflate(Bytef *dest, uLongf *destLen, const Bytef *source, uLong sourceLen, int level)
+{
+	z_stream stream;
+	int err;
+	const uInt max = (uInt)-1;
+	uLong left;
+
+	left = *destLen;
+	*destLen = 0;
+
+	stream.zalloc = (alloc_func)0;
+	stream.zfree = (free_func)0;
+	stream.opaque = (voidpf)0;
+
+	err = deflateInit2(&stream, level, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
+	if (err != Z_OK) return err;
+
+	stream.next_out = dest;
+	stream.avail_out = 0;
+	stream.next_in = (z_const Bytef *)source;
+	stream.avail_in = 0;
+
+	do {
+		if (stream.avail_out == 0)
+		{
+			stream.avail_out = left > (uLong)max ? max : (uInt)left;
+			left -= stream.avail_out;
+		}
+		if (stream.avail_in == 0)
+		{
+			stream.avail_in = sourceLen > (uLong)max ? max : (uInt)sourceLen;
+			sourceLen -= stream.avail_in;
+		}
+		err = deflate(&stream, sourceLen ? Z_NO_FLUSH : Z_FINISH);
+	} while (err == Z_OK);
+
+	//deflate(&stream, Z_SYNC_FLUSH);
+
+	*destLen = stream.total_out;
+	deflateEnd(&stream);
+	return err == Z_STREAM_END ? Z_OK : err;
+}
+
 bool zipReadFileData(zipFile_t *zip, zipCentralDirectoryEntry_t *entry, uint8_t **pData, uint64_t *dataSize, bool unpack)
 {
 	FILE *f = zip->f;
 	fseeko(f, entry->offsetOfLocalHeader, SEEK_SET);
 
-	zipLocalHeader_t header;
+	uint8_t *compressedData = NULL;
+	uint64_t compressedSize = 0;
+	uint64_t uncompressedSize = 0;
 
-	if (!zipReadLocalHeader(&header, zip, entry->compressedSize))
+	if (entry->overrideData)
 	{
-		return false;
+		compressedSize = entry->overrideData->compressedSize;
+		uncompressedSize = entry->overrideData->uncompressedSize;
+		compressedData = malloc(compressedSize);
+		memcpy(compressedData, entry->overrideData->data, compressedSize);
 	}
-
-	if (strcmp(header.fileName, entry->fileName) || header.compressedSize != entry->compressedSize
-		|| header.uncompressedSize != entry->uncompressedSize || header.compression != entry->compression)
+	else
 	{
-		printf("Local header does not match central directory entry\n");
-		return false;
+		zipLocalHeader_t header;
+
+		memset(&header, 0, sizeof(header));
+
+		if (!zipReadLocalHeader(&header, zip, entry->compressedSize))
+		{
+			return false;
+		}
+
+		if (strcmp(header.fileName, entry->fileName) || header.compressedSize != entry->compressedSize
+			|| header.uncompressedSize != entry->uncompressedSize || header.compression != entry->compression)
+		{
+			printf("Local header does not match central directory entry\n");
+			return false;
+		}
+
+		//we don't really need those
+		free(header.fileName);
+		free(header.extraField);
+
+		compressedData = malloc(entry->compressedSize);
+
+		fread(compressedData, 1, entry->compressedSize, f);
+
+		compressedSize = entry->compressedSize;
+		uncompressedSize = entry->uncompressedSize;
 	}
-
-	//we don't really need those
-	free(header.fileName);
-	free(header.extraField);
-
-	uint8_t *compressedData = malloc(entry->compressedSize);
-
-	fread(compressedData, 1, entry->compressedSize, f);
 
 	if (!unpack || unpack && entry->compression == COMPRESSION_NONE)
 	{
 		*pData = compressedData;
-		*dataSize = entry->compressedSize;
+		*dataSize = compressedSize;
 	}
 	else if (entry->compression == COMPRESSION_DEFLATE)
 	{
-		uint8_t *uncompressedData = malloc(entry->uncompressedSize);
-		uLongf destLen = entry->uncompressedSize;
-		uLongf sourceLen = entry->compressedSize;
+		uint8_t *uncompressedData = malloc(uncompressedSize);
+		uLongf destLen = uncompressedSize;
+		uLongf sourceLen = compressedSize;
 
 		int ret = zipInflate(uncompressedData, &destLen, compressedData, &sourceLen);
 
@@ -873,7 +949,7 @@ bool zipReadFileData(zipFile_t *zip, zipCentralDirectoryEntry_t *entry, uint8_t 
 		else
 		{
 			*pData = uncompressedData;
-			*dataSize = entry->uncompressedSize;
+			*dataSize = destLen;
 		}
 	}
 	else
@@ -882,6 +958,323 @@ bool zipReadFileData(zipFile_t *zip, zipCentralDirectoryEntry_t *entry, uint8_t 
 		free(compressedData);
 		return false;
 	}
+
+	return true;
+}
+
+void zipWriteLocalHeader(BIO *bio, zipLocalHeader_t *header, uint64_t *sizeonDisk)
+{
+	BIO_write(bio, PKZIP_LH_SIGNATURE, 4);
+
+	bioAddU16(bio, header->version);
+	bioAddU16(bio, header->flags);
+	bioAddU16(bio, header->compression);
+	bioAddU16(bio, header->modTime);
+	bioAddU16(bio, header->modDate);
+
+	if (header->flags & DATA_DESCRIPTOR_BIT)
+	{
+		bioAddU32(bio, 0);
+		bioAddU32(bio, 0);
+		bioAddU32(bio, 0);
+	}
+	else
+	{
+		bioAddU32(bio, header->crc32);
+		bioAddU32(bio, header->compressedSizeInZip64 ? 0xFFFFFFFF :  header->compressedSize);
+		bioAddU32(bio, header->uncompressedSizeInZip64 ? 0xFFFFFFFF : header->uncompressedSize);
+	}
+
+	bioAddU16(bio, header->fileNameLen);
+	bioAddU16(bio, header->extraFieldLen);
+
+	if (header->fileNameLen > 0)
+	{
+		BIO_write(bio, header->fileName, header->fileNameLen);
+	}
+
+	if (header->extraFieldLen > 0)
+	{
+		BIO_write(bio, header->extraField, header->extraFieldLen);
+	}
+
+	*sizeonDisk = 30 + header->fileNameLen + header->extraFieldLen;
+}
+
+void zipWriteCentralDirectoryEntry(BIO *bio, zipCentralDirectoryEntry_t *entry, int64_t offsetDiff, uint64_t *sizeOnDisk)
+{
+	BIO_write(bio, PKZIP_CD_SIGNATURE, 4);
+	bioAddU16(bio, entry->creatorVersion);
+	bioAddU16(bio, entry->viewerVersion);
+	bioAddU16(bio, entry->flags);
+	bioAddU16(bio, entry->compression);
+	bioAddU16(bio, entry->modTime);
+	bioAddU16(bio, entry->modDate);
+	bioAddU32(bio, entry->overrideData ? entry->overrideData->crc32 : entry->crc32);
+	bioAddU32(bio, entry->compressedSizeInZip64 ? 0xFFFFFFFF : entry->overrideData ? entry->overrideData->compressedSize : entry->compressedSize);
+	bioAddU32(bio, entry->uncompressedSizeInZip64 ? 0xFFFFFFFF : entry->overrideData ? entry->overrideData->uncompressedSize : entry->uncompressedSize);
+	bioAddU16(bio, entry->fileNameLen);
+	bioAddU16(bio, entry->extraFieldLen);
+	bioAddU16(bio, entry->fileCommentLen);
+	bioAddU16(bio, entry->diskNoInZip64 ? 0xFFFF : entry->diskNoStart);
+	bioAddU16(bio, entry->internalAttr);
+	bioAddU32(bio, entry->externalAttr);
+	bioAddU32(bio, entry->offsetInZip64 ? 0xFFFFFFFF : entry->offsetOfLocalHeader + offsetDiff);
+
+	if (entry->fileNameLen > 0 && entry->fileName)
+	{
+		BIO_write(bio, entry->fileName, entry->fileNameLen);
+	}
+
+	if (entry->extraFieldLen > 0 && entry->extraField)
+	{
+		//todo, if override daata, need to rewrite the extra field
+		BIO_write(bio, entry->extraField, entry->extraFieldLen);
+	}
+
+	if (entry->fileCommentLen > 0 && entry->fileComment)
+	{
+		BIO_write(bio, entry->fileComment, entry->fileCommentLen);
+	}
+
+	*sizeOnDisk = 46 + entry->fileNameLen + entry->extraFieldLen + entry->fileCommentLen;
+}
+
+bool zipAppendFile(zipFile_t *zip, BIO *bio, const char *fn, uint8_t *data, uint64_t dataSize, bool comprs)
+{
+	zipLocalHeader_t header;
+	memset(&header, 0, sizeof(zipLocalHeader_t));
+
+	time_t tim;
+	struct tm *timeinfo;
+
+	uint8_t *dataToWrite = data;
+	uint64_t sizeToWrite = dataSize;
+
+	if (comprs)
+	{
+		dataToWrite = malloc(dataSize);
+		uLongf destLen = dataSize;
+
+		int ret = zipDeflate(dataToWrite, &destLen, data, dataSize, 8);
+		if (ret != Z_OK)
+		{
+			printf("Zip deflate failed: %d\n", ret);
+			free(dataToWrite);
+
+			return false;
+		}
+
+		sizeToWrite = destLen;
+	}
+
+	time(&tim);
+	timeinfo = localtime(&tim);
+
+	header.version = 0x14;
+	header.flags = 0;
+	header.compression = comprs ? COMPRESSION_DEFLATE : 0;
+	header.modTime = timeinfo->tm_hour << 11 | timeinfo->tm_min << 5 | timeinfo->tm_sec >> 1;
+	header.modDate = (timeinfo->tm_year - 80) << 9 | (timeinfo->tm_mon + 1) << 5 | timeinfo->tm_mday;
+
+	uint32_t crc = crc32(0L, Z_NULL, 0);
+	crc = crc32(crc, data, dataSize);
+
+	header.crc32 = crc;
+	header.uncompressedSize = dataSize;
+	header.compressedSize = sizeToWrite;
+	header.fileNameLen = strlen(fn);
+	//this will be reassigned to CD entry and freed there
+	header.fileName = calloc(1, header.fileNameLen + 1);
+	memcpy(header.fileName, fn, header.fileNameLen);
+	header.extraField = NULL;
+	header.extraFieldLen = 0;
+
+	uint64_t offset = BIO_tell(bio); //unfortunately BIO has no 64bit API, so we are limited to 2G files...
+	//should probably rewrite it with using stdio and ftello64
+
+	uint64_t dummy = 0;
+	zipWriteLocalHeader(bio, &header, &dummy);
+
+	uint64_t written = 0;
+
+	while (sizeToWrite > 0)
+	{
+		uint64_t toWrite = sizeToWrite < SIZE_64K ? sizeToWrite : SIZE_64K;
+
+		BIO_write(bio, dataToWrite + written, toWrite);
+
+		sizeToWrite -= toWrite;
+		written += toWrite;
+	}
+
+	if (comprs)
+	{
+		free(dataToWrite);
+	}
+
+	zipCentralDirectoryEntry_t *entry = calloc(1, sizeof(zipCentralDirectoryEntry_t));
+	entry->creatorVersion = 0x2D;
+	entry->viewerVersion = header.version;
+	entry->flags = header.flags;
+	entry->compression = header.compression;
+	entry->modTime = header.modTime;
+	entry->modDate = header.modDate;
+	entry->crc32 = header.crc32;
+	entry->uncompressedSize = header.uncompressedSize;
+	entry->compressedSize = header.compressedSize;
+	entry->fileName = header.fileName; //take ownership of the fileName pointer
+	entry->fileNameLen = header.fileNameLen;
+	entry->extraField = header.extraField;
+	entry->extraFieldLen = header.extraFieldLen;
+	entry->fileCommentLen = 0;
+	entry->fileComment = NULL;
+	entry->diskNoStart = 0;
+	entry->offsetOfLocalHeader = offset;
+	entry->next = NULL;
+	entry->entryLen = entry->fileNameLen + entry->extraFieldLen + entry->fileCommentLen + 46;
+
+	if (!zip->centralDirectoryHead)
+	{
+		zip->centralDirectoryHead = entry;
+	}
+	else
+	{
+		zipCentralDirectoryEntry_t *last = zip->centralDirectoryHead;
+
+		while (last->next)
+		{
+			last = last->next;
+		}
+
+		last->next = entry;
+	}
+
+	return true;
+}
+
+bool zipOverrideFileData(zipFile_t *zip, zipCentralDirectoryEntry_t *entry, uint8_t *data, uint64_t dataSize, bool comprs)
+{
+	if (entry->overrideData)
+	{
+		free(entry->overrideData);
+		free(entry->overrideData->data);
+		entry->overrideData = NULL;
+	}
+
+	entry->overrideData = malloc(sizeof(zipOverrideData_t));
+	entry->overrideData->data = malloc(dataSize);
+
+	uint32_t crc = crc32(0L, Z_NULL, 0);
+	crc = crc32(crc, data, dataSize);
+	entry->overrideData->crc32 = crc;
+	entry->overrideData->uncompressedSize = dataSize;
+
+	if (comprs)
+	{
+		uLongf destLen = dataSize;
+
+		int ret = zipDeflate(entry->overrideData->data, &destLen, data, dataSize, 8);
+		if (ret != Z_OK)
+		{
+			printf("Zip deflate failed: %d\n", ret);
+
+			return false;
+		}
+
+		entry->overrideData->compressedSize = destLen;
+	}
+	else
+	{
+		memcpy(entry->overrideData, data, dataSize);
+		entry->overrideData->compressedSize = dataSize;
+	}
+
+	return true;
+}
+
+bool zipRewriteData(zipFile_t *zip, zipCentralDirectoryEntry_t *entry, BIO *bio, uint64_t *sizeOnDisk)
+{
+	zipLocalHeader_t header;
+
+	memset(&header, 0, sizeof(header));
+
+	fseeko(zip->f, entry->offsetOfLocalHeader, SEEK_SET);
+
+	if (!zipReadLocalHeader(&header, zip, entry->compressedSize))
+	{
+		return false;
+	}
+
+	if (entry->overrideData)
+	{
+		header.compressedSize = entry->overrideData->compressedSize;
+		header.uncompressedSize = entry->overrideData->uncompressedSize;
+		header.crc32 = entry->overrideData->crc32;
+	}
+
+	zipWriteLocalHeader(bio, &header, sizeOnDisk);
+
+	uint8_t *data = NULL;
+
+	if (entry->overrideData)
+	{
+		BIO_write(bio, entry->overrideData->data, entry->overrideData->compressedSize);
+		fseeko(zip->f, entry->compressedSize, SEEK_CUR);
+
+		*sizeOnDisk += entry->overrideData->compressedSize;
+	}
+	else
+	{
+		uint64_t len = entry->compressedSize;
+
+		data = malloc(SIZE_64K);
+
+		while (len > 0)
+		{
+			uint64_t toWrite = len < SIZE_64K ? len : SIZE_64K;
+
+			fread(data, 1, toWrite, zip->f);
+			BIO_write(bio, data, toWrite);
+
+			*sizeOnDisk += toWrite;
+
+			len -= toWrite;
+		}
+	}
+
+	if (header.flags & DATA_DESCRIPTOR_BIT)
+	{
+		BIO_write(bio, PKZIP_DATA_DESCRIPTOR_SIGNATURE, 4);
+
+		bioAddU32(bio, header.crc32);
+
+		if (zip->isZip64)
+		{
+			bioAddU64(bio, header.compressedSize);
+			bioAddU64(bio, header.uncompressedSize);
+		}
+		else
+		{
+			bioAddU32(bio, header.compressedSize);
+			bioAddU32(bio, header.uncompressedSize);
+		}
+
+		if (zip->isZip64)
+		{
+			fseeko(zip->f, 24, SEEK_CUR);
+			*sizeOnDisk += 24;
+		}
+		else
+		{
+			fseeko(zip->f, 16, SEEK_CUR);
+			*sizeOnDisk += 16;
+		}
+	}
+
+	free(data);
+	free(header.fileName);
+	free(header.extraField);
 
 	return true;
 }
@@ -1021,6 +1414,32 @@ zipFile_t *openZip(const char *fn)
 	return zip;
 }
 
+/*****************************************************/
+
+typedef struct {
+	ASN1_INTEGER *a;
+	ASN1_OCTET_STRING *string;
+	ASN1_INTEGER *b;
+	ASN1_INTEGER *c;
+	ASN1_INTEGER *d;
+	ASN1_INTEGER *e;
+	ASN1_INTEGER *f;
+} AppxSpcSipInfo;
+
+DECLARE_ASN1_FUNCTIONS(AppxSpcSipInfo)
+
+ASN1_SEQUENCE(AppxSpcSipInfo) = {
+	ASN1_SIMPLE(AppxSpcSipInfo, a, ASN1_INTEGER),
+	ASN1_SIMPLE(AppxSpcSipInfo, string, ASN1_OCTET_STRING),
+	ASN1_SIMPLE(AppxSpcSipInfo, b, ASN1_INTEGER),
+	ASN1_SIMPLE(AppxSpcSipInfo, c, ASN1_INTEGER),
+	ASN1_SIMPLE(AppxSpcSipInfo, d, ASN1_INTEGER),
+	ASN1_SIMPLE(AppxSpcSipInfo, e, ASN1_INTEGER),
+	ASN1_SIMPLE(AppxSpcSipInfo, f, ASN1_INTEGER),
+} ASN1_SEQUENCE_END(AppxSpcSipInfo)
+
+IMPLEMENT_ASN1_FUNCTIONS(AppxSpcSipInfo)
+
 struct appx_ctx_st
 {
 	zipFile_t *zip;
@@ -1039,7 +1458,7 @@ struct appx_ctx_st
 /* FILE_FORMAT method prototypes */
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
-static ASN1_OBJECT *appx_data_blob_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
+static ASN1_OBJECT *appx_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
 static int appx_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static int appx_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx);
@@ -1050,16 +1469,16 @@ static BIO *appx_bio_free(BIO *hash, BIO *outdata);
 static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 
 FILE_FORMAT file_format_appx = {
-    .ctx_new = appx_ctx_new, //ok
-    .data_blob_get = appx_data_blob_get, //?
+    .ctx_new = appx_ctx_new,
+	.data_blob_get = appx_spc_sip_info_get,
     .check_file = appx_check_file,
     .verify_digests = appx_verify_digests,
     .pkcs7_extract = appx_pkcs7_extract,
     .remove_pkcs7 = appx_remove_pkcs7,
-    .pkcs7_prepare = appx_pkcs7_prepare, //?
+    .pkcs7_prepare = appx_pkcs7_prepare,
     .append_pkcs7 = appx_append_pkcs7,
-    .bio_free = appx_bio_free, //ok?
-    .ctx_cleanup = appx_ctx_cleanup //ok?
+    .bio_free = appx_bio_free,
+    .ctx_cleanup = appx_ctx_cleanup,
 };
 
 FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata)
@@ -1083,12 +1502,7 @@ FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata)
 	return ctx;
 }
 
-ASN1_OBJECT *appx_data_blob_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx)
-{
-	return NULL;
-}
-
-uint8_t *appx_calc_zip_data_hash(zipFile_t *zip, const EVP_MD *md)
+uint8_t *appx_calc_zip_data_hash(zipFile_t *zip, const EVP_MD *md, uint64_t *cdOffset)
 {
 	u_char *mdbuf = NULL;
 
@@ -1102,6 +1516,8 @@ uint8_t *appx_calc_zip_data_hash(zipFile_t *zip, const EVP_MD *md)
 	}
 
 	BIO_push(bhash, BIO_new(BIO_s_null()));
+
+	*cdOffset = 0;
 
 	for (zipCentralDirectoryEntry_t *entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next)
 	{
@@ -1111,38 +1527,14 @@ uint8_t *appx_calc_zip_data_hash(zipFile_t *zip, const EVP_MD *md)
 			continue;
 		}
 
-		fseeko(zip->f, entry->offsetOfLocalHeader, SEEK_SET);
-		int64_t dataSize = zipGetLocalHeaderSize(zip, true);
-
-		if (dataSize == 0)
+		uint64_t sizeOnDisk = 0;
+		if (!zipRewriteData(zip, entry, bhash, &sizeOnDisk))
 		{
-			BIO_free_all(bhash);
-			return NULL;
+			printf("Rewrite data error\n");
+			return false;
 		}
 
-		dataSize += entry->compressedSize;
-
-		fseeko(zip->f, entry->offsetOfLocalHeader, SEEK_SET);
-
-		//printf("Will hash %lld bytes from file offset: %lld\n", dataSize, entry->offsetOfLocalHeader);
-
-		uint8_t *data = malloc(SIZE_64K);
-
-		while (dataSize > 0)
-		{
-			int64_t toRead = dataSize > SIZE_64K ? SIZE_64K : dataSize;
-			dataSize -= toRead;
-			fread(data, 1, toRead, zip->f);
-
-			if (!bio_hash_data(bhash, data, 0, toRead))
-			{
-				free(data);
-				BIO_free_all(bhash);
-				return NULL;
-			}
-		}
-
-		free(data);
+		*cdOffset += sizeOnDisk;
 	}
 
 	mdbuf = OPENSSL_malloc((size_t)EVP_MD_size(md));
@@ -1152,125 +1544,111 @@ uint8_t *appx_calc_zip_data_hash(zipFile_t *zip, const EVP_MD *md)
 	return mdbuf;
 }
 
-uint8_t *appx_eocdr_to_buffer(zipFile_t *zip, bool removeSignatureFile, uint64_t *size)
+void appx_write_central_directory(zipFile_t *zip, BIO *bio, bool removeSignature, uint64_t cdOffset)
 {
+	int64_t offsetDiff = 0;
 	uint64_t cdSize = 0;
-	uint64_t cdShift = 0;
+	int noEntries = 0;
 
 	for (zipCentralDirectoryEntry_t *entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next)
 	{
 		//the signature file is considered non existent for hashing purposes
-		if (removeSignatureFile && !strcmp(entry->fileName, APP_SIGNATURE_FILENAME))
+		if (removeSignature && !strcmp(entry->fileName, APP_SIGNATURE_FILENAME))
 		{
-			fseeko(zip->f, entry->offsetOfLocalHeader, SEEK_SET);
-			int64_t dataSize = zipGetLocalHeaderSize(zip, true);
-
-			if (dataSize == 0)
-			{
-				printf("Local header size calculation failed\n");
-				return NULL;
-			}
-
-			dataSize += entry->compressedSize;
-
-			//the central directory location would be in a different location is the signature file was not appended
-			cdShift = dataSize;
 			continue;
 		}
 
-		cdSize += entry->entryLen;
+		uint64_t sizeOnDisk = 0;
+
+		//APP_SIGNATURE is nt 'tainted' by offset shift after replacing the contents of [content_types]
+		zipWriteCentralDirectoryEntry(bio, entry, strcmp(entry->fileName, APP_SIGNATURE_FILENAME) ? offsetDiff : 0, &sizeOnDisk);
+
+		cdSize += sizeOnDisk;
+
+		if (entry->overrideData)
+		{
+			offsetDiff += entry->overrideData->compressedSize - entry->compressedSize;
+		}
+
+		noEntries++;
 	}
-
-	uint64_t pos = 0;
-
-	//size of zip64 eocdr + zip64 eocd locator + zip eocdr
-	uint64_t maxSize = cdSize + zip->eocdr.commentLen + zip->eocdr64.commentLen + 56 + 20 + 22;
-
-	uint8_t *buffer = malloc(maxSize);
 
 	if (zip->isZip64)
 	{
 		//eocdr
-		memcpy(buffer, PKZIP64_EOCDR_SIGNATURE, 4);
-		pos += 4;
-		bufferAddU64(buffer, &pos, zip->eocdr64.eocdrSize);
-		bufferAddU16(buffer, &pos, zip->eocdr64.creatorVersion);
-		bufferAddU16(buffer, &pos, zip->eocdr64.viewerVersion);
-		bufferAddU32(buffer, &pos, zip->eocdr64.diskNumber);
-		bufferAddU32(buffer, &pos, zip->eocdr64.diskWithCentralDirectory);
-		bufferAddU64(buffer, &pos, zip->eocdr64.diskEntries - (removeSignatureFile ? 1 : 0));
-		bufferAddU64(buffer, &pos, zip->eocdr64.totalEntries - (removeSignatureFile ? 1 : 0));
-		bufferAddU64(buffer, &pos, cdSize);
-		bufferAddU64(buffer, &pos, zip->eocdr64.centralDirectoryOffset - cdShift);
+		BIO_write(bio, PKZIP64_EOCDR_SIGNATURE, 4);
+		bioAddU64(bio, zip->eocdr64.eocdrSize);
+		bioAddU16(bio, zip->eocdr64.creatorVersion);
+		bioAddU16(bio, zip->eocdr64.viewerVersion);
+		bioAddU32(bio, zip->eocdr64.diskNumber);
+		bioAddU32(bio, zip->eocdr64.diskWithCentralDirectory);
+		bioAddU64(bio, noEntries);
+		bioAddU64(bio, noEntries);
+		bioAddU64(bio, cdSize);
+		bioAddU64(bio, cdOffset);
+
 		if (zip->eocdr64.commentLen > 0)
 		{
-			memcpy(buffer + pos, zip->eocdr64.comment, zip->eocdr64.commentLen);
-			pos += zip->eocdr64.commentLen;
+			BIO_write(bio, zip->eocdr64.comment, zip->eocdr64.commentLen);
 		}
 
 		//eocdr locator
-		memcpy(buffer + pos, PKZIP64_EOCD_LOCATOR_SIGNATURE, 4);
-		pos += 4;
-		bufferAddU32(buffer, &pos, zip->locator.diskWithEOCD);
-		uint64_t newPos = zip->locator.eocdOffset - cdShift - (zip->eocdr64.centralDirectorySize - cdSize);
-		bufferAddU64(buffer, &pos, newPos);
-		bufferAddU32(buffer, &pos, zip->locator.totalNumberOfDisks);
+		BIO_write(bio, PKZIP64_EOCD_LOCATOR_SIGNATURE, 4);
+		bioAddU32(bio, zip->locator.diskWithEOCD);
+		bioAddU64(bio, cdOffset + cdSize);
+
+		bioAddU32(bio, zip->locator.totalNumberOfDisks);
 	}
 
-	memcpy(buffer + pos, PKZIP_EOCDR_SIGNATURE, 4);
-	pos += 4;
-	bufferAddU16(buffer, &pos, zip->eocdr.diskNumber);
-	bufferAddU16(buffer, &pos, zip->eocdr.centralDirectoryDiskNumber);
+	BIO_write(bio, PKZIP_EOCDR_SIGNATURE, 4);
+	bioAddU16(bio, zip->eocdr.diskNumber);
+	bioAddU16(bio, zip->eocdr.centralDirectoryDiskNumber);
 
 	if (zip->eocdr.diskEntries != 0xFFFF)
 	{
-		bufferAddU16(buffer, &pos, zip->eocdr.diskEntries - (removeSignatureFile ? 1 : 0));
+		bioAddU16(bio, noEntries);
 	}
 	else
 	{
-		bufferAddU16(buffer, &pos, 0xFFFF);
+		bioAddU16(bio, 0xFFFF);
 	}
 
 	if (zip->eocdr.totalEntries != 0xFFFF)
 	{
-		bufferAddU16(buffer, &pos, zip->eocdr.totalEntries - (removeSignatureFile ? 1 : 0));
+		bioAddU16(bio, noEntries);
 	}
 	else
 	{
-		bufferAddU16(buffer, &pos, 0xFFFF);
+		bioAddU16(bio, 0xFFFF);
 	}
-	
+
 	if (zip->eocdr.centralDirectorySize != 0xFFFFFFFF)
 	{
-		bufferAddU32(buffer, &pos, cdSize);
+		bioAddU32(bio, cdSize);
 	}
 	else
 	{
-		bufferAddU32(buffer, &pos, 0xFFFFFFFF);
+		bioAddU32(bio, 0xFFFFFFFF);
 	}
 
 	if (zip->eocdr.centralDirectoryOffset != 0xFFFFFFFF)
 	{
-		bufferAddU32(buffer, &pos, zip->eocdr.centralDirectoryOffset - cdShift);
+		bioAddU32(bio, cdOffset);
 	}
 	else
 	{
-		bufferAddU32(buffer, &pos, 0xFFFFFFFF);
+		bioAddU32(bio, 0xFFFFFFFF);
 	}
 
-	bufferAddU16(buffer, &pos, zip->eocdr.commentLen);
-	
+	bioAddU16(bio, zip->eocdr.commentLen);
+
 	if (zip->eocdr.commentLen > 0)
 	{
-		memcpy(buffer + pos, zip->eocdr.comment, zip->eocdr.commentLen);
-		pos += zip->eocdr.commentLen;
+		BIO_write(bio, zip->eocdr.comment, zip->eocdr.commentLen);
 	}
-
-	*size = pos;
-	return buffer;
 }
 
-uint8_t *appx_calc_zip_central_directory_hash(zipFile_t *zip, const EVP_MD *md)
+uint8_t *appx_calc_zip_central_directory_hash(zipFile_t *zip, const EVP_MD *md, uint64_t cdOffset)
 {
 	u_char *mdbuf = NULL;
 
@@ -1285,64 +1663,13 @@ uint8_t *appx_calc_zip_central_directory_hash(zipFile_t *zip, const EVP_MD *md)
 
 	BIO_push(bhash, BIO_new(BIO_s_null()));
 
-	for (zipCentralDirectoryEntry_t *entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next)
-	{
-		//the signature file is considered non existent for hashing purposes
-		if (!strcmp(entry->fileName, APP_SIGNATURE_FILENAME))
-		{
-			continue;
-		}
-
-		uint64_t dataSize = entry->entryLen;
-		uint8_t *data = malloc(dataSize);
-
-		fseeko(zip->f, entry->fileOffset, SEEK_SET);
-		fread(data, 1, dataSize, zip->f);
-
-		if (!bio_hash_data(bhash, data, 0, dataSize))
-		{
-			free(data);
-			BIO_free_all(bhash);
-			return NULL;
-		}
-
-		free(data);
-	}
-
-	uint64_t dataSize = 0;
-	uint8_t *data = appx_eocdr_to_buffer(zip, true, &dataSize);
-
-	if (!data || !bio_hash_data(bhash, data, 0, dataSize))
-	{
-		free(data);
-		BIO_free_all(bhash);
-		return NULL;
-	}
-
-	free(data);
+	appx_write_central_directory(zip, bhash, true, cdOffset);
 
 	mdbuf = OPENSSL_malloc((size_t)EVP_MD_size(md));
 	BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
 	BIO_free_all(bhash);
 
 	return mdbuf;
-}
-
-//Check if the signature exists.
-int appx_check_file(FILE_FORMAT_CTX *ctx, int detached)
-{
-	if (detached)
-	{
-		printf("APPX does not support detached option\n");
-		return 0;
-	}
-
-	if (!zipEntryExist(ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME))
-	{
-		return 0;
-	}
-
-	return 1;
 }
 
 int appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
@@ -1361,8 +1688,11 @@ int appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
 
 	ctx->appx_ctx->calculatedBMHash = zipCalcDigest(ctx->appx_ctx->zip, BLOCK_MAP_FILENAME, true, EVP_sha256());
 	ctx->appx_ctx->calculatedCTHash = zipCalcDigest(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME, true, EVP_sha256());
-	ctx->appx_ctx->calculatedCDHash = appx_calc_zip_central_directory_hash(ctx->appx_ctx->zip, EVP_sha256());
-	ctx->appx_ctx->calculatedDataHash = appx_calc_zip_data_hash(ctx->appx_ctx->zip, EVP_sha256());
+
+	uint64_t cdOffset;
+
+	ctx->appx_ctx->calculatedDataHash = appx_calc_zip_data_hash(ctx->appx_ctx->zip, EVP_sha256(), &cdOffset);
+	ctx->appx_ctx->calculatedCDHash = appx_calc_zip_central_directory_hash(ctx->appx_ctx->zip, EVP_sha256(), cdOffset);
 	ctx->appx_ctx->calculatedCIHash = zipCalcDigest(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME, true, EVP_sha256());
 
 	if (!ctx->appx_ctx->calculatedBMHash || !ctx->appx_ctx->calculatedCTHash
@@ -1381,8 +1711,47 @@ int appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
 	return 1;
 }
 
+//Check if the signature exists.
+int appx_check_file(FILE_FORMAT_CTX *ctx, int detached)
+{
+	if (detached)
+	{
+		printf("APPX does not support detached option\n");
+		return 0;
+	}
+
+	appx_calculate_hashes(ctx);
+
+	if (!zipEntryExist(ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME))
+	{
+		printf("%s does not exist\n", APP_SIGNATURE_FILENAME);
+		return 0;
+	}
+
+	return 1;
+}
+
 bool appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *content)
 {
+	content->data->value->value.sequence->data;
+
+	//AppxSpcSipInfo *si = NULL;
+	//uint8_t *blob = content->data->value->value.sequence->data;
+	//d2i_AppxSpcSipInfo(&si, &blob, content->data->value->value.sequence->length);
+
+	//long a = ASN1_INTEGER_get(si->a);
+	//long b = ASN1_INTEGER_get(si->b);
+	//long c = ASN1_INTEGER_get(si->c);
+	//long d = ASN1_INTEGER_get(si->d);
+	//long e = ASN1_INTEGER_get(si->e);
+	//long f = ASN1_INTEGER_get(si->f);
+	//BIO *stdbio = BIO_new_fp(stdout, BIO_NOCLOSE);
+
+	//printf("a: 0x%x b: 0x%x c: 0x%x d: 0x%x e: 0x%x f: 0x%x\n", a, b, c, d, e, f);
+	//ASN1_STRING_print_ex(stdbio, si->string, ASN1_STRFLGS_RFC2253);
+
+	//AppxSpcSipInfo_free(si);
+
 	int length = content->messageDigest->digest->length;
 	uint8_t *data = content->messageDigest->digest->data;
 
@@ -1472,7 +1841,7 @@ bool appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *content)
 		return false;
 	}
 
-	if (zipEntryExist(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME) && !ctx->appx_ctx->calculatedCIHash)
+	if (zipEntryExist(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME) && !ctx->appx_ctx->existingCIHash)
 	{
 		printf("Code integrity hash missing\n");
 		return false;
@@ -1513,21 +1882,6 @@ bool appx_compare_hashes(FILE_FORMAT_CTX *ctx)
 		return false;
 	}
 
-	if (ctx->appx_ctx->calculatedCDHash && ctx->appx_ctx->existingCDHash)
-	{
-		printf("Checking Central Directory hashes:\n");
-
-		if (!compare_digests(ctx->appx_ctx->existingCDHash, ctx->appx_ctx->calculatedCDHash, NID_sha256))
-		{
-			return false;
-		}
-	}
-	else
-	{
-		printf("Central Directory hash missing\n");
-		return false;
-	}
-
 	if (ctx->appx_ctx->calculatedDataHash && ctx->appx_ctx->existingDataHash)
 	{
 		printf("Checking Data hashes:\n");
@@ -1543,11 +1897,26 @@ bool appx_compare_hashes(FILE_FORMAT_CTX *ctx)
 		return false;
 	}
 
+	if (ctx->appx_ctx->calculatedCDHash && ctx->appx_ctx->existingCDHash)
+	{
+		printf("Checking Central Directory hashes:\n");
+
+		if (!compare_digests(ctx->appx_ctx->existingCDHash, ctx->appx_ctx->calculatedCDHash, NID_sha256))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		printf("Central Directory hash missing\n");
+		return false;
+	}
+
 	if (ctx->appx_ctx->calculatedCIHash && ctx->appx_ctx->existingCIHash)
 	{
 		printf("Checking Code Integrity hashes:\n");
 
-		if (!compare_digests(ctx->appx_ctx->existingDataHash, ctx->appx_ctx->calculatedDataHash, NID_sha256))
+		if (!compare_digests(ctx->appx_ctx->existingCIHash, ctx->appx_ctx->calculatedCIHash, NID_sha256))
 		{
 			return false;
 		}
@@ -1627,13 +1996,272 @@ PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 	return d2i_PKCS7(NULL, &blob, dataSize - 4);
 }
 
-int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
+bool appx_remove_ct_signature_entry(zipFile_t *zip, zipCentralDirectoryEntry_t *entry)
 {
-	return 1;
+	uint8_t *data;
+	uint64_t dataSize;
+
+	if (!zipReadFileData(zip, entry, &data, &dataSize, true))
+	{
+		return false;
+	}
+
+	char *cpos = strstr((char *)data, SIGNATURE_CONTENT_TYPES_ENTRY);
+
+	if (!cpos)
+	{
+		//do not treat as en error
+		printf("Did not find existing signature entry in %s\n", entry->fileName);
+		return true;
+	}
+
+	int ipos = cpos - data;
+	int len = strlen(SIGNATURE_CONTENT_TYPES_ENTRY);
+
+	memcpy(data + ipos, data + ipos + len, dataSize - ipos - len);
+
+	dataSize -= len;
+
+	bool ret = zipOverrideFileData(zip, entry, data, dataSize, true);
+
+	free(data);
+
+	return ret;
 }
 
-#if 0
-int appx_add_indirect_data_object(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
+bool appx_append_ct_signature_entry(zipFile_t *zip, zipCentralDirectoryEntry_t *entry)
+{
+	uint8_t *data;
+	uint64_t dataSize;
+
+	if (!zipReadFileData(zip, entry, &data, &dataSize, true))
+	{
+		return false;
+	}
+
+	char *cpos = strstr((char *)data, SIGNATURE_CONTENT_TYPES_CLOSING_TAG);
+
+	if (!cpos)
+	{
+		printf("%s parsing error\n", entry->fileName);
+		return false;
+	}
+
+	int ipos = cpos - data;
+
+	int len = strlen(SIGNATURE_CONTENT_TYPES_ENTRY);
+
+	uint64_t newSize = dataSize + len;
+	uint8_t *newData = malloc(newSize);
+
+	memcpy(newData, data, ipos);
+	memcpy(newData + ipos, SIGNATURE_CONTENT_TYPES_ENTRY, len);
+	memcpy(newData + ipos + len, data + ipos, dataSize - ipos);
+
+	bool ret = zipOverrideFileData(zip, entry, newData, newSize, true);
+
+	free(data);
+	free(newData);
+
+	return ret;
+}
+
+int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
+{
+	zipFile_t *zip = ctx->appx_ctx->zip;
+
+	zipCentralDirectoryEntry_t *entry = zipGetCDEntryByName(zip, CONTENT_TYPES_FILENAME);
+
+	if (!entry)
+	{
+		printf("Not a valid .appx file: content types file missing\n");
+		return -1;
+	}
+
+	if (!appx_remove_ct_signature_entry(zip, entry))
+	{
+		return -1;
+	}
+
+	for (zipCentralDirectoryEntry_t *entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next)
+	{
+		if (strcmp(APP_SIGNATURE_FILENAME, entry->fileName))
+		{
+			uint64_t dummy;
+			if (!zipRewriteData(zip, entry, outdata, &dummy))
+			{
+				return -1;
+			}
+		}
+	}
+
+	uint64_t size = 0;
+
+	int64_t cdOffset = BIO_tell(outdata);
+
+	appx_write_central_directory(zip, outdata, true, cdOffset);
+
+	return 0;
+}
+
+/*
+ * Allocate and return SpcSipInfo object.
+ * [out] p: SpcSipInfo data
+ * [out] plen: SpcSipInfo data length
+ * [in] ctx: structure holds input and output data (unused)
+ * [returns] pointer to ASN1_OBJECT structure corresponding to SPC_SIPINFO_OBJID
+ */
+ASN1_OBJECT *appx_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx)
+{
+	//no idea what this represents
+	const u_char appxstr[] = {
+		0x4B, 0xDF, 0xC5, 0x0A, 0x07, 0xCE, 0xE2, 0x4D,
+		0xB7, 0x6E, 0x23, 0xC8, 0x39, 0xA0, 0x9F, 0xD1,
+	};
+
+	ASN1_OBJECT *dtype;
+	AppxSpcSipInfo *si = AppxSpcSipInfo_new();
+
+	/* squash the unused parameter warning */
+	(void)ctx;
+
+	ASN1_INTEGER_set(si->a, 0x01010000);
+	ASN1_INTEGER_set(si->b, 0);
+	ASN1_INTEGER_set(si->c, 0);
+	ASN1_INTEGER_set(si->d, 0);
+	ASN1_INTEGER_set(si->e, 0);
+	ASN1_INTEGER_set(si->f, 0);
+	ASN1_OCTET_STRING_set(si->string, appxstr, sizeof(appxstr));
+	*plen = i2d_AppxSpcSipInfo(si, NULL);
+	*p = OPENSSL_malloc((size_t)*plen);
+	i2d_SpcSipInfo(si, p);
+	*p -= *plen;
+	dtype = OBJ_txt2obj(SPC_SIPINFO_OBJID, 1);
+	AppxSpcSipInfo_free(si);
+	return dtype; /* OK */
+}
+
+/*
+ * Replace the data part with the MS Authenticode spcIndirectDataContent blob
+ * [out] p7: new PKCS#7 signature
+ * [in] hash: message digest BIO
+ * [in] blob: SpcIndirectDataContent data
+ * [in] len: SpcIndirectDataContent data length
+ * [returns] 0 on error or 1 on success
+ */
+static int appx_pkcs7_set_spc_indirect_data_content(PKCS7 *p7, uint8_t *hash, int hashLen, u_char *buf, int len)
+{
+	u_char mdbuf[EVP_MAX_MD_SIZE];
+	int seqhdrlen;
+	BIO *bio;
+	PKCS7 *td7;
+
+	memcpy(buf + len, hash, hashLen);
+	seqhdrlen = asn1_simple_hdr_len(buf, len);
+
+	if ((bio = PKCS7_dataInit(p7, NULL)) == NULL)
+	{
+		printf("PKCS7_dataInit failed\n");
+		return 0; /* FAILED */
+	}
+
+	BIO_write(bio, buf + seqhdrlen, len - seqhdrlen + hashLen);
+	(void)BIO_flush(bio);
+
+	if (!PKCS7_dataFinal(p7, bio))
+	{
+		printf("PKCS7_dataFinal failed\n");
+		return 0; /* FAILED */
+	}
+
+	BIO_free_all(bio);
+
+	td7 = PKCS7_new();
+	td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+	td7->d.other = ASN1_TYPE_new();
+	td7->d.other->type = V_ASN1_SEQUENCE;
+	td7->d.other->value.sequence = ASN1_STRING_new();
+	ASN1_STRING_set(td7->d.other->value.sequence, buf, len + hashLen);
+
+	if (!PKCS7_set_content(p7, td7))
+	{
+		PKCS7_free(td7);
+		printf("PKCS7_set_content failed\n");
+		return 0; /* FAILED */
+	}
+
+	return 1; /* OK */
+}
+
+/*
+ * [out] blob: SpcIndirectDataContent data
+ * [out] len: SpcIndirectDataContent data length
+ * [in] ctx: FILE_FORMAT_CTX structure
+ * [returns] 0 on error or 1 on success
+ */
+static int appx_spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CTX *ctx, int hashLen)
+{
+	u_char *p = NULL;
+	int l = 0;
+	void *hash;
+	SpcIndirectDataContent *idc = SpcIndirectDataContent_new();
+
+	idc->data->value = ASN1_TYPE_new();
+	idc->data->value->type = V_ASN1_SEQUENCE;
+	idc->data->value->value.sequence = ASN1_STRING_new();
+	idc->data->type = ctx->format->data_blob_get(&p, &l, ctx);
+	idc->data->value->value.sequence->data = p;
+	idc->data->value->value.sequence->length = l;
+	idc->messageDigest->digestAlgorithm->algorithm = OBJ_nid2obj(NID_sha256);
+	idc->messageDigest->digestAlgorithm->parameters = ASN1_TYPE_new();
+	idc->messageDigest->digestAlgorithm->parameters->type = V_ASN1_NULL;
+
+	hash = OPENSSL_malloc((size_t)hashLen);
+	memset(hash, 0, (size_t)hashLen);
+	ASN1_OCTET_STRING_set(idc->messageDigest->digest, hash, hashLen);
+	OPENSSL_free(hash);
+
+	*len = i2d_SpcIndirectDataContent(idc, NULL);
+	*blob = OPENSSL_malloc((size_t)*len);
+	p = *blob;
+	i2d_SpcIndirectDataContent(idc, &p);
+	SpcIndirectDataContent_free(idc);
+	*len -= hashLen;
+	return 1; /* OK */
+}
+
+/*
+ * [out] p7: new PKCS#7 signature
+ * [in] hash: message digest BIO
+ * [in] ctx: structure holds input and output data
+ * [returns] 0 on error or 1 on success
+ */
+int appx_pkcs7_set_data_content(PKCS7 *p7, uint8_t *hash, int hashLen, FILE_FORMAT_CTX *ctx)
+{
+	u_char *p = NULL;
+	int len = 0;
+	u_char *buf;
+
+	if (!appx_spc_indirect_data_content_get(&p, &len, ctx, hashLen))
+		return 0; /* FAILED */
+	buf = OPENSSL_malloc(SIZE_64K);
+	memcpy(buf, p, (size_t)len);
+	OPENSSL_free(p);
+	if (!appx_pkcs7_set_spc_indirect_data_content(p7, hash, hashLen, buf, len)) {
+		OPENSSL_free(buf);
+		return 0; /* FAILED */
+	}
+	OPENSSL_free(buf);
+
+	return 1; /* OK */
+}
+
+/*
+ * [in, out] p7: new PKCS#7 signature
+ * [in] hash: message digest BIO
+ * [returns] 0 on error or 1 on success
+ */
+int appx_add_indirect_data_object(PKCS7 *p7, uint8_t *hash, int hashLen, FILE_FORMAT_CTX *ctx)
 {
 	STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 	PKCS7_SIGNER_INFO *si;
@@ -1647,13 +2275,54 @@ int appx_add_indirect_data_object(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 	if (!PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
 		V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1)))
 		return 0; /* FAILED */
-	if (!pkcs7_set_data_content(p7, hash, ctx)) {
+	if (!appx_pkcs7_set_data_content(p7, hash, hashLen, ctx)) {
 		printf("Signing failed\n");
 		return 0; /* FAILED */
 	}
 	return 1; /* OK */
 }
-#endif
+
+uint8_t *appx_hash_blob_get(FILE_FORMAT_CTX *ctx, int *plen)
+{
+	int dataSize = ctx->appx_ctx->calculatedCIHash ? 4 + 5 * (SHA256_DIGEST_LENGTH + 4) : 4 + 4 * (SHA256_DIGEST_LENGTH + 4);
+	uint8_t *data = OPENSSL_malloc(dataSize);
+
+	int pos = 0;
+
+	memcpy(data + pos, APPX_SIGNATURE, 4);
+	pos += 4;
+
+	memcpy(data + pos, AXPC_SIGNATURE, 4);
+	pos += 4;
+	memcpy(data + pos, ctx->appx_ctx->calculatedDataHash, SHA256_DIGEST_LENGTH);
+	pos += SHA256_DIGEST_LENGTH;
+
+	memcpy(data + pos, AXCD_SIGNATURE, 4);
+	pos += 4;
+	memcpy(data + pos, ctx->appx_ctx->calculatedCDHash, SHA256_DIGEST_LENGTH);
+	pos += SHA256_DIGEST_LENGTH;
+
+	memcpy(data + pos, AXCT_SIGNATURE, 4);
+	pos += 4;
+	memcpy(data + pos, ctx->appx_ctx->calculatedCTHash, SHA256_DIGEST_LENGTH);
+	pos += SHA256_DIGEST_LENGTH;
+
+	memcpy(data + pos, AXBM_SIGNATURE, 4);
+	pos += 4;
+	memcpy(data + pos, ctx->appx_ctx->calculatedBMHash, SHA256_DIGEST_LENGTH);
+	pos += SHA256_DIGEST_LENGTH;
+
+	if (ctx->appx_ctx->calculatedCIHash)
+	{
+		memcpy(data + pos, AXCI_SIGNATURE, 4);
+		pos += 4;
+		memcpy(data + pos, ctx->appx_ctx->calculatedCIHash, SHA256_DIGEST_LENGTH);
+		pos += SHA256_DIGEST_LENGTH;
+	}
+
+	*plen = pos;
+	return data;
+}
 
 /*
  * Obtain an existing signature or create a new one.
@@ -1665,50 +2334,152 @@ int appx_add_indirect_data_object(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 static PKCS7 *appx_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
 	PKCS7 *cursig = NULL, *p7 = NULL;
-#if 0
+
 	/* squash unused parameter warnings */
 	(void)outdata;
 	(void)hash;
 
-	/* Obtain an existing signature */
-	cursig = appx_pkcs7_extract(ctx);
-	if (!cursig)
+	if (ctx->options->cmd == CMD_ADD || ctx->options->cmd == CMD_ATTACH)
 	{
-		printf("Unable to extract existing signature\n");
-		return NULL; /* FAILED */
-	}
-	if (ctx->options->cmd == CMD_ADD || ctx->options->cmd == CMD_ATTACH) {
-		p7 = cursig;
+		/* Obtain an existing signature */
+		cursig = appx_pkcs7_extract(ctx);
+
+		if (!cursig)
+		{
+			printf("Unable to extract existing signature\n");
+			return NULL; /* FAILED */
+		}
+
+		return cursig;
 	}
 	else if (ctx->options->cmd == CMD_SIGN)
 	{
 		/* Create a new signature */
+		zipCentralDirectoryEntry_t *entry = zipGetCDEntryByName(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME);
+
+		if (!entry)
+		{
+			printf("Not a valid .appx file: content types file missing\n");
+			return -1;
+		}
+
+		if (!appx_append_ct_signature_entry(ctx->appx_ctx->zip, entry))
+		{
+			return -1;
+		}
+		
+		if (!appx_calculate_hashes(ctx))
+		{
+			printf("Failed to claculate one ore more hash\n");
+			return NULL;
+		}
+
 		/* Create a new PKCS#7 signature */
 		p7 = pkcs7_create(ctx);
-		if (!p7) {
+		if (!p7)
+		{
 			printf("Creating a new signature failed\n");
 			return NULL; /* FAILED */
 		}
-		if (!add_indirect_data_object(p7, hash, ctx)) {
+
+		int len = 0;
+		uint8_t *hashBlob = appx_hash_blob_get(ctx, &len);
+
+		if (!appx_add_indirect_data_object(p7, hashBlob, len, ctx)) {
 			printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
+			OPENSSL_free(hashBlob);
 			PKCS7_free(p7);
 			return NULL; /* FAILED */
 		}
+
+		OPENSSL_free(hashBlob);
 	}
-#endif
+
 	return p7; /* OK */
 }
 
 int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 {
-	return 1;
+	zipFile_t *zip = ctx->appx_ctx->zip;
+
+	zipCentralDirectoryEntry_t *prev = NULL;
+	zipCentralDirectoryEntry_t *last = NULL;
+
+	for (zipCentralDirectoryEntry_t *entry = zip->centralDirectoryHead; entry != NULL; prev = entry)
+	{
+		last = entry;
+
+		if (strcmp(APP_SIGNATURE_FILENAME, entry->fileName))
+		{
+			uint64_t dummy = 0;
+			if (!zipRewriteData(zip, entry, outdata, &dummy))
+			{
+				return -1;
+			}
+
+			entry = entry->next;
+		}
+		else
+		{
+			//remove the entry
+			//actually this code is pretty naive - if you remove the entry that was not at the end
+			//everything will go south - the offsets in the CD will not match the local header offsets.
+			//that can be fixed here or left as is - signtool & this tool always appends the signatuee file at the end.
+			//Might be a problem when someone decides to unpack & repack the .appx zip file
+			zipCentralDirectoryEntry_t *current = entry;
+			entry = entry->next;
+
+			if (prev)
+			{
+				prev->next = entry;
+			}
+
+			freeZipCentralDirectoryEntry(entry);
+		}
+	}
+
+	if (!last)
+	{
+		//not really possible unless an empty zip file, but who knows
+		return -1;
+	}
+
+	//create the signature entry
+	uint8_t *der = NULL;
+	int noBytes = i2d_PKCS7(p7, &der);
+
+	if (noBytes <= 0)
+	{
+		return -1;
+	}
+
+	uint8_t *blob = malloc(noBytes + 4);
+	memcpy(blob, PKCX_SIGNATURE, 4);
+	memcpy(blob + 4, der, noBytes);
+
+	noBytes += 4;
+
+	if (!zipAppendFile(zip, outdata, APP_SIGNATURE_FILENAME, blob, noBytes, true))
+	{
+		free(blob);
+		return -1;
+	}
+
+
+	OPENSSL_free(der);
+
+	free(blob);
+
+	int64_t cdOffset = BIO_tell(outdata); //again, 32bit api -> will limit us to 2GB files
+
+	appx_write_central_directory(zip, outdata, false, cdOffset);
+
+	return 0;
 }
 
 BIO *appx_bio_free(BIO *hash, BIO *outdata)
 {
-	/* squash the unused parameter warning */
-	(void)outdata;
-
+	BIO_free_all(outdata);
 	BIO_free_all(hash);
 	return NULL;
 }
