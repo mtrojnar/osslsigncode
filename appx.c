@@ -29,6 +29,7 @@
 #include "helpers.h"
 
 #include <zlib.h>
+#include <inttypes.h>
 
 #if defined(_MSC_VER)
 #define fseeko _fseeki64
@@ -572,7 +573,6 @@ bool zipReadLocalHeader(zipLocalHeader_t *header, zipFile_t *zip, uint32_t compr
 		}
 		else
 		{
-			freeZipCentralDirectoryEntry(header);
 			free(header->fileName);
 			free(header->extraField);
 			header->fileName = NULL;
@@ -631,7 +631,7 @@ zipCentralDirectoryEntry_t *zipReadNextCentralDirectoryEntry(FILE *f)
 
 	if (entry->fileCommentLen > 0)
 	{
-		entry->fileComment = calloc(1, entry->fileComment + 1);
+		entry->fileComment = calloc(1, entry->fileCommentLen + 1);
 		fread(entry->fileComment, 1, entry->fileCommentLen, f);
 	}
 
@@ -757,11 +757,11 @@ bool zipReadCentralDirectory(zipFile_t *zip, FILE *f)
 
 void zipPrintCentralDirectory(zipFile_t *zip)
 {
-	printf("Central directory entry count: %lld\n", zip->centralDirectoryRecordCount);
+	printf("Central directory entry count: %" PRIu64"\n", zip->centralDirectoryRecordCount);
 
 	for (zipCentralDirectoryEntry_t *entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next)
 	{
-		printf("Name: %s Compressed: %lld Uncompressed: %lld Offset: %lld\n", entry->fileName,
+		printf("Name: %s Compressed: %" PRIu64" Uncompressed: %" PRIu64" Offset: %" PRIu64"\n", entry->fileName,
 			entry->compressedSize, entry->uncompressedSize, entry->offsetOfLocalHeader);
 	}
 }
@@ -2010,7 +2010,7 @@ PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 
 	uint8_t *blob = data + 4;
 
-	return d2i_PKCS7(NULL, &blob, dataSize - 4);
+	return d2i_PKCS7(NULL, (const unsigned char **)&blob, dataSize - 4);
 }
 
 bool appx_remove_ct_signature_entry(zipFile_t *zip, zipCentralDirectoryEntry_t *entry)
@@ -2032,7 +2032,7 @@ bool appx_remove_ct_signature_entry(zipFile_t *zip, zipCentralDirectoryEntry_t *
 		return true;
 	}
 
-	int ipos = cpos - data;
+	int ipos = cpos - (char *)data;
 	int len = strlen(SIGNATURE_CONTENT_TYPES_ENTRY);
 
 	memcpy(data + ipos, data + ipos + len, dataSize - ipos - len);
@@ -2064,7 +2064,7 @@ bool appx_append_ct_signature_entry(zipFile_t *zip, zipCentralDirectoryEntry_t *
 		return false;
 	}
 
-	int ipos = cpos - data;
+	int ipos = cpos - (char *)data;
 
 	int len = strlen(SIGNATURE_CONTENT_TYPES_ENTRY);
 
@@ -2130,8 +2130,7 @@ int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
  */
 ASN1_OBJECT *appx_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx)
 {
-	//no idea what this represents
-	const u_char appxstr[] = {
+	const u_char appxuuid[] = {
 		0x4B, 0xDF, 0xC5, 0x0A, 0x07, 0xCE, 0xE2, 0x4D,
 		0xB7, 0x6E, 0x23, 0xC8, 0x39, 0xA0, 0x9F, 0xD1,
 	};
@@ -2148,10 +2147,10 @@ ASN1_OBJECT *appx_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx)
 	ASN1_INTEGER_set(si->d, 0);
 	ASN1_INTEGER_set(si->e, 0);
 	ASN1_INTEGER_set(si->f, 0);
-	ASN1_OCTET_STRING_set(si->string, appxstr, sizeof(appxstr));
+	ASN1_OCTET_STRING_set(si->string, appxuuid, sizeof(appxuuid));
 	*plen = i2d_AppxSpcSipInfo(si, NULL);
 	*p = OPENSSL_malloc((size_t)*plen);
-	i2d_SpcSipInfo(si, p);
+	i2d_AppxSpcSipInfo(si, p);
 	*p -= *plen;
 	dtype = OBJ_txt2obj(SPC_SIPINFO_OBJID, 1);
 	AppxSpcSipInfo_free(si);
@@ -2377,12 +2376,12 @@ static PKCS7 *appx_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 		if (!entry)
 		{
 			printf("Not a valid .appx file: content types file missing\n");
-			return -1;
+			return NULL;
 		}
 
 		if (!appx_append_ct_signature_entry(ctx->appx_ctx->zip, entry))
 		{
-			return -1;
+			return NULL;
 		}
 		
 		if (!appx_calculate_hashes(ctx))
