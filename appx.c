@@ -27,9 +27,12 @@ static const char PKZIP64_EOCDR_SIGNATURE[4] = { 'P', 'K', 6, 6 };
 static const char *APP_SIGNATURE_FILENAME = "AppxSignature.p7x";
 static const char *CONTENT_TYPES_FILENAME = "[Content_Types].xml";
 static const char *BLOCK_MAP_FILENAME = "AppxBlockMap.xml";
+static const char *APPXBUNDLE_MANIFEST_FILE_NAME = "AppxMetadata/AppxBundleManifest.xml";
 static const char *CODE_INTEGRITY_FILENAME = "AppxMetadata/CodeIntegrity.cat";
 static const char *SIGNATURE_CONTENT_TYPES_ENTRY = "<Override PartName=\"/AppxSignature.p7x\" ContentType=\"application/vnd.ms-appx.signature\"/>";
 static const char *SIGNATURE_CONTENT_TYPES_CLOSING_TAG = "</Types>";
+static const u_char APPX_UUID[] = { 0x4B, 0xDF, 0xC5, 0x0A, 0x07, 0xCE, 0xE2, 0x4D, 0xB7, 0x6E, 0x23, 0xC8, 0x39, 0xA0, 0x9F, 0xD1, };
+static const u_char APPXBUNDLE_UUID[] = { 0xB3, 0x58, 0x5F, 0x0F, 0xDE, 0xAA, 0x9A, 0x4B, 0xA4, 0x34, 0x95, 0x74, 0x2D, 0x92, 0xEC, 0xEB, };
 
 static const char PKCX_SIGNATURE[4] = { 'P', 'K', 'C', 'X' }; //Main header header
 static const char APPX_SIGNATURE[4] = { 'A', 'P', 'P', 'X' }; //APPX header
@@ -1452,6 +1455,7 @@ struct appx_ctx_st
 	uint8_t *existingCDHash;
 	uint8_t *existingDataHash;
 	uint8_t *existingCIHash;
+	bool isBundle;
 } appx_ctx_t;
 
 /* FILE_FORMAT method prototypes */
@@ -1500,6 +1504,11 @@ FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata)
 	ctx->appx_ctx->zip = zip;
 	ctx->format = &file_format_appx;
 	ctx->options = options;
+
+	if (zipGetCDEntryByName(zip, APPXBUNDLE_MANIFEST_FILE_NAME))
+	{
+		ctx->appx_ctx->isBundle = true;
+	}
 
 	return ctx;
 }
@@ -2125,11 +2134,6 @@ int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
  */
 ASN1_OBJECT *appx_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx)
 {
-	const u_char appxuuid[] = {
-		0x4B, 0xDF, 0xC5, 0x0A, 0x07, 0xCE, 0xE2, 0x4D,
-		0xB7, 0x6E, 0x23, 0xC8, 0x39, 0xA0, 0x9F, 0xD1,
-	};
-
 	ASN1_OBJECT *dtype;
 	AppxSpcSipInfo *si = AppxSpcSipInfo_new();
 
@@ -2142,7 +2146,18 @@ ASN1_OBJECT *appx_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx)
 	ASN1_INTEGER_set(si->d, 0);
 	ASN1_INTEGER_set(si->e, 0);
 	ASN1_INTEGER_set(si->f, 0);
-	ASN1_OCTET_STRING_set(si->string, appxuuid, sizeof(appxuuid));
+
+	if (ctx->appx_ctx->isBundle)
+	{
+		printf("Signing as a bundle\n");
+		ASN1_OCTET_STRING_set(si->string, APPXBUNDLE_UUID, sizeof(APPXBUNDLE_UUID));
+	}
+	else
+	{
+		printf("Signing as a package\n");
+		ASN1_OCTET_STRING_set(si->string, APPX_UUID, sizeof(APPX_UUID));
+	}
+
 	*plen = i2d_AppxSpcSipInfo(si, NULL);
 	*p = OPENSSL_malloc((size_t)*plen);
 	i2d_AppxSpcSipInfo(si, p);
