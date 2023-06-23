@@ -42,6 +42,11 @@ static const char AXCT_SIGNATURE[4] = { 'A', 'X', 'C', 'T' }; //digest of uncomp
 static const char AXBM_SIGNATURE[4] = { 'A', 'X', 'B', 'M' }; //digest of uncompressed AppxBlockMap.xml
 static const char AXCI_SIGNATURE[4] = { 'A', 'X', 'C', 'I' }; //digest of uncompressed AppxMetadata/CodeIntegrity.cat (optional)
 
+static const char *HASH_METHOD_TAG = "HashMethod";
+static const char *HASH_METHOD_SHA256 = "http://www.w3.org/2001/04/xmlenc#sha256";
+static const char *HASH_METHOD_SHA384 = "http://www.w3.org/2001/04/xmldsig-more#sha384";
+static const char *HASH_METHOD_SHA512 = "http://www.w3.org/2001/04/xmlenc#sha512";
+
 #define EOCDR_SIZE 22
 #define ZIP64_EOCD_LOCATOR_SIZE 20
 #define ZIP64_HEADER 0x01
@@ -1456,6 +1461,7 @@ struct appx_ctx_st
 	uint8_t *existingDataHash;
 	uint8_t *existingCIHash;
 	bool isBundle;
+	const EVP_MD *md;
 } appx_ctx_t;
 
 /* FILE_FORMAT method prototypes */
@@ -1484,6 +1490,97 @@ FILE_FORMAT file_format_appx = {
     .ctx_cleanup = appx_ctx_cleanup,
 };
 
+const EVP_MD *appx_get_md(zipFile_t *zip)
+{
+	uint8_t *data = NULL;
+	uint64_t dataSize = 0;
+
+	if (!zipReadFileDataByName(zip, BLOCK_MAP_FILENAME, &data, &dataSize, true))
+	{
+		printf("Could not read: %s\n", BLOCK_MAP_FILENAME);
+		return NULL;
+	}
+
+	char *start = strstr((char *)data, HASH_METHOD_TAG);
+
+	if (!start)
+	{
+		printf("Parse error: tag: %s not found in %s\n", HASH_METHOD_TAG, BLOCK_MAP_FILENAME);
+
+		free(data);
+		return NULL;
+	}
+
+	start += strlen(HASH_METHOD_TAG);
+
+	if ((uint8_t *)start >= data + dataSize)
+	{
+		printf("Parse error: data too short in %s\n", BLOCK_MAP_FILENAME);
+
+		free(data);
+		return NULL;
+	}
+
+	char *end = strstr(start, ">");
+
+	if (!end)
+	{
+		printf("Parse error: end of tag not found in %s\n", BLOCK_MAP_FILENAME);
+
+		free(data);
+		return NULL;
+	}
+
+	char *valueStart = NULL;
+	char *valueEnd = NULL;
+
+	for (char *pos = start; pos != end; pos++)
+	{
+		if (*pos == '"')
+		{
+			if (!valueStart)
+			{
+				valueStart = pos + 1;
+			}
+			else
+			{
+				valueEnd = pos - 1;
+			}
+		}
+	}
+
+	if (!valueStart || !valueEnd || valueEnd <= valueStart)
+	{
+		printf("Parse error: value parse error in %s\n", BLOCK_MAP_FILENAME);
+
+		free(data);
+		return NULL;
+	}
+
+	int slen = valueEnd - valueStart + 1;
+
+	const EVP_MD *md = NULL;
+
+	if (strlen(HASH_METHOD_SHA256) == slen && !memcmp(valueStart, HASH_METHOD_SHA256, slen))
+	{
+		printf("Hash method is SHA256\n");
+		md = EVP_sha256();
+	}
+	else if (strlen(HASH_METHOD_SHA384) == slen && !memcmp(valueStart, HASH_METHOD_SHA384, slen))
+	{
+		printf("Hash method is SHA384\n");
+		md = EVP_sha384();
+	}
+	else if (strlen(HASH_METHOD_SHA512) == slen && !memcmp(valueStart, HASH_METHOD_SHA512, slen))
+	{
+		printf("Hash method is SHA512\n");
+		md = EVP_sha512();
+	}
+
+	free(data);
+	return md;
+}
+
 FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata)
 {
 	zipFile_t *zip = openZip(options->infile);
@@ -1498,12 +1595,22 @@ FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata)
 		zipPrintCentralDirectory(zip);
 	}
 
+	const EVP_MD *md = appx_get_md(zip);
+
+	if (!md)
+	{
+		freeZip(zip);
+		return NULL;
+	}
+
 	FILE_FORMAT_CTX *ctx = OPENSSL_malloc(sizeof(FILE_FORMAT_CTX));
 	ctx->appx_ctx = OPENSSL_zalloc(sizeof(appx_ctx_t));
 
 	ctx->appx_ctx->zip = zip;
 	ctx->format = &file_format_appx;
 	ctx->options = options;
+
+	ctx->appx_ctx->md = md;
 
 	if (zipGetCDEntryByName(zip, APPXBUNDLE_MANIFEST_FILE_NAME))
 	{
@@ -1699,14 +1806,14 @@ int appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
 	ctx->appx_ctx->calculatedDataHash = NULL;
 	ctx->appx_ctx->calculatedCIHash = NULL;
 
-	ctx->appx_ctx->calculatedBMHash = zipCalcDigest(ctx->appx_ctx->zip, BLOCK_MAP_FILENAME, true, EVP_sha256());
-	ctx->appx_ctx->calculatedCTHash = zipCalcDigest(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME, true, EVP_sha256());
+	ctx->appx_ctx->calculatedBMHash = zipCalcDigest(ctx->appx_ctx->zip, BLOCK_MAP_FILENAME, true, ctx->appx_ctx->md);
+	ctx->appx_ctx->calculatedCTHash = zipCalcDigest(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME, true, ctx->appx_ctx->md);
 
 	uint64_t cdOffset;
 
-	ctx->appx_ctx->calculatedDataHash = appx_calc_zip_data_hash(ctx->appx_ctx->zip, EVP_sha256(), &cdOffset);
-	ctx->appx_ctx->calculatedCDHash = appx_calc_zip_central_directory_hash(ctx->appx_ctx->zip, EVP_sha256(), cdOffset);
-	ctx->appx_ctx->calculatedCIHash = zipCalcDigest(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME, true, EVP_sha256());
+	ctx->appx_ctx->calculatedDataHash = appx_calc_zip_data_hash(ctx->appx_ctx->zip, ctx->appx_ctx->md, &cdOffset);
+	ctx->appx_ctx->calculatedCDHash = appx_calc_zip_central_directory_hash(ctx->appx_ctx->zip, ctx->appx_ctx->md, cdOffset);
+	ctx->appx_ctx->calculatedCIHash = zipCalcDigest(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME, true, ctx->appx_ctx->md);
 
 	if (!ctx->appx_ctx->calculatedBMHash || !ctx->appx_ctx->calculatedCTHash
 		|| !ctx->appx_ctx->calculatedCDHash || !ctx->appx_ctx->calculatedDataHash)
@@ -1767,9 +1874,10 @@ bool appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *content)
 
 	int length = content->messageDigest->digest->length;
 	uint8_t *data = content->messageDigest->digest->data;
+	int mdlen = EVP_MD_size(ctx->appx_ctx->md);
 
 	//we are expecting at least 4 hashes + 4 byte header
-	if (length < 4 * SHA256_DIGEST_LENGTH + 4)
+	if (length < 4 * mdlen + 4)
 	{
 		printf("Hash too short\n");
 		return false;
@@ -1795,39 +1903,40 @@ bool appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *content)
 
 	int pos = 4;
 
-	while (pos + SHA256_DIGEST_LENGTH + 4 <= length)
+	while (pos + mdlen + 4 <= length)
 	{
 		if (!memcmp(data + pos, AXPC_SIGNATURE, 4))
 		{
-			ctx->appx_ctx->existingDataHash = OPENSSL_malloc(SHA256_DIGEST_LENGTH);
-			memcpy(ctx->appx_ctx->existingDataHash, data + pos + 4, SHA256_DIGEST_LENGTH);
+			ctx->appx_ctx->existingDataHash = OPENSSL_malloc(mdlen);
+			memcpy(ctx->appx_ctx->existingDataHash, data + pos + 4, mdlen);
 		}
 		else if (!memcmp(data + pos, AXCD_SIGNATURE, 4))
 		{
-			ctx->appx_ctx->existingCDHash = OPENSSL_malloc(SHA256_DIGEST_LENGTH);
-			memcpy(ctx->appx_ctx->existingCDHash, data + pos + 4, SHA256_DIGEST_LENGTH);
+			ctx->appx_ctx->existingCDHash = OPENSSL_malloc(mdlen);
+			memcpy(ctx->appx_ctx->existingCDHash, data + pos + 4, mdlen);
 		}
 		else if (!memcmp(data + pos, AXCT_SIGNATURE, 4))
 		{
-			ctx->appx_ctx->existingCTHash = OPENSSL_malloc(SHA256_DIGEST_LENGTH);
-			memcpy(ctx->appx_ctx->existingCTHash, data + pos + 4, SHA256_DIGEST_LENGTH);
+			ctx->appx_ctx->existingCTHash = OPENSSL_malloc(mdlen);
+			memcpy(ctx->appx_ctx->existingCTHash, data + pos + 4, mdlen);
 		}
 		else if (!memcmp(data + pos, AXBM_SIGNATURE, 4))
 		{
-			ctx->appx_ctx->existingBMHash = OPENSSL_malloc(SHA256_DIGEST_LENGTH);
-			memcpy(ctx->appx_ctx->existingBMHash, data + pos + 4, SHA256_DIGEST_LENGTH);
+			ctx->appx_ctx->existingBMHash = OPENSSL_malloc(mdlen);
+			memcpy(ctx->appx_ctx->existingBMHash, data + pos + 4, mdlen);
 		}
 		else if (!memcmp(data + pos, AXCI_SIGNATURE, 4))
 		{
-			ctx->appx_ctx->existingCIHash = OPENSSL_malloc(SHA256_DIGEST_LENGTH);
-			memcpy(ctx->appx_ctx->existingCIHash, data + pos + 4, SHA256_DIGEST_LENGTH);
+			ctx->appx_ctx->existingCIHash = OPENSSL_malloc(mdlen);
+			memcpy(ctx->appx_ctx->existingCIHash, data + pos + 4, mdlen);
 		}
 		else
 		{
 			printf("Invalid hash signature\n");
+			return false;
 		}
 
-		pos += SHA256_DIGEST_LENGTH + 4;
+		pos += mdlen + 4;
 	}
 
 	if (!ctx->appx_ctx->existingDataHash)
@@ -1865,11 +1974,13 @@ bool appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *content)
 
 bool appx_compare_hashes(FILE_FORMAT_CTX *ctx)
 {
+	int mdtype = EVP_MD_nid(ctx->appx_ctx->md);
+
 	if (ctx->appx_ctx->calculatedBMHash && ctx->appx_ctx->existingBMHash)
 	{
 		printf("Checking Block Map hashes:\n");
 
-		if (!compare_digests(ctx->appx_ctx->existingBMHash, ctx->appx_ctx->calculatedBMHash, NID_sha256))
+		if (!compare_digests(ctx->appx_ctx->existingBMHash, ctx->appx_ctx->calculatedBMHash, mdtype))
 		{
 			return false;
 		}
@@ -1884,7 +1995,7 @@ bool appx_compare_hashes(FILE_FORMAT_CTX *ctx)
 	{
 		printf("Checking Content Types hashes:\n");
 
-		if (!compare_digests(ctx->appx_ctx->existingCTHash, ctx->appx_ctx->calculatedCTHash, NID_sha256))
+		if (!compare_digests(ctx->appx_ctx->existingCTHash, ctx->appx_ctx->calculatedCTHash, mdtype))
 		{
 			return false;
 		}
@@ -1899,7 +2010,7 @@ bool appx_compare_hashes(FILE_FORMAT_CTX *ctx)
 	{
 		printf("Checking Data hashes:\n");
 
-		if (!compare_digests(ctx->appx_ctx->existingDataHash, ctx->appx_ctx->calculatedDataHash, NID_sha256))
+		if (!compare_digests(ctx->appx_ctx->existingDataHash, ctx->appx_ctx->calculatedDataHash, mdtype))
 		{
 			return false;
 		}
@@ -1914,7 +2025,7 @@ bool appx_compare_hashes(FILE_FORMAT_CTX *ctx)
 	{
 		printf("Checking Central Directory hashes:\n");
 
-		if (!compare_digests(ctx->appx_ctx->existingCDHash, ctx->appx_ctx->calculatedCDHash, NID_sha256))
+		if (!compare_digests(ctx->appx_ctx->existingCDHash, ctx->appx_ctx->calculatedCDHash, mdtype))
 		{
 			return false;
 		}
@@ -1929,7 +2040,7 @@ bool appx_compare_hashes(FILE_FORMAT_CTX *ctx)
 	{
 		printf("Checking Code Integrity hashes:\n");
 
-		if (!compare_digests(ctx->appx_ctx->existingCIHash, ctx->appx_ctx->calculatedCIHash, NID_sha256))
+		if (!compare_digests(ctx->appx_ctx->existingCIHash, ctx->appx_ctx->calculatedCIHash, mdtype))
 		{
 			return false;
 		}
@@ -2230,6 +2341,8 @@ static int appx_spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORM
 	u_char *p = NULL;
 	int l = 0;
 	void *hash;
+	int mdtype = EVP_MD_nid(ctx->appx_ctx->md);
+
 	SpcIndirectDataContent *idc = SpcIndirectDataContent_new();
 
 	idc->data->value = ASN1_TYPE_new();
@@ -2238,7 +2351,7 @@ static int appx_spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORM
 	idc->data->type = ctx->format->data_blob_get(&p, &l, ctx);
 	idc->data->value->value.sequence->data = p;
 	idc->data->value->value.sequence->length = l;
-	idc->messageDigest->digestAlgorithm->algorithm = OBJ_nid2obj(NID_sha256);
+	idc->messageDigest->digestAlgorithm->algorithm = OBJ_nid2obj(mdtype);
 	idc->messageDigest->digestAlgorithm->parameters = ASN1_TYPE_new();
 	idc->messageDigest->digestAlgorithm->parameters->type = V_ASN1_NULL;
 
@@ -2310,7 +2423,9 @@ int appx_add_indirect_data_object(PKCS7 *p7, uint8_t *hash, int hashLen, FILE_FO
 
 uint8_t *appx_hash_blob_get(FILE_FORMAT_CTX *ctx, int *plen)
 {
-	int dataSize = ctx->appx_ctx->calculatedCIHash ? 4 + 5 * (SHA256_DIGEST_LENGTH + 4) : 4 + 4 * (SHA256_DIGEST_LENGTH + 4);
+	int mdlen = EVP_MD_size(ctx->appx_ctx->md);
+
+	int dataSize = ctx->appx_ctx->calculatedCIHash ? 4 + 5 * (mdlen + 4) : 4 + 4 * (mdlen + 4);
 	uint8_t *data = OPENSSL_malloc(dataSize);
 
 	int pos = 0;
@@ -2320,30 +2435,30 @@ uint8_t *appx_hash_blob_get(FILE_FORMAT_CTX *ctx, int *plen)
 
 	memcpy(data + pos, AXPC_SIGNATURE, 4);
 	pos += 4;
-	memcpy(data + pos, ctx->appx_ctx->calculatedDataHash, SHA256_DIGEST_LENGTH);
-	pos += SHA256_DIGEST_LENGTH;
+	memcpy(data + pos, ctx->appx_ctx->calculatedDataHash, mdlen);
+	pos += mdlen;
 
 	memcpy(data + pos, AXCD_SIGNATURE, 4);
 	pos += 4;
-	memcpy(data + pos, ctx->appx_ctx->calculatedCDHash, SHA256_DIGEST_LENGTH);
-	pos += SHA256_DIGEST_LENGTH;
+	memcpy(data + pos, ctx->appx_ctx->calculatedCDHash, mdlen);
+	pos += mdlen;
 
 	memcpy(data + pos, AXCT_SIGNATURE, 4);
 	pos += 4;
-	memcpy(data + pos, ctx->appx_ctx->calculatedCTHash, SHA256_DIGEST_LENGTH);
-	pos += SHA256_DIGEST_LENGTH;
+	memcpy(data + pos, ctx->appx_ctx->calculatedCTHash, mdlen);
+	pos += mdlen;
 
 	memcpy(data + pos, AXBM_SIGNATURE, 4);
 	pos += 4;
-	memcpy(data + pos, ctx->appx_ctx->calculatedBMHash, SHA256_DIGEST_LENGTH);
-	pos += SHA256_DIGEST_LENGTH;
+	memcpy(data + pos, ctx->appx_ctx->calculatedBMHash, mdlen);
+	pos += mdlen;
 
 	if (ctx->appx_ctx->calculatedCIHash)
 	{
 		memcpy(data + pos, AXCI_SIGNATURE, 4);
 		pos += 4;
-		memcpy(data + pos, ctx->appx_ctx->calculatedCIHash, SHA256_DIGEST_LENGTH);
-		pos += SHA256_DIGEST_LENGTH;
+		memcpy(data + pos, ctx->appx_ctx->calculatedCIHash, mdlen);
+		pos += mdlen;
 	}
 
 	*plen = pos;
