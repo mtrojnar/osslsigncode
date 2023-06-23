@@ -1600,8 +1600,10 @@ void appx_write_central_directory(zipFile_t *zip, BIO *bio, bool removeSignature
 	}
 
 	BIO_write(bio, PKZIP_EOCDR_SIGNATURE, 4);
-	bioAddU16(bio, zip->eocdr.diskNumber);
-	bioAddU16(bio, zip->eocdr.centralDirectoryDiskNumber);
+	//those need to be 0s even though packaging tool writes FFFFs here
+	//it will fail verification if not zeros
+	bioAddU16(bio, 0);
+	bioAddU16(bio, 0);
 
 	if (zip->eocdr.diskEntries != 0xFFFF)
 	{
