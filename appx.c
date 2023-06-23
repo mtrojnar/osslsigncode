@@ -1489,7 +1489,10 @@ FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata)
 		return NULL;
 	}
 
-	zipPrintCentralDirectory(zip);
+	if (options->verbose)
+	{
+		zipPrintCentralDirectory(zip);
+	}
 
 	FILE_FORMAT_CTX *ctx = OPENSSL_malloc(sizeof(FILE_FORMAT_CTX));
 	ctx->appx_ctx = OPENSSL_zalloc(sizeof(appx_ctx_t));
