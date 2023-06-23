@@ -2038,6 +2038,14 @@ bool appx_append_ct_signature_entry(zipFile_t *zip, zipCentralDirectoryEntry_t *
 		return false;
 	}
 
+	char *existingEntry = strstr((char *)data, SIGNATURE_CONTENT_TYPES_ENTRY);
+
+	if (existingEntry)
+	{
+		//do not append it twice
+		return true;
+	}
+
 	char *cpos = strstr((char *)data, SIGNATURE_CONTENT_TYPES_CLOSING_TAG);
 
 	if (!cpos)
@@ -2403,7 +2411,7 @@ int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 	zipCentralDirectoryEntry_t *prev = NULL;
 	zipCentralDirectoryEntry_t *last = NULL;
 
-	for (zipCentralDirectoryEntry_t *entry = zip->centralDirectoryHead; entry != NULL; prev = entry)
+	for (zipCentralDirectoryEntry_t *entry = zip->centralDirectoryHead; entry != NULL; )
 	{
 		last = entry;
 
@@ -2415,6 +2423,7 @@ int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 				return -1;
 			}
 
+			prev = entry;
 			entry = entry->next;
 		}
 		else
@@ -2432,7 +2441,7 @@ int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 				prev->next = entry;
 			}
 
-			freeZipCentralDirectoryEntry(entry);
+			freeZipCentralDirectoryEntry(current);
 		}
 	}
 
