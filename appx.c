@@ -1963,7 +1963,7 @@ int appx_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 
 			if (!appx_compare_hashes(ctx))
 			{
-				printf("Signatue hash verification failed\n");
+				printf("Signature hash verification failed\n");
 				SpcIndirectDataContent_free(idc);
 				return 0; /* FAILED */
 			}
