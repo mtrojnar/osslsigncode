@@ -186,13 +186,16 @@ typedef struct {
     char *ministream;
     char *minifat;
     char *fat;
+    char *difat;
     uint32_t dirtreeLen;
     uint32_t miniStreamLen;
     uint32_t minifatLen;
     uint32_t fatLen;
+    uint32_t difatLen;
     uint32_t ministreamsMemallocCount;
     uint32_t minifatMemallocCount;
     uint32_t fatMemallocCount;
+    uint32_t difatMemallocCount;
     uint32_t dirtreeSectorsCount;
     uint32_t minifatSectorsCount;
     uint32_t fatSectorsCount;
@@ -1542,6 +1545,16 @@ static void fat_append(MSI_OUT *out, char *buf, uint32_t len)
     out->fatLen += len;
 }
 
+static void difat_append(MSI_OUT *out, char *buf, uint32_t len)
+{
+    if (out->difatLen == (uint64_t)out->difatMemallocCount * out->sectorSize) {
+        out->difatMemallocCount += 1;
+        out->difat = OPENSSL_realloc(out->difat, (size_t)(out->difatMemallocCount * out->sectorSize));
+    }
+    memcpy(out->difat + out->difatLen, buf, (size_t)len);
+    out->difatLen += len;
+}
+
 static int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen)
 {
     int i;
@@ -1938,15 +1951,6 @@ static void dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
     out->sectorNum += out->dirtreeSectorsCount;
 }
 
-static void fat_pad_last_sector(MSI_OUT *out, int padValue, char *buf)
-{
-    if (out->fatLen % out->sectorSize > 0) {
-        uint32_t remain = out->sectorSize - out->fatLen % out->sectorSize;
-        memset(buf, padValue, (size_t)remain);
-        fat_append(out, buf, remain);
-    }
-}
-
 static int fat_save(BIO *outdata, MSI_OUT *out)
 {
     char buf[MAX_SECTOR_SIZE];
@@ -1954,8 +1958,6 @@ static int fat_save(BIO *outdata, MSI_OUT *out)
 
     remain = (out->fatLen + out->sectorSize - 1) / out->sectorSize;
     out->fatSectorsCount = (out->fatLen + remain * 4 + out->sectorSize - 1) / out->sectorSize;
-
-    fat_pad_last_sector(out, 0, buf);
 
     if (out->fatSectorsCount > DIFAT_IN_HEADER) {
         difatEntriesPerSector = (out->sectorSize / 4) - 1;
@@ -2001,7 +2003,7 @@ static int fat_save(BIO *outdata, MSI_OUT *out)
                 PUT_UINT32_LE(out->sectorNum + 1, buf + out->sectorSize - 4);
             }
 
-            fat_append(out, buf, out->sectorSize);
+            difat_append(out, buf, out->sectorSize);
             out->sectorNum++;
         }
     }
@@ -2019,9 +2021,14 @@ static int fat_save(BIO *outdata, MSI_OUT *out)
     }
 
     /* empty unallocated free sectors in the last FAT sector */
-    fat_pad_last_sector(out, (int)FREESECT, buf);
+    if (out->fatLen % out->sectorSize > 0) {
+        remain = out->sectorSize - out->fatLen % out->sectorSize;
+        memset(buf, (int)FREESECT, (size_t)remain);
+        fat_append(out, buf, remain);
+    }
 
     BIO_write(outdata, out->fat, (int)out->fatLen);
+    BIO_write(outdata, out->difat, (int)out->difatLen);
     return 1; /* OK */
 }
 
