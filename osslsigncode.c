@@ -2002,12 +2002,10 @@ static int verify_member(FILE_FORMAT_CTX *ctx, CatalogAuthAttr *attribute)
         printf("Failed to extract current message digest\n\n");
         return 1; /* FAILED */
     }
-
-    if(!ctx->format->digest_calc) {
-        printf("Unsupported command\n");
-        return 1; /* Failed */
+    if (!ctx->format->digest_calc) {
+        printf("Unsupported method: digest_calc\n");
+        return 1; /* FAILED */
     }
-
     md = EVP_get_digestbynid(mdtype);
     cmdbuf = ctx->format->digest_calc(ctx, md);
     if (!cmdbuf) {
@@ -2225,13 +2223,14 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
     PKCS7 *p7;
     STACK_OF(PKCS7) *signatures;
     int detached = options->catalog ? 1 : 0;
-    if(!ctx->format->check_file) {
-        printf("Unsupported command\n");
-        return 1; /* Failed */
+
+    if (!ctx->format->check_file) {
+        printf("Unsupported method: check_file\n");
+        return 1; /* FAILED */
     }
 
     if (!ctx->format->check_file(ctx, detached))
-        return 1; /* Failed */
+        return 1; /* FAILED */
 
     if (detached) {
         GLOBAL_OPTIONS *cat_options;
@@ -2248,21 +2247,18 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
             printf("CAT file initialization error\n");
             return 1; /* Failed */
         }
-
-        if(!cat_ctx->format->pkcs7_extract) {
-           printf("Unsupported command\n");
-           return 1; /* Failed */
+        if (!cat_ctx->format->pkcs7_extract) {
+            printf("Unsupported command: extract-signature\n");
+            return 1; /* FAILED */
         }
-
         p7 = cat_ctx->format->pkcs7_extract(cat_ctx);
         cat_ctx->format->ctx_cleanup(cat_ctx, NULL, NULL);
         OPENSSL_free(cat_options);
     } else {
-        if(!ctx->format->pkcs7_extract) {
-           printf("Unsupported command\n");
-           return 1; /* Failed */
+        if (!ctx->format->pkcs7_extract) {
+            printf("Unsupported command: extract-signature\n");
+            return 1; /* FAILED */
         }
-
         p7 = ctx->format->pkcs7_extract(ctx);
     }
     if (!p7) {
@@ -2284,13 +2280,13 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
                 printf("Catalog verification: failed\n\n");
             }
         } else if (ctx->format->verify_digests) {
-            if(ctx->format->verify_digests(ctx, sig)) {
+            if (ctx->format->verify_digests(ctx, sig)) {
                 printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
                 ret &= verify_signature(ctx, sig);
             }
         } else {
-           printf("Unsupported command\n");
-           return 1; /* Failed */
+            printf("Unsupported method: verify_digests\n");
+            return 1; /* FAILED */
         }
     }
     printf("Number of verified signatures: %d\n", i);
@@ -3771,8 +3767,8 @@ int main(int argc, char **argv)
         ret = verify_signed_file(ctx, &options);
         goto skip_signing;
     } else if (options.cmd == CMD_EXTRACT) {
-        if(!ctx->format->pkcs7_extract) {
-            DO_EXIT_0("Unsupported command\n");
+        if (!ctx->format->pkcs7_extract) {
+            DO_EXIT_0("Unsupported command: extract-signature\n");
         }
         p7 = ctx->format->pkcs7_extract(ctx);
         if (!p7) {
@@ -3782,8 +3778,8 @@ int main(int argc, char **argv)
         PKCS7_free(p7);
         goto skip_signing;
     } else if (options.cmd == CMD_REMOVE) {
-        if(!ctx->format->remove_pkcs7) {
-            DO_EXIT_0("Unsupported command\n");
+        if (!ctx->format->remove_pkcs7) {
+            DO_EXIT_0("Unsupported command: remove-signature\n");
         }
         ret = ctx->format->remove_pkcs7(ctx, hash, outdata);
         if (ctx->format->update_data_size) {
