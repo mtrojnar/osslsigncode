@@ -745,6 +745,250 @@ static int add_timestamp_rfc3161(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 #endif /* ENABLE_CURL */
 
 /*
+ * [in] resp_ctx: a response context that can be used for generating responses
+ * [in] data: unused
+ * [returns] hexadecimal serial number
+ */
+static ASN1_INTEGER *serial_cb(TS_RESP_CTX *resp_ctx, void *data)
+{
+    int ret = 0;
+    ASN1_INTEGER *serial = NULL;
+    u_char *buf;
+
+    /* squash unused parameter warning */
+    (void)data;
+
+    buf = OPENSSL_malloc(SERIAL_LEN);
+    if (RAND_bytes(buf, SERIAL_LEN) <= 0) {
+        printf("RAND_bytes failed\n");
+        goto out;
+    }
+    serial = ASN1_INTEGER_new();
+    if (!serial)
+        goto out;
+    OPENSSL_free(serial->data);
+    serial->length = SERIAL_LEN;
+    serial->data = OPENSSL_malloc(SERIAL_LEN);
+    memcpy(serial->data, buf, SERIAL_LEN);
+    ret = 1;
+out:
+     if (!ret) {
+        TS_RESP_CTX_set_status_info(resp_ctx, TS_STATUS_REJECTION,
+            "Error during serial number generation.");
+        TS_RESP_CTX_add_failure_info(resp_ctx, TS_INFO_ADD_INFO_NOT_AVAILABLE);
+        ASN1_INTEGER_free(serial);
+    }
+    OPENSSL_free(buf);
+    return serial;
+}
+
+/*
+ * This must return the seconds and microseconds since Jan 1, 1970 in the sec
+ * and usec variables allocated by the caller.
+ * [in] resp_ctx: a response context that can be used for generating responses
+ * [in] data: timestamping time
+ * [out] sec: total of seconds since Jan 1, 1970
+ * [out] usec: microseconds (unused)
+ * [returns] 0 on error or 1 on success
+ */
+static int time_cb(TS_RESP_CTX *resp_ctx, void *data, long *sec, long *usec)
+{
+    time_t *time = (time_t *)data;
+    if(!*time) {
+        ERR_raise(ERR_LIB_TS, TS_R_TIME_SYSCALL_ERROR);
+        TS_RESP_CTX_set_status_info(resp_ctx, TS_STATUS_REJECTION,
+            "Time is not available.");
+        TS_RESP_CTX_add_failure_info(resp_ctx, TS_INFO_TIME_NOT_AVAILABLE);
+        return 0; /* FAILED */
+    }
+    *sec = (long int)*time;
+    *usec = 0;
+    return 1; /* OK */
+}
+
+/*
+ * [in] ctx: structure holds input and output data
+ * [in] signer_cert: the signer certificate of the TSA in PEM format
+ * [in] signer_key: the private key of the TSA in PEM format
+ * [in] chain: the certificate chain that will all be included in the response
+ * [in] serialfile: the name of the file containing the hexadecimal serial number
+ *      of the last timestamp response created
+ * [in] bout: timestamp request
+ * [returns] 0 on error or 1 on success
+ */
+static BIO *bio_get_rfc3161_response(FILE_FORMAT_CTX *ctx, X509 *signer_cert,
+    EVP_PKEY *signer_key, STACK_OF(X509) *chain, BIO *bout)
+{
+    TS_RESP_CTX *resp_ctx = NULL;
+    TS_RESP *response = NULL;
+    BIO *bio = NULL;
+    ASN1_OBJECT *policy_obj = NULL;
+
+    resp_ctx = TS_RESP_CTX_new();
+    if (!resp_ctx)
+        goto out;
+
+    TS_RESP_CTX_set_serial_cb(resp_ctx, serial_cb, NULL);
+    if (!TS_RESP_CTX_set_signer_cert(resp_ctx, signer_cert)) {
+        goto out;
+    }
+    if (!TS_RESP_CTX_set_signer_key(resp_ctx, signer_key)) {
+        goto out;
+    }
+    if (!TS_RESP_CTX_set_certs(resp_ctx, chain)) {
+        goto out;
+    }
+    /* message digest algorithm that the TSA accepts */
+    if (!TS_RESP_CTX_add_md(resp_ctx, ctx->options->md)) {
+        goto out;
+    }
+    /* default policy to use when the request does not mandate any policy
+     * tsa_policy1 = 1.2.3.4.1 */
+    policy_obj = OBJ_txt2obj(TSA_POLICY1, 0);
+    if (!policy_obj) {
+        goto out;
+    }
+    if (!TS_RESP_CTX_set_def_policy(resp_ctx, policy_obj)) {
+        goto out;
+    }
+    /* the accuracy of the time source of the TSA in seconds, milliseconds
+     * and microseconds; e.g. secs:1, millisecs:500, microsecs:100;
+     * 0 means not specified */
+    if (!TS_RESP_CTX_set_accuracy(resp_ctx, 1, 500, 100)) {
+        goto out;
+    }
+    if (ctx->options->tsa_time) {
+        TS_RESP_CTX_set_time_cb(resp_ctx, time_cb, &(ctx->options->tsa_time));
+    }
+    /* generate RFC3161 response with embedded TimeStampToken */
+    response = TS_RESP_create_response(resp_ctx, bout);
+    if (!response) {
+        printf("Failed to create RFC3161 response\n");
+        goto out;
+    }
+    bio = BIO_new(BIO_s_mem());
+    if (!i2d_TS_RESP_bio(bio, response)) {
+        printf("Failed to convert RFC3161 response\n");
+        goto out;
+    }
+
+out:
+    ASN1_OBJECT_free(policy_obj);
+    TS_RESP_CTX_free(resp_ctx);
+    TS_RESP_free(response);
+
+    return bio;
+}
+
+/*
+ * [in] bin: certfile BIO
+ * [in] certpass: NULL
+ * [returns] pointer to STACK_OF(X509) structure
+ */
+static STACK_OF(X509) *X509_chain_read_certs(BIO *bin, char *certpass)
+{
+    STACK_OF(X509) *certs = sk_X509_new_null();
+    X509 *x509;
+    (void)BIO_seek(bin, 0);
+    x509 = PEM_read_bio_X509(bin, NULL, NULL, certpass);
+    while (x509) {
+        sk_X509_push(certs, x509);
+        x509 = PEM_read_bio_X509(bin, NULL, NULL, certpass);
+    }
+    ERR_clear_error();
+    if (!sk_X509_num(certs)) {
+        sk_X509_free(certs);
+        return NULL;
+    }
+    return certs;
+}
+
+/*
+ * [in, out] p7: new PKCS#7 signature
+ * [in] ctx: structure holds input and output data
+ * [returns] 1 on error or 0 on success
+ */
+static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
+{
+    BIO *btmp, *bout, *bin;
+    STACK_OF(X509) *chain;
+    X509 *signer_cert=NULL;
+    EVP_PKEY *signer_key;
+    int i, res = 1;
+
+    btmp = BIO_new_file(ctx->options->tsa_certfile, "rb");
+    if (!btmp) {
+        printf("Failed to read Time-Stamp Authority certificate file: %s\n", ctx->options->tsa_certfile);
+        return 0; /* FAILED */
+    }
+    /* .pem certificate file */
+    chain = X509_chain_read_certs(btmp, NULL);
+    BIO_free(btmp);
+    btmp = BIO_new_file(ctx->options->tsa_keyfile, "rb");
+    if (!btmp) {
+        printf("Failed to read private key file: %s\n", ctx->options->tsa_keyfile);
+        return 0; /* FAILED */
+    }
+    signer_key = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL);
+    BIO_free(btmp);
+    if(!chain || !signer_key) {
+        printf("Failed to load Time-Stamp Authority crypto parameters\n");
+        return 0; /* FAILED */
+    }
+    /* find the signer's certificate located somewhere in the whole certificate chain */
+    for (i=0; i<sk_X509_num(chain); i++) {
+        X509 *cert = sk_X509_value(chain, i);
+        if (X509_check_private_key(cert, signer_key)) {
+            signer_cert = cert;
+            break;
+        }
+    }
+    if(!signer_cert) {
+        printf("Failed to checking the consistency of a TSA private key with a public key in any X509 certificate\n");
+        goto out;
+    }
+
+    /* The TSA signing certificate must have exactly one extended key usage
+     * assigned to it: timeStamping. The extended key usage must also be critical,
+     * otherwise the certificate is going to be refused. */
+
+    /* check X509_PURPOSE_TIMESTAMP_SIGN certificate purpose */
+    if (X509_check_purpose(signer_cert, X509_PURPOSE_TIMESTAMP_SIGN, 0) != 1) {
+        printf("Unsupported TSA signer's certificate purpose X509_PURPOSE_TIMESTAMP_SIGN\n");
+        goto out;
+    }
+    /* check extended key usage flag XKU_TIMESTAMP */
+    if (!(X509_get_extended_key_usage(signer_cert) & XKU_TIMESTAMP)) {
+        printf("Unsupported Signer's certificate purpose XKU_TIMESTAMP\n");
+        goto out;
+    }
+    /* encode timestamp request */
+    bout = bio_encode_rfc3161_request(p7, ctx->options->md);
+    if (!bout) {
+        printf("Failed to encode timestamp request\n");
+        goto out;
+    }
+
+    bin = bio_get_rfc3161_response(ctx, signer_cert, signer_key, chain, bout);
+    BIO_free_all(bout);
+
+    if (bin) {
+        res = decode_rfc3161_response(p7, bin, ctx->options->verbose);
+        BIO_free_all(bin);
+        if (res) {
+            printf("Failed to convert timestamp reply\n");
+            ERR_print_errors_fp(stdout);
+        }
+    } else {
+        printf("Failed to obtain RFC3161 response\n");
+    }
+out:
+    sk_X509_pop_free(chain, X509_free);
+    EVP_PKEY_free(signer_key);
+    return res;
+}
+
+/*
  * If successful the unauthenticated blob will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1]:
  * p7->d.sign->signer_info->unauth_attr
@@ -799,6 +1043,10 @@ static int add_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
     if (ctx->options->ntsurl && !add_timestamp_rfc3161(p7, ctx)) {
         printf("%s\n%s\n", "RFC 3161 timestamping failed",
             "Use the \"-t\" option to add the Authenticode Time-Stamp Authority or choose another one RFC3161 Time-Stamp Authority");
+        return 1; /* FAILED */
+    }
+    if (ctx->options->tsa_certfile && ctx->options->tsa_keyfile && add_timestamp_builtin(p7, ctx)) {
+        printf("Built-in timestamping failed\n");
         return 1; /* FAILED */
     }
 #endif /* ENABLE_CURL */
@@ -1224,6 +1472,18 @@ static STACK_OF(X509_CRL) *x509_crl_list_get(PKCS7 *p7, X509_CRL *crl)
     return crls;
 }
 
+static void print_timestamp_serial_number(const ASN1_INTEGER *serial)
+{
+    BIGNUM *serialbn;
+    char *number;
+
+    serialbn = ASN1_INTEGER_to_BN(serial, NULL);
+    number = BN_bn2hex(serialbn);
+    printf("Timestamp serial number: %s\n", number);
+    BN_free(serialbn);
+    OPENSSL_free(number);
+}
+
 /*
  * Compare the hash provided from the TSTInfo object against the hash computed
  * from the signature created by the signing certificate's private key
@@ -1256,6 +1516,7 @@ static int verify_timestamp_token(PKCS7 *p7, CMS_ContentInfo *timestamp)
         p = (*pos)->data;
         token = d2i_TimeStampToken(NULL, &p, (*pos)->length);
         if (token) {
+            print_timestamp_serial_number(token->serial);
             /* compute a hash from the encrypted message digest value of the file */
             md_nid = OBJ_obj2nid(token->messageImprint->digestAlgorithm->algorithm);
             md = EVP_get_digestbynid(md_nid);
@@ -1269,7 +1530,6 @@ static int verify_timestamp_token(PKCS7 *p7, CMS_ContentInfo *timestamp)
             BIO_write(bhash, si->enc_digest->data, si->enc_digest->length);
             BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
             BIO_free_all(bhash);
-
             /* compare the provided hash against the computed hash */
             hash = token->messageImprint->digest;
             /* hash->length == EVP_MD_size(md) */
@@ -1353,8 +1613,7 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
         crl = x509_crl_get(url);
         OPENSSL_free(url);
         if (!crl && !ctx->options->tsa_crlfile) {
-            printf("Use the \"-TSA-CRLfile\" option to add one or more Time-Stamp Authority CRLs in PEM format.\n\n");
-            goto out;
+            printf("Use the \"-TSA-CRLfile\" option to add one or more Time-Stamp Authority CRLs in PEM format.\n");
         }
     }
 #endif /* ENABLE_CURL */
@@ -1465,7 +1724,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
         crl = x509_crl_get(url);
         OPENSSL_free(url);
         if (!crl && !ctx->options->crlfile) {
-            printf("Use the \"-CRLfile\" option to add one or more CRLs in PEM format.\n\n");
+            printf("Use the \"-CRLfile\" option to add one or more CRLs in PEM format.\n");
             goto out;
         }
     }
@@ -2441,6 +2700,8 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
         printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
 #endif /* ENABLE_CURL */
+        printf("%12s[ -TSA-certs <TSA-certfile> ] [ -TSA-key <TSA-keyfile> ]\n", "");
+        printf("%12s[ -TSA-time <unix-time> ]\n", "");
         printf("%12s[ -time <unix-time> ]\n", "");
         printf("%12s[ -addUnauthenticatedBlob ]\n", "");
         printf("%12s[ -nest ]\n", "");
@@ -2454,6 +2715,8 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
         printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
 #endif /* ENABLE_CURL */
+        printf("%12s[ -TSA-certs <TSA-certfile> ] [ -TSA-key <TSA-keyfile> ]\n", "");
+        printf("%12s[ -TSA-time <unix-time> ]\n", "");
         printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
         printf("%12s[ -verbose ]\n", "");
         printf("%12s[ -add-msi-dse ]\n", "");
@@ -2551,6 +2814,9 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_ts[] = {"add", "sign", NULL};
 #endif /* ENABLE_CURL */
     const char *cmds_CAfileTSA[] = {"attach-signature", "verify", NULL};
+    const char *cmds_certsTSA[] = {"add", "sign", NULL};
+    const char *cmds_keyTSA[] = {"add", "sign", NULL};
+    const char *cmds_timeTSA[] = {"add", "sign", NULL};
     const char *cmds_verbose[] = {"add", "sign", "verify", NULL};
 
     if (on_list(cmd, cmds_all)) {
@@ -2700,32 +2966,15 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%-24s= the file containing one or more Time-Stamp Authority certificates in PEM format\n", "-TSA-CAfile");
     if (on_list(cmd, cmds_CRLfileTSA))
         printf("%-24s= the file containing one or more Time-Stamp Authority CRLs in PEM format\n", "-TSA-CRLfile");
+    if (on_list(cmd, cmds_certsTSA))
+        printf("%-24s= Time-Stamp Authority signing certificate\n", "-TSA-certs");
+    if (on_list(cmd, cmds_keyTSA))
+        printf("%-24s= Time-Stamp Authority private key or PKCS#11 URI identifies a key in the token\n", "-TSA-key");
+    if (on_list(cmd, cmds_timeTSA))
+        printf("%-24s= the unix-time to set the Time-Stamp Authority signing\n", "-TSA-time");
     if (on_list(cmd, cmds_verbose))
         printf("%-24s= include additional output in the log\n", "-verbose");
     usage(argv0, cmd);
-}
-
-/*
- * [in] bin: certfile BIO
- * [in] certpass: NULL
- * [returns] pointer to STACK_OF(X509) structure
- */
-static STACK_OF(X509) *X509_chain_read_certs(BIO *bin, char *certpass)
-{
-    STACK_OF(X509) *certs = sk_X509_new_null();
-    X509 *x509;
-    (void)BIO_seek(bin, 0);
-    x509 = PEM_read_bio_X509(bin, NULL, NULL, certpass);
-    while (x509) {
-        sk_X509_push(certs, x509);
-        x509 = PEM_read_bio_X509(bin, NULL, NULL, certpass);
-    }
-    ERR_clear_error();
-    if (!sk_X509_num(certs)) {
-        sk_X509_free(certs);
-        return NULL;
-    }
-    return certs;
 }
 
 #ifdef PROVIDE_ASKPASS
@@ -3608,6 +3857,24 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->leafhash = (*++argv);
+        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-TSA-certs")) {
+            if (--argc < 1) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            options->tsa_certfile = *(++argv);
+        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-TSA-key")) {
+            if (--argc < 1) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            options->tsa_keyfile = *(++argv);
+        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-TSA-time")) {
+            if (--argc < 1) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            options->tsa_time = (time_t)strtoull(*(++argv), NULL, 10);
         } else if ((cmd == CMD_ADD) && !strcmp(*argv, "--help")) {
             help_for(argv0, "add");
             cmd = CMD_HELP;
