@@ -183,21 +183,6 @@ IMPLEMENT_ASN1_FUNCTIONS(TimeStampRequest)
 
 /* RFC3161 Time stamping */
 
-ASN1_SEQUENCE(PKIStatusInfo) = {
-    ASN1_SIMPLE(PKIStatusInfo, status, ASN1_INTEGER),
-    ASN1_SEQUENCE_OF_OPT(PKIStatusInfo, statusString, ASN1_UTF8STRING),
-    ASN1_OPT(PKIStatusInfo, failInfo, ASN1_BIT_STRING)
-} ASN1_SEQUENCE_END(PKIStatusInfo)
-
-IMPLEMENT_ASN1_FUNCTIONS(PKIStatusInfo)
-
-ASN1_SEQUENCE(TimeStampResp) = {
-    ASN1_SIMPLE(TimeStampResp, status, PKIStatusInfo),
-    ASN1_OPT(TimeStampResp, token, PKCS7)
-} ASN1_SEQUENCE_END(TimeStampResp)
-
-IMPLEMENT_ASN1_FUNCTIONS(TimeStampResp)
-
 ASN1_SEQUENCE(TimeStampReq) = {
     ASN1_SIMPLE(TimeStampReq, version, ASN1_INTEGER),
     ASN1_SIMPLE(TimeStampReq, messageImprint, MessageImprint),
@@ -406,19 +391,19 @@ static BIO *bio_encode_authenticode_request(PKCS7 *p7)
 }
 
 /*
- * Decode a RFC 3161 response from BIO.
  * If successful the RFC 3161 timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1].
  * [in, out] p7: new PKCS#7 signature
- * [in] bin: BIO with http data
+ * [in] response: RFC3161 response
  * [in] verbose: additional output mode
  * [returns] 1 on error or 0 on success
  */
-static int decode_rfc3161_response(PKCS7 *p7, BIO *bin, int verbose)
+static int attach_rfc3161_response(PKCS7 *p7, TS_RESP *response, int verbose)
 {
     PKCS7_SIGNER_INFO *si;
     STACK_OF(X509_ATTRIBUTE) *attrs;
-    TimeStampResp *reply;
+    TS_STATUS_INFO *status;
+    PKCS7 *token;
     u_char *p;
     int i, len;
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
@@ -428,32 +413,31 @@ static int decode_rfc3161_response(PKCS7 *p7, BIO *bin, int verbose)
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si)
         return 1; /* FAILED */
-
-    reply = ASN1_item_d2i_bio(ASN1_ITEM_rptr(TimeStampResp), bin, NULL);
-    if (!reply || !reply->status)
+    if (!response)
         return 1; /* FAILED */
-    if (ASN1_INTEGER_get(reply->status->status) != 0) {
+
+    status = TS_RESP_get_status_info(response);
+    if (ASN1_INTEGER_get(TS_STATUS_INFO_get0_status(status)) != 0) {
         if (verbose) {
-            printf("Timestamping failed: status %ld\n", ASN1_INTEGER_get(reply->status->status));
-            for (i = 0; i < sk_ASN1_UTF8STRING_num(reply->status->statusString); i++) {
-                ASN1_UTF8STRING *status = sk_ASN1_UTF8STRING_value(reply->status->statusString, i);
-                printf("%s\n", ASN1_STRING_get0_data(status));
+            const STACK_OF(ASN1_UTF8STRING) *reasons = TS_STATUS_INFO_get0_text(status);
+            printf("Timestamping failed: status %ld\n", ASN1_INTEGER_get(TS_STATUS_INFO_get0_status(status)));
+            for (i = 0; i < sk_ASN1_UTF8STRING_num(reasons); i++) {
+                ASN1_UTF8STRING *reason = sk_ASN1_UTF8STRING_value(reasons, i);
+                printf("%s\n", ASN1_STRING_get0_data(reason));
             }
         }
-        TimeStampResp_free(reply);
         return 1; /* FAILED */
     }
-    if (((len = i2d_PKCS7(reply->token, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
+    token = TS_RESP_get_token(response);
+    if (((len = i2d_PKCS7(token, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
         if (verbose) {
             printf("Failed to convert pkcs7: %d\n", len);
             ERR_print_errors_fp(stdout);
         }
-        TimeStampResp_free(reply);
         return 1; /* FAILED */
     }
-    len = i2d_PKCS7(reply->token, &p);
+    len = i2d_PKCS7(token, &p);
     p -= len;
-    TimeStampResp_free(reply);
 
     attrs = sk_X509_ATTRIBUTE_new_null();
     attrs = X509at_add1_attr_by_txt(&attrs, SPC_RFC3161_OBJID, V_ASN1_SET, p, len);
@@ -465,26 +449,22 @@ static int decode_rfc3161_response(PKCS7 *p7, BIO *bin, int verbose)
 }
 
 /*
- * Decode an authenticode response from BIO.
  * If successful the authenticode timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1]:
  * p7->d.sign->signer_info->unauth_attr
  * [in, out] p7: new PKCS#7 signature
- * [in] bin: base64 BIO with http data
+ * [in] resp: PKCS#7 authenticode response
  * [in] verbose: additional output mode
  * [returns] 1 on error or 0 on success
  */
-static int decode_authenticode_response(PKCS7 *p7, BIO *b64_bin, int verbose)
+static int attach_authenticode_response(PKCS7 *p7, PKCS7 *resp, int verbose)
 {
-    PKCS7 *resp;
     PKCS7_SIGNER_INFO *info, *si;
     STACK_OF(X509_ATTRIBUTE) *attrs;
-
     u_char *p;
     int len, i;
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 
-    resp = d2i_PKCS7_bio(b64_bin, NULL);
     if (!resp) {
         return 1; /* FAILED */
     }
@@ -689,15 +669,25 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
 
     if (bin) {
         if (rfc3161) {
-            res = decode_rfc3161_response(p7, bin, verbose);
+            /* decode a RFC 3161 response from BIO */
+            TS_RESP *response = d2i_TS_RESP_bio(bin, NULL);
             BIO_free_all(bin);
+
+            res = attach_rfc3161_response(p7, response, verbose);
+            TS_RESP_free(response);
         } else {
-            BIO *b64 = BIO_new(BIO_f_base64());
+            /* decode an authenticode response from BIO */
+            PKCS7 *response;
+            BIO *b64, *b64_bin;
+
+            b64 = BIO_new(BIO_f_base64());
             if (!blob_has_nl)
                 BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
-            BIO *b64_bin = BIO_push(b64, bin);
-            res = decode_authenticode_response(p7, b64_bin, verbose);
+            b64_bin = BIO_push(b64, bin);
+            response = d2i_PKCS7_bio(b64_bin, NULL);
             BIO_free_all(b64_bin);
+
+            res = attach_authenticode_response(p7, response, verbose);
         }
         if (res && verbose) {
             if (http_code != -1) {
@@ -753,7 +743,7 @@ static ASN1_INTEGER *serial_cb(TS_RESP_CTX *resp_ctx, void *data)
 {
     int ret = 0;
     uint64_t buf;
-    ASN1_INTEGER *serial;
+    ASN1_INTEGER *serial = NULL;
 
     /* squash unused parameter warning */
     (void)data;
@@ -806,17 +796,14 @@ static int time_cb(TS_RESP_CTX *resp_ctx, void *data, long *sec, long *usec)
  * [in] signer_cert: the signer certificate of the TSA in PEM format
  * [in] signer_key: the private key of the TSA in PEM format
  * [in] chain: the certificate chain that will all be included in the response
- * [in] serialfile: the name of the file containing the hexadecimal serial number
- *      of the last timestamp response created
  * [in] bout: timestamp request
- * [returns] 0 on error or 1 on success
+ * [returns] RFC3161 response
  */
-static BIO *bio_get_rfc3161_response(FILE_FORMAT_CTX *ctx, X509 *signer_cert,
+static TS_RESP *get_rfc3161_response(FILE_FORMAT_CTX *ctx, X509 *signer_cert,
     EVP_PKEY *signer_key, STACK_OF(X509) *chain, BIO *bout)
 {
     TS_RESP_CTX *resp_ctx = NULL;
     TS_RESP *response = NULL;
-    BIO *bio = NULL;
     ASN1_OBJECT *policy_obj = NULL;
 
     resp_ctx = TS_RESP_CTX_new();
@@ -859,20 +846,13 @@ static BIO *bio_get_rfc3161_response(FILE_FORMAT_CTX *ctx, X509 *signer_cert,
     response = TS_RESP_create_response(resp_ctx, bout);
     if (!response) {
         printf("Failed to create RFC3161 response\n");
-        goto out;
-    }
-    bio = BIO_new(BIO_s_mem());
-    if (!i2d_TS_RESP_bio(bio, response)) {
-        printf("Failed to convert RFC3161 response\n");
-        goto out;
     }
 
 out:
     ASN1_OBJECT_free(policy_obj);
     TS_RESP_CTX_free(resp_ctx);
-    TS_RESP_free(response);
 
-    return bio;
+    return response;
 }
 
 /*
@@ -905,10 +885,11 @@ static STACK_OF(X509) *X509_chain_read_certs(BIO *bin, char *certpass)
  */
 static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 {
-    BIO *btmp, *bout, *bin;
+    BIO *btmp, *bout;
     STACK_OF(X509) *chain;
-    X509 *signer_cert=NULL;
+    X509 *signer_cert = NULL;
     EVP_PKEY *signer_key;
+    TS_RESP *response = NULL;
     int i, res = 1;
 
     btmp = BIO_new_file(ctx->options->tsa_certfile, "rb");
@@ -964,12 +945,11 @@ static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
         goto out;
     }
 
-    bin = bio_get_rfc3161_response(ctx, signer_cert, signer_key, chain, bout);
+    response = get_rfc3161_response(ctx, signer_cert, signer_key, chain, bout);
     BIO_free_all(bout);
 
-    if (bin) {
-        res = decode_rfc3161_response(p7, bin, ctx->options->verbose);
-        BIO_free_all(bin);
+    if (response) {
+        res = attach_rfc3161_response(p7, response, ctx->options->verbose);
         if (res) {
             printf("Failed to convert timestamp reply\n");
             ERR_print_errors_fp(stdout);
@@ -980,6 +960,7 @@ static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 out:
     sk_X509_pop_free(chain, X509_free);
     EVP_PKEY_free(signer_key);
+    TS_RESP_free(response);
     return res;
 }
 
@@ -3935,6 +3916,8 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
     if (argc > 0 ||
 #ifdef ENABLE_CURL
         (options->nturl && options->ntsurl) ||
+        (options->nturl && options->tsa_certfile && options->tsa_keyfile) ||
+        (options->ntsurl && options->tsa_certfile && options->tsa_keyfile) ||
 #endif
         !options->infile ||
         (cmd != CMD_VERIFY && !options->outfile) ||
