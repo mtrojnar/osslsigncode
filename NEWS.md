@@ -2,6 +2,9 @@
 
 ### 2.7 (unreleased)
 
+- added a built-in TSA response generation (-TSA-certs, -TSA-key
+  and -TSA-time options)
+
 ### 2.6 (2023.05.29)
 
 - modular architecture implemented to simplify adding file formats
