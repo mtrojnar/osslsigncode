@@ -777,6 +777,7 @@ out:
             "Error during serial number generation.");
         TS_RESP_CTX_add_failure_info(resp_ctx, TS_INFO_ADD_INFO_NOT_AVAILABLE);
         ASN1_INTEGER_free(serial);
+        return NULL; /* FAILED */
     }
     OPENSSL_free(buf);
     return serial;
@@ -795,7 +796,6 @@ static int time_cb(TS_RESP_CTX *resp_ctx, void *data, long *sec, long *usec)
 {
     time_t *time = (time_t *)data;
     if(!*time) {
-        ERR_raise(ERR_LIB_TS, TS_R_TIME_SYSCALL_ERROR);
         TS_RESP_CTX_set_status_info(resp_ctx, TS_STATUS_REJECTION,
             "Time is not available.");
         TS_RESP_CTX_add_failure_info(resp_ctx, TS_INFO_TIME_NOT_AVAILABLE);
