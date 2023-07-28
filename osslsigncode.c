@@ -752,24 +752,20 @@ static int add_timestamp_rfc3161(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 static ASN1_INTEGER *serial_cb(TS_RESP_CTX *resp_ctx, void *data)
 {
     int ret = 0;
-    ASN1_INTEGER *serial = NULL;
-    u_char *buf;
+    uint64_t buf;
+    ASN1_INTEGER *serial;
 
     /* squash unused parameter warning */
     (void)data;
 
-    buf = OPENSSL_malloc(SERIAL_LEN);
-    if (RAND_bytes(buf, SERIAL_LEN) <= 0) {
+    if (RAND_bytes((unsigned char *)&buf, sizeof buf) <= 0) {
         printf("RAND_bytes failed\n");
         goto out;
     }
     serial = ASN1_INTEGER_new();
     if (!serial)
         goto out;
-    OPENSSL_free(serial->data);
-    serial->length = SERIAL_LEN;
-    serial->data = OPENSSL_malloc(SERIAL_LEN);
-    memcpy(serial->data, buf, SERIAL_LEN);
+    ASN1_INTEGER_set_uint64(serial, buf);
     ret = 1;
 out:
      if (!ret) {
@@ -779,7 +775,6 @@ out:
         ASN1_INTEGER_free(serial);
         return NULL; /* FAILED */
     }
-    OPENSSL_free(buf);
     return serial;
 }
 

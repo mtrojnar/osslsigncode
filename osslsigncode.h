@@ -215,9 +215,6 @@
 /* Default policy if request did not specify it. */
 #define TSA_POLICY1 "1.2.3.4.1"
 
-/* Timestamp serial number length. */
-#define SERIAL_LEN  8
-
 typedef enum {
     CMD_SIGN,
     CMD_EXTRACT,
