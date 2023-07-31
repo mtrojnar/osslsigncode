@@ -834,6 +834,10 @@ static TS_RESP *get_rfc3161_response(FILE_FORMAT_CTX *ctx, X509 *signer_cert,
     if (!TS_RESP_CTX_add_md(resp_ctx, ctx->options->md)) {
         goto out;
     }
+    /* signing digest to use */
+    if (!TS_RESP_CTX_set_signer_digest(resp_ctx, ctx->options->md)) {
+        goto out;
+    }
     /* default policy to use when the request does not mandate any policy
      * tsa_policy1 = 1.2.3.4.1 */
     policy_obj = OBJ_txt2obj(TSA_POLICY1, 0);
