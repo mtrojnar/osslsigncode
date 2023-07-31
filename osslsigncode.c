@@ -158,15 +158,10 @@ ASN1_SEQUENCE(CatalogAuthAttr) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(CatalogAuthAttr)
 
-ASN1_SEQUENCE(MessageImprint) = {
-    ASN1_SIMPLE(MessageImprint, digestAlgorithm, AlgorithmIdentifier),
-    ASN1_SIMPLE(MessageImprint, digest, ASN1_OCTET_STRING)
-} ASN1_SEQUENCE_END(MessageImprint)
-
-IMPLEMENT_ASN1_FUNCTIONS(MessageImprint)
-
 #ifdef ENABLE_CURL
-
+/*
+ * Structures for Authenticode Timestamp
+ */
 ASN1_SEQUENCE(TimeStampRequestBlob) = {
     ASN1_SIMPLE(TimeStampRequestBlob, type, ASN1_OBJECT),
     ASN1_EXP_OPT(TimeStampRequestBlob, signature, ASN1_OCTET_STRING, 0)
@@ -182,29 +177,6 @@ ASN1_SEQUENCE(TimeStampRequest) = {
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampRequest)
 
 #endif /* ENABLE_CURL */
-
-ASN1_SEQUENCE(TimeStampAccuracy) = {
-    ASN1_OPT(TimeStampAccuracy, seconds, ASN1_INTEGER),
-    ASN1_IMP_OPT(TimeStampAccuracy, millis, ASN1_INTEGER, 0),
-    ASN1_IMP_OPT(TimeStampAccuracy, micros, ASN1_INTEGER, 1)
-} ASN1_SEQUENCE_END(TimeStampAccuracy)
-
-IMPLEMENT_ASN1_FUNCTIONS(TimeStampAccuracy)
-
-ASN1_SEQUENCE(TimeStampToken) = {
-    ASN1_SIMPLE(TimeStampToken, version, ASN1_INTEGER),
-    ASN1_SIMPLE(TimeStampToken, policy_id, ASN1_OBJECT),
-    ASN1_SIMPLE(TimeStampToken, messageImprint, MessageImprint),
-    ASN1_SIMPLE(TimeStampToken, serial, ASN1_INTEGER),
-    ASN1_SIMPLE(TimeStampToken, time, ASN1_GENERALIZEDTIME),
-    ASN1_OPT(TimeStampToken, accuracy, TimeStampAccuracy),
-    ASN1_OPT(TimeStampToken, ordering, ASN1_FBOOLEAN),
-    ASN1_OPT(TimeStampToken, nonce, ASN1_INTEGER),
-    ASN1_EXP_OPT(TimeStampToken, tsa, GENERAL_NAME, 0),
-    ASN1_IMP_SEQUENCE_OF_OPT(TimeStampToken, extensions, X509_EXTENSION, 1)
-} ASN1_SEQUENCE_END(TimeStampToken)
-
-IMPLEMENT_ASN1_FUNCTIONS(TimeStampToken)
 
 ASN1_SEQUENCE(CatalogInfo) = {
     ASN1_SIMPLE(CatalogInfo, digest, ASN1_OCTET_STRING),
@@ -856,7 +828,7 @@ static TS_RESP *get_rfc3161_response(FILE_FORMAT_CTX *ctx, X509 *signer_cert,
     if (ctx->options->tsa_time) {
         TS_RESP_CTX_set_time_cb(resp_ctx, time_cb, &(ctx->options->tsa_time));
     }
-    /* generate RFC3161 response with embedded TimeStampToken */
+    /* generate RFC3161 response with embedded TS_TST_INFO structure */
     response = TS_RESP_create_response(resp_ctx, bout);
     if (!response) {
         printf("Failed to create RFC3161 response\n");
@@ -1462,12 +1434,14 @@ static STACK_OF(X509_CRL) *x509_crl_list_get(PKCS7 *p7, X509_CRL *crl)
     return crls;
 }
 
-static void print_timestamp_serial_number(const ASN1_INTEGER *serial)
+static void print_timestamp_serial_number(TS_TST_INFO *token)
 {
     BIGNUM *serialbn;
     char *number;
 
-    serialbn = ASN1_INTEGER_to_BN(serial, NULL);
+    if (!token)
+        return;
+    serialbn = ASN1_INTEGER_to_BN(TS_TST_INFO_get_serial(token), NULL);
     number = BN_bn2hex(serialbn);
     printf("Timestamp serial number: %s\n", number);
     BN_free(serialbn);
@@ -1485,59 +1459,68 @@ static int verify_timestamp_token(PKCS7 *p7, CMS_ContentInfo *timestamp)
 {
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
     PKCS7_SIGNER_INFO *si;
-    ASN1_OCTET_STRING *hash, **pos;
-    TimeStampToken *token = NULL;
-    const u_char *p = NULL;
-    u_char mdbuf[EVP_MAX_MD_SIZE];
-    const EVP_MD *md;
-    int md_nid;
-    BIO *bhash;
+    ASN1_OCTET_STRING **pos;
 
     signer_info = PKCS7_get_signer_info(p7);
     if (!signer_info)
         return 0; /* FAILED */
-
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si)
         return 0; /* FAILED */
 
+    /* get the embedded content */
     pos  = CMS_get0_content(timestamp);
     if (pos != NULL && *pos != NULL) {
-        p = (*pos)->data;
-        token = d2i_TimeStampToken(NULL, &p, (*pos)->length);
+        const u_char *p = (*pos)->data;
+        TS_TST_INFO *token = d2i_TS_TST_INFO(NULL, &p, (*pos)->length);
+
         if (token) {
-            print_timestamp_serial_number(token->serial);
-            /* compute a hash from the encrypted message digest value of the file */
-            md_nid = OBJ_obj2nid(token->messageImprint->digestAlgorithm->algorithm);
+            BIO *bhash;
+            u_char mdbuf[EVP_MAX_MD_SIZE];
+            ASN1_OCTET_STRING *hash;
+            const ASN1_OBJECT *aoid;
+            int md_nid;
+            const EVP_MD *md;
+            TS_MSG_IMPRINT *msg_imprint = TS_TST_INFO_get_msg_imprint(token);
+            const X509_ALGOR *alg = TS_MSG_IMPRINT_get_algo(msg_imprint);
+
+            X509_ALGOR_get0(&aoid, NULL, NULL, alg);
+            md_nid = OBJ_obj2nid(aoid);
             md = EVP_get_digestbynid(md_nid);
+
+            /* compute a hash from the encrypted message digest value of the file */
             bhash = BIO_new(BIO_f_md());
             if (!BIO_set_md(bhash, md)) {
                 printf("Unable to set the message digest of BIO\n");
                 BIO_free_all(bhash);
-                return 0;  /* FAILED */
+                TS_TST_INFO_free(token);
+                return 0; /* FAILED */
             }
             BIO_push(bhash, BIO_new(BIO_s_null()));
             BIO_write(bhash, si->enc_digest->data, si->enc_digest->length);
             BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
             BIO_free_all(bhash);
+
             /* compare the provided hash against the computed hash */
-            hash = token->messageImprint->digest;
-            /* hash->length == EVP_MD_size(md) */
+            hash =TS_MSG_IMPRINT_get_msg(msg_imprint);
             if (memcmp(mdbuf, hash->data, (size_t)hash->length)) {
                 printf("Hash value mismatch:\n\tMessage digest algorithm: %s\n",
                         (md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2ln(md_nid));
                 print_hash("\tComputed message digest", "", mdbuf, EVP_MD_size(md));
                 print_hash("\tReceived message digest", "", hash->data, hash->length);
                 printf("\nFile's message digest verification: failed\n");
-                TimeStampToken_free(token);
+                TS_TST_INFO_free(token);
                 return 0; /* FAILED */
             } /* else Computed and received message digests matched */
-            TimeStampToken_free(token);
+
+            print_timestamp_serial_number(token);
+            TS_TST_INFO_free(token);
         } else
             /* our CMS_ContentInfo struct created for Authenticode Timestamp
-             * does not contain any TimeStampToken as specified in RFC 3161 */
+             * does not contain any TS_TST_INFO struct as specified in RFC 3161 */
             ERR_clear_error();
     }
+
     return 1; /* OK */
 }
 
@@ -2127,20 +2110,16 @@ static time_t time_t_get_si_time(PKCS7_SIGNER_INFO *si)
  */
 static time_t time_t_get_cms_time(CMS_ContentInfo *cms)
 {
-    ASN1_OCTET_STRING **pos;
-    const u_char *p = NULL;
-    TimeStampToken *token = NULL;
-    ASN1_GENERALIZEDTIME *asn1_time = NULL;
     time_t posix_time = INVALID_TIME;
+    ASN1_OCTET_STRING **pos  = CMS_get0_content(cms);
 
-    pos  = CMS_get0_content(cms);
     if (pos != NULL && *pos != NULL) {
-        p = (*pos)->data;
-        token = d2i_TimeStampToken(NULL, &p, (*pos)->length);
+        const u_char *p = (*pos)->data;
+        TS_TST_INFO *token = d2i_TS_TST_INFO(NULL, &p, (*pos)->length);
         if (token) {
-            asn1_time = token->time;
+            const ASN1_GENERALIZEDTIME *asn1_time = TS_TST_INFO_get_time(token);
             posix_time = time_t_get_asn1_time(asn1_time);
-            TimeStampToken_free(token);
+            TS_TST_INFO_free(token);
         }
     }
     return posix_time;
@@ -2148,7 +2127,7 @@ static time_t time_t_get_cms_time(CMS_ContentInfo *cms)
 
 /*
  * Create new CMS_ContentInfo struct for Authenticode Timestamp.
- * This struct does not contain any TimeStampToken as specified in RFC 3161.
+ * This struct does not contain any TS_TST_INFO as specified in RFC 3161.
  * [in] p7_signed: PKCS#7 signedData structure
  * [in] countersignature: Authenticode Timestamp decoded to PKCS7_SIGNER_INFO
  * [returns] pointer to CMS_ContentInfo structure
