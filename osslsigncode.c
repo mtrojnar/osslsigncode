@@ -181,19 +181,6 @@ ASN1_SEQUENCE(TimeStampRequest) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampRequest)
 
-/* RFC3161 Time stamping */
-
-ASN1_SEQUENCE(TimeStampReq) = {
-    ASN1_SIMPLE(TimeStampReq, version, ASN1_INTEGER),
-    ASN1_SIMPLE(TimeStampReq, messageImprint, MessageImprint),
-    ASN1_OPT   (TimeStampReq, reqPolicy, ASN1_OBJECT),
-    ASN1_OPT   (TimeStampReq, nonce, ASN1_INTEGER),
-    ASN1_SIMPLE(TimeStampReq, certReq, ASN1_FBOOLEAN),
-    ASN1_IMP_SEQUENCE_OF_OPT(TimeStampReq, extensions, X509_EXTENSION, 0)
-} ASN1_SEQUENCE_END(TimeStampReq)
-
-IMPLEMENT_ASN1_FUNCTIONS(TimeStampReq)
-
 #endif /* ENABLE_CURL */
 
 ASN1_SEQUENCE(TimeStampAccuracy) = {
@@ -302,48 +289,71 @@ static BIO *bio_encode_rfc3161_request(PKCS7 *p7, const EVP_MD *md)
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
     PKCS7_SIGNER_INFO *si;
     u_char mdbuf[EVP_MAX_MD_SIZE];
-    TimeStampReq *req;
-    BIO *bout, *bhash;
+    TS_MSG_IMPRINT *msg_imprint = NULL;
+    X509_ALGOR *alg = NULL;
+    TS_REQ *req = NULL;
+    BIO *bout = NULL, *bhash = NULL;
     u_char *p;
     int len;
 
     signer_info = PKCS7_get_signer_info(p7);
     if (!signer_info)
-        return NULL; /* FAILED */
+        goto out;
 
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si)
-        return NULL; /* FAILED */
+        goto out;
 
     bhash = BIO_new(BIO_f_md());
     if (!BIO_set_md(bhash, md)) {
         printf("Unable to set the message digest of BIO\n");
-        BIO_free_all(bhash);
-        return NULL;  /* FAILED */
+        goto out;
     }
     BIO_push(bhash, BIO_new(BIO_s_null()));
     BIO_write(bhash, si->enc_digest->data, si->enc_digest->length);
     BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
-    BIO_free_all(bhash);
 
-    req = TimeStampReq_new();
-    ASN1_INTEGER_set(req->version, 1);
-    req->messageImprint->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(md));
-    req->messageImprint->digestAlgorithm->parameters = ASN1_TYPE_new();
-    req->messageImprint->digestAlgorithm->parameters->type = V_ASN1_NULL;
-    ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(md));
-    req->certReq = 0xFF;
+    req = TS_REQ_new();
+    if (!req)
+        goto out;
+    if (!TS_REQ_set_version(req, 1))
+        goto out;
 
-    len = i2d_TimeStampReq(req, NULL);
+    msg_imprint = TS_MSG_IMPRINT_new();
+    if (!msg_imprint)
+        goto out;
+    alg = X509_ALGOR_new();
+    if (!alg)
+        goto out;
+    X509_ALGOR_set_md(alg, md);
+    if (!X509_ALGOR_set0(alg, OBJ_nid2obj(EVP_MD_nid(md)), V_ASN1_NULL, NULL))
+        goto out;
+    if (!TS_MSG_IMPRINT_set_algo(msg_imprint, alg))
+        goto out;
+    if (!TS_MSG_IMPRINT_set_msg(msg_imprint, mdbuf, EVP_MD_size(md)))
+        goto out;
+    if (!TS_REQ_set_msg_imprint(req, msg_imprint))
+        goto out;
+    /* TSA is expected to include its signing certificate in the response, flag 0xFF */
+    if (!TS_REQ_set_cert_req(req, 1))
+        goto out;
+
+    len = i2d_TS_REQ(req, NULL);
     p = OPENSSL_malloc((size_t)len);
-    len = i2d_TimeStampReq(req, &p);
+    len = i2d_TS_REQ(req, &p);
     p -= len;
-    TimeStampReq_free(req);
 
     bout = BIO_new(BIO_s_mem());
     BIO_write(bout, p, len);
     OPENSSL_free(p);
     (void)BIO_flush(bout);
+
+out:
+    BIO_free_all(bhash);
+    TS_MSG_IMPRINT_free(msg_imprint);
+    X509_ALGOR_free(alg);
+    TS_REQ_free(req);
+
     return bout;
 }
 
