@@ -158,15 +158,10 @@ ASN1_SEQUENCE(CatalogAuthAttr) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(CatalogAuthAttr)
 
-ASN1_SEQUENCE(MessageImprint) = {
-    ASN1_SIMPLE(MessageImprint, digestAlgorithm, AlgorithmIdentifier),
-    ASN1_SIMPLE(MessageImprint, digest, ASN1_OCTET_STRING)
-} ASN1_SEQUENCE_END(MessageImprint)
-
-IMPLEMENT_ASN1_FUNCTIONS(MessageImprint)
-
 #ifdef ENABLE_CURL
-
+/*
+ * Structures for Authenticode Timestamp
+ */
 ASN1_SEQUENCE(TimeStampRequestBlob) = {
     ASN1_SIMPLE(TimeStampRequestBlob, type, ASN1_OBJECT),
     ASN1_EXP_OPT(TimeStampRequestBlob, signature, ASN1_OCTET_STRING, 0)
@@ -181,58 +176,7 @@ ASN1_SEQUENCE(TimeStampRequest) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampRequest)
 
-/* RFC3161 Time stamping */
-
-ASN1_SEQUENCE(PKIStatusInfo) = {
-    ASN1_SIMPLE(PKIStatusInfo, status, ASN1_INTEGER),
-    ASN1_SEQUENCE_OF_OPT(PKIStatusInfo, statusString, ASN1_UTF8STRING),
-    ASN1_OPT(PKIStatusInfo, failInfo, ASN1_BIT_STRING)
-} ASN1_SEQUENCE_END(PKIStatusInfo)
-
-IMPLEMENT_ASN1_FUNCTIONS(PKIStatusInfo)
-
-ASN1_SEQUENCE(TimeStampResp) = {
-    ASN1_SIMPLE(TimeStampResp, status, PKIStatusInfo),
-    ASN1_OPT(TimeStampResp, token, PKCS7)
-} ASN1_SEQUENCE_END(TimeStampResp)
-
-IMPLEMENT_ASN1_FUNCTIONS(TimeStampResp)
-
-ASN1_SEQUENCE(TimeStampReq) = {
-    ASN1_SIMPLE(TimeStampReq, version, ASN1_INTEGER),
-    ASN1_SIMPLE(TimeStampReq, messageImprint, MessageImprint),
-    ASN1_OPT   (TimeStampReq, reqPolicy, ASN1_OBJECT),
-    ASN1_OPT   (TimeStampReq, nonce, ASN1_INTEGER),
-    ASN1_SIMPLE(TimeStampReq, certReq, ASN1_FBOOLEAN),
-    ASN1_IMP_SEQUENCE_OF_OPT(TimeStampReq, extensions, X509_EXTENSION, 0)
-} ASN1_SEQUENCE_END(TimeStampReq)
-
-IMPLEMENT_ASN1_FUNCTIONS(TimeStampReq)
-
 #endif /* ENABLE_CURL */
-
-ASN1_SEQUENCE(TimeStampAccuracy) = {
-    ASN1_OPT(TimeStampAccuracy, seconds, ASN1_INTEGER),
-    ASN1_IMP_OPT(TimeStampAccuracy, millis, ASN1_INTEGER, 0),
-    ASN1_IMP_OPT(TimeStampAccuracy, micros, ASN1_INTEGER, 1)
-} ASN1_SEQUENCE_END(TimeStampAccuracy)
-
-IMPLEMENT_ASN1_FUNCTIONS(TimeStampAccuracy)
-
-ASN1_SEQUENCE(TimeStampToken) = {
-    ASN1_SIMPLE(TimeStampToken, version, ASN1_INTEGER),
-    ASN1_SIMPLE(TimeStampToken, policy_id, ASN1_OBJECT),
-    ASN1_SIMPLE(TimeStampToken, messageImprint, MessageImprint),
-    ASN1_SIMPLE(TimeStampToken, serial, ASN1_INTEGER),
-    ASN1_SIMPLE(TimeStampToken, time, ASN1_GENERALIZEDTIME),
-    ASN1_OPT(TimeStampToken, accuracy, TimeStampAccuracy),
-    ASN1_OPT(TimeStampToken, ordering, ASN1_FBOOLEAN),
-    ASN1_OPT(TimeStampToken, nonce, ASN1_INTEGER),
-    ASN1_EXP_OPT(TimeStampToken, tsa, GENERAL_NAME, 0),
-    ASN1_IMP_SEQUENCE_OF_OPT(TimeStampToken, extensions, X509_EXTENSION, 1)
-} ASN1_SEQUENCE_END(TimeStampToken)
-
-IMPLEMENT_ASN1_FUNCTIONS(TimeStampToken)
 
 ASN1_SEQUENCE(CatalogInfo) = {
     ASN1_SIMPLE(CatalogInfo, digest, ASN1_OCTET_STRING),
@@ -317,48 +261,71 @@ static BIO *bio_encode_rfc3161_request(PKCS7 *p7, const EVP_MD *md)
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
     PKCS7_SIGNER_INFO *si;
     u_char mdbuf[EVP_MAX_MD_SIZE];
-    TimeStampReq *req;
-    BIO *bout, *bhash;
+    TS_MSG_IMPRINT *msg_imprint = NULL;
+    X509_ALGOR *alg = NULL;
+    TS_REQ *req = NULL;
+    BIO *bout = NULL, *bhash = NULL;
     u_char *p;
     int len;
 
     signer_info = PKCS7_get_signer_info(p7);
     if (!signer_info)
-        return NULL; /* FAILED */
+        goto out;
 
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si)
-        return NULL; /* FAILED */
+        goto out;
 
     bhash = BIO_new(BIO_f_md());
     if (!BIO_set_md(bhash, md)) {
         printf("Unable to set the message digest of BIO\n");
-        BIO_free_all(bhash);
-        return NULL;  /* FAILED */
+        goto out;
     }
     BIO_push(bhash, BIO_new(BIO_s_null()));
     BIO_write(bhash, si->enc_digest->data, si->enc_digest->length);
     BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
-    BIO_free_all(bhash);
 
-    req = TimeStampReq_new();
-    ASN1_INTEGER_set(req->version, 1);
-    req->messageImprint->digestAlgorithm->algorithm = OBJ_nid2obj(EVP_MD_nid(md));
-    req->messageImprint->digestAlgorithm->parameters = ASN1_TYPE_new();
-    req->messageImprint->digestAlgorithm->parameters->type = V_ASN1_NULL;
-    ASN1_OCTET_STRING_set(req->messageImprint->digest, mdbuf, EVP_MD_size(md));
-    req->certReq = 0xFF;
+    req = TS_REQ_new();
+    if (!req)
+        goto out;
+    if (!TS_REQ_set_version(req, 1))
+        goto out;
 
-    len = i2d_TimeStampReq(req, NULL);
+    msg_imprint = TS_MSG_IMPRINT_new();
+    if (!msg_imprint)
+        goto out;
+    alg = X509_ALGOR_new();
+    if (!alg)
+        goto out;
+    X509_ALGOR_set_md(alg, md);
+    if (!X509_ALGOR_set0(alg, OBJ_nid2obj(EVP_MD_nid(md)), V_ASN1_NULL, NULL))
+        goto out;
+    if (!TS_MSG_IMPRINT_set_algo(msg_imprint, alg))
+        goto out;
+    if (!TS_MSG_IMPRINT_set_msg(msg_imprint, mdbuf, EVP_MD_size(md)))
+        goto out;
+    if (!TS_REQ_set_msg_imprint(req, msg_imprint))
+        goto out;
+    /* TSA is expected to include its signing certificate in the response, flag 0xFF */
+    if (!TS_REQ_set_cert_req(req, 1))
+        goto out;
+
+    len = i2d_TS_REQ(req, NULL);
     p = OPENSSL_malloc((size_t)len);
-    len = i2d_TimeStampReq(req, &p);
+    len = i2d_TS_REQ(req, &p);
     p -= len;
-    TimeStampReq_free(req);
 
     bout = BIO_new(BIO_s_mem());
     BIO_write(bout, p, len);
     OPENSSL_free(p);
     (void)BIO_flush(bout);
+
+out:
+    BIO_free_all(bhash);
+    TS_MSG_IMPRINT_free(msg_imprint);
+    X509_ALGOR_free(alg);
+    TS_REQ_free(req);
+
     return bout;
 }
 
@@ -406,19 +373,19 @@ static BIO *bio_encode_authenticode_request(PKCS7 *p7)
 }
 
 /*
- * Decode a RFC 3161 response from BIO.
  * If successful the RFC 3161 timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1].
  * [in, out] p7: new PKCS#7 signature
- * [in] bin: BIO with http data
+ * [in] response: RFC3161 response
  * [in] verbose: additional output mode
  * [returns] 1 on error or 0 on success
  */
-static int decode_rfc3161_response(PKCS7 *p7, BIO *bin, int verbose)
+static int attach_rfc3161_response(PKCS7 *p7, TS_RESP *response, int verbose)
 {
     PKCS7_SIGNER_INFO *si;
     STACK_OF(X509_ATTRIBUTE) *attrs;
-    TimeStampResp *reply;
+    TS_STATUS_INFO *status;
+    PKCS7 *token;
     u_char *p;
     int i, len;
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
@@ -428,32 +395,31 @@ static int decode_rfc3161_response(PKCS7 *p7, BIO *bin, int verbose)
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si)
         return 1; /* FAILED */
-
-    reply = ASN1_item_d2i_bio(ASN1_ITEM_rptr(TimeStampResp), bin, NULL);
-    if (!reply || !reply->status)
+    if (!response)
         return 1; /* FAILED */
-    if (ASN1_INTEGER_get(reply->status->status) != 0) {
+
+    status = TS_RESP_get_status_info(response);
+    if (ASN1_INTEGER_get(TS_STATUS_INFO_get0_status(status)) != 0) {
         if (verbose) {
-            printf("Timestamping failed: status %ld\n", ASN1_INTEGER_get(reply->status->status));
-            for (i = 0; i < sk_ASN1_UTF8STRING_num(reply->status->statusString); i++) {
-                ASN1_UTF8STRING *status = sk_ASN1_UTF8STRING_value(reply->status->statusString, i);
-                printf("%s\n", ASN1_STRING_get0_data(status));
+            const STACK_OF(ASN1_UTF8STRING) *reasons = TS_STATUS_INFO_get0_text(status);
+            printf("Timestamping failed: status %ld\n", ASN1_INTEGER_get(TS_STATUS_INFO_get0_status(status)));
+            for (i = 0; i < sk_ASN1_UTF8STRING_num(reasons); i++) {
+                ASN1_UTF8STRING *reason = sk_ASN1_UTF8STRING_value(reasons, i);
+                printf("%s\n", ASN1_STRING_get0_data(reason));
             }
         }
-        TimeStampResp_free(reply);
         return 1; /* FAILED */
     }
-    if (((len = i2d_PKCS7(reply->token, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
+    token = TS_RESP_get_token(response);
+    if (((len = i2d_PKCS7(token, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
         if (verbose) {
             printf("Failed to convert pkcs7: %d\n", len);
             ERR_print_errors_fp(stdout);
         }
-        TimeStampResp_free(reply);
         return 1; /* FAILED */
     }
-    len = i2d_PKCS7(reply->token, &p);
+    len = i2d_PKCS7(token, &p);
     p -= len;
-    TimeStampResp_free(reply);
 
     attrs = sk_X509_ATTRIBUTE_new_null();
     attrs = X509at_add1_attr_by_txt(&attrs, SPC_RFC3161_OBJID, V_ASN1_SET, p, len);
@@ -465,26 +431,22 @@ static int decode_rfc3161_response(PKCS7 *p7, BIO *bin, int verbose)
 }
 
 /*
- * Decode an authenticode response from BIO.
  * If successful the authenticode timestamp will be written into
  * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1]:
  * p7->d.sign->signer_info->unauth_attr
  * [in, out] p7: new PKCS#7 signature
- * [in] bin: base64 BIO with http data
+ * [in] resp: PKCS#7 authenticode response
  * [in] verbose: additional output mode
  * [returns] 1 on error or 0 on success
  */
-static int decode_authenticode_response(PKCS7 *p7, BIO *b64_bin, int verbose)
+static int attach_authenticode_response(PKCS7 *p7, PKCS7 *resp, int verbose)
 {
-    PKCS7 *resp;
     PKCS7_SIGNER_INFO *info, *si;
     STACK_OF(X509_ATTRIBUTE) *attrs;
-
     u_char *p;
     int len, i;
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 
-    resp = d2i_PKCS7_bio(b64_bin, NULL);
     if (!resp) {
         return 1; /* FAILED */
     }
@@ -689,15 +651,25 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
 
     if (bin) {
         if (rfc3161) {
-            res = decode_rfc3161_response(p7, bin, verbose);
+            /* decode a RFC 3161 response from BIO */
+            TS_RESP *response = d2i_TS_RESP_bio(bin, NULL);
             BIO_free_all(bin);
+
+            res = attach_rfc3161_response(p7, response, verbose);
+            TS_RESP_free(response);
         } else {
-            BIO *b64 = BIO_new(BIO_f_base64());
+            /* decode an authenticode response from BIO */
+            PKCS7 *response;
+            BIO *b64, *b64_bin;
+
+            b64 = BIO_new(BIO_f_base64());
             if (!blob_has_nl)
                 BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
-            BIO *b64_bin = BIO_push(b64, bin);
-            res = decode_authenticode_response(p7, b64_bin, verbose);
+            b64_bin = BIO_push(b64, bin);
+            response = d2i_PKCS7_bio(b64_bin, NULL);
             BIO_free_all(b64_bin);
+
+            res = attach_authenticode_response(p7, response, verbose);
         }
         if (res && verbose) {
             if (http_code != -1) {
@@ -743,6 +715,240 @@ static int add_timestamp_rfc3161(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
     return 0; /* FAILED */
 }
 #endif /* ENABLE_CURL */
+
+/*
+ * [in] resp_ctx: a response context that can be used for generating responses
+ * [in] data: unused
+ * [returns] hexadecimal serial number
+ */
+static ASN1_INTEGER *serial_cb(TS_RESP_CTX *resp_ctx, void *data)
+{
+    int ret = 0;
+    uint64_t buf;
+    ASN1_INTEGER *serial = NULL;
+
+    /* squash unused parameter warning */
+    (void)data;
+
+    if (RAND_bytes((unsigned char *)&buf, sizeof buf) <= 0) {
+        printf("RAND_bytes failed\n");
+        goto out;
+    }
+    serial = ASN1_INTEGER_new();
+    if (!serial)
+        goto out;
+    ASN1_INTEGER_set_uint64(serial, buf);
+    ret = 1;
+out:
+     if (!ret) {
+        TS_RESP_CTX_set_status_info(resp_ctx, TS_STATUS_REJECTION,
+            "Error during serial number generation.");
+        TS_RESP_CTX_add_failure_info(resp_ctx, TS_INFO_ADD_INFO_NOT_AVAILABLE);
+        ASN1_INTEGER_free(serial);
+        return NULL; /* FAILED */
+    }
+    return serial;
+}
+
+/*
+ * This must return the seconds and microseconds since Jan 1, 1970 in the sec
+ * and usec variables allocated by the caller.
+ * [in] resp_ctx: a response context that can be used for generating responses
+ * [in] data: timestamping time
+ * [out] sec: total of seconds since Jan 1, 1970
+ * [out] usec: microseconds (unused)
+ * [returns] 0 on error or 1 on success
+ */
+static int time_cb(TS_RESP_CTX *resp_ctx, void *data, long *sec, long *usec)
+{
+    time_t *time = (time_t *)data;
+    if(!*time) {
+        TS_RESP_CTX_set_status_info(resp_ctx, TS_STATUS_REJECTION,
+            "Time is not available.");
+        TS_RESP_CTX_add_failure_info(resp_ctx, TS_INFO_TIME_NOT_AVAILABLE);
+        return 0; /* FAILED */
+    }
+    *sec = (long int)*time;
+    *usec = 0;
+    return 1; /* OK */
+}
+
+/*
+ * [in] ctx: structure holds input and output data
+ * [in] signer_cert: the signer certificate of the TSA in PEM format
+ * [in] signer_key: the private key of the TSA in PEM format
+ * [in] chain: the certificate chain that will all be included in the response
+ * [in] bout: timestamp request
+ * [returns] RFC3161 response
+ */
+static TS_RESP *get_rfc3161_response(FILE_FORMAT_CTX *ctx, X509 *signer_cert,
+    EVP_PKEY *signer_key, STACK_OF(X509) *chain, BIO *bout)
+{
+    TS_RESP_CTX *resp_ctx = NULL;
+    TS_RESP *response = NULL;
+    ASN1_OBJECT *policy_obj = NULL;
+
+    resp_ctx = TS_RESP_CTX_new();
+    if (!resp_ctx)
+        goto out;
+
+    TS_RESP_CTX_set_serial_cb(resp_ctx, serial_cb, NULL);
+    if (!TS_RESP_CTX_set_signer_cert(resp_ctx, signer_cert)) {
+        goto out;
+    }
+    if (!TS_RESP_CTX_set_signer_key(resp_ctx, signer_key)) {
+        goto out;
+    }
+    if (!TS_RESP_CTX_set_certs(resp_ctx, chain)) {
+        goto out;
+    }
+    /* message digest algorithm that the TSA accepts */
+    if (!TS_RESP_CTX_add_md(resp_ctx, ctx->options->md)) {
+        goto out;
+    }
+    /* signing digest to use */
+    if (!TS_RESP_CTX_set_signer_digest(resp_ctx, ctx->options->md)) {
+        goto out;
+    }
+    /* default policy to use when the request does not mandate any policy
+     * tsa_policy1 = 1.2.3.4.1 */
+    policy_obj = OBJ_txt2obj(TSA_POLICY1, 0);
+    if (!policy_obj) {
+        goto out;
+    }
+    if (!TS_RESP_CTX_set_def_policy(resp_ctx, policy_obj)) {
+        goto out;
+    }
+    /* the accuracy of the time source of the TSA in seconds, milliseconds
+     * and microseconds; e.g. secs:1, millisecs:500, microsecs:100;
+     * 0 means not specified */
+    if (!TS_RESP_CTX_set_accuracy(resp_ctx, 1, 500, 100)) {
+        goto out;
+    }
+    if (ctx->options->tsa_time) {
+        TS_RESP_CTX_set_time_cb(resp_ctx, time_cb, &(ctx->options->tsa_time));
+    }
+    /* generate RFC3161 response with embedded TS_TST_INFO structure */
+    response = TS_RESP_create_response(resp_ctx, bout);
+    if (!response) {
+        printf("Failed to create RFC3161 response\n");
+    }
+
+out:
+    ASN1_OBJECT_free(policy_obj);
+    TS_RESP_CTX_free(resp_ctx);
+
+    return response;
+}
+
+/*
+ * [in] bin: certfile BIO
+ * [in] certpass: NULL
+ * [returns] pointer to STACK_OF(X509) structure
+ */
+static STACK_OF(X509) *X509_chain_read_certs(BIO *bin, char *certpass)
+{
+    STACK_OF(X509) *certs = sk_X509_new_null();
+    X509 *x509;
+    (void)BIO_seek(bin, 0);
+    x509 = PEM_read_bio_X509(bin, NULL, NULL, certpass);
+    while (x509) {
+        sk_X509_push(certs, x509);
+        x509 = PEM_read_bio_X509(bin, NULL, NULL, certpass);
+    }
+    ERR_clear_error();
+    if (!sk_X509_num(certs)) {
+        sk_X509_free(certs);
+        return NULL;
+    }
+    return certs;
+}
+
+/*
+ * [in, out] p7: new PKCS#7 signature
+ * [in] ctx: structure holds input and output data
+ * [returns] 1 on error or 0 on success
+ */
+static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
+{
+    BIO *btmp, *bout;
+    STACK_OF(X509) *chain;
+    X509 *signer_cert = NULL;
+    EVP_PKEY *signer_key;
+    TS_RESP *response = NULL;
+    int i, res = 1;
+
+    btmp = BIO_new_file(ctx->options->tsa_certfile, "rb");
+    if (!btmp) {
+        printf("Failed to read Time-Stamp Authority certificate file: %s\n", ctx->options->tsa_certfile);
+        return 0; /* FAILED */
+    }
+    /* .pem certificate file */
+    chain = X509_chain_read_certs(btmp, NULL);
+    BIO_free(btmp);
+    btmp = BIO_new_file(ctx->options->tsa_keyfile, "rb");
+    if (!btmp) {
+        printf("Failed to read private key file: %s\n", ctx->options->tsa_keyfile);
+        return 0; /* FAILED */
+    }
+    signer_key = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL);
+    BIO_free(btmp);
+    if(!chain || !signer_key) {
+        printf("Failed to load Time-Stamp Authority crypto parameters\n");
+        return 0; /* FAILED */
+    }
+    /* find the signer's certificate located somewhere in the whole certificate chain */
+    for (i=0; i<sk_X509_num(chain); i++) {
+        X509 *cert = sk_X509_value(chain, i);
+        if (X509_check_private_key(cert, signer_key)) {
+            signer_cert = cert;
+            break;
+        }
+    }
+    if(!signer_cert) {
+        printf("Failed to checking the consistency of a TSA private key with a public key in any X509 certificate\n");
+        goto out;
+    }
+
+    /* The TSA signing certificate must have exactly one extended key usage
+     * assigned to it: timeStamping. The extended key usage must also be critical,
+     * otherwise the certificate is going to be refused. */
+
+    /* check X509_PURPOSE_TIMESTAMP_SIGN certificate purpose */
+    if (X509_check_purpose(signer_cert, X509_PURPOSE_TIMESTAMP_SIGN, 0) != 1) {
+        printf("Unsupported TSA signer's certificate purpose X509_PURPOSE_TIMESTAMP_SIGN\n");
+        goto out;
+    }
+    /* check extended key usage flag XKU_TIMESTAMP */
+    if (!(X509_get_extended_key_usage(signer_cert) & XKU_TIMESTAMP)) {
+        printf("Unsupported Signer's certificate purpose XKU_TIMESTAMP\n");
+        goto out;
+    }
+    /* encode timestamp request */
+    bout = bio_encode_rfc3161_request(p7, ctx->options->md);
+    if (!bout) {
+        printf("Failed to encode timestamp request\n");
+        goto out;
+    }
+
+    response = get_rfc3161_response(ctx, signer_cert, signer_key, chain, bout);
+    BIO_free_all(bout);
+
+    if (response) {
+        res = attach_rfc3161_response(p7, response, ctx->options->verbose);
+        if (res) {
+            printf("Failed to convert timestamp reply\n");
+            ERR_print_errors_fp(stdout);
+        }
+    } else {
+        printf("Failed to obtain RFC3161 response\n");
+    }
+out:
+    sk_X509_pop_free(chain, X509_free);
+    EVP_PKEY_free(signer_key);
+    TS_RESP_free(response);
+    return res;
+}
 
 /*
  * If successful the unauthenticated blob will be written into
@@ -799,6 +1005,10 @@ static int add_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
     if (ctx->options->ntsurl && !add_timestamp_rfc3161(p7, ctx)) {
         printf("%s\n%s\n", "RFC 3161 timestamping failed",
             "Use the \"-t\" option to add the Authenticode Time-Stamp Authority or choose another one RFC3161 Time-Stamp Authority");
+        return 1; /* FAILED */
+    }
+    if (ctx->options->tsa_certfile && ctx->options->tsa_keyfile && add_timestamp_builtin(p7, ctx)) {
+        printf("Built-in timestamping failed\n");
         return 1; /* FAILED */
     }
 #endif /* ENABLE_CURL */
@@ -1224,6 +1434,20 @@ static STACK_OF(X509_CRL) *x509_crl_list_get(PKCS7 *p7, X509_CRL *crl)
     return crls;
 }
 
+static void print_timestamp_serial_number(TS_TST_INFO *token)
+{
+    BIGNUM *serialbn;
+    char *number;
+
+    if (!token)
+        return;
+    serialbn = ASN1_INTEGER_to_BN(TS_TST_INFO_get_serial(token), NULL);
+    number = BN_bn2hex(serialbn);
+    printf("Timestamp serial number: %s\n", number);
+    BN_free(serialbn);
+    OPENSSL_free(number);
+}
+
 /*
  * Compare the hash provided from the TSTInfo object against the hash computed
  * from the signature created by the signing certificate's private key
@@ -1235,35 +1459,42 @@ static int verify_timestamp_token(PKCS7 *p7, CMS_ContentInfo *timestamp)
 {
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
     PKCS7_SIGNER_INFO *si;
-    ASN1_OCTET_STRING *hash, **pos;
-    TimeStampToken *token = NULL;
-    const u_char *p = NULL;
-    u_char mdbuf[EVP_MAX_MD_SIZE];
-    const EVP_MD *md;
-    int md_nid;
-    BIO *bhash;
+    ASN1_OCTET_STRING **pos;
 
     signer_info = PKCS7_get_signer_info(p7);
     if (!signer_info)
         return 0; /* FAILED */
-
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si)
         return 0; /* FAILED */
 
+    /* get the embedded content */
     pos  = CMS_get0_content(timestamp);
     if (pos != NULL && *pos != NULL) {
-        p = (*pos)->data;
-        token = d2i_TimeStampToken(NULL, &p, (*pos)->length);
+        const u_char *p = (*pos)->data;
+        TS_TST_INFO *token = d2i_TS_TST_INFO(NULL, &p, (*pos)->length);
+
         if (token) {
-            /* compute a hash from the encrypted message digest value of the file */
-            md_nid = OBJ_obj2nid(token->messageImprint->digestAlgorithm->algorithm);
+            BIO *bhash;
+            u_char mdbuf[EVP_MAX_MD_SIZE];
+            ASN1_OCTET_STRING *hash;
+            const ASN1_OBJECT *aoid;
+            int md_nid;
+            const EVP_MD *md;
+            TS_MSG_IMPRINT *msg_imprint = TS_TST_INFO_get_msg_imprint(token);
+            const X509_ALGOR *alg = TS_MSG_IMPRINT_get_algo(msg_imprint);
+
+            X509_ALGOR_get0(&aoid, NULL, NULL, alg);
+            md_nid = OBJ_obj2nid(aoid);
             md = EVP_get_digestbynid(md_nid);
+
+            /* compute a hash from the encrypted message digest value of the file */
             bhash = BIO_new(BIO_f_md());
             if (!BIO_set_md(bhash, md)) {
                 printf("Unable to set the message digest of BIO\n");
                 BIO_free_all(bhash);
-                return 0;  /* FAILED */
+                TS_TST_INFO_free(token);
+                return 0; /* FAILED */
             }
             BIO_push(bhash, BIO_new(BIO_s_null()));
             BIO_write(bhash, si->enc_digest->data, si->enc_digest->length);
@@ -1271,23 +1502,25 @@ static int verify_timestamp_token(PKCS7 *p7, CMS_ContentInfo *timestamp)
             BIO_free_all(bhash);
 
             /* compare the provided hash against the computed hash */
-            hash = token->messageImprint->digest;
-            /* hash->length == EVP_MD_size(md) */
+            hash =TS_MSG_IMPRINT_get_msg(msg_imprint);
             if (memcmp(mdbuf, hash->data, (size_t)hash->length)) {
                 printf("Hash value mismatch:\n\tMessage digest algorithm: %s\n",
                         (md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2ln(md_nid));
                 print_hash("\tComputed message digest", "", mdbuf, EVP_MD_size(md));
                 print_hash("\tReceived message digest", "", hash->data, hash->length);
                 printf("\nFile's message digest verification: failed\n");
-                TimeStampToken_free(token);
+                TS_TST_INFO_free(token);
                 return 0; /* FAILED */
             } /* else Computed and received message digests matched */
-            TimeStampToken_free(token);
+
+            print_timestamp_serial_number(token);
+            TS_TST_INFO_free(token);
         } else
             /* our CMS_ContentInfo struct created for Authenticode Timestamp
-             * does not contain any TimeStampToken as specified in RFC 3161 */
+             * does not contain any TS_TST_INFO struct as specified in RFC 3161 */
             ERR_clear_error();
     }
+
     return 1; /* OK */
 }
 
@@ -1353,8 +1586,7 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
         crl = x509_crl_get(url);
         OPENSSL_free(url);
         if (!crl && !ctx->options->tsa_crlfile) {
-            printf("Use the \"-TSA-CRLfile\" option to add one or more Time-Stamp Authority CRLs in PEM format.\n\n");
-            goto out;
+            printf("Use the \"-TSA-CRLfile\" option to add one or more Time-Stamp Authority CRLs in PEM format.\n");
         }
     }
 #endif /* ENABLE_CURL */
@@ -1465,7 +1697,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
         crl = x509_crl_get(url);
         OPENSSL_free(url);
         if (!crl && !ctx->options->crlfile) {
-            printf("Use the \"-CRLfile\" option to add one or more CRLs in PEM format.\n\n");
+            printf("Use the \"-CRLfile\" option to add one or more CRLs in PEM format.\n");
             goto out;
         }
     }
@@ -1878,20 +2110,16 @@ static time_t time_t_get_si_time(PKCS7_SIGNER_INFO *si)
  */
 static time_t time_t_get_cms_time(CMS_ContentInfo *cms)
 {
-    ASN1_OCTET_STRING **pos;
-    const u_char *p = NULL;
-    TimeStampToken *token = NULL;
-    ASN1_GENERALIZEDTIME *asn1_time = NULL;
     time_t posix_time = INVALID_TIME;
+    ASN1_OCTET_STRING **pos  = CMS_get0_content(cms);
 
-    pos  = CMS_get0_content(cms);
     if (pos != NULL && *pos != NULL) {
-        p = (*pos)->data;
-        token = d2i_TimeStampToken(NULL, &p, (*pos)->length);
+        const u_char *p = (*pos)->data;
+        TS_TST_INFO *token = d2i_TS_TST_INFO(NULL, &p, (*pos)->length);
         if (token) {
-            asn1_time = token->time;
+            const ASN1_GENERALIZEDTIME *asn1_time = TS_TST_INFO_get_time(token);
             posix_time = time_t_get_asn1_time(asn1_time);
-            TimeStampToken_free(token);
+            TS_TST_INFO_free(token);
         }
     }
     return posix_time;
@@ -1899,7 +2127,7 @@ static time_t time_t_get_cms_time(CMS_ContentInfo *cms)
 
 /*
  * Create new CMS_ContentInfo struct for Authenticode Timestamp.
- * This struct does not contain any TimeStampToken as specified in RFC 3161.
+ * This struct does not contain any TS_TST_INFO as specified in RFC 3161.
  * [in] p7_signed: PKCS#7 signedData structure
  * [in] countersignature: Authenticode Timestamp decoded to PKCS7_SIGNER_INFO
  * [returns] pointer to CMS_ContentInfo structure
@@ -2000,6 +2228,10 @@ static int verify_member(FILE_FORMAT_CTX *ctx, CatalogAuthAttr *attribute)
     ASN1_TYPE_free(content);
     if (mdtype == -1) {
         printf("Failed to extract current message digest\n\n");
+        return 1; /* FAILED */
+    }
+    if (!ctx->format->digest_calc) {
+        printf("Unsupported method: digest_calc\n");
         return 1; /* FAILED */
     }
     md = EVP_get_digestbynid(mdtype);
@@ -2220,6 +2452,11 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
     STACK_OF(PKCS7) *signatures;
     int detached = options->catalog ? 1 : 0;
 
+    if (!ctx->format->check_file) {
+        printf("Unsupported method: check_file\n");
+        return 1; /* FAILED */
+    }
+
     if (!ctx->format->check_file(ctx, detached))
         return 1; /* FAILED */
 
@@ -2238,10 +2475,18 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
             printf("CAT file initialization error\n");
             return 1; /* Failed */
         }
+        if (!cat_ctx->format->pkcs7_extract) {
+            printf("Unsupported command: extract-signature\n");
+            return 1; /* FAILED */
+        }
         p7 = cat_ctx->format->pkcs7_extract(cat_ctx);
         cat_ctx->format->ctx_cleanup(cat_ctx, NULL, NULL);
         OPENSSL_free(cat_options);
     } else {
+        if (!ctx->format->pkcs7_extract) {
+            printf("Unsupported command: extract-signature\n");
+            return 1; /* FAILED */
+        }
         p7 = ctx->format->pkcs7_extract(ctx);
     }
     if (!p7) {
@@ -2262,9 +2507,14 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
             } else {
                 printf("Catalog verification: failed\n\n");
             }
-        } else if (ctx->format->verify_digests(ctx, sig)) {
-            printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
-            ret &= verify_signature(ctx, sig);
+        } else if (ctx->format->verify_digests) {
+            if (ctx->format->verify_digests(ctx, sig)) {
+                printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
+                ret &= verify_signature(ctx, sig);
+            }
+        } else {
+            printf("Unsupported method: verify_digests\n");
+            return 1; /* FAILED */
         }
     }
     printf("Number of verified signatures: %d\n", i);
@@ -2419,6 +2669,8 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
         printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
 #endif /* ENABLE_CURL */
+        printf("%12s[ -TSA-certs <TSA-certfile> ] [ -TSA-key <TSA-keyfile> ]\n", "");
+        printf("%12s[ -TSA-time <unix-time> ]\n", "");
         printf("%12s[ -time <unix-time> ]\n", "");
         printf("%12s[ -addUnauthenticatedBlob ]\n", "");
         printf("%12s[ -nest ]\n", "");
@@ -2432,6 +2684,8 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
         printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
 #endif /* ENABLE_CURL */
+        printf("%12s[ -TSA-certs <TSA-certfile> ] [ -TSA-key <TSA-keyfile> ]\n", "");
+        printf("%12s[ -TSA-time <unix-time> ]\n", "");
         printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
         printf("%12s[ -verbose ]\n", "");
         printf("%12s[ -add-msi-dse ]\n", "");
@@ -2529,6 +2783,9 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_ts[] = {"add", "sign", NULL};
 #endif /* ENABLE_CURL */
     const char *cmds_CAfileTSA[] = {"attach-signature", "verify", NULL};
+    const char *cmds_certsTSA[] = {"add", "sign", NULL};
+    const char *cmds_keyTSA[] = {"add", "sign", NULL};
+    const char *cmds_timeTSA[] = {"add", "sign", NULL};
     const char *cmds_verbose[] = {"add", "sign", "verify", NULL};
 
     if (on_list(cmd, cmds_all)) {
@@ -2678,32 +2935,15 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%-24s= the file containing one or more Time-Stamp Authority certificates in PEM format\n", "-TSA-CAfile");
     if (on_list(cmd, cmds_CRLfileTSA))
         printf("%-24s= the file containing one or more Time-Stamp Authority CRLs in PEM format\n", "-TSA-CRLfile");
+    if (on_list(cmd, cmds_certsTSA))
+        printf("%-24s= Time-Stamp Authority signing certificate\n", "-TSA-certs");
+    if (on_list(cmd, cmds_keyTSA))
+        printf("%-24s= Time-Stamp Authority private key or PKCS#11 URI identifies a key in the token\n", "-TSA-key");
+    if (on_list(cmd, cmds_timeTSA))
+        printf("%-24s= the unix-time to set the Time-Stamp Authority signing\n", "-TSA-time");
     if (on_list(cmd, cmds_verbose))
         printf("%-24s= include additional output in the log\n", "-verbose");
     usage(argv0, cmd);
-}
-
-/*
- * [in] bin: certfile BIO
- * [in] certpass: NULL
- * [returns] pointer to STACK_OF(X509) structure
- */
-static STACK_OF(X509) *X509_chain_read_certs(BIO *bin, char *certpass)
-{
-    STACK_OF(X509) *certs = sk_X509_new_null();
-    X509 *x509;
-    (void)BIO_seek(bin, 0);
-    x509 = PEM_read_bio_X509(bin, NULL, NULL, certpass);
-    while (x509) {
-        sk_X509_push(certs, x509);
-        x509 = PEM_read_bio_X509(bin, NULL, NULL, certpass);
-    }
-    ERR_clear_error();
-    if (!sk_X509_num(certs)) {
-        sk_X509_free(certs);
-        return NULL;
-    }
-    return certs;
 }
 
 #ifdef PROVIDE_ASKPASS
@@ -3586,6 +3826,24 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->leafhash = (*++argv);
+        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-TSA-certs")) {
+            if (--argc < 1) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            options->tsa_certfile = *(++argv);
+        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-TSA-key")) {
+            if (--argc < 1) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            options->tsa_keyfile = *(++argv);
+        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-TSA-time")) {
+            if (--argc < 1) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            options->tsa_time = (time_t)strtoull(*(++argv), NULL, 10);
         } else if ((cmd == CMD_ADD) && !strcmp(*argv, "--help")) {
             help_for(argv0, "add");
             cmd = CMD_HELP;
@@ -3651,6 +3909,8 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
     if (argc > 0 ||
 #ifdef ENABLE_CURL
         (options->nturl && options->ntsurl) ||
+        (options->nturl && options->tsa_certfile && options->tsa_keyfile) ||
+        (options->ntsurl && options->tsa_certfile && options->tsa_keyfile) ||
 #endif
         !options->infile ||
         (cmd != CMD_VERIFY && !options->outfile) ||
@@ -3746,7 +4006,10 @@ int main(int argc, char **argv)
     if (options.cmd == CMD_VERIFY) {
         ret = verify_signed_file(ctx, &options);
         goto skip_signing;
-    } else if (options.cmd == CMD_EXTRACT && ctx->format->pkcs7_extract) {
+    } else if (options.cmd == CMD_EXTRACT) {
+        if (!ctx->format->pkcs7_extract) {
+            DO_EXIT_0("Unsupported command: extract-signature\n");
+        }
         p7 = ctx->format->pkcs7_extract(ctx);
         if (!p7) {
             DO_EXIT_0("Unable to extract existing signature\n");
@@ -3754,7 +4017,10 @@ int main(int argc, char **argv)
         ret = save_extracted_pkcs7(ctx, outdata, p7);
         PKCS7_free(p7);
         goto skip_signing;
-    } else if (options.cmd == CMD_REMOVE && ctx->format->remove_pkcs7) {
+    } else if (options.cmd == CMD_REMOVE) {
+        if (!ctx->format->remove_pkcs7) {
+            DO_EXIT_0("Unsupported command: remove-signature\n");
+        }
         ret = ctx->format->remove_pkcs7(ctx, hash, outdata);
         if (ctx->format->update_data_size) {
             ctx->format->update_data_size(ctx, outdata, NULL);
