@@ -1911,7 +1911,6 @@ static ZIP_FILE *openZip(const char *fn)
     zip->file = file;
     if (!readZipEOCDR(&zip->eocdr, file)) {
         freeZip(zip);
-        fclose(file);
         return NULL;
     }
     fseeko(file, 0, SEEK_END);
