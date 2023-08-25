@@ -231,46 +231,46 @@ static int appx_add_indirect_data_object(PKCS7 *p7, u_char *hash, int hashLen, F
 
 /* Prototypes */
 static u_char *appx_hash_blob_get(FILE_FORMAT_CTX *ctx, int *plen);
-static uint8_t *appx_calc_zip_data_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t *cdOffset);
-static void appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSignature, uint64_t cdOffset);
-static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t cdOffset);
 static int appx_calculate_hashes(FILE_FORMAT_CTX *ctx);
+static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t cdOffset);
+static void appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSignature, uint64_t cdOffset);
+static uint8_t *appx_calc_zip_data_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t *cdOffset);
 static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *content);
 static int appx_compare_hashes(FILE_FORMAT_CTX *ctx);
 static int appx_remove_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry);
 static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry);
 static const EVP_MD *appx_get_md(ZIP_FILE *zip);
-static uint16_t fileGetU16(FILE *file);
-static uint32_t fileGetU32(FILE *file);
-static uint64_t fileGetU64(FILE *file);
-static uint16_t bufferGetU16(uint8_t *buffer, uint64_t *pos);
-static uint32_t bufferGetU32(uint8_t *buffer, uint64_t *pos);
-static uint64_t bufferGetU64(uint8_t *buffer, uint64_t *pos);
-static void bioAddU16(BIO *bio, uint16_t v);
-static void bioAddU32(BIO *bio, uint32_t v);
-static void bioAddU64(BIO *bio, uint64_t v);
-static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file);
-static int readZip64EOCDLocator(ZIP64_EOCD_LOCATOR *locator, FILE *file);
-static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset);
-static void freeZipCentralDirectoryEntry(ZIP_CENTRAL_DIRECTORY_ENTRY *entry);
-static void freeZip(ZIP_FILE *zip);
 static ZIP_CENTRAL_DIRECTORY_ENTRY *zipGetCDEntryByName(ZIP_FILE *zip, const char *name);
-static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t compressedSize);
-static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file);
-static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file);
-static void zipPrintCentralDirectory(ZIP_FILE *zip);
-static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *sourceLen);
-static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen, int level);
-static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t **pData, uint64_t *dataSize, int unpack);
-static void zipWriteLocalHeader(BIO *bio, ZIP_LOCAL_HEADER *header, uint64_t *sizeonDisk);
 static void zipWriteCentralDirectoryEntry(BIO *bio, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint64_t offsetDiff, uint64_t *sizeOnDisk);
 static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data, uint64_t dataSize, int comprs);
 static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data, uint64_t dataSize, int comprs);
 static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO *bio, uint64_t *sizeOnDisk);
-static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pData, uint64_t *dataSize, int unpack);
+static void zipWriteLocalHeader(BIO *bio, ZIP_LOCAL_HEADER *header, uint64_t *sizeonDisk);
 static int zipEntryExist(ZIP_FILE *zip, const char *name);
 static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *md);
+static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pData, uint64_t *dataSize, int unpack);
+static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t **pData, uint64_t *dataSize, int unpack);
+static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t compressedSize);
+static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *sourceLen);
+static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen, int level);
 static ZIP_FILE *openZip(const char *fn);
+static void freeZip(ZIP_FILE *zip);
+static void zipPrintCentralDirectory(ZIP_FILE *zip);
+static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file);
+static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file);
+static void freeZipCentralDirectoryEntry(ZIP_CENTRAL_DIRECTORY_ENTRY *entry);
+static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file);
+static int readZip64EOCDLocator(ZIP64_EOCD_LOCATOR *locator, FILE *file);
+static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset);
+static uint64_t fileGetU64(FILE *file);
+static uint32_t fileGetU32(FILE *file);
+static uint16_t fileGetU16(FILE *file);
+static uint64_t bufferGetU64(uint8_t *buffer, uint64_t *pos);
+static uint32_t bufferGetU32(uint8_t *buffer, uint64_t *pos);
+static uint16_t bufferGetU16(uint8_t *buffer, uint64_t *pos);
+static void bioAddU64(BIO *bio, uint64_t v);
+static void bioAddU32(BIO *bio, uint32_t v);
+static void bioAddU16(BIO *bio, uint16_t v);
 
 
 /*
@@ -824,9 +824,41 @@ static u_char *appx_hash_blob_get(FILE_FORMAT_CTX *ctx, int *plen)
     return data;
 }
 
-static uint8_t *appx_calc_zip_data_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t *cdOffset)
+static int appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
 {
-    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+    uint64_t cdOffset = 0;
+
+    OPENSSL_free(ctx->appx_ctx->calculatedBMHash);
+    OPENSSL_free(ctx->appx_ctx->calculatedCTHash);
+    OPENSSL_free(ctx->appx_ctx->calculatedCDHash);
+    OPENSSL_free(ctx->appx_ctx->calculatedDataHash);
+    OPENSSL_free(ctx->appx_ctx->calculatedCIHash);
+    ctx->appx_ctx->calculatedBMHash = NULL;
+    ctx->appx_ctx->calculatedCIHash = NULL;
+    ctx->appx_ctx->calculatedBMHash = NULL;
+    ctx->appx_ctx->calculatedDataHash = NULL;
+    ctx->appx_ctx->calculatedCIHash = NULL;
+
+    ctx->appx_ctx->calculatedBMHash = zipCalcDigest(ctx->appx_ctx->zip, BLOCK_MAP_FILENAME, ctx->appx_ctx->md);
+    ctx->appx_ctx->calculatedCTHash = zipCalcDigest(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME, ctx->appx_ctx->md);
+    ctx->appx_ctx->calculatedDataHash = appx_calc_zip_data_hash(ctx->appx_ctx->zip, ctx->appx_ctx->md, &cdOffset);
+    ctx->appx_ctx->calculatedCDHash = appx_calc_zip_central_directory_hash(ctx->appx_ctx->zip, ctx->appx_ctx->md, cdOffset);
+    ctx->appx_ctx->calculatedCIHash = zipCalcDigest(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME, ctx->appx_ctx->md);
+
+    if (!ctx->appx_ctx->calculatedBMHash || !ctx->appx_ctx->calculatedCTHash
+        || !ctx->appx_ctx->calculatedCDHash || !ctx->appx_ctx->calculatedDataHash) {
+        printf("One or more hashes calculation failed\n");
+        return 0;
+    }
+    if (zipEntryExist(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME) && !ctx->appx_ctx->calculatedCIHash) {
+        printf("Code integrity file exists, but CI hash calculation failed\n");
+        return 0;
+    }
+    return 1;
+}
+
+static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t cdOffset)
+{
     u_char *mdbuf = NULL;
     BIO *bhash = BIO_new(BIO_f_md());
 
@@ -836,19 +868,7 @@ static uint8_t *appx_calc_zip_data_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_
         return NULL;  /* FAILED */
     }
     BIO_push(bhash, BIO_new(BIO_s_null()));
-    *cdOffset = 0;
-    for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
-        /* the signature file is considered not existent for hashing purposes */
-        uint64_t sizeOnDisk = 0;
-        if (!strcmp(entry->fileName, APP_SIGNATURE_FILENAME)) {
-            continue;
-        }
-        if (!zipRewriteData(zip, entry, bhash, &sizeOnDisk)) {
-            printf("Rewrite data error\n");
-            return 0;
-        }
-        *cdOffset += sizeOnDisk;
-    }
+    appx_write_central_directory(zip, bhash, 1, cdOffset);
     mdbuf = OPENSSL_malloc((size_t)EVP_MD_size(md));
     BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
     BIO_free_all(bhash);
@@ -935,8 +955,9 @@ static void appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSign
     }
 }
 
-static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t cdOffset)
+static uint8_t *appx_calc_zip_data_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t *cdOffset)
 {
+    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
     u_char *mdbuf = NULL;
     BIO *bhash = BIO_new(BIO_f_md());
 
@@ -946,44 +967,23 @@ static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD
         return NULL;  /* FAILED */
     }
     BIO_push(bhash, BIO_new(BIO_s_null()));
-    appx_write_central_directory(zip, bhash, 1, cdOffset);
+    *cdOffset = 0;
+    for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
+        /* the signature file is considered not existent for hashing purposes */
+        uint64_t sizeOnDisk = 0;
+        if (!strcmp(entry->fileName, APP_SIGNATURE_FILENAME)) {
+            continue;
+        }
+        if (!zipRewriteData(zip, entry, bhash, &sizeOnDisk)) {
+            printf("Rewrite data error\n");
+            return 0;
+        }
+        *cdOffset += sizeOnDisk;
+    }
     mdbuf = OPENSSL_malloc((size_t)EVP_MD_size(md));
     BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
     BIO_free_all(bhash);
     return mdbuf;
-}
-
-static int appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
-{
-    uint64_t cdOffset = 0;
-
-    OPENSSL_free(ctx->appx_ctx->calculatedBMHash);
-    OPENSSL_free(ctx->appx_ctx->calculatedCTHash);
-    OPENSSL_free(ctx->appx_ctx->calculatedCDHash);
-    OPENSSL_free(ctx->appx_ctx->calculatedDataHash);
-    OPENSSL_free(ctx->appx_ctx->calculatedCIHash);
-    ctx->appx_ctx->calculatedBMHash = NULL;
-    ctx->appx_ctx->calculatedCIHash = NULL;
-    ctx->appx_ctx->calculatedBMHash = NULL;
-    ctx->appx_ctx->calculatedDataHash = NULL;
-    ctx->appx_ctx->calculatedCIHash = NULL;
-
-    ctx->appx_ctx->calculatedBMHash = zipCalcDigest(ctx->appx_ctx->zip, BLOCK_MAP_FILENAME, ctx->appx_ctx->md);
-    ctx->appx_ctx->calculatedCTHash = zipCalcDigest(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME, ctx->appx_ctx->md);
-    ctx->appx_ctx->calculatedDataHash = appx_calc_zip_data_hash(ctx->appx_ctx->zip, ctx->appx_ctx->md, &cdOffset);
-    ctx->appx_ctx->calculatedCDHash = appx_calc_zip_central_directory_hash(ctx->appx_ctx->zip, ctx->appx_ctx->md, cdOffset);
-    ctx->appx_ctx->calculatedCIHash = zipCalcDigest(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME, ctx->appx_ctx->md);
-
-    if (!ctx->appx_ctx->calculatedBMHash || !ctx->appx_ctx->calculatedCTHash
-        || !ctx->appx_ctx->calculatedCDHash || !ctx->appx_ctx->calculatedDataHash) {
-        printf("One or more hashes calculation failed\n");
-        return 0;
-    }
-    if (zipEntryExist(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME) && !ctx->appx_ctx->calculatedCIHash) {
-        printf("Code integrity file exists, but CI hash calculation failed\n");
-        return 0;
-    }
-    return 1;
 }
 
 static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *content)
@@ -1248,210 +1248,6 @@ static const EVP_MD *appx_get_md(ZIP_FILE *zip)
     return md;
 }
 
-static uint16_t fileGetU16(FILE *file)
-{
-    uint8_t b[2];
-    size_t size = fread(b, 1, 2, file);
-    if (size != 2) {
-        return 0;
-    }
-    return b[1] << 8 | b[0];
-}
-
-static uint32_t fileGetU32(FILE *file)
-{
-    uint8_t b[4];
-    size_t size = fread(b, 1, 4, file);
-    if (size != 4) {
-        return 0;
-    }
-    return b[3] << 24 | b[2] << 16 | b[1] << 8 | b[0];
-}
-
-static uint64_t fileGetU64(FILE *file)
-{
-    uint64_t l = fileGetU32(file);
-    uint64_t h = fileGetU32(file);
-    return h << 32 | l;
-}
-
-static uint16_t bufferGetU16(uint8_t *buffer, uint64_t *pos)
-{
-    uint16_t ret = buffer[*pos + 1] << 8 | buffer[*pos];
-    *pos += 2;
-    return ret;
-}
-
-static uint32_t bufferGetU32(uint8_t *buffer, uint64_t *pos)
-{
-    uint32_t ret = buffer[*pos + 3] << 24 | buffer[*pos + 2] << 16 | buffer[*pos + 1] << 8 | buffer[*pos];
-    *pos += 4;
-    return ret;
-}
-
-static uint64_t bufferGetU64(uint8_t *buffer, uint64_t *pos)
-{
-    uint64_t l = bufferGetU32(buffer, pos);
-    uint64_t h = bufferGetU32(buffer, pos);
-    return h << 32 | l;
-}
-
-static void bioAddU16(BIO *bio, uint16_t v)
-{
-    uint8_t b[2];
-    b[0] = (u_char)((v) & 0xFF);
-    b[1] = (u_char)(((v) >> 8) & 0xFF);
-    BIO_write(bio, b, 2);
-}
-
-static void bioAddU32(BIO *bio, uint32_t v)
-{
-    uint8_t b[4];
-    b[0] = (u_char)((v) & 0xFF);
-    b[1] = (u_char)(((v) >> 8) & 0xFF);
-    b[2] = (u_char)(((v) >> 16) & 0xFF);
-    b[3] = (u_char)(((v) >> 24) & 0xFF);
-    BIO_write(bio, b, 4);
-}
-
-void bioAddU64(BIO *bio, uint64_t v)
-{
-    uint32_t l = v & 0xFFFFFFFF;
-    uint32_t h = (uint32_t)(v >> 32);
-    bioAddU32(bio, l);
-    bioAddU32(bio, h);
-}
-
-static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
-{
-    char signature[4];
-    size_t size;
-
-    fseeko(file, -EOCDR_SIZE, SEEK_END);
-    size = fread(signature, 1, 4, file);
-    if (size != 4) {
-        return 0;
-    }
-    if (memcmp(signature, PKZIP_EOCDR_SIGNATURE, 4)) {
-        printf("The input file is not a valip zip file - could not find End of Central Directory record\n");
-        return 0;
-    }
-    eocdr->diskNumber = fileGetU16(file);
-    eocdr->centralDirectoryDiskNumber = fileGetU16(file);
-    eocdr->diskEntries = fileGetU16(file);
-    eocdr->totalEntries = fileGetU16(file);
-    eocdr->centralDirectorySize = fileGetU32(file);
-    eocdr->centralDirectoryOffset = fileGetU32(file);
-    eocdr->commentLen = fileGetU16(file);
-
-    /*if (eocdr->centralDirectoryDiskNumber > 1 || eocdr->diskNumber > 1 ||
-        eocdr->centralDirectoryDiskNumber != eocdr->diskNumber ||
-        eocdr->diskEntries != eocdr->totalEntries)
-    {
-        printf("The input file is a multipart archive - not supported\n");
-        return 0;
-    }*/
-    if (eocdr->commentLen > 0) {
-        eocdr->comment = OPENSSL_malloc(eocdr->commentLen + 1);
-        memset(eocdr->comment, 0, eocdr->commentLen + 1);
-        size = fread(eocdr->comment, 1, eocdr->commentLen, file);
-        if (size != eocdr->commentLen) {
-            return 0;
-        }
-    } else {
-        eocdr->comment = NULL;
-    }
-    return 1;
-}
-
-static int readZip64EOCDLocator(ZIP64_EOCD_LOCATOR *locator, FILE *file)
-{
-    char signature[4];
-    size_t size;
-
-    fseeko(file, -(EOCDR_SIZE + ZIP64_EOCD_LOCATOR_SIZE), SEEK_END);
-    size = fread(signature, 1, 4, file);
-    if (size != 4) {
-        return 0;
-    }
-    if (memcmp(signature, PKZIP64_EOCD_LOCATOR_SIGNATURE, 4)) {
-        printf("The input file is not a valip zip file - could not find zip64 EOCD locator\n");
-        return 0;
-    }
-    locator->diskWithEOCD = fileGetU32(file);
-    locator->eocdOffset = fileGetU64(file);
-    locator->totalNumberOfDisks = fileGetU32(file);
-    return 1;
-}
-
-static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
-{
-    char signature[4];
-    size_t size;
-
-    fseeko(file, (int64_t)offset, SEEK_SET);
-    size = fread(signature, 1, 4, file);
-    if (size != 4) {
-        return 0;
-    }
-    if (memcmp(signature, PKZIP64_EOCDR_SIGNATURE, 4)) {
-        printf("The input file is not a valip zip file - could not find zip64 End of Central Directory record\n");
-        return 0;
-    }
-    eocdr->eocdrSize = fileGetU64(file);
-    eocdr->creatorVersion = fileGetU16(file);
-    eocdr->viewerVersion = fileGetU16(file);
-    eocdr->diskNumber = fileGetU32(file);
-    eocdr->diskWithCentralDirectory = fileGetU32(file);
-    eocdr->diskEntries = fileGetU64(file);
-    eocdr->totalEntries = fileGetU64(file);
-    eocdr->centralDirectorySize = fileGetU64(file);
-    eocdr->centralDirectoryOffset = fileGetU64(file);
-    eocdr->commentLen = eocdr->eocdrSize - 44;
-
-    if (eocdr->commentLen > 0) {
-        eocdr->comment = OPENSSL_malloc(eocdr->commentLen);
-        size = fread(eocdr->comment, 1, eocdr->commentLen, file);
-        if (size != eocdr->commentLen) {
-            return 0;
-        }
-    }
-    if (eocdr->diskWithCentralDirectory > 1 || eocdr->diskNumber > 1 ||
-        eocdr->diskWithCentralDirectory != eocdr->diskNumber ||
-        eocdr->totalEntries != eocdr->diskEntries) {
-        printf("The input file is a multipart archive - not supported\n");
-        return 0;
-    }
-    return 1;
-}
-
-static void freeZipCentralDirectoryEntry(ZIP_CENTRAL_DIRECTORY_ENTRY *entry)
-{
-    OPENSSL_free(entry->fileName);
-    OPENSSL_free(entry->extraField);
-    OPENSSL_free(entry->fileComment);
-    if (entry->overrideData) {
-        OPENSSL_free(entry->overrideData->data);
-    }
-    OPENSSL_free(entry->overrideData);
-    OPENSSL_free(entry);
-}
-
-static void freeZip(ZIP_FILE *zip)
-{
-    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
-
-    fclose(zip->file);
-    OPENSSL_free(zip->eocdr.comment);
-    OPENSSL_free(zip->eocdr64.comment);
-    ZIP_CENTRAL_DIRECTORY_ENTRY *next = NULL;
-    for (entry = zip->centralDirectoryHead; entry != NULL; entry = next) {
-        next = entry->next;
-        freeZipCentralDirectoryEntry(entry);
-    }
-    OPENSSL_free(zip);
-}
-
 static ZIP_CENTRAL_DIRECTORY_ENTRY *zipGetCDEntryByName(ZIP_FILE *zip, const char *name)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
@@ -1462,467 +1258,6 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipGetCDEntryByName(ZIP_FILE *zip, const cha
         }
     }
     return NULL;
-}
-
-static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t compressedSize)
-{
-    char signature[4];
-    size_t size;
-    FILE *file = zip->file;
-
-    size = fread(signature, 1, 4, file);
-    if (size != 4) {
-        return 0;
-    }
-    if (memcmp(signature, PKZIP_LH_SIGNATURE, 4)) {
-        printf("The input file is not a valip zip file - local header signature does not match\n");
-        return 0;
-    }
-    header->version = fileGetU16(file);
-    header->flags = fileGetU16(file);
-    header->compression = fileGetU16(file);
-    header->modTime = fileGetU16(file);
-    header->modDate = fileGetU16(file);
-    header->crc32 = fileGetU32(file);
-    header->compressedSize = fileGetU32(file);
-    header->uncompressedSize = fileGetU32(file);
-    header->fileNameLen = fileGetU16(file);
-    header->extraFieldLen = fileGetU16(file);
-
-    if (header->fileNameLen > 0) {
-        header->fileName = OPENSSL_malloc(header->fileNameLen + 1);
-        memset(header->fileName, 0, header->fileNameLen + 1);
-        size = fread(header->fileName, 1, header->fileNameLen, file);
-        if (size != header->fileNameLen) {
-            return 0;
-        }
-    } else {
-        header->fileName = NULL;
-    }
-    if (header->extraFieldLen > 0) {
-        header->extraField = OPENSSL_malloc(header->extraFieldLen);
-        memset(header->extraField, 0, header->extraFieldLen);
-        size = fread(header->extraField, 1, header->extraFieldLen, file);
-        if (size != header->extraFieldLen) {
-            return 0;
-        }
-    } else {
-        header->extraField = NULL;
-    }
-    if (header->flags & DATA_DESCRIPTOR_BIT) {
-        int64_t offset = ftello(file);
-        fseeko(file, (int64_t)compressedSize, SEEK_CUR);
-        size = fread(signature, 1, 4, file);
-        if (size != 4) {
-            return 0;
-        }
-        if (memcmp(signature, PKZIP_DATA_DESCRIPTOR_SIGNATURE, 4)) {
-            printf("The input file is not a valip zip file - flags indicate data descriptor, but data descriptor signature does not match\n");
-            OPENSSL_free(header->fileName);
-            OPENSSL_free(header->extraField);
-            return 0;
-        }
-        header->crc32 = fileGetU32(file);
-        if (zip->isZip64) {
-            header->compressedSize = fileGetU64(file);
-            header->uncompressedSize = fileGetU64(file);
-        } else {
-            header->compressedSize = fileGetU32(file);
-            header->uncompressedSize = fileGetU32(file);
-        }
-        fseeko(file, offset, SEEK_SET);
-    }
-    if (header->uncompressedSize == 0xFFFFFFFFF || header->compressedSize == 0xFFFFFFFF) {
-        if (header->extraFieldLen > 4) {
-            uint64_t pos = 0;
-            uint16_t len;
-            uint16_t op = bufferGetU16(header->extraField, &pos);
-
-            if (op != ZIP64_HEADER) {
-                printf("Expected zip64 header in local header extra field, got : 0x%X\n", op);
-                OPENSSL_free(header->fileName);
-                OPENSSL_free(header->extraField);
-                header->fileName = NULL;
-                header->extraField = NULL;
-                return 0;
-            }
-            len = bufferGetU16(header->extraField, &pos);
-            if (header->uncompressedSize == 0xFFFFFFFF) {
-                if (len >= 8) {
-                    header->uncompressedSize = bufferGetU64(header->extraField, &pos);
-                    header->uncompressedSizeInZip64 = 1;
-                } else {
-                    printf("Invalid zip64 local header entry\n");
-                    OPENSSL_free(header->fileName);
-                    OPENSSL_free(header->extraField);
-                    header->fileName = NULL;
-                    header->extraField = NULL;
-                    return 0;
-                }
-            }
-            if (header->compressedSize == 0xFFFFFFFF) {
-                if (len >= 16) {
-                    header->compressedSize = bufferGetU64(header->extraField, &pos);
-                    header->compressedSizeInZip64 = 1;
-                } else {
-                    printf("Invalid zip64 local header entry\n");
-                    OPENSSL_free(header->fileName);
-                    OPENSSL_free(header->extraField);
-                    header->fileName = NULL;
-                    header->extraField = NULL;
-                    return 0;
-                }
-            }
-        } else {
-            OPENSSL_free(header->fileName);
-            OPENSSL_free(header->extraField);
-            header->fileName = NULL;
-            header->extraField = NULL;
-            return 0;
-        }
-    }
-    return 1;
-}
-
-static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
-{
-    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
-    char signature[4];
-    size_t size = fread(signature, 1, 4, file);
-
-    if (size != 4) {
-        return NULL;
-    }
-    if (memcmp(signature, PKZIP_CD_SIGNATURE, 4)) {
-        printf("The input file is not a valip zip file - could not find Central Directory record\n");
-        return NULL;
-    }
-    entry = OPENSSL_malloc(sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
-
-    /* initialise */
-    memset(entry, 0, sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
-    entry->fileOffset = ftello(file) - 4;
-    entry->creatorVersion = fileGetU16(file);
-    entry->viewerVersion = fileGetU16(file);
-    entry->flags = fileGetU16(file);
-    entry->compression = fileGetU16(file);
-    entry->modTime = fileGetU16(file);
-    entry->modDate = fileGetU16(file);
-    entry->crc32 = fileGetU32(file);
-    entry->compressedSize = fileGetU32(file);
-    entry->uncompressedSize = fileGetU32(file);
-    entry->fileNameLen = fileGetU16(file);
-    entry->extraFieldLen = fileGetU16(file);
-    entry->fileCommentLen = fileGetU16(file);
-    entry->diskNoStart = fileGetU16(file);
-    entry->internalAttr = fileGetU16(file);
-    entry->externalAttr = fileGetU32(file);
-    entry->offsetOfLocalHeader = fileGetU32(file);
-
-    if (entry->fileNameLen > 0) {
-        entry->fileName = OPENSSL_malloc(entry->fileNameLen + 1);
-        memset(entry->fileName, 0, entry->fileNameLen + 1);
-        size = fread(entry->fileName, 1, entry->fileNameLen, file);
-        if (size != entry->fileNameLen) {
-            return NULL;
-        }
-    }
-    if (entry->extraFieldLen > 0) {
-        entry->extraField = OPENSSL_malloc(entry->extraFieldLen);
-        memset(entry->extraField, 0, entry->extraFieldLen);
-        size = fread(entry->extraField, 1, entry->extraFieldLen, file);
-        if (size != entry->extraFieldLen) {
-            return NULL;
-        }
-    }
-    if (entry->fileCommentLen > 0) {
-        entry->fileComment = OPENSSL_malloc(entry->fileCommentLen + 1);
-        memset(entry->fileComment, 0, entry->fileCommentLen + 1);
-        size = fread(entry->fileComment, 1, entry->fileCommentLen, file);
-        if (size != entry->fileCommentLen) {
-            return NULL;
-        }
-    }
-    if (entry->uncompressedSize == 0xFFFFFFFFF || entry->compressedSize == 0xFFFFFFFF ||
-        entry->offsetOfLocalHeader == 0xFFFFFFFF || entry->diskNoStart == 0xFFFF) {
-        if (entry->extraFieldLen > 4) {
-            uint64_t pos = 0;
-            uint64_t len;
-            uint16_t header = bufferGetU16(entry->extraField, &pos);
-
-            if (header != ZIP64_HEADER) {
-                printf("Expected zip64 header in central directory extra field, got : 0x%X\n", header);
-                freeZipCentralDirectoryEntry(entry);
-                return NULL;
-            }
-            len = bufferGetU16(entry->extraField, &pos);
-            if (entry->uncompressedSize == 0xFFFFFFFF) {
-                if (len >= 8) {
-                    entry->uncompressedSize = bufferGetU64(entry->extraField, &pos);
-                    entry->uncompressedSizeInZip64 = 1;
-                } else {
-                    printf("Invalid zip64 central directory entry\n");
-                    freeZipCentralDirectoryEntry(entry);
-                    return NULL;
-                }
-            }
-            if (entry->compressedSize == 0xFFFFFFFF) {
-                if (len >= 16) {
-                    entry->compressedSize = bufferGetU64(entry->extraField, &pos);
-                    entry->compressedSizeInZip64 = 1;
-                } else {
-                    printf("Invalid zip64 central directory entry\n");
-                    freeZipCentralDirectoryEntry(entry);
-                    return NULL;
-                }
-            }
-            if (entry->offsetOfLocalHeader == 0xFFFFFFFF) {
-                if (len >= 24) {
-                    entry->offsetOfLocalHeader = bufferGetU64(entry->extraField, &pos);
-                    entry->offsetInZip64 = 1;
-                } else {
-                    printf("Invalid zip64 central directory entry\n");
-                    freeZipCentralDirectoryEntry(entry);
-                    return NULL;
-                }
-            }
-            if (entry->diskNoStart == 0xFFFF) {
-                if (len >= 28) {
-                    entry->diskNoStart = bufferGetU32(entry->extraField, &pos);
-                    entry->diskNoInZip64 = 1;
-                } else {
-                    printf("Invalid zip64 central directory entry\n");
-                    freeZipCentralDirectoryEntry(entry);
-                    return NULL;
-                }
-            }
-        } else {
-            freeZipCentralDirectoryEntry(entry);
-            return NULL;
-        }
-    }
-    entry->entryLen = ftello(file) - entry->fileOffset;
-    return entry;
-}
-
-static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file)
-{
-    ZIP_CENTRAL_DIRECTORY_ENTRY *prev = NULL;
-    uint64_t i;
-
-    fseeko(file, (int64_t)zip->centralDirectoryOffset, SEEK_SET);
-    for (i = 0; i < zip->centralDirectoryRecordCount; i++) {
-        ZIP_CENTRAL_DIRECTORY_ENTRY *entry = zipReadNextCentralDirectoryEntry(file);
-        if (!entry) {
-            return 0;
-        }
-        if (prev) {
-            prev->next = entry;
-        }
-        if (!zip->centralDirectoryHead) {
-            zip->centralDirectoryHead = entry;
-        }
-        prev = entry;
-    }
-    return 1;
-}
-
-static void zipPrintCentralDirectory(ZIP_FILE *zip)
-{
-    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
-
-    printf("Central directory entry count: %" PRIu64"\n", zip->centralDirectoryRecordCount);
-    for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
-        printf("Name: %s Compressed: %" PRIu64" Uncompressed: %" PRIu64" Offset: %" PRIu64"\n", entry->fileName,
-            entry->compressedSize, entry->uncompressedSize, entry->offsetOfLocalHeader);
-    }
-}
-
-static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *sourceLen)
-{
-    z_stream stream;
-    int err;
-    const uInt max = (uInt)-1;
-    uLong len, left;
-    Byte buf[1];    /* for detection of incomplete stream when *destLen == 0 */
-
-    len = *sourceLen;
-    if (*destLen) {
-        left = *destLen;
-        *destLen = 0;
-    } else {
-        left = 1;
-        dest = buf;
-    }
-    stream.next_in = source;
-    stream.avail_in = 0;
-    stream.zalloc = (alloc_func)0;
-    stream.zfree = (free_func)0;
-    stream.opaque = (voidpf)0;
-    err = inflateInit2(&stream, -MAX_WBITS);
-    if (err != Z_OK) {
-        return err;
-    }
-    stream.next_out = dest;
-    stream.avail_out = 0;
-    do {
-        if (stream.avail_out == 0) {
-            stream.avail_out = left > (uLong)max ? max : (uInt)left;
-            left -= stream.avail_out;
-        }
-        if (stream.avail_in == 0) {
-            stream.avail_in = len > (uLong)max ? max : (uInt)len;
-            len -= stream.avail_in;
-        }
-        err = inflate(&stream, Z_NO_FLUSH);
-    } while (err == Z_OK);
-    *sourceLen -= len + stream.avail_in;
-
-    if (dest != buf) {
-        *destLen = stream.total_out;
-    } else if (stream.total_out && err == Z_BUF_ERROR) {
-        left = 1;
-    }
-    inflateEnd(&stream);
-
-    return err == Z_STREAM_END ? Z_OK :
-        err == Z_NEED_DICT ? Z_DATA_ERROR :
-        err == Z_BUF_ERROR && left + stream.avail_out ? Z_DATA_ERROR :
-        err;
-}
-
-static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen, int level)
-{
-    z_stream stream;
-    int err;
-    const uInt max = (uInt)-1;
-    uLong left;
-
-    left = *destLen;
-    *destLen = 0;
-    stream.zalloc = (alloc_func)0;
-    stream.zfree = (free_func)0;
-    stream.opaque = (voidpf)0;
-
-    err = deflateInit2(&stream, level, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
-    if (err != Z_OK) {
-        return err;
-    }
-    stream.next_out = dest;
-    stream.avail_out = 0;
-    stream.next_in = source;
-    stream.avail_in = 0;
-    do {
-        if (stream.avail_out == 0) {
-            stream.avail_out = left > (uLong)max ? max : (uInt)left;
-            left -= stream.avail_out;
-        }
-        if (stream.avail_in == 0) {
-            stream.avail_in = sourceLen > (uLong)max ? max : (uInt)sourceLen;
-            sourceLen -= stream.avail_in;
-        }
-        err = deflate(&stream, sourceLen ? Z_NO_FLUSH : Z_FINISH);
-    } while (err == Z_OK);
-
-    //deflate(&stream, Z_SYNC_FLUSH);
-    *destLen = stream.total_out;
-    deflateEnd(&stream);
-    return err == Z_STREAM_END ? Z_OK : err;
-}
-
-static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t **pData, uint64_t *dataSize, int unpack)
-{
-    FILE *file = zip->file;
-    uint8_t *compressedData = NULL;
-    uint64_t compressedSize = 0;
-    uint64_t uncompressedSize = 0;
-    size_t size;
-
-    fseeko(file, (int64_t)entry->offsetOfLocalHeader, SEEK_SET);
-    if (entry->overrideData) {
-        compressedSize = entry->overrideData->compressedSize;
-        uncompressedSize = entry->overrideData->uncompressedSize;
-        compressedData = OPENSSL_malloc(compressedSize);
-        memcpy(compressedData, entry->overrideData->data, compressedSize);
-    } else {
-        ZIP_LOCAL_HEADER header;
-        memset(&header, 0, sizeof(header));
-        if (!zipReadLocalHeader(&header, zip, entry->compressedSize)) {
-            return 0;
-        }
-        if (strcmp(header.fileName, entry->fileName) || header.compressedSize != entry->compressedSize
-            || header.uncompressedSize != entry->uncompressedSize || header.compression != entry->compression) {
-            printf("Local header does not match central directory entry\n");
-            return 0;
-        }
-        /* we don't really need those */
-        OPENSSL_free(header.fileName);
-        OPENSSL_free(header.extraField);
-
-        compressedData = OPENSSL_malloc(entry->compressedSize);
-        size = fread(compressedData, 1, entry->compressedSize, file);
-        if (size != entry->compressedSize) {
-            return 0;
-        }
-        compressedSize = entry->compressedSize;
-        uncompressedSize = entry->uncompressedSize;
-    }
-    if (!unpack || (unpack && entry->compression == COMPRESSION_NONE)) {
-        *pData = compressedData;
-        *dataSize = compressedSize;
-    } else if (entry->compression == COMPRESSION_DEFLATE) {
-        uint8_t *uncompressedData = OPENSSL_malloc(uncompressedSize);
-        int ret;
-        uint64_t destLen = uncompressedSize;
-        uint64_t sourceLen = compressedSize;
-
-        ret = zipInflate(uncompressedData, &destLen, compressedData, &sourceLen);
-        OPENSSL_free(compressedData);
-
-        if (ret != Z_OK) {
-            printf("data decompresssion failed, zlib error: %d\n", ret);
-            OPENSSL_free(uncompressedData);
-            return 0;
-        } else {
-            *pData = uncompressedData;
-            *dataSize = destLen;
-        }
-    } else {
-        printf("Unsupported compression mode: %d\n", entry->compression);
-        OPENSSL_free(compressedData);
-        return 0;
-    }
-    return 1;
-}
-
-static void zipWriteLocalHeader(BIO *bio, ZIP_LOCAL_HEADER *header, uint64_t *sizeonDisk)
-{
-    BIO_write(bio, PKZIP_LH_SIGNATURE, 4);
-    bioAddU16(bio, header->version);
-    bioAddU16(bio, header->flags);
-    bioAddU16(bio, header->compression);
-    bioAddU16(bio, header->modTime);
-    bioAddU16(bio, header->modDate);
-
-    if (header->flags & DATA_DESCRIPTOR_BIT) {
-        bioAddU32(bio, 0);
-        bioAddU32(bio, 0);
-        bioAddU32(bio, 0);
-    } else {
-        bioAddU32(bio, header->crc32);
-        bioAddU32(bio, header->compressedSizeInZip64 ? 0xFFFFFFFF : (uint32_t)header->compressedSize);
-        bioAddU32(bio, header->uncompressedSizeInZip64 ? 0xFFFFFFFF : (uint32_t)header->uncompressedSize);
-    }
-    bioAddU16(bio, header->fileNameLen);
-    bioAddU16(bio, header->extraFieldLen);
-
-    if (header->fileNameLen > 0) {
-        BIO_write(bio, header->fileName, header->fileNameLen);
-    }
-    if (header->extraFieldLen > 0) {
-        BIO_write(bio, header->extraField, header->extraFieldLen);
-    }
-    *sizeonDisk = (uint64_t)30 + header->fileNameLen + header->extraFieldLen;
 }
 
 static void zipWriteCentralDirectoryEntry(BIO *bio, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint64_t offsetDiff, uint64_t *sizeOnDisk)
@@ -2193,16 +1528,34 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
     return 1;
 }
 
-static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pData, uint64_t *dataSize, int unpack)
+static void zipWriteLocalHeader(BIO *bio, ZIP_LOCAL_HEADER *header, uint64_t *sizeonDisk)
 {
-    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+    BIO_write(bio, PKZIP_LH_SIGNATURE, 4);
+    bioAddU16(bio, header->version);
+    bioAddU16(bio, header->flags);
+    bioAddU16(bio, header->compression);
+    bioAddU16(bio, header->modTime);
+    bioAddU16(bio, header->modDate);
 
-    for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
-        if (!strcmp(name, entry->fileName)) {
-            return zipReadFileData(zip, entry, pData, dataSize, unpack);
-        }
+    if (header->flags & DATA_DESCRIPTOR_BIT) {
+        bioAddU32(bio, 0);
+        bioAddU32(bio, 0);
+        bioAddU32(bio, 0);
+    } else {
+        bioAddU32(bio, header->crc32);
+        bioAddU32(bio, header->compressedSizeInZip64 ? 0xFFFFFFFF : (uint32_t)header->compressedSize);
+        bioAddU32(bio, header->uncompressedSizeInZip64 ? 0xFFFFFFFF : (uint32_t)header->uncompressedSize);
     }
-    return 0;
+    bioAddU16(bio, header->fileNameLen);
+    bioAddU16(bio, header->extraFieldLen);
+
+    if (header->fileNameLen > 0) {
+        BIO_write(bio, header->fileName, header->fileNameLen);
+    }
+    if (header->extraFieldLen > 0) {
+        BIO_write(bio, header->extraField, header->extraFieldLen);
+    }
+    *sizeonDisk = (uint64_t)30 + header->fileNameLen + header->extraFieldLen;
 }
 
 static int zipEntryExist(ZIP_FILE *zip, const char *name)
@@ -2246,6 +1599,296 @@ static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *
     BIO_free_all(bhash);
 
     return mdbuf;
+}
+
+static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pData, uint64_t *dataSize, int unpack)
+{
+    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+
+    for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
+        if (!strcmp(name, entry->fileName)) {
+            return zipReadFileData(zip, entry, pData, dataSize, unpack);
+        }
+    }
+    return 0;
+}
+
+static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t **pData, uint64_t *dataSize, int unpack)
+{
+    FILE *file = zip->file;
+    uint8_t *compressedData = NULL;
+    uint64_t compressedSize = 0;
+    uint64_t uncompressedSize = 0;
+    size_t size;
+
+    fseeko(file, (int64_t)entry->offsetOfLocalHeader, SEEK_SET);
+    if (entry->overrideData) {
+        compressedSize = entry->overrideData->compressedSize;
+        uncompressedSize = entry->overrideData->uncompressedSize;
+        compressedData = OPENSSL_malloc(compressedSize);
+        memcpy(compressedData, entry->overrideData->data, compressedSize);
+    } else {
+        ZIP_LOCAL_HEADER header;
+        memset(&header, 0, sizeof(header));
+        if (!zipReadLocalHeader(&header, zip, entry->compressedSize)) {
+            return 0;
+        }
+        if (strcmp(header.fileName, entry->fileName) || header.compressedSize != entry->compressedSize
+            || header.uncompressedSize != entry->uncompressedSize || header.compression != entry->compression) {
+            printf("Local header does not match central directory entry\n");
+            return 0;
+        }
+        /* we don't really need those */
+        OPENSSL_free(header.fileName);
+        OPENSSL_free(header.extraField);
+
+        compressedData = OPENSSL_malloc(entry->compressedSize);
+        size = fread(compressedData, 1, entry->compressedSize, file);
+        if (size != entry->compressedSize) {
+            OPENSSL_free(compressedData);
+            return 0;
+        }
+        compressedSize = entry->compressedSize;
+        uncompressedSize = entry->uncompressedSize;
+    }
+    if (!unpack || (unpack && entry->compression == COMPRESSION_NONE)) {
+        *pData = compressedData;
+        *dataSize = compressedSize;
+    } else if (entry->compression == COMPRESSION_DEFLATE) {
+        uint8_t *uncompressedData = OPENSSL_malloc(uncompressedSize);
+        int ret;
+        uint64_t destLen = uncompressedSize;
+        uint64_t sourceLen = compressedSize;
+
+        ret = zipInflate(uncompressedData, &destLen, compressedData, &sourceLen);
+        OPENSSL_free(compressedData);
+
+        if (ret != Z_OK) {
+            printf("Data decompresssion failed, zlib error: %d\n", ret);
+            OPENSSL_free(uncompressedData);
+            return 0;
+        } else {
+            *pData = uncompressedData;
+            *dataSize = destLen;
+        }
+    } else {
+        printf("Unsupported compression mode: %d\n", entry->compression);
+        OPENSSL_free(compressedData);
+        return 0;
+    }
+    return 1;
+}
+
+static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t compressedSize)
+{
+    char signature[4];
+    size_t size;
+    FILE *file = zip->file;
+
+    size = fread(signature, 1, 4, file);
+    if (size != 4) {
+        return 0;
+    }
+    if (memcmp(signature, PKZIP_LH_SIGNATURE, 4)) {
+        printf("The input file is not a valip zip file - local header signature does not match\n");
+        return 0;
+    }
+    header->version = fileGetU16(file);
+    header->flags = fileGetU16(file);
+    header->compression = fileGetU16(file);
+    header->modTime = fileGetU16(file);
+    header->modDate = fileGetU16(file);
+    header->crc32 = fileGetU32(file);
+    header->compressedSize = fileGetU32(file);
+    header->uncompressedSize = fileGetU32(file);
+    header->fileNameLen = fileGetU16(file);
+    header->extraFieldLen = fileGetU16(file);
+
+    if (header->fileNameLen > 0) {
+        header->fileName = OPENSSL_malloc(header->fileNameLen + 1);
+        memset(header->fileName, 0, header->fileNameLen + 1);
+        size = fread(header->fileName, 1, header->fileNameLen, file);
+        if (size != header->fileNameLen) {
+            return 0;
+        }
+    } else {
+        header->fileName = NULL;
+    }
+    if (header->extraFieldLen > 0) {
+        header->extraField = OPENSSL_malloc(header->extraFieldLen);
+        memset(header->extraField, 0, header->extraFieldLen);
+        size = fread(header->extraField, 1, header->extraFieldLen, file);
+        if (size != header->extraFieldLen) {
+            return 0;
+        }
+    } else {
+        header->extraField = NULL;
+    }
+    if (header->flags & DATA_DESCRIPTOR_BIT) {
+        int64_t offset = ftello(file);
+        fseeko(file, (int64_t)compressedSize, SEEK_CUR);
+        size = fread(signature, 1, 4, file);
+        if (size != 4) {
+            return 0;
+        }
+        if (memcmp(signature, PKZIP_DATA_DESCRIPTOR_SIGNATURE, 4)) {
+            printf("The input file is not a valip zip file - flags indicate data descriptor, but data descriptor signature does not match\n");
+            OPENSSL_free(header->fileName);
+            OPENSSL_free(header->extraField);
+            return 0;
+        }
+        header->crc32 = fileGetU32(file);
+        if (zip->isZip64) {
+            header->compressedSize = fileGetU64(file);
+            header->uncompressedSize = fileGetU64(file);
+        } else {
+            header->compressedSize = fileGetU32(file);
+            header->uncompressedSize = fileGetU32(file);
+        }
+        fseeko(file, offset, SEEK_SET);
+    }
+    if (header->uncompressedSize == 0xFFFFFFFFF || header->compressedSize == 0xFFFFFFFF) {
+        if (header->extraFieldLen > 4) {
+            uint64_t pos = 0;
+            uint16_t len;
+            uint16_t op = bufferGetU16(header->extraField, &pos);
+
+            if (op != ZIP64_HEADER) {
+                printf("Expected zip64 header in local header extra field, got : 0x%X\n", op);
+                OPENSSL_free(header->fileName);
+                OPENSSL_free(header->extraField);
+                header->fileName = NULL;
+                header->extraField = NULL;
+                return 0;
+            }
+            len = bufferGetU16(header->extraField, &pos);
+            if (header->uncompressedSize == 0xFFFFFFFF) {
+                if (len >= 8) {
+                    header->uncompressedSize = bufferGetU64(header->extraField, &pos);
+                    header->uncompressedSizeInZip64 = 1;
+                } else {
+                    printf("Invalid zip64 local header entry\n");
+                    OPENSSL_free(header->fileName);
+                    OPENSSL_free(header->extraField);
+                    header->fileName = NULL;
+                    header->extraField = NULL;
+                    return 0;
+                }
+            }
+            if (header->compressedSize == 0xFFFFFFFF) {
+                if (len >= 16) {
+                    header->compressedSize = bufferGetU64(header->extraField, &pos);
+                    header->compressedSizeInZip64 = 1;
+                } else {
+                    printf("Invalid zip64 local header entry\n");
+                    OPENSSL_free(header->fileName);
+                    OPENSSL_free(header->extraField);
+                    header->fileName = NULL;
+                    header->extraField = NULL;
+                    return 0;
+                }
+            }
+        } else {
+            OPENSSL_free(header->fileName);
+            OPENSSL_free(header->extraField);
+            header->fileName = NULL;
+            header->extraField = NULL;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *sourceLen)
+{
+    z_stream stream;
+    int err;
+    const uInt max = (uInt)-1;
+    uLong len, left;
+    Byte buf[1];    /* for detection of incomplete stream when *destLen == 0 */
+
+    len = *sourceLen;
+    if (*destLen) {
+        left = *destLen;
+        *destLen = 0;
+    } else {
+        left = 1;
+        dest = buf;
+    }
+    stream.next_in = source;
+    stream.avail_in = 0;
+    stream.zalloc = (alloc_func)0;
+    stream.zfree = (free_func)0;
+    stream.opaque = (voidpf)0;
+    err = inflateInit2(&stream, -MAX_WBITS);
+    if (err != Z_OK) {
+        return err;
+    }
+    stream.next_out = dest;
+    stream.avail_out = 0;
+    do {
+        if (stream.avail_out == 0) {
+            stream.avail_out = left > (uLong)max ? max : (uInt)left;
+            left -= stream.avail_out;
+        }
+        if (stream.avail_in == 0) {
+            stream.avail_in = len > (uLong)max ? max : (uInt)len;
+            len -= stream.avail_in;
+        }
+        err = inflate(&stream, Z_NO_FLUSH);
+    } while (err == Z_OK);
+    *sourceLen -= len + stream.avail_in;
+
+    if (dest != buf) {
+        *destLen = stream.total_out;
+    } else if (stream.total_out && err == Z_BUF_ERROR) {
+        left = 1;
+    }
+    inflateEnd(&stream);
+
+    return err == Z_STREAM_END ? Z_OK :
+        err == Z_NEED_DICT ? Z_DATA_ERROR :
+        err == Z_BUF_ERROR && left + stream.avail_out ? Z_DATA_ERROR :
+        err;
+}
+
+static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen, int level)
+{
+    z_stream stream;
+    int err;
+    const uInt max = (uInt)-1;
+    uLong left;
+
+    left = *destLen;
+    *destLen = 0;
+    stream.zalloc = (alloc_func)0;
+    stream.zfree = (free_func)0;
+    stream.opaque = (voidpf)0;
+
+    err = deflateInit2(&stream, level, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
+    if (err != Z_OK) {
+        return err;
+    }
+    stream.next_out = dest;
+    stream.avail_out = 0;
+    stream.next_in = source;
+    stream.avail_in = 0;
+    do {
+        if (stream.avail_out == 0) {
+            stream.avail_out = left > (uLong)max ? max : (uInt)left;
+            left -= stream.avail_out;
+        }
+        if (stream.avail_in == 0) {
+            stream.avail_in = sourceLen > (uLong)max ? max : (uInt)sourceLen;
+            sourceLen -= stream.avail_in;
+        }
+        err = deflate(&stream, sourceLen ? Z_NO_FLUSH : Z_FINISH);
+    } while (err == Z_OK);
+
+    //deflate(&stream, Z_SYNC_FLUSH);
+    *destLen = stream.total_out;
+    deflateEnd(&stream);
+    return err == Z_STREAM_END ? Z_OK : err;
 }
 
 static ZIP_FILE *openZip(const char *fn)
@@ -2299,6 +1942,365 @@ static ZIP_FILE *openZip(const char *fn)
     }
 
     return zip;
+}
+
+static void freeZip(ZIP_FILE *zip)
+{
+    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+
+    fclose(zip->file);
+    OPENSSL_free(zip->eocdr.comment);
+    OPENSSL_free(zip->eocdr64.comment);
+    ZIP_CENTRAL_DIRECTORY_ENTRY *next = NULL;
+    for (entry = zip->centralDirectoryHead; entry != NULL; entry = next) {
+        next = entry->next;
+        freeZipCentralDirectoryEntry(entry);
+    }
+    OPENSSL_free(zip);
+}
+
+static void zipPrintCentralDirectory(ZIP_FILE *zip)
+{
+    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+
+    printf("Central directory entry count: %" PRIu64"\n", zip->centralDirectoryRecordCount);
+    for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
+        printf("Name: %s Compressed: %" PRIu64" Uncompressed: %" PRIu64" Offset: %" PRIu64"\n", entry->fileName,
+            entry->compressedSize, entry->uncompressedSize, entry->offsetOfLocalHeader);
+    }
+}
+
+static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file)
+{
+    ZIP_CENTRAL_DIRECTORY_ENTRY *prev = NULL;
+    uint64_t i;
+
+    fseeko(file, (int64_t)zip->centralDirectoryOffset, SEEK_SET);
+    for (i = 0; i < zip->centralDirectoryRecordCount; i++) {
+        ZIP_CENTRAL_DIRECTORY_ENTRY *entry = zipReadNextCentralDirectoryEntry(file);
+        if (!entry) {
+            return 0;
+        }
+        if (prev) {
+            prev->next = entry;
+        }
+        if (!zip->centralDirectoryHead) {
+            zip->centralDirectoryHead = entry;
+        }
+        prev = entry;
+    }
+    return 1;
+}
+
+static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
+{
+    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+    char signature[4];
+    size_t size = fread(signature, 1, 4, file);
+
+    if (size != 4) {
+        return NULL;
+    }
+    if (memcmp(signature, PKZIP_CD_SIGNATURE, 4)) {
+        printf("The input file is not a valip zip file - could not find Central Directory record\n");
+        return NULL;
+    }
+    entry = OPENSSL_malloc(sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
+
+    /* initialise */
+    memset(entry, 0, sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
+    entry->fileOffset = ftello(file) - 4;
+    entry->creatorVersion = fileGetU16(file);
+    entry->viewerVersion = fileGetU16(file);
+    entry->flags = fileGetU16(file);
+    entry->compression = fileGetU16(file);
+    entry->modTime = fileGetU16(file);
+    entry->modDate = fileGetU16(file);
+    entry->crc32 = fileGetU32(file);
+    entry->compressedSize = fileGetU32(file);
+    entry->uncompressedSize = fileGetU32(file);
+    entry->fileNameLen = fileGetU16(file);
+    entry->extraFieldLen = fileGetU16(file);
+    entry->fileCommentLen = fileGetU16(file);
+    entry->diskNoStart = fileGetU16(file);
+    entry->internalAttr = fileGetU16(file);
+    entry->externalAttr = fileGetU32(file);
+    entry->offsetOfLocalHeader = fileGetU32(file);
+
+    if (entry->fileNameLen > 0) {
+        entry->fileName = OPENSSL_malloc(entry->fileNameLen + 1);
+        memset(entry->fileName, 0, entry->fileNameLen + 1);
+        size = fread(entry->fileName, 1, entry->fileNameLen, file);
+        if (size != entry->fileNameLen) {
+            return NULL;
+        }
+    }
+    if (entry->extraFieldLen > 0) {
+        entry->extraField = OPENSSL_malloc(entry->extraFieldLen);
+        memset(entry->extraField, 0, entry->extraFieldLen);
+        size = fread(entry->extraField, 1, entry->extraFieldLen, file);
+        if (size != entry->extraFieldLen) {
+            return NULL;
+        }
+    }
+    if (entry->fileCommentLen > 0) {
+        entry->fileComment = OPENSSL_malloc(entry->fileCommentLen + 1);
+        memset(entry->fileComment, 0, entry->fileCommentLen + 1);
+        size = fread(entry->fileComment, 1, entry->fileCommentLen, file);
+        if (size != entry->fileCommentLen) {
+            return NULL;
+        }
+    }
+    if (entry->uncompressedSize == 0xFFFFFFFFF || entry->compressedSize == 0xFFFFFFFF ||
+        entry->offsetOfLocalHeader == 0xFFFFFFFF || entry->diskNoStart == 0xFFFF) {
+        if (entry->extraFieldLen > 4) {
+            uint64_t pos = 0;
+            uint64_t len;
+            uint16_t header = bufferGetU16(entry->extraField, &pos);
+
+            if (header != ZIP64_HEADER) {
+                printf("Expected zip64 header in central directory extra field, got : 0x%X\n", header);
+                freeZipCentralDirectoryEntry(entry);
+                return NULL;
+            }
+            len = bufferGetU16(entry->extraField, &pos);
+            if (entry->uncompressedSize == 0xFFFFFFFF) {
+                if (len >= 8) {
+                    entry->uncompressedSize = bufferGetU64(entry->extraField, &pos);
+                    entry->uncompressedSizeInZip64 = 1;
+                } else {
+                    printf("Invalid zip64 central directory entry\n");
+                    freeZipCentralDirectoryEntry(entry);
+                    return NULL;
+                }
+            }
+            if (entry->compressedSize == 0xFFFFFFFF) {
+                if (len >= 16) {
+                    entry->compressedSize = bufferGetU64(entry->extraField, &pos);
+                    entry->compressedSizeInZip64 = 1;
+                } else {
+                    printf("Invalid zip64 central directory entry\n");
+                    freeZipCentralDirectoryEntry(entry);
+                    return NULL;
+                }
+            }
+            if (entry->offsetOfLocalHeader == 0xFFFFFFFF) {
+                if (len >= 24) {
+                    entry->offsetOfLocalHeader = bufferGetU64(entry->extraField, &pos);
+                    entry->offsetInZip64 = 1;
+                } else {
+                    printf("Invalid zip64 central directory entry\n");
+                    freeZipCentralDirectoryEntry(entry);
+                    return NULL;
+                }
+            }
+            if (entry->diskNoStart == 0xFFFF) {
+                if (len >= 28) {
+                    entry->diskNoStart = bufferGetU32(entry->extraField, &pos);
+                    entry->diskNoInZip64 = 1;
+                } else {
+                    printf("Invalid zip64 central directory entry\n");
+                    freeZipCentralDirectoryEntry(entry);
+                    return NULL;
+                }
+            }
+        } else {
+            freeZipCentralDirectoryEntry(entry);
+            return NULL;
+        }
+    }
+    entry->entryLen = ftello(file) - entry->fileOffset;
+    return entry;
+}
+
+static void freeZipCentralDirectoryEntry(ZIP_CENTRAL_DIRECTORY_ENTRY *entry)
+{
+    OPENSSL_free(entry->fileName);
+    OPENSSL_free(entry->extraField);
+    OPENSSL_free(entry->fileComment);
+    if (entry->overrideData) {
+        OPENSSL_free(entry->overrideData->data);
+    }
+    OPENSSL_free(entry->overrideData);
+    OPENSSL_free(entry);
+}
+
+
+static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
+{
+    char signature[4];
+    size_t size;
+
+    fseeko(file, -EOCDR_SIZE, SEEK_END);
+    size = fread(signature, 1, 4, file);
+    if (size != 4) {
+        return 0;
+    }
+    if (memcmp(signature, PKZIP_EOCDR_SIGNATURE, 4)) {
+        printf("The input file is not a valip zip file - could not find End of Central Directory record\n");
+        return 0;
+    }
+    eocdr->diskNumber = fileGetU16(file);
+    eocdr->centralDirectoryDiskNumber = fileGetU16(file);
+    eocdr->diskEntries = fileGetU16(file);
+    eocdr->totalEntries = fileGetU16(file);
+    eocdr->centralDirectorySize = fileGetU32(file);
+    eocdr->centralDirectoryOffset = fileGetU32(file);
+    eocdr->commentLen = fileGetU16(file);
+
+    /*if (eocdr->centralDirectoryDiskNumber > 1 || eocdr->diskNumber > 1 ||
+        eocdr->centralDirectoryDiskNumber != eocdr->diskNumber ||
+        eocdr->diskEntries != eocdr->totalEntries)
+    {
+        printf("The input file is a multipart archive - not supported\n");
+        return 0;
+    }*/
+    if (eocdr->commentLen > 0) {
+        eocdr->comment = OPENSSL_malloc(eocdr->commentLen + 1);
+        memset(eocdr->comment, 0, eocdr->commentLen + 1);
+        size = fread(eocdr->comment, 1, eocdr->commentLen, file);
+        if (size != eocdr->commentLen) {
+            return 0;
+        }
+    } else {
+        eocdr->comment = NULL;
+    }
+    return 1;
+}
+
+static int readZip64EOCDLocator(ZIP64_EOCD_LOCATOR *locator, FILE *file)
+{
+    char signature[4];
+    size_t size;
+
+    fseeko(file, -(EOCDR_SIZE + ZIP64_EOCD_LOCATOR_SIZE), SEEK_END);
+    size = fread(signature, 1, 4, file);
+    if (size != 4) {
+        return 0;
+    }
+    if (memcmp(signature, PKZIP64_EOCD_LOCATOR_SIGNATURE, 4)) {
+        printf("The input file is not a valip zip file - could not find zip64 EOCD locator\n");
+        return 0;
+    }
+    locator->diskWithEOCD = fileGetU32(file);
+    locator->eocdOffset = fileGetU64(file);
+    locator->totalNumberOfDisks = fileGetU32(file);
+    return 1;
+}
+
+static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
+{
+    char signature[4];
+    size_t size;
+
+    fseeko(file, (int64_t)offset, SEEK_SET);
+    size = fread(signature, 1, 4, file);
+    if (size != 4) {
+        return 0;
+    }
+    if (memcmp(signature, PKZIP64_EOCDR_SIGNATURE, 4)) {
+        printf("The input file is not a valip zip file - could not find zip64 End of Central Directory record\n");
+        return 0;
+    }
+    eocdr->eocdrSize = fileGetU64(file);
+    eocdr->creatorVersion = fileGetU16(file);
+    eocdr->viewerVersion = fileGetU16(file);
+    eocdr->diskNumber = fileGetU32(file);
+    eocdr->diskWithCentralDirectory = fileGetU32(file);
+    eocdr->diskEntries = fileGetU64(file);
+    eocdr->totalEntries = fileGetU64(file);
+    eocdr->centralDirectorySize = fileGetU64(file);
+    eocdr->centralDirectoryOffset = fileGetU64(file);
+    eocdr->commentLen = eocdr->eocdrSize - 44;
+
+    if (eocdr->commentLen > 0) {
+        eocdr->comment = OPENSSL_malloc(eocdr->commentLen);
+        size = fread(eocdr->comment, 1, eocdr->commentLen, file);
+        if (size != eocdr->commentLen) {
+            return 0;
+        }
+    }
+    if (eocdr->diskWithCentralDirectory > 1 || eocdr->diskNumber > 1 ||
+        eocdr->diskWithCentralDirectory != eocdr->diskNumber ||
+        eocdr->totalEntries != eocdr->diskEntries) {
+        printf("The input file is a multipart archive - not supported\n");
+        return 0;
+    }
+    return 1;
+}
+
+static uint64_t fileGetU64(FILE *file)
+{
+    uint64_t l = fileGetU32(file);
+    uint64_t h = fileGetU32(file);
+    return h << 32 | l;
+}
+
+static uint32_t fileGetU32(FILE *file)
+{
+    uint8_t b[4];
+    size_t size = fread(b, 1, 4, file);
+    if (size != 4) {
+        return 0;
+    }
+    return b[3] << 24 | b[2] << 16 | b[1] << 8 | b[0];
+}
+
+static uint16_t fileGetU16(FILE *file)
+{
+    uint8_t b[2];
+    size_t size = fread(b, 1, 2, file);
+    if (size != 2) {
+        return 0;
+    }
+    return b[1] << 8 | b[0];
+}
+
+static uint64_t bufferGetU64(uint8_t *buffer, uint64_t *pos)
+{
+    uint64_t l = bufferGetU32(buffer, pos);
+    uint64_t h = bufferGetU32(buffer, pos);
+    return h << 32 | l;
+}
+
+static uint32_t bufferGetU32(uint8_t *buffer, uint64_t *pos)
+{
+    uint32_t ret = buffer[*pos + 3] << 24 | buffer[*pos + 2] << 16 | buffer[*pos + 1] << 8 | buffer[*pos];
+    *pos += 4;
+    return ret;
+}
+
+static uint16_t bufferGetU16(uint8_t *buffer, uint64_t *pos)
+{
+    uint16_t ret = buffer[*pos + 1] << 8 | buffer[*pos];
+    *pos += 2;
+    return ret;
+}
+
+void bioAddU64(BIO *bio, uint64_t v)
+{
+    uint32_t l = v & 0xFFFFFFFF;
+    uint32_t h = (uint32_t)(v >> 32);
+    bioAddU32(bio, l);
+    bioAddU32(bio, h);
+}
+
+static void bioAddU32(BIO *bio, uint32_t v)
+{
+    uint8_t b[4];
+    b[0] = (u_char)((v) & 0xFF);
+    b[1] = (u_char)(((v) >> 8) & 0xFF);
+    b[2] = (u_char)(((v) >> 16) & 0xFF);
+    b[3] = (u_char)(((v) >> 24) & 0xFF);
+    BIO_write(bio, b, 4);
+}
+
+static void bioAddU16(BIO *bio, uint16_t v)
+{
+    uint8_t b[2];
+    b[0] = (u_char)((v) & 0xFF);
+    b[1] = (u_char)(((v) >> 8) & 0xFF);
+    BIO_write(bio, b, 2);
 }
 
 /*
