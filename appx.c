@@ -1314,7 +1314,7 @@ static void bioAddU32(BIO *bio, uint32_t v)
 void bioAddU64(BIO *bio, uint64_t v)
 {
     uint32_t l = v & 0xFFFFFFFF;
-    uint32_t h = (v >> 32) & 0xFFFFFFFF;
+    uint32_t h = (uint32_t)(v >> 32);
     bioAddU32(bio, l);
     bioAddU32(bio, h);
 }
