@@ -259,8 +259,8 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
 static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file);
 static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file);
 static void zipPrintCentralDirectory(ZIP_FILE *zip);
-static int zipInflate(Bytef *dest, uLongf *destLen, Bytef *source, uLong *sourceLen);
-static int zipDeflate(Bytef *dest, uLongf *destLen, Bytef *source, uLong sourceLen, int level);
+static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *sourceLen);
+static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen, int level);
 static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t **pData, uint64_t *dataSize, int unpack);
 static void zipWriteLocalHeader(BIO *bio, ZIP_LOCAL_HEADER *header, uint64_t *sizeonDisk);
 static void zipWriteCentralDirectoryEntry(BIO *bio, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint64_t offsetDiff, uint64_t *sizeOnDisk);
@@ -1738,7 +1738,7 @@ static void zipPrintCentralDirectory(ZIP_FILE *zip)
     }
 }
 
-static int zipInflate(Bytef *dest, uLongf *destLen, Bytef *source, uLong *sourceLen)
+static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *sourceLen)
 {
     z_stream stream;
     int err;
@@ -1791,7 +1791,7 @@ static int zipInflate(Bytef *dest, uLongf *destLen, Bytef *source, uLong *source
         err;
 }
 
-static int zipDeflate(Bytef *dest, uLongf *destLen, Bytef *source, uLong sourceLen, int level)
+static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen, int level)
 {
     z_stream stream;
     int err;
@@ -1873,8 +1873,8 @@ static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, ui
     } else if (entry->compression == COMPRESSION_DEFLATE) {
         uint8_t *uncompressedData = OPENSSL_malloc(uncompressedSize);
         int ret;
-        uLongf destLen = uncompressedSize;
-        uLongf sourceLen = compressedSize;
+        uint64_t destLen = uncompressedSize;
+        uint64_t sourceLen = compressedSize;
 
         ret = zipInflate(uncompressedData, &destLen, compressedData, &sourceLen);
         OPENSSL_free(compressedData);
@@ -2006,7 +2006,7 @@ static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data,
         int ret;
 
         dataToWrite = OPENSSL_malloc(dataSize);
-        uLongf destLen = dataSize;
+        uint64_t destLen = dataSize;
         ret = zipDeflate(dataToWrite, &destLen, data, dataSize, 8);
         if (ret != Z_OK) {
             printf("Zip deflate failed: %d\n", ret);
@@ -2112,7 +2112,7 @@ static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data
     entry->overrideData->uncompressedSize = dataSize;
 
     if (comprs) {
-        uLongf destLen = dataSize;
+        uint64_t destLen = dataSize;
         int ret = zipDeflate(entry->overrideData->data, &destLen, data, dataSize, 8);
         if (ret != Z_OK) {
             printf("Zip deflate failed: %d\n", ret);
