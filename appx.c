@@ -1349,7 +1349,8 @@ static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
         return 0;
     }*/
     if (eocdr->commentLen > 0) {
-        eocdr->comment = calloc(1, eocdr->commentLen + 1);
+        eocdr->comment = OPENSSL_malloc(eocdr->commentLen + 1);
+        memset(eocdr->comment, 0, eocdr->commentLen + 1);
         size = fread(eocdr->comment, 1, eocdr->commentLen, file);
         if (size != eocdr->commentLen) {
             return 0;
@@ -1486,7 +1487,8 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
     header->extraFieldLen = fileGetU16(file);
 
     if (header->fileNameLen > 0) {
-        header->fileName = calloc(1, header->fileNameLen + 1);
+        header->fileName = OPENSSL_malloc(header->fileNameLen + 1);
+        memset(header->fileName, 0, header->fileNameLen + 1);
         size = fread(header->fileName, 1, header->fileNameLen, file);
         if (size != header->fileNameLen) {
             return 0;
@@ -1495,7 +1497,8 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
         header->fileName = NULL;
     }
     if (header->extraFieldLen > 0) {
-        header->extraField = calloc(1, header->extraFieldLen);
+        header->extraField = OPENSSL_malloc(header->extraFieldLen);
+        memset(header->extraField, 0, header->extraFieldLen);
         size = fread(header->extraField, 1, header->extraFieldLen, file);
         if (size != header->extraFieldLen) {
             return 0;
@@ -1580,6 +1583,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
 
 static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
 {
+    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
     char signature[4];
     size_t size = fread(signature, 1, 4, file);
 
@@ -1590,7 +1594,10 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
         printf("The input file is not a valip zip file - could not find Central Directory record\n");
         return NULL;
     }
-    ZIP_CENTRAL_DIRECTORY_ENTRY *entry = calloc(1, sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
+    entry = OPENSSL_malloc(sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
+
+    /* initialise */
+    memset(entry, 0, sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
     entry->fileOffset = ftello(file) - 4;
     entry->creatorVersion = fileGetU16(file);
     entry->viewerVersion = fileGetU16(file);
@@ -1610,21 +1617,24 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
     entry->offsetOfLocalHeader = fileGetU32(file);
 
     if (entry->fileNameLen > 0) {
-        entry->fileName = calloc(1, entry->fileNameLen + 1);
+        entry->fileName = OPENSSL_malloc(entry->fileNameLen + 1);
+        memset(entry->fileName, 0, entry->fileNameLen + 1);
         size = fread(entry->fileName, 1, entry->fileNameLen, file);
         if (size != entry->fileNameLen) {
             return NULL;
         }
     }
     if (entry->extraFieldLen > 0) {
-        entry->extraField = calloc(1, entry->extraFieldLen);
+        entry->extraField = OPENSSL_malloc(entry->extraFieldLen);
+        memset(entry->extraField, 0, entry->extraFieldLen);
         size = fread(entry->extraField, 1, entry->extraFieldLen, file);
         if (size != entry->extraFieldLen) {
             return NULL;
         }
     }
     if (entry->fileCommentLen > 0) {
-        entry->fileComment = calloc(1, entry->fileCommentLen + 1);
+        entry->fileComment = OPENSSL_malloc(entry->fileCommentLen + 1);
+        memset(entry->fileComment, 0, entry->fileCommentLen + 1);
         size = fread(entry->fileComment, 1, entry->fileCommentLen, file);
         if (size != entry->fileCommentLen) {
             return NULL;
@@ -1980,6 +1990,7 @@ static void zipWriteCentralDirectoryEntry(BIO *bio, ZIP_CENTRAL_DIRECTORY_ENTRY 
 
 static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data, uint64_t dataSize, int comprs)
 {
+    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
     time_t tim;
     struct tm *timeinfo;
     uint32_t crc;
@@ -2019,7 +2030,8 @@ static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data,
     header.compressedSize = sizeToWrite;
     header.fileNameLen = (uint16_t)strlen(fn);
     /* this will be reassigned to CD entry and freed there */
-    header.fileName = calloc(1, header.fileNameLen + 1);
+    header.fileName = OPENSSL_malloc(header.fileNameLen + 1);
+    memset(header.fileName, 0, header.fileNameLen + 1);
     memcpy(header.fileName, fn, header.fileNameLen);
     header.extraField = NULL;
     header.extraFieldLen = 0;
@@ -2042,7 +2054,10 @@ static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data,
     if (comprs) {
         OPENSSL_free(dataToWrite);
     }
-    ZIP_CENTRAL_DIRECTORY_ENTRY *entry = calloc(1, sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
+    entry = OPENSSL_malloc(sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
+
+    /* initialise */
+    memset(entry, 0, sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
     entry->creatorVersion = 0x2D;
     entry->viewerVersion = header.version;
     entry->flags = header.flags;
@@ -2229,13 +2244,17 @@ static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *
 
 static ZIP_FILE *openZip(const char *fn)
 {
+    ZIP_FILE *zip;
     FILE *file = fopen(fn, "rb");
 
     if (!file) {
         return NULL;
     }
     /* oncde we read eocdr, comment might be allocated and we need to take care of it -> create the zipFile structure */
-    ZIP_FILE *zip = calloc(1, sizeof(ZIP_FILE));
+    zip = OPENSSL_malloc(sizeof(ZIP_FILE));
+
+    /* initialise */
+    memset(zip, 0, sizeof(ZIP_FILE));
     zip->file = file;
     if (!readZipEOCDR(&zip->eocdr, file)) {
         freeZip(zip);
