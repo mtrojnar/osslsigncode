@@ -1356,8 +1356,12 @@ static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data,
     header.version = 0x14;
     header.flags = 0;
     header.compression = comprs ? COMPRESSION_DEFLATE : 0;
-    header.modTime = (uint16_t)timeinfo->tm_hour << 11 | (uint16_t)timeinfo->tm_min << 5 | (uint16_t)timeinfo->tm_sec >> 1;
-    header.modDate = (uint16_t)(timeinfo->tm_year - 80) << 9 | (uint16_t)(timeinfo->tm_mon + 1) << 5 | (uint16_t)timeinfo->tm_mday;
+    header.modTime = (uint16_t)(timeinfo->tm_hour << 11 | \
+                                timeinfo->tm_min << 5 | \
+                                timeinfo->tm_sec >> 1);
+    header.modDate = (uint16_t)((timeinfo->tm_year - 80) << 9 | \
+                                (timeinfo->tm_mon + 1) << 5 | \
+                                timeinfo->tm_mday);
 
     /* TODO */
     crc = (uint32_t)crc32(0L, Z_NULL, 0);
@@ -2243,7 +2247,7 @@ static uint32_t fileGetU32(FILE *file)
     if (size != 4) {
         return 0;
     }
-    return b[3] << 24 | b[2] << 16 | b[1] << 8 | b[0];
+    return (uint32_t)(b[3] << 24 | b[2] << 16 | b[1] << 8 | b[0]);
 }
 
 static uint16_t fileGetU16(FILE *file)
@@ -2253,7 +2257,7 @@ static uint16_t fileGetU16(FILE *file)
     if (size != 2) {
         return 0;
     }
-    return b[1] << 8 | b[0];
+    return (uint16_t)(b[1] << 8 | b[0]);
 }
 
 static uint64_t bufferGetU64(uint8_t *buffer, uint64_t *pos)
@@ -2265,14 +2269,17 @@ static uint64_t bufferGetU64(uint8_t *buffer, uint64_t *pos)
 
 static uint32_t bufferGetU32(uint8_t *buffer, uint64_t *pos)
 {
-    uint32_t ret = buffer[*pos + 3] << 24 | buffer[*pos + 2] << 16 | buffer[*pos + 1] << 8 | buffer[*pos];
+    uint32_t ret = (uint32_t)(buffer[*pos + 3] << 24 | \
+                              buffer[*pos + 2] << 16 | \
+                              buffer[*pos + 1] << 8 | \
+                              buffer[*pos]);
     *pos += 4;
     return ret;
 }
 
 static uint16_t bufferGetU16(uint8_t *buffer, uint64_t *pos)
 {
-    uint16_t ret = buffer[*pos + 1] << 8 | buffer[*pos];
+    uint16_t ret = (uint16_t)(buffer[*pos + 1] << 8 | buffer[*pos]);
     *pos += 2;
     return ret;
 }
