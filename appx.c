@@ -1138,9 +1138,10 @@ static int appx_remove_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
     if (!zipReadFileData(zip, entry, &data, (uint64_t *)&dataSize, 1)) {
         return 0;
     }
-    cpos = strstr((char *)data, SIGNATURE_CONTENT_TYPES_ENTRY);
+    cpos = strstr((const char *)data, SIGNATURE_CONTENT_TYPES_ENTRY);
     if (!cpos) {
         printf("Did not find existing signature entry in %s\n", entry->fileName);
+        OPENSSL_free(data);
         return 1; /* do not treat as en error */
     }
     /* *cpos > *data */
@@ -1160,16 +1161,18 @@ static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
     size_t dataSize, newSize, ipos, len;
     int ret;
 
-    if (!zipReadFileData(zip, entry, &data, &dataSize, 1)) {
+    if (!zipReadFileData(zip, entry, &data, (uint64_t *)&dataSize, 1)) {
         return 0;
     }
-    existingEntry = strstr((char *)data, SIGNATURE_CONTENT_TYPES_ENTRY);
+    existingEntry = strstr((const char *)data, SIGNATURE_CONTENT_TYPES_ENTRY);
     if (existingEntry) {
+        OPENSSL_free(data);
         return 1; /* do not append it twice */
     }
-    cpos = strstr((char *)data, SIGNATURE_CONTENT_TYPES_CLOSING_TAG);
+    cpos = strstr((const char *)data, SIGNATURE_CONTENT_TYPES_CLOSING_TAG);
     if (!cpos) {
         printf("%s parsing error\n", entry->fileName);
+        OPENSSL_free(data);
         return 0;
     }
     ipos = (size_t)(cpos - (char *)data);
@@ -1198,7 +1201,7 @@ static const EVP_MD *appx_get_md(ZIP_FILE *zip)
         printf("Could not read: %s\n", BLOCK_MAP_FILENAME);
         return NULL;
     }
-    start = strstr((char *)data, HASH_METHOD_TAG);
+    start = strstr((const char *)data, HASH_METHOD_TAG);
     if (!start) {
         printf("Parse error: tag: %s not found in %s\n", HASH_METHOD_TAG, BLOCK_MAP_FILENAME);
         OPENSSL_free(data);
@@ -1210,7 +1213,7 @@ static const EVP_MD *appx_get_md(ZIP_FILE *zip)
         OPENSSL_free(data);
         return NULL;
     }
-    end = strstr(start, ">");
+    end = strstr((const char *)start, ">");
     if (!end) {
         printf("Parse error: end of tag not found in %s\n", BLOCK_MAP_FILENAME);
         OPENSSL_free(data);
@@ -2154,10 +2157,12 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
             uint64_t toWrite = len < SIZE_64K ? len : SIZE_64K;
             size_t size = fread(data, 1, toWrite, zip->file);
             if (size != toWrite) {
+                OPENSSL_free(data);
                 return 0; /* FAILED */
             }
             if (!BIO_write_ex(bio, data, toWrite, &check)
                 || check != toWrite) {
+                OPENSSL_free(data);
                 return 0; /* FAILED */
             }
             *sizeOnDisk += toWrite;
@@ -2225,6 +2230,7 @@ static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *
     bhash = BIO_new(BIO_f_md());
     if (!BIO_set_md(bhash, md)) {
         printf("Unable to set the message digest of BIO\n");
+        OPENSSL_free(data);
         BIO_free_all(bhash);
         return NULL;  /* FAILED */
     }
@@ -2236,8 +2242,8 @@ static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *
     }
     mdbuf = OPENSSL_malloc((size_t)EVP_MD_size(md));
     BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
-    BIO_free_all(bhash);
     OPENSSL_free(data);
+    BIO_free_all(bhash);
 
     return mdbuf;
 }
