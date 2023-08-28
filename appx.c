@@ -717,8 +717,7 @@ static int appx_spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORM
     idc->messageDigest->digestAlgorithm->parameters = ASN1_TYPE_new();
     idc->messageDigest->digestAlgorithm->parameters->type = V_ASN1_NULL;
 
-    hash = OPENSSL_malloc((size_t)hashLen);
-    memset(hash, 0, (size_t)hashLen);
+    hash = OPENSSL_zalloc((size_t)hashLen);
     ASN1_OCTET_STRING_set(idc->messageDigest->digest, hash, hashLen);
     OPENSSL_free(hash);
 
@@ -1329,11 +1328,11 @@ static void zipWriteCentralDirectoryEntry(BIO *bio, ZIP_CENTRAL_DIRECTORY_ENTRY 
 static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data, uint64_t dataSize, int comprs)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+    ZIP_LOCAL_HEADER header;
     time_t tim;
     struct tm *timeinfo;
     uint32_t crc;
     uint64_t offset, dummy = 0, written = 0, sizeToWrite = dataSize;
-    ZIP_LOCAL_HEADER header;
     uint8_t *dataToWrite = data;
 
     memset(&header, 0, sizeof(ZIP_LOCAL_HEADER));
@@ -1372,8 +1371,7 @@ static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data,
     header.compressedSize = sizeToWrite;
     header.fileNameLen = (uint16_t)strlen(fn);
     /* this will be reassigned to CD entry and freed there */
-    header.fileName = OPENSSL_malloc(header.fileNameLen + 1);
-    memset(header.fileName, 0, header.fileNameLen + 1);
+    header.fileName = OPENSSL_zalloc(header.fileNameLen + 1);
     memcpy(header.fileName, fn, header.fileNameLen);
     header.extraField = NULL;
     header.extraFieldLen = 0;
@@ -1396,10 +1394,7 @@ static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data,
     if (comprs) {
         OPENSSL_free(dataToWrite);
     }
-    entry = OPENSSL_malloc(sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
-
-    /* initialise */
-    memset(entry, 0, sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
+    entry = OPENSSL_zalloc(sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
     entry->creatorVersion = 0x2D;
     entry->viewerVersion = header.version;
     entry->flags = header.flags;
@@ -1639,16 +1634,18 @@ static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, ui
     if (entry->overrideData) {
         compressedSize = entry->overrideData->compressedSize;
         uncompressedSize = entry->overrideData->uncompressedSize;
-        compressedData = OPENSSL_malloc(compressedSize);
+        compressedData = OPENSSL_zalloc(compressedSize + 1);
         memcpy(compressedData, entry->overrideData->data, compressedSize);
     } else {
         ZIP_LOCAL_HEADER header;
+        compressedSize = entry->compressedSize;
+        uncompressedSize = entry->uncompressedSize;
         memset(&header, 0, sizeof(header));
-        if (!zipReadLocalHeader(&header, zip, entry->compressedSize)) {
+        if (!zipReadLocalHeader(&header, zip, compressedSize)) {
             return 0;
         }
-        if (strcmp(header.fileName, entry->fileName) || header.compressedSize != entry->compressedSize
-            || header.uncompressedSize != entry->uncompressedSize || header.compression != entry->compression) {
+        if (strcmp(header.fileName, entry->fileName) || header.compressedSize != compressedSize
+            || header.uncompressedSize != uncompressedSize || header.compression != entry->compression) {
             printf("Local header does not match central directory entry\n");
             return 0;
         }
@@ -1656,23 +1653,21 @@ static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, ui
         OPENSSL_free(header.fileName);
         OPENSSL_free(header.extraField);
 
-        compressedData = OPENSSL_malloc(entry->compressedSize);
-        size = fread(compressedData, 1, entry->compressedSize, file);
-        if (size != entry->compressedSize) {
+        compressedData = OPENSSL_zalloc(compressedSize + 1);
+        size = fread(compressedData, 1, compressedSize, file);
+        if (size != compressedSize) {
             OPENSSL_free(compressedData);
             return 0;
         }
-        compressedSize = entry->compressedSize;
-        uncompressedSize = entry->uncompressedSize;
     }
     if (!unpack || (unpack && entry->compression == COMPRESSION_NONE)) {
         *pData = compressedData;
         *dataSize = compressedSize;
     } else if (entry->compression == COMPRESSION_DEFLATE) {
-        uint8_t *uncompressedData = OPENSSL_malloc(uncompressedSize);
-        int ret;
+        uint8_t *uncompressedData = OPENSSL_zalloc(uncompressedSize + 1);
         uint64_t destLen = uncompressedSize;
         uint64_t sourceLen = compressedSize;
+        int ret;
 
         ret = zipInflate(uncompressedData, &destLen, compressedData, &sourceLen);
         OPENSSL_free(compressedData);
@@ -1719,8 +1714,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
     header->extraFieldLen = fileGetU16(file);
 
     if (header->fileNameLen > 0) {
-        header->fileName = OPENSSL_malloc(header->fileNameLen + 1);
-        memset(header->fileName, 0, header->fileNameLen + 1);
+        header->fileName = OPENSSL_zalloc(header->fileNameLen + 1);
         size = fread(header->fileName, 1, header->fileNameLen, file);
         if (size != header->fileNameLen) {
             return 0;
@@ -1729,8 +1723,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
         header->fileName = NULL;
     }
     if (header->extraFieldLen > 0) {
-        header->extraField = OPENSSL_malloc(header->extraFieldLen);
-        memset(header->extraField, 0, header->extraFieldLen);
+        header->extraField = OPENSSL_zalloc(header->extraFieldLen);
         size = fread(header->extraField, 1, header->extraFieldLen, file);
         if (size != header->extraFieldLen) {
             return 0;
@@ -1921,10 +1914,7 @@ static ZIP_FILE *openZip(const char *fn)
         return NULL;
     }
     /* oncde we read eocdr, comment might be allocated and we need to take care of it -> create the zipFile structure */
-    zip = OPENSSL_malloc(sizeof(ZIP_FILE));
-
-    /* initialise */
-    memset(zip, 0, sizeof(ZIP_FILE));
+    zip = OPENSSL_zalloc(sizeof(ZIP_FILE));
     zip->file = file;
     if (!readZipEOCDR(&zip->eocdr, file)) {
         freeZip(zip);
@@ -2040,10 +2030,7 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
         printf("The input file is not a valip zip file - could not find Central Directory record\n");
         return NULL;
     }
-    entry = OPENSSL_malloc(sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
-
-    /* initialise */
-    memset(entry, 0, sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
+    entry = OPENSSL_zalloc(sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
     entry->fileOffset = ftello(file) - 4;
     if (entry->fileOffset < 0) {
         return NULL; /* FAILED */
@@ -2066,24 +2053,21 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
     entry->offsetOfLocalHeader = fileGetU32(file);
 
     if (entry->fileNameLen > 0) {
-        entry->fileName = OPENSSL_malloc(entry->fileNameLen + 1);
-        memset(entry->fileName, 0, entry->fileNameLen + 1);
+        entry->fileName = OPENSSL_zalloc(entry->fileNameLen + 1);
         size = fread(entry->fileName, 1, entry->fileNameLen, file);
         if (size != entry->fileNameLen) {
             return NULL;
         }
     }
     if (entry->extraFieldLen > 0) {
-        entry->extraField = OPENSSL_malloc(entry->extraFieldLen);
-        memset(entry->extraField, 0, entry->extraFieldLen);
+        entry->extraField = OPENSSL_zalloc(entry->extraFieldLen);
         size = fread(entry->extraField, 1, entry->extraFieldLen, file);
         if (size != entry->extraFieldLen) {
             return NULL;
         }
     }
     if (entry->fileCommentLen > 0) {
-        entry->fileComment = OPENSSL_malloc(entry->fileCommentLen + 1);
-        memset(entry->fileComment, 0, entry->fileCommentLen + 1);
+        entry->fileComment = OPENSSL_zalloc(entry->fileCommentLen + 1);
         size = fread(entry->fileComment, 1, entry->fileCommentLen, file);
         if (size != entry->fileCommentLen) {
             return NULL;
@@ -2199,8 +2183,7 @@ static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
         return 0;
     }*/
     if (eocdr->commentLen > 0) {
-        eocdr->comment = OPENSSL_malloc(eocdr->commentLen + 1);
-        memset(eocdr->comment, 0, eocdr->commentLen + 1);
+        eocdr->comment = OPENSSL_zalloc(eocdr->commentLen + 1);
         size = fread(eocdr->comment, 1, eocdr->commentLen, file);
         if (size != eocdr->commentLen) {
             return 0;
