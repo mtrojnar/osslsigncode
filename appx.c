@@ -420,6 +420,7 @@ static int appx_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
  */
 static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
+    PKCS7 *p7;
     uint8_t *data = NULL;
     const u_char *blob;
     uint64_t dataSize = 0;
@@ -433,7 +434,9 @@ static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx)
         return NULL;
     }
     blob = (u_char *)data + 4;
-    return d2i_PKCS7(NULL, &blob, (int)dataSize - 4);
+    p7 = d2i_PKCS7(NULL, &blob, (int)dataSize - 4);
+    OPENSSL_free(data);
+    return p7;
 }
 
 /*
