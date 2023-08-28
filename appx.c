@@ -148,8 +148,8 @@ typedef struct {
     uint64_t centralDirectoryOffset;
     uint64_t centralDirectoryRecordCount;
     uint64_t eocdrOffset;
-    uint64_t eocdrLen;
-    uint64_t fileSize;
+    int64_t eocdrLen;
+    int64_t fileSize;
     int isZip64;
     /* this will come handy to rewrite the eocdr */
     ZIP_EOCDR eocdr;
@@ -1472,7 +1472,9 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
     ZIP_LOCAL_HEADER header;
 
     memset(&header, 0, sizeof(header));
-    fseeko(zip->file, (int64_t)entry->offsetOfLocalHeader, SEEK_SET);
+    if (fseeko(zip->file, (int64_t)entry->offsetOfLocalHeader, SEEK_SET) < 0) {
+        return 0; /* FAILED */
+    }
     if (!zipReadLocalHeader(&header, zip, entry->compressedSize)) {
         return 0; /* FAILED */
     }
@@ -1487,7 +1489,9 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
             || check != entry->overrideData->compressedSize) {
             return 0; /* FAILED */
         }
-        fseeko(zip->file, (int64_t)entry->compressedSize, SEEK_CUR);
+        if (fseeko(zip->file, (int64_t)entry->compressedSize, SEEK_CUR) < 0) {
+            return 0; /* FAILED */
+        }
         *sizeOnDisk += entry->overrideData->compressedSize;
     } else {
         uint64_t len = entry->compressedSize;
@@ -1519,10 +1523,14 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
             bioAddU32(bio, (uint32_t)header.uncompressedSize);
         }
         if (zip->isZip64) {
-            fseeko(zip->file, 24, SEEK_CUR);
+            if (fseeko(zip->file, 24, SEEK_CUR) < 0) {
+                return 0; /* FAILED */
+            }
             *sizeOnDisk += 24;
         } else {
-            fseeko(zip->file, 16, SEEK_CUR);
+            if (fseeko(zip->file, 16, SEEK_CUR) < 0) {
+                return 0; /* FAILED */
+            }
             *sizeOnDisk += 16;
         }
     }
@@ -1625,7 +1633,9 @@ static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, ui
     uint64_t uncompressedSize = 0;
     size_t size;
 
-    fseeko(file, (int64_t)entry->offsetOfLocalHeader, SEEK_SET);
+    if (fseeko(file, (int64_t)entry->offsetOfLocalHeader, SEEK_SET) < 0) {
+        return 0; /* FAILED */
+    }
     if (entry->overrideData) {
         compressedSize = entry->overrideData->compressedSize;
         uncompressedSize = entry->overrideData->uncompressedSize;
@@ -1730,7 +1740,12 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
     }
     if (header->flags & DATA_DESCRIPTOR_BIT) {
         int64_t offset = ftello(file);
-        fseeko(file, (int64_t)compressedSize, SEEK_CUR);
+        if (offset < 0) {
+           return 0; /* FAILED */
+        }
+        if (fseeko(file, (int64_t)compressedSize, SEEK_CUR) < 0) {
+            return 0; /* FAILED */
+        }
         size = fread(signature, 1, 4, file);
         if (size != 4) {
             return 0;
@@ -1749,7 +1764,9 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
             header->compressedSize = fileGetU32(file);
             header->uncompressedSize = fileGetU32(file);
         }
-        fseeko(file, offset, SEEK_SET);
+        if (fseeko(file, offset, SEEK_SET) < 0) {
+            return 0; /* FAILED */
+        }
     }
     if (header->uncompressedSize == 0xFFFFFFFFF || header->compressedSize == 0xFFFFFFFF) {
         if (header->extraFieldLen > 4) {
@@ -1913,8 +1930,13 @@ static ZIP_FILE *openZip(const char *fn)
         freeZip(zip);
         return NULL;
     }
-    fseeko(file, 0, SEEK_END);
-    zip->fileSize = (uint64_t)ftello(file);
+    if (fseeko(file, 0, SEEK_END) < 0) {
+        return 0; /* FAILED */
+    }
+    zip->fileSize = ftello(file);
+    if (zip->fileSize < 0) {
+        return 0; /* FAILED */
+    }
     if (zip->eocdr.centralDirectoryOffset == 0xFFFFFFFF || zip->eocdr.centralDirectorySize == 0xFFFFFFFF) {
         /* probably a zip64 file */
         if (!readZip64EOCDLocator(&zip->locator, file)) {
@@ -1927,12 +1949,20 @@ static ZIP_FILE *openZip(const char *fn)
         }
         zip->isZip64 = 1;
         zip->eocdrOffset = zip->locator.eocdOffset;
-        zip->eocdrLen = zip->fileSize - zip->eocdrOffset;
+        zip->eocdrLen = zip->fileSize - (int64_t)zip->eocdrOffset;
+        if (zip->eocdrLen < 0) {
+            freeZip(zip);
+            return NULL;
+        }
         zip->centralDirectoryOffset = zip->eocdr64.centralDirectoryOffset;
         zip->centralDirectorySize = zip->eocdr64.centralDirectorySize;
         zip->centralDirectoryRecordCount = zip->eocdr64.totalEntries;
     } else {
-        zip->eocdrOffset = zip->fileSize - EOCDR_SIZE;
+        if (zip->fileSize < EOCDR_SIZE) {
+            freeZip(zip);
+            return 0; /* NULL */
+        }
+        zip->eocdrOffset = (uint64_t)zip->fileSize - EOCDR_SIZE;
         zip->eocdrLen = EOCDR_SIZE;
         zip->centralDirectoryOffset = zip->eocdr.centralDirectoryOffset;
         zip->centralDirectorySize = zip->eocdr.centralDirectorySize;
@@ -1978,7 +2008,9 @@ static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file)
     ZIP_CENTRAL_DIRECTORY_ENTRY *prev = NULL;
     uint64_t i;
 
-    fseeko(file, (int64_t)zip->centralDirectoryOffset, SEEK_SET);
+    if (fseeko(file, (int64_t)zip->centralDirectoryOffset, SEEK_SET) < 0) {
+        return 0; /* FAILED */
+    }
     for (i = 0; i < zip->centralDirectoryRecordCount; i++) {
         ZIP_CENTRAL_DIRECTORY_ENTRY *entry = zipReadNextCentralDirectoryEntry(file);
         if (!entry) {
@@ -2013,6 +2045,9 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
     /* initialise */
     memset(entry, 0, sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
     entry->fileOffset = ftello(file) - 4;
+    if (entry->fileOffset < 0) {
+        return NULL; /* FAILED */
+    }
     entry->creatorVersion = fileGetU16(file);
     entry->viewerVersion = fileGetU16(file);
     entry->flags = fileGetU16(file);
@@ -2113,6 +2148,9 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
         }
     }
     entry->entryLen = ftello(file) - entry->fileOffset;
+    if (entry->entryLen < 0) {
+        return NULL; /* FAILED */
+    }
     return entry;
 }
 
@@ -2134,7 +2172,9 @@ static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
     char signature[4];
     size_t size;
 
-    fseeko(file, -EOCDR_SIZE, SEEK_END);
+    if (fseeko(file, -EOCDR_SIZE, SEEK_END) < 0) {
+        return 0; /* FAILED */
+    }
     size = fread(signature, 1, 4, file);
     if (size != 4) {
         return 0;
@@ -2176,7 +2216,9 @@ static int readZip64EOCDLocator(ZIP64_EOCD_LOCATOR *locator, FILE *file)
     char signature[4];
     size_t size;
 
-    fseeko(file, -(EOCDR_SIZE + ZIP64_EOCD_LOCATOR_SIZE), SEEK_END);
+    if (fseeko(file, -(EOCDR_SIZE + ZIP64_EOCD_LOCATOR_SIZE), SEEK_END) < 0) {
+        return 0; /* FAILED */
+    }
     size = fread(signature, 1, 4, file);
     if (size != 4) {
         return 0;
@@ -2196,7 +2238,9 @@ static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
     char signature[4];
     size_t size;
 
-    fseeko(file, (int64_t)offset, SEEK_SET);
+    if (fseeko(file, (int64_t)offset, SEEK_SET) < 0) {
+        return 0; /* FAILED */
+    }
     size = fread(signature, 1, 4, file);
     if (size != 4) {
         return 0;
