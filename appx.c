@@ -2249,6 +2249,13 @@ static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
     eocdr->diskEntries = fileGetU16(file);
     /* total number of entries in the central directory (2 bytes) */
     eocdr->totalEntries = fileGetU16(file);
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wtype-limits"
+    if (eocdr->totalEntries < 0 || eocdr->totalEntries > UINT16_MAX) {
+        printf("Corrupted total number of entries in the central directory : 0x%08X\n", eocdr->totalEntries);
+        return 0; /* FAILED */
+    }
+    #pragma GCC diagnostic pop
     /* size of the central directory (4 bytes) */
     eocdr->centralDirectorySize = fileGetU32(file);
     /* offset of start of central directory with respect
@@ -2334,6 +2341,13 @@ static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
     eocdr->diskEntries = fileGetU64(file);
     /* total number of entries in the central directory (8 bytes) */
     eocdr->totalEntries = fileGetU64(file);
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wtype-limits"
+    if (eocdr->totalEntries < 0 || eocdr->totalEntries > UINT64_MAX) {
+        printf("Corrupted total number of entries in the central directory : 0x%08lX\n", eocdr->totalEntries);
+        return 0; /* FAILED */
+    }
+    #pragma GCC diagnostic pop
     /* size of the central directory (8 bytes) */
     eocdr->centralDirectorySize = fileGetU64(file);
     /* offset of start of central directory with respect
