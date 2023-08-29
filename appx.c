@@ -2251,7 +2251,7 @@ static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
     eocdr->totalEntries = fileGetU16(file);
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wtype-limits"
-    if (eocdr->totalEntries < 0 || eocdr->totalEntries > UINT16_MAX) {
+    if (eocdr->totalEntries > UINT16_MAX) {
         printf("Corrupted total number of entries in the central directory : 0x%08X\n", eocdr->totalEntries);
         return 0; /* FAILED */
     }
@@ -2343,7 +2343,7 @@ static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
     eocdr->totalEntries = fileGetU64(file);
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wtype-limits"
-    if (eocdr->totalEntries < 0 || eocdr->totalEntries > UINT64_MAX) {
+    if (eocdr->totalEntries > UINT64_MAX) {
         printf("Corrupted total number of entries in the central directory : 0x%08lX\n", eocdr->totalEntries);
         return 0; /* FAILED */
     }
