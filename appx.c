@@ -1872,7 +1872,8 @@ static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *
     int err;
     const uInt max = (uInt)-1;
     uLong len, left;
-    Byte buf[1];    /* for detection of incomplete stream when *destLen == 0 */
+     /* for detection of incomplete stream when *destLen == 0 */
+    static u_char buf[] = { 0x00 };
 
     len = *sourceLen;
     if (*destLen) {
