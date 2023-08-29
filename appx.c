@@ -2063,9 +2063,11 @@ static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file)
         }
         if (prev) {
             prev->next = entry;
-        }
-        if (!zip->centralDirectoryHead) {
+        } else if (!zip->centralDirectoryHead) {
             zip->centralDirectoryHead = entry;
+        } else {
+            printf("Corrupted central directory structure\n");
+            return 0;
         }
         prev = entry;
     }
