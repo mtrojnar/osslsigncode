@@ -1971,11 +1971,13 @@ static ZIP_FILE *openZip(const char *fn)
         return NULL;
     }
     if (fseeko(file, 0, SEEK_END) < 0) {
-        return 0; /* FAILED */
+        freeZip(zip);
+        return NULL; /* FAILED */
     }
     zip->fileSize = ftello(file);
     if (zip->fileSize < 0) {
-        return 0; /* FAILED */
+        freeZip(zip);
+        return NULL; /* FAILED */
     }
     if (zip->eocdr.centralDirectoryOffset == UINT32_MAX || zip->eocdr.centralDirectorySize == UINT32_MAX) {
         /* probably a zip64 file */
