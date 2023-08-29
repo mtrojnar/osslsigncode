@@ -1952,7 +1952,7 @@ static void dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
 static int fat_save(BIO *outdata, MSI_OUT *out)
 {
     char buf[MAX_SECTOR_SIZE];
-    uint32_t i, j, remain, difatSectors, difatEntriesPerSector, fatSectorIndex, lastFatSectorIndex;
+    uint32_t i, j, remain, difatSectors, difatEntriesPerSector = 0, fatSectorIndex, lastFatSectorIndex;
 
     remain = (out->fatLen + out->sectorSize - 1) / out->sectorSize;
     out->fatSectorsCount = (out->fatLen + remain * 4 + out->sectorSize - 1) / out->sectorSize;
