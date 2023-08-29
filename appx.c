@@ -1498,7 +1498,6 @@ static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data
 
 static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO *bio, uint64_t *sizeOnDisk)
 {
-    uint8_t *data = NULL;
     size_t check;
     ZIP_LOCAL_HEADER header;
 
@@ -1526,7 +1525,7 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
         *sizeOnDisk += entry->overrideData->compressedSize;
     } else {
         uint64_t len = entry->compressedSize;
-        data = OPENSSL_malloc(SIZE_64K);
+        uint8_t *data = OPENSSL_malloc(SIZE_64K);
         while (len > 0) {
             uint64_t toWrite = len < SIZE_64K ? len : SIZE_64K;
             size_t size = fread(data, 1, toWrite, zip->file);
@@ -1542,6 +1541,7 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
             *sizeOnDisk += toWrite;
             len -= toWrite;
         }
+        OPENSSL_free(data);
     }
     if (header.flags & DATA_DESCRIPTOR_BIT) {
         BIO_write(bio, PKZIP_DATA_DESCRIPTOR_SIGNATURE, 4);
@@ -1565,7 +1565,6 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
             *sizeOnDisk += 16;
         }
     }
-    OPENSSL_free(data);
     OPENSSL_free(header.fileName);
     OPENSSL_free(header.extraField);
     return 1;
