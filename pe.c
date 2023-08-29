@@ -930,7 +930,7 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
     /* NumberOfSections indicates the size of the section table,
      * which immediately follows the headers, can be up to 65535 under Vista and later */
     nsections = GET_UINT16_LE(ctx->options->indata + ctx->pe_ctx->header_size + 6);
-    if (nsections == 0 || nsections > UINT16_MAX) {
+    if (nsections == 0) {
         printf("Corrupted number of sections: 0x%08X\n", nsections);
         return NULL; /* FAILED */
     }
