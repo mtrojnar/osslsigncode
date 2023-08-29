@@ -1679,8 +1679,11 @@ static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, ui
         if (!zipReadLocalHeader(&header, zip, compressedSize)) {
             return 0;
         }
-        if (strcmp(header.fileName, entry->fileName) || header.compressedSize != compressedSize
-            || header.uncompressedSize != uncompressedSize || header.compression != entry->compression) {
+        if (header.fileNameLen != entry->fileNameLen
+            || memcmp(header.fileName, entry->fileName, header.fileNameLen)
+            || header.compressedSize != compressedSize
+            || header.uncompressedSize != uncompressedSize
+            || header.compression != entry->compression) {
             printf("Local header does not match central directory entry\n");
             return 0;
         }
