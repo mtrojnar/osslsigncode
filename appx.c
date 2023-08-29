@@ -1927,6 +1927,9 @@ static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong s
     const uInt max = (uInt)-1;
     uLong left;
 
+    /* reset stream */
+    memset(&stream, 0, sizeof stream);
+
     left = *destLen;
     *destLen = 0;
     stream.zalloc = (alloc_func)0;
