@@ -2079,15 +2079,16 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
     size_t size = fread(signature, 1, 4, file);
 
     if (size != 4) {
-        return NULL;
+        return NULL; /* FAILED */
     }
     if (memcmp(signature, PKZIP_CD_SIGNATURE, 4)) {
         printf("The input file is not a valip zip file - could not find Central Directory record\n");
-        return NULL;
+        return NULL; /* FAILED */
     }
     entry = OPENSSL_zalloc(sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
     entry->fileOffset = ftello(file) - 4;
     if (entry->fileOffset < 0) {
+        freeZipCentralDirectoryEntry(entry);
         return NULL; /* FAILED */
     }
     /* version made by (2 bytes) */
@@ -2127,7 +2128,8 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
         entry->fileName = OPENSSL_zalloc(entry->fileNameLen + 1);
         size = fread(entry->fileName, 1, entry->fileNameLen, file);
         if (size != entry->fileNameLen) {
-            return NULL;
+            freeZipCentralDirectoryEntry(entry);
+            return NULL; /* FAILED */
         }
     }
     /* extra field (variable size) */
@@ -2135,7 +2137,8 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
         entry->extraField = OPENSSL_zalloc(entry->extraFieldLen);
         size = fread(entry->extraField, 1, entry->extraFieldLen, file);
         if (size != entry->extraFieldLen) {
-            return NULL;
+            freeZipCentralDirectoryEntry(entry);
+            return NULL; /* FAILED */
         }
     }
     /* file comment (variable size) */
@@ -2143,7 +2146,8 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
         entry->fileComment = OPENSSL_zalloc(entry->fileCommentLen + 1);
         size = fread(entry->fileComment, 1, entry->fileCommentLen, file);
         if (size != entry->fileCommentLen) {
-            return NULL;
+            freeZipCentralDirectoryEntry(entry);
+            return NULL; /* FAILED */
         }
     }
     if (entry->uncompressedSize == UINT32_MAX || entry->compressedSize == UINT32_MAX ||
@@ -2156,7 +2160,7 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
             if (header != ZIP64_HEADER) {
                 printf("Expected zip64 header in central directory extra field, got : 0x%X\n", header);
                 freeZipCentralDirectoryEntry(entry);
-                return NULL;
+                return NULL; /* FAILED */
             }
             len = bufferGetU16(entry->extraField, &pos);
             if (entry->uncompressedSize == UINT32_MAX) {
@@ -2166,7 +2170,7 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
                 } else {
                     printf("Invalid zip64 central directory entry\n");
                     freeZipCentralDirectoryEntry(entry);
-                    return NULL;
+                    return NULL; /* FAILED */
                 }
             }
             if (entry->compressedSize == UINT32_MAX) {
@@ -2176,7 +2180,7 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
                 } else {
                     printf("Invalid zip64 central directory entry\n");
                     freeZipCentralDirectoryEntry(entry);
-                    return NULL;
+                    return NULL; /* FAILED */
                 }
             }
             if (entry->offsetOfLocalHeader == UINT32_MAX) {
@@ -2186,7 +2190,7 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
                 } else {
                     printf("Invalid zip64 central directory entry\n");
                     freeZipCentralDirectoryEntry(entry);
-                    return NULL;
+                    return NULL; /* FAILED */
                 }
             }
             if (entry->diskNoStart == UINT16_MAX) {
@@ -2196,16 +2200,17 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
                 } else {
                     printf("Invalid zip64 central directory entry\n");
                     freeZipCentralDirectoryEntry(entry);
-                    return NULL;
+                    return NULL; /* FAILED */
                 }
             }
         } else {
             freeZipCentralDirectoryEntry(entry);
-            return NULL;
+            return NULL; /* FAILED */
         }
     }
     entry->entryLen = ftello(file) - entry->fileOffset;
     if (entry->entryLen < 0) {
+        freeZipCentralDirectoryEntry(entry);
         return NULL; /* FAILED */
     }
     return entry;
