@@ -2100,7 +2100,12 @@ static ZIP_FILE *openZip(const char *fn)
         zip->eocdrLen = EOCDR_SIZE;
         zip->centralDirectoryOffset = zip->eocdr.centralDirectoryOffset;
         zip->centralDirectorySize = zip->eocdr.centralDirectorySize;
-        zip->centralDirectoryRecordCount = zip->eocdr.totalEntries;
+        zip->centralDirectoryRecordCount = (uint64_t)zip->eocdr.totalEntries;
+        if (zip->centralDirectoryRecordCount > UINT16_MAX) {
+            printf("Corrupted total number of entries in the central directory : 0x%08lX\n", zip->centralDirectoryRecordCount);
+            freeZip(zip);
+            return NULL; /* FAILED */
+        }
     }
 
     if (!zipReadCentralDirectory(zip, file)) {
