@@ -1941,7 +1941,7 @@ static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *
 {
     z_stream stream;
     int err;
-    const uInt max = (uInt)-1;
+    const uInt max = (uInt)-1; /* 0xFFFFFFFF */
     uLong len, left;
      /* for detection of incomplete stream when *destLen == 0 */
     static u_char buf[] = { 0x00 };
@@ -1977,6 +1977,7 @@ static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *
             stream.avail_in = len > (uLong)max ? max : (uInt)len;
             len -= stream.avail_in;
         }
+        /* coverity[out-of-bounds access] max value 0xFFFFFFFF is intended */
         err = inflate(&stream, Z_NO_FLUSH);
     } while (err == Z_OK);
     *sourceLen -= len + stream.avail_in;
@@ -2009,7 +2010,7 @@ static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong s
 {
     z_stream stream;
     int err;
-    const uInt max = (uInt)-1;
+    const uInt max = (uInt)-1; /* 0xFFFFFFFF */
     uLong left;
 
     /* reset stream */
@@ -2038,6 +2039,7 @@ static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong s
             stream.avail_in = sourceLen > (uLong)max ? max : (uInt)sourceLen;
             sourceLen -= stream.avail_in;
         }
+        /* coverity[out-of-bounds access] max value 0xFFFFFFFF is intended */
         err = deflate(&stream, sourceLen ? Z_NO_FLUSH : Z_FINISH);
     } while (err == Z_OK);
 
