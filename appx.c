@@ -2166,6 +2166,7 @@ static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file)
             zip->centralDirectoryHead = entry;
         } else {
             printf("Corrupted central directory structure\n");
+            OPENSSL_free(entry);
             return 0; /* FAILED */
         }
         prev = entry;
