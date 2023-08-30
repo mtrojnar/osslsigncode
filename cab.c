@@ -900,6 +900,7 @@ static int cab_add_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
      */
     nfolders = GET_UINT16_LE(ctx->options->indata + 26);
     while (nfolders) {
+        tmp = GET_UINT32_LE(ctx->options->indata + i);
         tmp += 24;
         PUT_UINT32_LE(tmp, buf);
         BIO_write(hash, buf, 4);
