@@ -285,7 +285,7 @@ static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pDat
 static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t **pData, uint64_t *dataSize, int unpack);
 static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t compressedSize);
 static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *sourceLen);
-static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen, int level);
+static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen);
 static ZIP_FILE *openZip(const char *fn);
 static void freeZip(ZIP_FILE *zip);
 static void zipPrintCentralDirectory(ZIP_FILE *zip);
@@ -1408,7 +1408,7 @@ static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data,
 
         dataToWrite = OPENSSL_malloc(dataSize);
         uint64_t destLen = dataSize;
-        ret = zipDeflate(dataToWrite, &destLen, data, dataSize, 8);
+        ret = zipDeflate(dataToWrite, &destLen, data, dataSize);
         if (ret != Z_OK) {
             printf("Zip deflate failed: %d\n", ret);
             OPENSSL_free(dataToWrite);
@@ -1517,7 +1517,7 @@ static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data
 
     if (comprs) {
         uint64_t destLen = dataSize;
-        int ret = zipDeflate(entry->overrideData->data, &destLen, data, dataSize, 8);
+        int ret = zipDeflate(entry->overrideData->data, &destLen, data, dataSize);
         if (ret != Z_OK) {
             printf("Zip deflate failed: %d\n", ret);
             return 0; /* FAILED */
@@ -1929,7 +1929,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
 
 /*
  * Decompresses the source buffer into the destination buffer.
- * see: uncompress2()
+ * see: uncompress2(), but windowBits is set to –15 for raw inflate
  * https://github.com/madler/zlib/blob/09155eaa2f9270dc4ed1fa13e2b4b2613e6e4851/uncompr.c#L27
  * [out] dest: destination buffer
  * [out] destLen: size of the decompressed data
@@ -1996,7 +1996,7 @@ static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *
 
 /*
  * Compresses the source buffer into the destination buffer.
- * see: compress2()
+ * see: compress2(), but windowBits is set to -15 for raw deflate
  * https://github.com/madler/zlib/blob/09155eaa2f9270dc4ed1fa13e2b4b2613e6e4851/compress.c#L22
  * [out] dest: destination buffer
  * [out] destLen: actual size of the compressed buffer
@@ -2005,7 +2005,7 @@ static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *
  * [in] level: deflateInit2 parameter (8)
  * [returns] returns ZIP error or Z_OK if success
  */
-static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen, int level)
+static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen)
 {
     z_stream stream;
     int err;
@@ -2021,7 +2021,7 @@ static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong s
     stream.zfree = (free_func)0;
     stream.opaque = (voidpf)0;
 
-    err = deflateInit2(&stream, level, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
+    err = deflateInit2(&stream, 8, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
     if (err != Z_OK) {
         return err;
     }
