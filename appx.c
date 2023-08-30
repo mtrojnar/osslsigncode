@@ -1946,6 +1946,9 @@ static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *
      /* for detection of incomplete stream when *destLen == 0 */
     static u_char buf[] = { 0x00 };
 
+    /* reset stream */
+    memset(&stream, 0, sizeof stream);
+
     len = *sourceLen;
     if (*destLen) {
         left = *destLen;
