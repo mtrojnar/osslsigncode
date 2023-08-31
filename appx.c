@@ -1977,7 +1977,7 @@ static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *
             stream.avail_in = len > (uLong)max ? max : (uInt)len;
             len -= stream.avail_in;
         }
-        /* coverity[out-of-bounds access] max value 0xFFFFFFFF is intended */
+        /* coverity[overrun-buffer-arg] max value 0xFFFFFFFF is intended */
         err = inflate(&stream, Z_NO_FLUSH);
     } while (err == Z_OK);
     *sourceLen -= len + stream.avail_in;
@@ -2039,7 +2039,7 @@ static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong s
             stream.avail_in = sourceLen > (uLong)max ? max : (uInt)sourceLen;
             sourceLen -= stream.avail_in;
         }
-        /* coverity[out-of-bounds access] max value 0xFFFFFFFF is intended */
+        /* coverity[overrun-buffer-arg] max value 0xFFFFFFFF is intended */
         err = deflate(&stream, sourceLen ? Z_NO_FLUSH : Z_FINISH);
     } while (err == Z_OK);
 
