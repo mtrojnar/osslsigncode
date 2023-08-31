@@ -30,6 +30,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # load CMake library modules
 include(FindOpenSSL)
 include(FindCURL)
+include(FindZLIB)
 
 # load CMake project modules
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${PROJECT_SOURCE_DIR}/cmake")
@@ -47,7 +48,7 @@ configure_file(Config.h.in config.h)
 target_compile_definitions(osslsigncode PRIVATE HAVE_CONFIG_H=1)
 
 # set sources
-target_sources(osslsigncode PRIVATE osslsigncode.c helpers.c msi.c pe.c cab.c cat.c)
+target_sources(osslsigncode PRIVATE osslsigncode.c helpers.c msi.c pe.c cab.c cat.c appx.c)
 if(NOT UNIX)
     target_sources(osslsigncode PRIVATE applink.c)
 endif(NOT UNIX)
@@ -71,6 +72,12 @@ if(CURL_FOUND)
 else(CURL_FOUND)
     message(STATUS "cURL support disabled (library not found)")
 endif(CURL_FOUND)
+
+if(NOT ZLIB_FOUND)
+    message(FATAL_ERROR "Zlib library not found")
+endif(NOT ZLIB_FOUND)
+target_include_directories(osslsigncode PRIVATE ${ZLIB_INCLUDE_DIR})
+target_link_libraries(osslsigncode PRIVATE ${ZLIB_LIBRARIES})
 
 # add paths to linker search and installed rpath
 set_target_properties(osslsigncode PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
