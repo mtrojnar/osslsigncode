@@ -1269,9 +1269,7 @@ static int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, M
     }
     /* detect cycles in previously visited entries (parents, siblings) */
     if (!ret) { /* initialized (non-root entry) */
-        if ((entry->leftSiblingID != NOSTREAM && tortoise->entry->leftSiblingID == entry->leftSiblingID)
-            || (entry->rightSiblingID != NOSTREAM && tortoise->entry->rightSiblingID == entry->rightSiblingID)
-            || (entry->childID != NOSTREAM && tortoise->entry->childID == entry->childID)) {
+        if (!memcmp(entry, tortoise->entry, sizeof(MSI_ENTRY))) {
             printf("MSI_ENTRY cycle detected at level %d\n", cnt);
             OPENSSL_free(entry);
             return 0; /* FAILED */
