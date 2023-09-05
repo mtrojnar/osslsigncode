@@ -489,6 +489,7 @@ extern FILE_FORMAT file_format_appx;
 struct file_format_st {
     FILE_FORMAT_CTX *(*ctx_new) (GLOBAL_OPTIONS *option, BIO *hash, BIO *outdata);
     ASN1_OBJECT *(*data_blob_get) (u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
+    int (*hash_length_get) (FILE_FORMAT_CTX *ctx);
     int (*check_file) (FILE_FORMAT_CTX *ctx, int detached);
     u_char *(*digest_calc) (FILE_FORMAT_CTX *ctx, const EVP_MD *md);
     int (*verify_digests) (FILE_FORMAT_CTX *ctx, PKCS7 *p7);

@@ -215,6 +215,7 @@ struct msi_ctx_st {
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
 static ASN1_OBJECT *msi_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
+static int msi_hash_length_get(FILE_FORMAT_CTX *ctx);
 static int msi_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static u_char *msi_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
@@ -228,6 +229,7 @@ static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 FILE_FORMAT file_format_msi = {
     .ctx_new = msi_ctx_new,
     .data_blob_get = msi_spc_sip_info_get,
+    .hash_length_get = msi_hash_length_get,
     .check_file = msi_check_file,
     .digest_calc = msi_digest_calc,
     .verify_digests = msi_verify_digests,
@@ -344,6 +346,15 @@ static ASN1_OBJECT *msi_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX 
     dtype = OBJ_txt2obj(SPC_SIPINFO_OBJID, 1);
     SpcSipInfo_free(si);
     return dtype; /* OK */
+}
+
+/*
+ * [in] ctx: structure holds input and output data
+ * [returns] the size of the message digest when passed an EVP_MD structure (the size of the hash)
+ */
+static int msi_hash_length_get(FILE_FORMAT_CTX *ctx)
+{
+    return EVP_MD_size(ctx->options->md);
 }
 
 /*
