@@ -44,6 +44,7 @@ struct pe_ctx_st {
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
 static ASN1_OBJECT *pe_spc_image_data_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
+static int pe_hash_length_get(FILE_FORMAT_CTX *ctx);
 static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static u_char *pe_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
@@ -59,6 +60,7 @@ static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 FILE_FORMAT file_format_pe = {
     .ctx_new = pe_ctx_new,
     .data_blob_get = pe_spc_image_data_get,
+    .hash_length_get = pe_hash_length_get,
     .check_file = pe_check_file,
     .digest_calc = pe_digest_calc,
     .verify_digests = pe_verify_digests,
@@ -166,6 +168,15 @@ static ASN1_OBJECT *pe_spc_image_data_get(u_char **p, int *plen, FILE_FORMAT_CTX
     dtype = OBJ_txt2obj(SPC_PE_IMAGE_DATA_OBJID, 1);
     SpcPeImageData_free(pid);
     return dtype; /* OK */
+}
+
+/*
+ * [in] ctx: structure holds input and output data
+ * [returns] the size of the message digest when passed an EVP_MD structure (the size of the hash)
+ */
+static int pe_hash_length_get(FILE_FORMAT_CTX *ctx)
+{
+    return EVP_MD_size(ctx->options->md);
 }
 
 /*

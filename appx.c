@@ -41,8 +41,8 @@ static const char *APPXBUNDLE_MANIFEST_FILE_NAME = "AppxMetadata/AppxBundleManif
 static const char *CODE_INTEGRITY_FILENAME = "AppxMetadata/CodeIntegrity.cat";
 static const char *SIGNATURE_CONTENT_TYPES_ENTRY = "<Override PartName=\"/AppxSignature.p7x\" ContentType=\"application/vnd.ms-appx.signature\"/>";
 static const char *SIGNATURE_CONTENT_TYPES_CLOSING_TAG = "</Types>";
-static const u_char APPX_UUID[] = { 0x4B, 0xDF, 0xC5, 0x0A, 0x07, 0xCE, 0xE2, 0x4D, 0xB7, 0x6E, 0x23, 0xC8, 0x39, 0xA0, 0x9F, 0xD1, };
-static const u_char APPXBUNDLE_UUID[] = { 0xB3, 0x58, 0x5F, 0x0F, 0xDE, 0xAA, 0x9A, 0x4B, 0xA4, 0x34, 0x95, 0x74, 0x2D, 0x92, 0xEC, 0xEB, };
+static const u_char APPX_UUID[] = { 0x4B, 0xDF, 0xC5, 0x0A, 0x07, 0xCE, 0xE2, 0x4D, 0xB7, 0x6E, 0x23, 0xC8, 0x39, 0xA0, 0x9F, 0xD1 };
+static const u_char APPXBUNDLE_UUID[] = { 0xB3, 0x58, 0x5F, 0x0F, 0xDE, 0xAA, 0x9A, 0x4B, 0xA4, 0x34, 0x95, 0x74, 0x2D, 0x92, 0xEC, 0xEB };
 
 static const char PKCX_SIGNATURE[4] = { 'P', 'K', 'C', 'X' }; //Main header header
 static const char APPX_SIGNATURE[4] = { 'A', 'P', 'P', 'X' }; //APPX header
@@ -228,11 +228,13 @@ struct appx_ctx_st {
     u_char *existingCIHash;
     int isBundle;
     const EVP_MD *md;
+    int hashlen;
 } appx_ctx_t;
 
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
 static ASN1_OBJECT *appx_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
+static int appx_hash_length_get(FILE_FORMAT_CTX *ctx);
 static int appx_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static int appx_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx);
@@ -245,6 +247,7 @@ static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 FILE_FORMAT file_format_appx = {
     .ctx_new = appx_ctx_new,
     .data_blob_get = appx_spc_sip_info_get,
+    .hash_length_get = appx_hash_length_get,
     .check_file = appx_check_file,
     .verify_digests = appx_verify_digests,
     .pkcs7_extract = appx_pkcs7_extract,
@@ -255,15 +258,8 @@ FILE_FORMAT file_format_appx = {
     .ctx_cleanup = appx_ctx_cleanup,
 };
 
-/* see helpers.c */
-static int appx_pkcs7_set_spc_indirect_data_content(PKCS7 *p7, u_char *hash, int hashLen, u_char *buf, int len);
-static int appx_spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CTX *ctx, int hashLen);
-static int appx_pkcs7_set_data_content(PKCS7 *p7, u_char *hash, int hashLen, FILE_FORMAT_CTX *ctx);
-static int appx_add_indirect_data_object(PKCS7 *p7, u_char *hash, int hashLen, FILE_FORMAT_CTX *ctx);
-
-
 /* Prototypes */
-static u_char *appx_hash_blob_get(FILE_FORMAT_CTX *ctx, int *plen);
+static BIO *appx_hash_blob_get(FILE_FORMAT_CTX *ctx);
 static int appx_calculate_hashes(FILE_FORMAT_CTX *ctx);
 static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t cdOffset);
 static int appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSignature, uint64_t cdOffset);
@@ -386,6 +382,15 @@ static ASN1_OBJECT *appx_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX
     dtype = OBJ_txt2obj(SPC_SIPINFO_OBJID, 1);
     AppxSpcSipInfo_free(si);
     return dtype; /* OK */
+}
+
+/*
+ * [in] ctx: structure holds input and output data
+ * [returns] the size of the hash
+ */
+static int appx_hash_length_get(FILE_FORMAT_CTX *ctx)
+{
+    return ctx->appx_ctx->hashlen;
 }
 
 /*
@@ -544,8 +549,7 @@ static PKCS7 *appx_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         }
         return cursig;
     } else if (ctx->options->cmd == CMD_SIGN) {
-        int len = 0;
-        u_char *hashBlob;
+        BIO *hashes;
         ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
 
         /* Create a new signature */
@@ -567,14 +571,14 @@ static PKCS7 *appx_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             printf("Creating a new signature failed\n");
             return NULL; /* FAILED */
         }
-        hashBlob = appx_hash_blob_get(ctx, &len);
-        if (!appx_add_indirect_data_object(p7, hashBlob, len, ctx)) {
+        hashes = appx_hash_blob_get(ctx);
+        if (!add_indirect_data_object(p7, hashes, ctx)) {
             printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
-            OPENSSL_free(hashBlob);
+            BIO_free_all(hashes);
             PKCS7_free(p7);
             return NULL; /* FAILED */
         }
-        OPENSSL_free(hashBlob);
+        BIO_free_all(hashes);
     }
     return p7; /* OK */
 }
@@ -700,160 +704,17 @@ static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     OPENSSL_free(ctx);
 }
 
-/********************* helpers.c ****************************************/
-/*
- * pkcs7_set_spc_indirect_data_content()
- * Replace the data part with the MS Authenticode spcIndirectDataContent blob
- * [out] p7: new PKCS#7 signature
- * [in] hash: message digest BIO
- * [in] blob: SpcIndirectDataContent data
- * [in] len: SpcIndirectDataContent data length
- * [returns] 0 on error or 1 on success
- */
-static int appx_pkcs7_set_spc_indirect_data_content(PKCS7 *p7, u_char *hash, int hashLen, u_char *buf, int len)
-{
-    int seqhdrlen;
-    BIO *bio;
-    PKCS7 *td7;
-
-    memcpy(buf + len, hash, (size_t)hashLen);
-    seqhdrlen = asn1_simple_hdr_len(buf, len);
-
-    if ((bio = PKCS7_dataInit(p7, NULL)) == NULL) {
-        printf("PKCS7_dataInit failed\n");
-        return 0; /* FAILED */
-    }
-
-    BIO_write(bio, buf + seqhdrlen, len - seqhdrlen + hashLen);
-    (void)BIO_flush(bio);
-
-    if (!PKCS7_dataFinal(p7, bio)) {
-        printf("PKCS7_dataFinal failed\n");
-        return 0; /* FAILED */
-    }
-
-    BIO_free_all(bio);
-
-    td7 = PKCS7_new();
-    td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
-    td7->d.other = ASN1_TYPE_new();
-    td7->d.other->type = V_ASN1_SEQUENCE;
-    td7->d.other->value.sequence = ASN1_STRING_new();
-    ASN1_STRING_set(td7->d.other->value.sequence, buf, len + hashLen);
-
-    if (!PKCS7_set_content(p7, td7))
-    {
-        PKCS7_free(td7);
-        printf("PKCS7_set_content failed\n");
-        return 0; /* FAILED */
-    }
-
-    return 1; /* OK */
-}
-
-/*
- * spc_indirect_data_content_get()
- * [out] blob: SpcIndirectDataContent data
- * [out] len: SpcIndirectDataContent data length
- * [in] ctx: FILE_FORMAT_CTX structure
- * [returns] 0 on error or 1 on success
- */
-static int appx_spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CTX *ctx, int hashLen)
-{
-    u_char *p = NULL;
-    int l = 0;
-    void *hash;
-    int mdtype = EVP_MD_nid(ctx->appx_ctx->md);
-
-    SpcIndirectDataContent *idc = SpcIndirectDataContent_new();
-
-    idc->data->value = ASN1_TYPE_new();
-    idc->data->value->type = V_ASN1_SEQUENCE;
-    idc->data->value->value.sequence = ASN1_STRING_new();
-    idc->data->type = ctx->format->data_blob_get(&p, &l, ctx);
-    idc->data->value->value.sequence->data = p;
-    idc->data->value->value.sequence->length = l;
-    idc->messageDigest->digestAlgorithm->algorithm = OBJ_nid2obj(mdtype);
-    idc->messageDigest->digestAlgorithm->parameters = ASN1_TYPE_new();
-    idc->messageDigest->digestAlgorithm->parameters->type = V_ASN1_NULL;
-
-    hash = OPENSSL_zalloc((size_t)hashLen);
-    ASN1_OCTET_STRING_set(idc->messageDigest->digest, hash, hashLen);
-    OPENSSL_free(hash);
-
-    *len = i2d_SpcIndirectDataContent(idc, NULL);
-    *blob = OPENSSL_malloc((size_t)*len);
-    p = *blob;
-    i2d_SpcIndirectDataContent(idc, &p);
-    SpcIndirectDataContent_free(idc);
-    *len -= hashLen;
-    return 1; /* OK */
-}
-
-/*
- * pkcs7_set_data_content()
- * [out] p7: new PKCS#7 signature
- * [in] hash: message digest BIO
- * [in] ctx: structure holds input and output data
- * [returns] 0 on error or 1 on success
- */
-static int appx_pkcs7_set_data_content(PKCS7 *p7, u_char *hash, int hashLen, FILE_FORMAT_CTX *ctx)
-{
-    u_char *p = NULL;
-    int len = 0;
-    u_char *buf;
-
-    if (!appx_spc_indirect_data_content_get(&p, &len, ctx, hashLen))
-        return 0; /* FAILED */
-    buf = OPENSSL_malloc(SIZE_64K);
-    memcpy(buf, p, (size_t)len);
-    OPENSSL_free(p);
-    if (!appx_pkcs7_set_spc_indirect_data_content(p7, hash, hashLen, buf, len)) {
-        OPENSSL_free(buf);
-        return 0; /* FAILED */
-    }
-    OPENSSL_free(buf);
-    return 1; /* OK */
-}
-
-/*
- * add_indirect_data_object()
- * [in, out] p7: new PKCS#7 signature
- * [in] hash: message digest BIO
- * [returns] 0 on error or 1 on success
- */
-static int appx_add_indirect_data_object(PKCS7 *p7, u_char *hash, int hashLen, FILE_FORMAT_CTX *ctx)
-{
-    STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
-    PKCS7_SIGNER_INFO *si;
-
-    signer_info = PKCS7_get_signer_info(p7);
-    if (!signer_info)
-        return 0; /* FAILED */
-    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
-    if (!si)
-        return 0; /* FAILED */
-    if (!PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
-        V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1)))
-        return 0; /* FAILED */
-    if (!appx_pkcs7_set_data_content(p7, hash, hashLen, ctx)) {
-        printf("Signing failed\n");
-        return 0; /* FAILED */
-    }
-    return 1; /* OK */
-}
-
-
 /*
  * APPX helper functions
  */
 
-static u_char *appx_hash_blob_get(FILE_FORMAT_CTX *ctx, int *plen)
+static BIO *appx_hash_blob_get(FILE_FORMAT_CTX *ctx)
 {
     int mdlen = EVP_MD_size(ctx->appx_ctx->md);
     int dataSize = ctx->appx_ctx->calculatedCIHash ? 4 + 5 * (mdlen + 4) : 4 + 4 * (mdlen + 4);
     u_char *data = OPENSSL_malloc((size_t)dataSize);
     int pos = 0;
+    BIO *hashes = BIO_new(BIO_s_mem());
 
     memcpy(data + pos, APPX_SIGNATURE, 4);
     pos += 4;
@@ -879,8 +740,8 @@ static u_char *appx_hash_blob_get(FILE_FORMAT_CTX *ctx, int *plen)
         memcpy(data + pos, ctx->appx_ctx->calculatedCIHash, (size_t)mdlen);
         pos += mdlen;
     }
-    *plen = pos;
-    return data;
+    ctx->appx_ctx->hashlen = BIO_write(hashes, data, pos);
+    return hashes;
 }
 
 /*
@@ -1092,7 +953,7 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
 {
 #if 0
     AppxSpcSipInfo *si = NULL;
-    uint8_t *blob = content->data->value->value.sequence->data;
+    const unsigned char *blob = content->data->value->value.sequence->data;
     d2i_AppxSpcSipInfo(&si, &blob, content->data->value->value.sequence->length);
     long a = ASN1_INTEGER_get(si->a);
     long b = ASN1_INTEGER_get(si->b);
@@ -1101,31 +962,28 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
     long e = ASN1_INTEGER_get(si->e);
     long f = ASN1_INTEGER_get(si->f);
     BIO *stdbio = BIO_new_fp(stdout, BIO_NOCLOSE);
-    printf("a: 0x%x b: 0x%x c: 0x%x d: 0x%x e: 0x%x f: 0x%x\n", a, b, c, d, e, f);
+    printf("a: 0x%lX b: 0x%lX c: 0x%lX d: 0x%lX e: 0x%lX f: 0x%lX\n", a, b, c, d, e, f);
+    printf("string: ");
     ASN1_STRING_print_ex(stdbio, si->string, ASN1_STRFLGS_RFC2253);
+    printf("\n\n");
     AppxSpcSipInfo_free(si);
+    BIO_free_all(stdbio);
 #endif
     int length = content->messageDigest->digest->length;
     uint8_t *data = content->messageDigest->digest->data;
     int mdlen = EVP_MD_size(ctx->appx_ctx->md);
-    int pos = 4;
+    int i, pos = 4;
 
+    printf("Hash of file: ");
+    for (i=0; i<length; i++) {
+        printf("%X", data[i]);
+    }
+    printf("\n\n");
     /* we are expecting at least 4 hashes + 4 byte header */
     if (length < 4 * mdlen + 4) {
         printf("Hash too short\n");
         return 0; /* FAILED */
     }
-    OPENSSL_free(ctx->appx_ctx->existingBMHash);
-    OPENSSL_free(ctx->appx_ctx->existingCTHash);
-    OPENSSL_free(ctx->appx_ctx->existingCDHash);
-    OPENSSL_free(ctx->appx_ctx->existingDataHash);
-    OPENSSL_free(ctx->appx_ctx->existingCIHash);
-    ctx->appx_ctx->existingBMHash = NULL;
-    ctx->appx_ctx->existingCIHash = NULL;
-    ctx->appx_ctx->existingBMHash = NULL;
-    ctx->appx_ctx->existingDataHash = NULL;
-    ctx->appx_ctx->existingCIHash = NULL;
-
     if (memcmp(data, APPX_SIGNATURE, 4)) {
         printf("Hash signature does not match\n");
         return 0; /* FAILED */
