@@ -266,7 +266,7 @@ static int appx_add_indirect_data_object(PKCS7 *p7, u_char *hash, int hashLen, F
 static u_char *appx_hash_blob_get(FILE_FORMAT_CTX *ctx, int *plen);
 static int appx_calculate_hashes(FILE_FORMAT_CTX *ctx);
 static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t cdOffset);
-static void appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSignature, uint64_t cdOffset);
+static int appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSignature, uint64_t cdOffset);
 static uint8_t *appx_calc_zip_data_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t *cdOffset);
 static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *content);
 static int appx_compare_hashes(FILE_FORMAT_CTX *ctx);
@@ -481,7 +481,7 @@ static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx)
  */
 static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
-    uint64_t cdOffset;
+    uint64_t cdOffset, noEntries = 0;
     ZIP_FILE *zip = ctx->appx_ctx->zip;
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry = zipGetCDEntryByName(zip, CONTENT_TYPES_FILENAME);
 
@@ -496,7 +496,16 @@ static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         return 1; /* FAILED */
     }
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
-        if (strcmp(APP_SIGNATURE_FILENAME, entry->fileName)) {
+        if (noEntries == zip->centralDirectoryRecordCount) {
+            printf("Warning: Corrupted central directory structure\n");
+            return 1; /* FAILED */
+        }
+        noEntries++;
+        if (!entry->fileName || (entry->fileNameLen == 0)) {
+            printf("Warning: Corrupted file name\n");
+            return 1; /* FAILED */
+        }
+        if (strcmp(entry->fileName, APP_SIGNATURE_FILENAME)) {
             uint64_t dummy;
             if (!zipRewriteData(zip, entry, outdata, &dummy)) {
                 return 1; /* FAILED */
@@ -504,7 +513,10 @@ static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         }
     }
     cdOffset = (uint64_t)BIO_tell(outdata);
-    appx_write_central_directory(zip, outdata, 1, cdOffset);
+    if (!appx_write_central_directory(zip, outdata, 1, cdOffset)) {
+        printf("Unable to write central directory\n");
+        return 1; /* FAILED */
+    }
     return 0; /* OK */
 }
 
@@ -582,11 +594,20 @@ static int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
     u_char *blob, *der = NULL;
     int len;
-    uint64_t cdOffset;
+    uint64_t cdOffset, noEntries = 0;
 
     for (entry = zip->centralDirectoryHead; entry != NULL;) {
+        if (noEntries >= zip->centralDirectoryRecordCount) {
+            printf("Warning: Corrupted central directory structure\n");
+            return 1; /* FAILED */
+        }
+        noEntries++;
         last = entry;
-        if (strcmp(APP_SIGNATURE_FILENAME, entry->fileName)) {
+        if (!entry->fileName || (entry->fileNameLen == 0)) {
+            printf("Warning: Corrupted file name\n");
+            return 1; /* FAILED */
+        }
+        if (strcmp(entry->fileName, APP_SIGNATURE_FILENAME)) {
             uint64_t dummy = 0;
             if (!zipRewriteData(zip, entry, outdata, &dummy)) {
                 return 1; /* FAILED */
@@ -630,7 +651,10 @@ static int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     OPENSSL_free(blob);
     /* again, 32bit api -> will limit us to 2GB files */
     cdOffset = (uint64_t)BIO_tell(outdata);
-    appx_write_central_directory(zip, outdata, 0, cdOffset);
+    if (!appx_write_central_directory(zip, outdata, 0, cdOffset)) {
+        printf("Unable to write central directory\n");
+        return 1; /* FAILED */
+    }
     return 0; /* OK */
 }
 
@@ -908,7 +932,11 @@ static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD
         return NULL; /* FAILED */
     }
     BIO_push(bhash, BIO_new(BIO_s_null()));
-    appx_write_central_directory(zip, bhash, 1, cdOffset);
+    if (!appx_write_central_directory(zip, bhash, 1, cdOffset)) {
+        printf("Unable to write central directory\n");
+        BIO_free_all(bhash);
+        return NULL; /* FAILED */
+    }
     mdbuf = OPENSSL_malloc((size_t)EVP_MD_size(md));
     BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
     BIO_free_all(bhash);
@@ -916,18 +944,30 @@ static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD
 }
 
 /*
- * [returns] none
+ * Write the central directory structure
+ * [in] zip: signature holds specific ZIP data
+ * [out] bio: outdata file BIO
+ * [in] removeSignature: remove signature switch
+ * [in] cdOffset: central directory offset
+ * [returns] 0 on error or 1 on success
  */
-static void appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSignature, uint64_t cdOffset)
+static int appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSignature, uint64_t cdOffset)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
-    uint64_t offsetDiff = 0;
-    uint64_t cdSize = 0;
+    uint64_t offsetDiff = 0, cdSize = 0;
     uint16_t noEntries = 0;
 
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
         /* the signature file is considered non existent for hashing purposes */
         uint64_t sizeOnDisk = 0;
+        if (noEntries > zip->centralDirectoryRecordCount) {
+            printf("Warning: Corrupted central directory structure\n");
+            return 0; /* FAILED */
+        }
+        if (!entry->fileName || (entry->fileNameLen == 0)) {
+            printf("Warning: Corrupted file name\n");
+            return 0; /* FAILED */
+        }
         if (removeSignature && !strcmp(entry->fileName, APP_SIGNATURE_FILENAME)) {
             continue;
         }
@@ -956,7 +996,7 @@ static void appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSign
             size_t check;
             if (!BIO_write_ex(bio, zip->eocdr64.comment, zip->eocdr64.commentLen, &check)
                 || check != zip->eocdr64.commentLen) {
-                return; /* FAILED */
+                return 0; /* FAILED */
             }
         }
         /* eocdr locator */
@@ -996,6 +1036,7 @@ static void appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSign
     if (zip->eocdr.commentLen > 0) {
         BIO_write(bio, zip->eocdr.comment, zip->eocdr.commentLen);
     }
+    return 1; /* OK */
 }
 
 static uint8_t *appx_calc_zip_data_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t *cdOffset)
@@ -1003,6 +1044,7 @@ static uint8_t *appx_calc_zip_data_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
     u_char *mdbuf = NULL;
     BIO *bhash = BIO_new(BIO_f_md());
+    uint64_t noEntries = 0;
 
     if (!BIO_set_md(bhash, md)) {
         printf("Unable to set the message digest of BIO\n");
@@ -1014,11 +1056,22 @@ static uint8_t *appx_calc_zip_data_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
         /* the signature file is considered not existent for hashing purposes */
         uint64_t sizeOnDisk = 0;
+        if (noEntries >= zip->centralDirectoryRecordCount) {
+            printf("Warning: Corrupted central directory structure\n");
+            BIO_free_all(bhash);
+            return NULL; /* FAILED */
+        }
+        noEntries++;
+        if (!entry->fileName || (entry->fileNameLen == 0)) {
+            printf("Warning: Corrupted file name\n");
+            return NULL; /* FAILED */
+        }
         if (!strcmp(entry->fileName, APP_SIGNATURE_FILENAME)) {
             continue;
         }
         if (!zipRewriteData(zip, entry, bhash, &sizeOnDisk)) {
             printf("Rewrite data error\n");
+            BIO_free_all(bhash);
             return NULL; /* FAILED */
         }
         *cdOffset += sizeOnDisk;
@@ -1311,8 +1364,18 @@ static const EVP_MD *appx_get_md(ZIP_FILE *zip)
 static ZIP_CENTRAL_DIRECTORY_ENTRY *zipGetCDEntryByName(ZIP_FILE *zip, const char *name)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+    uint64_t noEntries = 0;
 
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
+        if (noEntries >= zip->centralDirectoryRecordCount) {
+            printf("Warning: Corrupted central directory structure\n");
+            return NULL; /* FAILED */
+        }
+        noEntries++;
+        if (!entry->fileName || (entry->fileNameLen == 0)) {
+            printf("Warning: Corrupted file name\n");
+            return NULL; /* FAILED */
+        }
         if (!strcmp(entry->fileName, name)) {
             return entry;
         }
@@ -1646,9 +1709,19 @@ static void zipWriteLocalHeader(BIO *bio, ZIP_LOCAL_HEADER *header, uint64_t *si
 static int zipEntryExist(ZIP_FILE *zip, const char *name)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+    uint64_t noEntries = 0;
 
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
-        if (!strcmp(name, entry->fileName)) {
+        if (noEntries >= zip->centralDirectoryRecordCount) {
+            printf("Warning: Corrupted central directory structure\n");
+            return 0; /* FAILED */
+        }
+        noEntries++;
+        if (!entry->fileName || (entry->fileNameLen == 0)) {
+            printf("Warning: Corrupted file name\n");
+            return 0; /* FAILED */
+        }
+        if (!strcmp(entry->fileName, name)) {
             return 1; /* OK */
         }
     }
@@ -1692,9 +1765,19 @@ static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *
 static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pData, uint64_t *dataSize, int unpack)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+    uint64_t noEntries = 0;
 
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
-        if (!strcmp(name, entry->fileName)) {
+        if (noEntries >= zip->centralDirectoryRecordCount) {
+            printf("Warning: Corrupted central directory structure\n");
+            return 0; /* FAILED */
+        }
+        noEntries++;
+        if (!entry->fileName || (entry->fileNameLen == 0)) {
+            printf("Warning: Corrupted file name\n");
+            return 0; /* FAILED */
+        }
+        if (!strcmp(entry->fileName, name)) {
             return zipReadFileData(zip, entry, pData, dataSize, unpack);
         }
     }
@@ -1977,7 +2060,7 @@ static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *
             stream.avail_in = len > (uLong)max ? max : (uInt)len;
             len -= stream.avail_in;
         }
-        /* coverity[out-of-bounds access] max value 0xFFFFFFFF is intended */
+        /* coverity[overrun-buffer-arg] max value 0xFFFFFFFF is intended */
         err = inflate(&stream, Z_NO_FLUSH);
     } while (err == Z_OK);
     *sourceLen -= len + stream.avail_in;
@@ -2039,7 +2122,7 @@ static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong s
             stream.avail_in = sourceLen > (uLong)max ? max : (uInt)sourceLen;
             sourceLen -= stream.avail_in;
         }
-        /* coverity[out-of-bounds access] max value 0xFFFFFFFF is intended */
+        /* coverity[overrun-buffer-arg] max value 0xFFFFFFFF is intended */
         err = deflate(&stream, sourceLen ? Z_NO_FLUSH : Z_FINISH);
     } while (err == Z_OK);
 
@@ -2126,12 +2209,19 @@ static ZIP_FILE *openZip(const char *fn)
 static void freeZip(ZIP_FILE *zip)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+    uint64_t noEntries = 0;
 
     fclose(zip->file);
     OPENSSL_free(zip->eocdr.comment);
     OPENSSL_free(zip->eocdr64.comment);
     ZIP_CENTRAL_DIRECTORY_ENTRY *next = NULL;
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = next) {
+        if (noEntries > zip->centralDirectoryRecordCount) {
+            printf("Warning: Corrupted central directory structure\n");
+            freeZipCentralDirectoryEntry(entry);
+            return;
+        }
+        noEntries++;
         next = entry->next;
         freeZipCentralDirectoryEntry(entry);
     }
@@ -2146,9 +2236,14 @@ static void freeZip(ZIP_FILE *zip)
 static void zipPrintCentralDirectory(ZIP_FILE *zip)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+    uint64_t noEntries = 0;
 
     printf("Central directory entry count: %" PRIu64"\n", zip->centralDirectoryRecordCount);
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
+        if (noEntries >= zip->centralDirectoryRecordCount) {
+            printf("Warning: Corrupted central directory structure\n");
+        }
+        noEntries++;
         printf("Name: %s Compressed: %" PRIu64" Uncompressed: %" PRIu64" Offset: %" PRIu64"\n", entry->fileName,
             entry->compressedSize, entry->uncompressedSize, entry->offsetOfLocalHeader);
     }
