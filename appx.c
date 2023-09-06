@@ -343,6 +343,18 @@ static FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *ou
     if (zipGetCDEntryByName(zip, APPXBUNDLE_MANIFEST_FILE_NAME)) {
         ctx->appx_ctx->isBundle = 1;
     }
+    if (options->nest)
+        /* I've not tried using set_nested_signature as signtool won't do this */
+        printf("Warning: APPX files do not support nesting (multiple signature)\n");
+    if (options->cmd == CMD_SIGN || options->cmd==CMD_ATTACH || options->cmd==CMD_ADD) {
+        printf("Warning: Ignore -h option, use the hash algorithm specified in AppxBlockMap.xml\n");
+    }
+    if (options->pagehash == 1)
+        printf("Warning: -ph option is only valid for PE files\n");
+    if (options->jp >= 0)
+        printf("Warning: -jp option is only valid for CAB files\n");
+    if (options->add_msi_dse == 1)
+        printf("Warning: -add-msi-dse option is only valid for MSI files\n");
     return ctx;
 }
 
@@ -350,16 +362,13 @@ static FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *ou
  * Allocate and return SpcSipInfo object.
  * [out] p: SpcSipInfo data
  * [out] plen: SpcSipInfo data length
- * [in] ctx: structure holds input and output data (unused)
+ * [in] ctx: structure holds input and output data
  * [returns] pointer to ASN1_OBJECT structure corresponding to SPC_SIPINFO_OBJID
  */
 static ASN1_OBJECT *appx_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx)
 {
     ASN1_OBJECT *dtype;
     AppxSpcSipInfo *si = AppxSpcSipInfo_new();
-
-    /* squash the unused parameter warning */
-    (void)ctx;
 
     ASN1_INTEGER_set(si->a, 0x01010000);
     ASN1_INTEGER_set(si->b, 0);
@@ -403,7 +412,7 @@ static int appx_hash_length_get(FILE_FORMAT_CTX *ctx)
 static int appx_check_file(FILE_FORMAT_CTX *ctx, int detached)
 {
     if (detached) {
-        printf("APPX does not support detached option\n");
+        printf("APPX format does not support detached PKCS#7 signature\n");
         return 0; /* FAILED */
     }
     appx_calculate_hashes(ctx);
@@ -498,6 +507,7 @@ static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         return 1; /* FAILED */
     }
     if (!appx_remove_ct_signature_entry(zip, entry)) {
+        printf("Failed to remove signature entry\n");
         return 1; /* FAILED */
     }
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
@@ -1094,6 +1104,9 @@ static int appx_compare_hashes(FILE_FORMAT_CTX *ctx)
 }
 
 /*
+ * Remove signature content types entry.
+ * [in] zip: signature holds specific ZIP data
+ * [in, out] entry: Central directory structure
  * [returns] 0 on error or 1 on success
  */
 static int appx_remove_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry)
@@ -1123,6 +1136,9 @@ static int appx_remove_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
 }
 
 /*
+ * Append signature content types entry.
+ * [in] zip: signature holds specific ZIP data
+ * [in, out] entry: Central directory structure
  * [returns] 0 on error or 1 on success
  */
 static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry)
@@ -2340,7 +2356,7 @@ static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
         return 0; /* FAILED */
     }
     if (memcmp(signature, PKZIP_EOCDR_SIGNATURE, 4)) {
-        printf("The input file is not a valip zip file - could not find End of Central Directory record\n");
+        /* Not a valid ZIP file - could not find End of Central Directory record */
         return 0; /* FAILED */
     }
     /* number of this disk (2 bytes) */
