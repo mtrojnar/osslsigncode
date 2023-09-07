@@ -44,13 +44,13 @@ static const char *SIGNATURE_CONTENT_TYPES_CLOSING_TAG = "</Types>";
 static const u_char APPX_UUID[] = { 0x4B, 0xDF, 0xC5, 0x0A, 0x07, 0xCE, 0xE2, 0x4D, 0xB7, 0x6E, 0x23, 0xC8, 0x39, 0xA0, 0x9F, 0xD1 };
 static const u_char APPXBUNDLE_UUID[] = { 0xB3, 0x58, 0x5F, 0x0F, 0xDE, 0xAA, 0x9A, 0x4B, 0xA4, 0x34, 0x95, 0x74, 0x2D, 0x92, 0xEC, 0xEB };
 
-static const char PKCX_SIGNATURE[4] = { 'P', 'K', 'C', 'X' }; //Main header header
-static const char APPX_SIGNATURE[4] = { 'A', 'P', 'P', 'X' }; //APPX header
-static const char AXPC_SIGNATURE[4] = { 'A', 'X', 'P', 'C' }; //digest of zip file records
-static const char AXCD_SIGNATURE[4] = { 'A', 'X', 'C', 'D' }; //digest zip file central directory
-static const char AXCT_SIGNATURE[4] = { 'A', 'X', 'C', 'T' }; //digest of uncompressed [ContentTypes].xml
-static const char AXBM_SIGNATURE[4] = { 'A', 'X', 'B', 'M' }; //digest of uncompressed AppxBlockMap.xml
-static const char AXCI_SIGNATURE[4] = { 'A', 'X', 'C', 'I' }; //digest of uncompressed AppxMetadata/CodeIntegrity.cat (optional)
+static const char PKCX_SIGNATURE[4] = { 'P', 'K', 'C', 'X' }; /* Main header header */
+static const char APPX_SIGNATURE[4] = { 'A', 'P', 'P', 'X' }; /* APPX header */
+static const char AXPC_SIGNATURE[4] = { 'A', 'X', 'P', 'C' }; /* digest of zip file records */
+static const char AXCD_SIGNATURE[4] = { 'A', 'X', 'C', 'D' }; /* digest zip file central directory */
+static const char AXCT_SIGNATURE[4] = { 'A', 'X', 'C', 'T' }; /* digest of uncompressed [ContentTypes].xml */
+static const char AXBM_SIGNATURE[4] = { 'A', 'X', 'B', 'M' }; /* digest of uncompressed AppxBlockMap.xml */
+static const char AXCI_SIGNATURE[4] = { 'A', 'X', 'C', 'I' }; /* digest of uncompressed AppxMetadata/CodeIntegrity.cat (optional) */
 
 static const char *HASH_METHOD_TAG = "HashMethod";
 static const char *HASH_METHOD_SHA256 = "http://www.w3.org/2001/04/xmlenc#sha256";
@@ -1408,7 +1408,8 @@ static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data,
     entry->crc32 = header.crc32;
     entry->uncompressedSize = header.uncompressedSize;
     entry->compressedSize = header.compressedSize;
-    entry->fileName = header.fileName; //take ownership of the fileName pointer
+    /* take ownership of the fileName pointer */
+    entry->fileName = header.fileName;
     entry->fileNameLen = header.fileNameLen;
     entry->extraField = header.extraField;
     entry->extraFieldLen = header.extraFieldLen;
@@ -1999,8 +2000,9 @@ static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong s
         /* coverity[overrun-buffer-arg] max value 0xFFFFFFFF is intended */
         err = deflate(&stream, sourceLen ? Z_NO_FLUSH : Z_FINISH);
     } while (err == Z_OK);
-
-    //deflate(&stream, Z_SYNC_FLUSH);
+#if 0
+    deflate(&stream, Z_SYNC_FLUSH);
+#endif
     *destLen = stream.total_out;
     deflateEnd(&stream);
     return err == Z_STREAM_END ? Z_OK : err;
