@@ -37,7 +37,7 @@ static const char PKZIP64_EOCDR_SIGNATURE[4] = { 'P', 'K', 6, 6 };
 static const char *APP_SIGNATURE_FILENAME = "AppxSignature.p7x";
 static const char *CONTENT_TYPES_FILENAME = "[Content_Types].xml";
 static const char *BLOCK_MAP_FILENAME = "AppxBlockMap.xml";
-static const char *APPXBUNDLE_MANIFEST_FILE_NAME = "AppxMetadata/AppxBundleManifest.xml";
+static const char *APPXBUNDLE_MANIFEST_FILENAME = "AppxMetadata/AppxBundleManifest.xml";
 static const char *CODE_INTEGRITY_FILENAME = "AppxMetadata/CodeIntegrity.cat";
 static const char *SIGNATURE_CONTENT_TYPES_ENTRY = "<Override PartName=\"/AppxSignature.p7x\" ContentType=\"application/vnd.ms-appx.signature\"/>";
 static const char *SIGNATURE_CONTENT_TYPES_CLOSING_TAG = "</Types>";
@@ -277,12 +277,12 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
 static void zipWriteLocalHeader(BIO *bio, ZIP_LOCAL_HEADER *header, uint64_t *sizeonDisk);
 static int zipEntryExist(ZIP_FILE *zip, const char *name);
 static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *md);
-static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pData, uint64_t *dataSize, int unpack);
-static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t **pData, uint64_t *dataSize, int unpack);
+static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pData, uint64_t *dataSize);
+static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t **pData, uint64_t *dataSize);
 static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t compressedSize);
 static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *sourceLen);
 static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen);
-static ZIP_FILE *openZip(const char *fn);
+static ZIP_FILE *openZip(const char *filename);
 static void freeZip(ZIP_FILE *zip);
 static void zipPrintCentralDirectory(ZIP_FILE *zip);
 static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file);
@@ -340,7 +340,7 @@ static FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *ou
     ctx->format = &file_format_appx;
     ctx->options = options;
     ctx->appx_ctx->md = md;
-    if (zipGetCDEntryByName(zip, APPXBUNDLE_MANIFEST_FILE_NAME)) {
+    if (zipGetCDEntryByName(zip, APPXBUNDLE_MANIFEST_FILENAME)) {
         ctx->appx_ctx->isBundle = 1;
     }
     if (options->nest)
@@ -403,8 +403,7 @@ static int appx_hash_length_get(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * Print current and calculated PE checksum, (unsupported)
- * check if the signature exists.
+ * Check if the signature exists.
  * [in, out] ctx: structure holds input and output data
  * [in] detached: embedded/detached PKCS#7 signature switch
  * [returns] 0 on error or 1 on success
@@ -415,7 +414,6 @@ static int appx_check_file(FILE_FORMAT_CTX *ctx, int detached)
         printf("APPX format does not support detached PKCS#7 signature\n");
         return 0; /* FAILED */
     }
-    appx_calculate_hashes(ctx);
     if (!zipEntryExist(ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME)) {
         printf("%s does not exist\n", APP_SIGNATURE_FILENAME);
         return 0; /* FAILED */
@@ -424,8 +422,7 @@ static int appx_check_file(FILE_FORMAT_CTX *ctx, int detached)
 }
 
 /*
- * Calculate message digest and page_hash and compare to values retrieved
- * from PKCS#7 signedData.
+ * Calculate message digest and compare to value retrieved from PKCS#7 signedData.
  * [in] ctx: structure holds input and output data
  * [in] p7: PKCS#7 signature
  * [returns] 0 on error or 1 on success
@@ -448,7 +445,6 @@ static int appx_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
                 SpcIndirectDataContent_free(idc);
                 return 0; /* FAILED */
             }
-
             if (!appx_compare_hashes(ctx)) {
                 printf("Signature hash verification failed\n");
                 SpcIndirectDataContent_free(idc);
@@ -472,7 +468,7 @@ static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     const u_char *blob;
     uint64_t dataSize = 0;
 
-    if (!zipReadFileDataByName(ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME, &data, &dataSize, 1)) {
+    if (!zipReadFileDataByName(ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME, &data, &dataSize)) {
         return NULL; /* FAILED */
     }
     if (memcmp(data, PKCX_SIGNATURE, 4)) {
@@ -761,24 +757,13 @@ static BIO *appx_hash_blob_get(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * Calculate hashes.
+ * Calculate ZIP hashes.
  * [in, out] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
 static int appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
 {
     uint64_t cdOffset = 0;
-
-    OPENSSL_free(ctx->appx_ctx->calculatedBMHash);
-    OPENSSL_free(ctx->appx_ctx->calculatedCTHash);
-    OPENSSL_free(ctx->appx_ctx->calculatedCDHash);
-    OPENSSL_free(ctx->appx_ctx->calculatedDataHash);
-    OPENSSL_free(ctx->appx_ctx->calculatedCIHash);
-    ctx->appx_ctx->calculatedBMHash = NULL;
-    ctx->appx_ctx->calculatedCIHash = NULL;
-    ctx->appx_ctx->calculatedBMHash = NULL;
-    ctx->appx_ctx->calculatedDataHash = NULL;
-    ctx->appx_ctx->calculatedCIHash = NULL;
 
     ctx->appx_ctx->calculatedBMHash = zipCalcDigest(ctx->appx_ctx->zip, BLOCK_MAP_FILENAME, ctx->appx_ctx->md);
     ctx->appx_ctx->calculatedCTHash = zipCalcDigest(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME, ctx->appx_ctx->md);
@@ -798,6 +783,13 @@ static int appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
     return 1; /* OK */
 }
 
+/*
+ * Calculate ZIP central directory hash.
+ * [in] zip: structure holds specific ZIP data
+ * [in] md: message digest algorithm type
+ * [in] cdOffset: central directory offset
+ * [returns] hash
+ */
 static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t cdOffset)
 {
     u_char *mdbuf = NULL;
@@ -821,8 +813,8 @@ static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD
 }
 
 /*
- * Write the central directory structure
- * [in] zip: signature holds specific ZIP data
+ * Write the central directory structure.
+ * [in] zip: structure holds specific ZIP data
  * [out] bio: outdata file BIO
  * [in] removeSignature: remove signature switch
  * [in] cdOffset: central directory offset
@@ -916,6 +908,13 @@ static int appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSigna
     return 1; /* OK */
 }
 
+/*
+ * Calculate ZIP data hash.
+ * [in] zip: structure holds specific ZIP data
+ * [in] md: message digest algorithm type
+ * [out] cdOffset: central directory offset
+ * [returns] hash
+ */
 static uint8_t *appx_calc_zip_data_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t *cdOffset)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
@@ -1004,7 +1003,6 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
         printf("Hash signature does not match\n");
         return 0; /* FAILED */
     }
-
     while (pos + mdlen + 4 <= length) {
         if (!memcmp(data + pos, AXPC_SIGNATURE, 4)) {
             ctx->appx_ctx->existingDataHash = OPENSSL_malloc((size_t)mdlen);
@@ -1111,8 +1109,8 @@ static int appx_compare_hashes(FILE_FORMAT_CTX *ctx)
 
 /*
  * Remove signature content types entry.
- * [in] zip: signature holds specific ZIP data
- * [in, out] entry: Central directory structure
+ * [in] zip: structure holds specific ZIP data
+ * [in, out] entry: central directory structure
  * [returns] 0 on error or 1 on success
  */
 static int appx_remove_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry)
@@ -1122,7 +1120,7 @@ static int appx_remove_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
     size_t dataSize, ipos, len;
     int ret;
 
-    if (!zipReadFileData(zip, entry, &data, (uint64_t *)&dataSize, 1)) {
+    if (!zipReadFileData(zip, entry, &data, (uint64_t *)&dataSize)) {
         return 0; /* FAILED */
     }
     cpos = strstr((const char *)data, SIGNATURE_CONTENT_TYPES_ENTRY);
@@ -1143,8 +1141,8 @@ static int appx_remove_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
 
 /*
  * Append signature content types entry.
- * [in] zip: signature holds specific ZIP data
- * [in, out] entry: Central directory structure
+ * [in] zip: structure holds specific ZIP data
+ * [in, out] entry: central directory structure
  * [returns] 0 on error or 1 on success
  */
 static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry)
@@ -1154,7 +1152,7 @@ static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
     size_t dataSize, newSize, ipos, len;
     int ret;
 
-    if (!zipReadFileData(zip, entry, &data, (uint64_t *)&dataSize, 1)) {
+    if (!zipReadFileData(zip, entry, &data, (uint64_t *)&dataSize)) {
         return 0; /* FAILED */
     }
     existingEntry = strstr((const char *)data, SIGNATURE_CONTENT_TYPES_ENTRY);
@@ -1181,6 +1179,11 @@ static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
     return ret;
 }
 
+/*
+ * Get a hash algorithm specified in the AppxBlockMap.xml file.
+ * [in] zip: structure holds specific ZIP data
+ * [returns] one of SHA256/SHA384/SHA512 digest algorithms
+ */
 static const EVP_MD *appx_get_md(ZIP_FILE *zip)
 {
     uint8_t *data = NULL;
@@ -1190,7 +1193,7 @@ static const EVP_MD *appx_get_md(ZIP_FILE *zip)
     const EVP_MD *md = NULL;
     size_t slen;
 
-    if (!zipReadFileDataByName(zip, BLOCK_MAP_FILENAME, &data, &dataSize, 1)) {
+    if (!zipReadFileDataByName(zip, BLOCK_MAP_FILENAME, &data, &dataSize)) {
         printf("Could not read: %s\n", BLOCK_MAP_FILENAME);
         return NULL; /* FAILED */
     }
@@ -1236,11 +1239,21 @@ static const EVP_MD *appx_get_md(ZIP_FILE *zip)
     } else if (strlen(HASH_METHOD_SHA512) == slen && !memcmp(valueStart, HASH_METHOD_SHA512, slen)) {
         printf("Hash method is SHA512\n");
         md = EVP_sha512();
+    } else {
+        printf("Unsupported hash method\n");
+        OPENSSL_free(data);
+        return NULL; /* FAILED */
     }
     OPENSSL_free(data);
     return md;
 }
 
+/*
+ * Get central directory structure entry.
+ * [in] zip: structure holds specific ZIP data
+ * [in] name: APPXBUNDLE_MANIFEST_FILENAME or CONTENT_TYPES_FILENAME
+ * [returns] pointer to central directory structure
+ */
 static ZIP_CENTRAL_DIRECTORY_ENTRY *zipGetCDEntryByName(ZIP_FILE *zip, const char *name)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
@@ -1264,6 +1277,11 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipGetCDEntryByName(ZIP_FILE *zip, const cha
 }
 
 /*
+ * Write central directory entry.
+ * [out] bio: outdata file BIO
+ * [in] entry: central directory structure
+ * [in] offsetDiff: central directory offset
+ * [out] sizeOnDisk: size of central directory structure
  * [returns] none
  */
 static void zipWriteCentralDirectoryEntry(BIO *bio, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint64_t offsetDiff, uint64_t *sizeOnDisk)
@@ -1474,6 +1492,7 @@ static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data
 }
 
 /*
+ * [out] sizeOnDisk:
  * [returns] 0 on error or 1 on success
  */
 static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO *bio, uint64_t *sizeOnDisk)
@@ -1551,6 +1570,10 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
 }
 
 /*
+ * Write local file header.
+ * [out] bio: outdata file BIO
+ * [in] header: local file header structure
+ * [out] sizeonDisk: local file header size
  * [returns] none
  */
 static void zipWriteLocalHeader(BIO *bio, ZIP_LOCAL_HEADER *header, uint64_t *sizeonDisk)
@@ -1584,6 +1607,9 @@ static void zipWriteLocalHeader(BIO *bio, ZIP_LOCAL_HEADER *header, uint64_t *si
 }
 
 /*
+ * Check if a given ZIP file exists
+ * [in] zip: structure holds specific ZIP data
+ * [in] name: APP_SIGNATURE_FILENAME or CODE_INTEGRITY_FILENAME
  * [returns] 0 on error or 1 on success
  */
 static int zipEntryExist(ZIP_FILE *zip, const char *name)
@@ -1608,6 +1634,13 @@ static int zipEntryExist(ZIP_FILE *zip, const char *name)
     return 0; /* FAILED */
 }
 
+/*
+ * Calculate ZIP container file hash.
+ * [in] zip: structure holds specific ZIP data
+ * [in] fileName: one of ZIP container file
+ * [in] md: message digest algorithm type
+ * [returns] hash
+ */
 static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *md)
 {
     uint8_t *data = NULL;
@@ -1615,7 +1648,7 @@ static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *
     u_char *mdbuf = NULL;
     BIO *bhash;
 
-    if (!zipReadFileDataByName(zip, fileName, &data, &dataSize, 1)) {
+    if (!zipReadFileDataByName(zip, fileName, &data, &dataSize)) {
         return NULL; /* FAILED */
     }
     bhash = BIO_new(BIO_f_md());
@@ -1640,9 +1673,14 @@ static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *
 }
 
 /*
+ * Read file data by name.
+ * [in] zip: structure holds specific ZIP data
+ * [in] name: one of ZIP container file
+ * [out] pData: pointer to data
+ * [out] dataSize: data size
  * [returns] 0 on error or 1 on success
  */
-static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pData, uint64_t *dataSize, int unpack)
+static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pData, uint64_t *dataSize)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
     uint64_t noEntries = 0;
@@ -1658,16 +1696,21 @@ static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pDat
             return 0; /* FAILED */
         }
         if (!strcmp(entry->fileName, name)) {
-            return zipReadFileData(zip, entry, pData, dataSize, unpack);
+            return zipReadFileData(zip, entry, pData, dataSize);
         }
     }
     return 0; /* FAILED */
 }
 
 /*
+ * Read file data.
+ * [in] zip: structure holds specific ZIP data
+ * [in] entry: central directory structure
+ * [out] pData: pointer to data
+ * [out] dataSize: data size
  * [returns] 0 on error or 1 on success
  */
-static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t **pData, uint64_t *dataSize, int unpack)
+static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t **pData, uint64_t *dataSize)
 {
     FILE *file = zip->file;
     uint8_t *compressedData = NULL;
@@ -1710,7 +1753,7 @@ static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, ui
             return 0; /* FAILED */
         }
     }
-    if (!unpack || (unpack && entry->compression == COMPRESSION_NONE)) {
+    if (entry->compression == COMPRESSION_NONE) {
         *pData = compressedData;
         *dataSize = compressedSize;
     } else if (entry->compression == COMPRESSION_DEFLATE) {
@@ -1739,7 +1782,10 @@ static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, ui
 }
 
 /*
- * Read local file header
+ * Read local file header from a ZIP file.
+ * [out] header: local file header
+ * [in] zip: structure holds specific ZIP data
+ * [in] compressedSize: compressed size
  * [returns] 0 on error or 1 on success
  */
 static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t compressedSize)
@@ -1753,7 +1799,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
         return 0; /* FAILED */
     }
     if (memcmp(signature, PKZIP_LH_SIGNATURE, 4)) {
-        printf("The input file is not a valip zip file - local header signature does not match\n");
+        printf("The input file is not a valid zip file - local header signature does not match\n");
         return 0; /* FAILED */
     }
     /* version needed to extract (2 bytes) */
@@ -1821,7 +1867,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
             return 0; /* FAILED */
         }
         if (memcmp(signature, PKZIP_DATA_DESCRIPTOR_SIGNATURE, 4)) {
-            printf("The input file is not a valip zip file - flags indicate data descriptor, but data descriptor signature does not match\n");
+            printf("The input file is not a valid zip file - flags indicate data descriptor, but data descriptor signature does not match\n");
             OPENSSL_free(header->fileName);
             OPENSSL_free(header->extraField);
             return 0; /* FAILED */
@@ -2013,15 +2059,21 @@ static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong s
     return err == Z_STREAM_END ? Z_OK : err;
 }
 
-static ZIP_FILE *openZip(const char *fn)
+/*
+ * Open input file and create ZIP_FILE structure.
+ * [in] filename: input file
+ * [returns] pointer to ZIP_FILE structure
+ */
+static ZIP_FILE *openZip(const char *filename)
 {
     ZIP_FILE *zip;
-    FILE *file = fopen(fn, "rb");
+    FILE *file = fopen(filename, "rb");
 
     if (!file) {
         return NULL; /* FAILED */
     }
-    /* oncde we read eocdr, comment might be allocated and we need to take care of it -> create the zipFile structure */
+    /* oncde we read eocdr, comment might be allocated and we need to take care of it
+     -> create the ZIP_FILE structure */
     zip = OPENSSL_zalloc(sizeof(ZIP_FILE));
     zip->file = file;
     if (!readZipEOCDR(&zip->eocdr, file)) {
@@ -2073,12 +2125,10 @@ static ZIP_FILE *openZip(const char *fn)
             return NULL; /* FAILED */
         }
     }
-
     if (!zipReadCentralDirectory(zip, file)) {
         freeZip(zip);
         return NULL; /* FAILED */
     }
-
     return zip;
 }
 
@@ -2130,6 +2180,9 @@ static void zipPrintCentralDirectory(ZIP_FILE *zip)
 }
 
 /*
+ * Read central directory
+ * [in, out] zip: structure holds specific ZIP data
+ * [in] file: FILE pointer to the input file
  * [returns] 0 on error or 1 on success
  */
 static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file)
@@ -2161,8 +2214,8 @@ static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file)
 
 /*
  * Initialize central directory structure.
- * [in] file: FILE pointer
- * [returns] Central directory structure
+ * [in] file: FILE pointer to the input file
+ * [returns] pointer to the central directory structure
  */
 static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
 {
@@ -2174,7 +2227,7 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
         return NULL; /* FAILED */
     }
     if (memcmp(signature, PKZIP_CD_SIGNATURE, 4)) {
-        printf("The input file is not a valip zip file - could not find Central Directory record\n");
+        printf("The input file is not a valid zip file - could not find Central Directory record\n");
         return NULL; /* FAILED */
     }
     entry = OPENSSL_zalloc(sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
@@ -2346,7 +2399,7 @@ static void freeZipCentralDirectoryEntry(ZIP_CENTRAL_DIRECTORY_ENTRY *entry)
 /*
  * Read Zip end of central directory record
  * [out] eocdr: end of central directory record
- * [in] file: FILE pointer
+ * [in] file: FILE pointer to the input file
  * [returns] 0 on error or 1 on success
  */
 static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
@@ -2418,7 +2471,7 @@ static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
 /*
  * Read Zip64 end of central directory locator
  * [out] locator: Zip64 end of central directory locator
- * [in] file: FILE pointer
+ * [in] file: FILE pointer to the input file
  * [returns] 0 on error or 1 on success
  */
 static int readZip64EOCDLocator(ZIP64_EOCD_LOCATOR *locator, FILE *file)
@@ -2434,7 +2487,7 @@ static int readZip64EOCDLocator(ZIP64_EOCD_LOCATOR *locator, FILE *file)
         return 0; /* FAILED */
     }
     if (memcmp(signature, PKZIP64_EOCD_LOCATOR_SIGNATURE, 4)) {
-        printf("The input file is not a valip zip file - could not find zip64 EOCD locator\n");
+        printf("The input file is not a valid zip file - could not find zip64 EOCD locator\n");
         return 0; /* FAILED */
     }
     locator->diskWithEOCD = fileGetU32(file);
@@ -2446,7 +2499,7 @@ static int readZip64EOCDLocator(ZIP64_EOCD_LOCATOR *locator, FILE *file)
 /*
  * Read Zip64 end of central directory record
  * [out] eocdr: Zip64 end of central directory record
- * [in] file: FILE pointer
+ * [in] file: FILE pointer to the input file
  * [in] offset: eocdr struct offset in the file
  * [returns] 0 on error or 1 on success
  */
@@ -2463,7 +2516,7 @@ static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
         return 0; /* FAILED */
     }
     if (memcmp(signature, PKZIP64_EOCDR_SIGNATURE, 4)) {
-        printf("The input file is not a valip zip file - could not find zip64 End of Central Directory record\n");
+        printf("The input file is not a valid zip file - could not find zip64 End of Central Directory record\n");
         return 0; /* FAILED */
     }
     /* size of zip64 end of central directory record (8 bytes) */
