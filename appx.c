@@ -718,6 +718,11 @@ static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
  * APPX helper functions
  */
 
+/*
+ * Create hash blob from concatenated APPX hashes.
+ * [in] ctx: structure holds input and output data
+ * [returns] pointer to BIO with calculated APPX hashes
+ */
 static BIO *appx_hash_blob_get(FILE_FORMAT_CTX *ctx)
 {
     int mdlen = EVP_MD_size(ctx->appx_ctx->md);
@@ -751,6 +756,7 @@ static BIO *appx_hash_blob_get(FILE_FORMAT_CTX *ctx)
         pos += mdlen;
     }
     ctx->appx_ctx->hashlen = BIO_write(hashes, data, pos);
+    OPENSSL_free(data);
     return hashes;
 }
 
