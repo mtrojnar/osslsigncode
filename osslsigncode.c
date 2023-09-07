@@ -3331,7 +3331,7 @@ static ENGINE *engine_dynamic(GLOBAL_OPTIONS *options)
  * [in] none
  * [returns] pointer to ENGINE
  */
-static ENGINE *engine_pkcs11()
+static ENGINE *engine_pkcs11(void)
 {
     ENGINE *engine = ENGINE_by_id("pkcs11");
     if (!engine) {
