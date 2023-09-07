@@ -1342,9 +1342,8 @@ static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data,
     memset(&header, 0, sizeof(ZIP_LOCAL_HEADER));
     if (comprs) {
         int ret;
-
-        dataToWrite = OPENSSL_malloc(dataSize);
         uint64_t destLen = dataSize;
+        dataToWrite = OPENSSL_malloc(dataSize);
         ret = zipDeflate(dataToWrite, &destLen, data, dataSize);
         if (ret != Z_OK) {
             printf("Zip deflate failed: %d\n", ret);
@@ -2084,13 +2083,12 @@ static ZIP_FILE *openZip(const char *fn)
  */
 static void freeZip(ZIP_FILE *zip)
 {
-    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+    ZIP_CENTRAL_DIRECTORY_ENTRY *entry, *next = NULL;
     uint64_t noEntries = 0;
 
     fclose(zip->file);
     OPENSSL_free(zip->eocdr.comment);
     OPENSSL_free(zip->eocdr64.comment);
-    ZIP_CENTRAL_DIRECTORY_ENTRY *next = NULL;
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = next) {
         if (noEntries > zip->centralDirectoryRecordCount) {
             printf("Warning: Corrupted central directory structure\n");
