@@ -1850,7 +1850,7 @@ static char *msi_dirent_get(MSI_ENTRY *entry)
     return data;
 }
 
-static char *msi_unused_dirent_get()
+static char *msi_unused_dirent_get(void)
 {
     char *data = OPENSSL_malloc(DIRENT_SIZE);
 
