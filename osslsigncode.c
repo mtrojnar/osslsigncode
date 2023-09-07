@@ -2270,6 +2270,7 @@ static int verify_member(FILE_FORMAT_CTX *ctx, CatalogAuthAttr *attribute)
 static int verify_content(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
     ASN1_STRING *value;
+    ASN1_OBJECT *indir_objid;
     const u_char *data;
     MsCtlContent *ctlc;
     int i, j;
@@ -2285,7 +2286,7 @@ static int verify_content(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         printf("Failed to extract MS_CTL_OBJID data\n");
         return 1; /* FAILED */
     }
-    ASN1_OBJECT *indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+    indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
     for (i = 0; i < sk_CatalogInfo_num(ctlc->header_attributes); i++) {
         STACK_OF(CatalogAuthAttr) *attributes;
         CatalogInfo *header_attr = sk_CatalogInfo_value(ctlc->header_attributes, i);
