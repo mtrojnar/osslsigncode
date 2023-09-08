@@ -1834,21 +1834,10 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
     header->compressedSize = fileGetU32(file);
     /* uncompressed size (4 bytes) */
     header->uncompressedSize = fileGetU32(file);
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wtype-limits"
     /* file name length (2 bytes) */
     header->fileNameLen = fileGetU16(file);
-    if (header->fileNameLen > UINT16_MAX) {
-        printf("Corrupted file name length : 0x%08X\n", header->fileNameLen);
-        return 0; /* FAILED */
-    }
     /* extra file name length (2 bytes) */
     header->extraFieldLen = fileGetU16(file);
-    if (header->extraFieldLen > UINT16_MAX) {
-        printf("Corrupted extra file name length : 0x%08X\n", header->extraFieldLen);
-        return 0; /* FAILED */
-    }
-    #pragma GCC diagnostic pop
     /* file name (variable size) */
     if (header->fileNameLen > 0) {
         header->fileName = OPENSSL_zalloc(header->fileNameLen + 1);
@@ -2270,30 +2259,12 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
     entry->compressedSize = fileGetU32(file);
     /* uncompressed size (4 bytes) */
     entry->uncompressedSize = fileGetU32(file);
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wtype-limits"
     /* file name length (2 bytes) */
     entry->fileNameLen = fileGetU16(file);
-    if (entry->fileNameLen > UINT16_MAX) {
-        printf("Corrupted file name length : 0x%08X\n", entry->fileNameLen);
-        freeZipCentralDirectoryEntry(entry);
-        return NULL; /* FAILED */
-    }
     /* extra field length (2 bytes) */
     entry->extraFieldLen = fileGetU16(file);
-    if (entry->extraFieldLen > UINT16_MAX) {
-        printf("Corrupted extra field length : 0x%08X\n", entry->extraFieldLen);
-        freeZipCentralDirectoryEntry(entry);
-        return NULL; /* FAILED */
-    }
     /* file comment length (2 bytes) */
     entry->fileCommentLen = fileGetU16(file);
-    if (entry->fileCommentLen > UINT16_MAX) {
-        printf("Corrupted file comment length : 0x%08X\n", entry->fileCommentLen);
-        freeZipCentralDirectoryEntry(entry);
-        return NULL; /* FAILED */
-    }
-    #pragma GCC diagnostic pop
     /* disk number start (2 bytes) */
     entry->diskNoStart = fileGetU16(file);
     /* internal file attributes (2 bytes) */
@@ -2442,13 +2413,6 @@ static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
     eocdr->diskEntries = fileGetU16(file);
     /* total number of entries in the central directory (2 bytes) */
     eocdr->totalEntries = fileGetU16(file);
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wtype-limits"
-    if (eocdr->totalEntries > UINT16_MAX) {
-        printf("Corrupted total number of entries in the central directory : 0x%08X\n", eocdr->totalEntries);
-        return 0; /* FAILED */
-    }
-    #pragma GCC diagnostic pop
     /* size of the central directory (4 bytes) */
     eocdr->centralDirectorySize = fileGetU32(file);
     /* offset of start of central directory with respect
@@ -2456,13 +2420,6 @@ static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
     eocdr->centralDirectoryOffset = fileGetU32(file);
     /* .ZIP file comment length (2 bytes) */
     eocdr->commentLen = fileGetU16(file);
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wtype-limits"
-    if (eocdr->commentLen > UINT16_MAX) {
-        printf("Corrupted file comment length : 0x%08X\n", eocdr->commentLen);
-        return 0; /* FAILED */
-    }
-    #pragma GCC diagnostic pop
 #if 0
     if (eocdr->centralDirectoryDiskNumber > 1 || eocdr->diskNumber > 1 ||
         eocdr->centralDirectoryDiskNumber != eocdr->diskNumber ||
@@ -2549,13 +2506,6 @@ static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
     eocdr->diskEntries = fileGetU64(file);
     /* total number of entries in the central directory (8 bytes) */
     eocdr->totalEntries = fileGetU64(file);
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wtype-limits"
-    if (eocdr->totalEntries > UINT64_MAX) {
-        printf("Corrupted total number of entries in the central directory : 0x%08lX\n", eocdr->totalEntries);
-        return 0; /* FAILED */
-    }
-    #pragma GCC diagnostic pop
     /* size of the central directory (8 bytes) */
     eocdr->centralDirectorySize = fileGetU64(file);
     /* offset of start of central directory with respect
@@ -2563,13 +2513,10 @@ static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
     eocdr->centralDirectoryOffset = fileGetU64(file);
     /* zip64 extensible data sector (comment) */
     eocdr->commentLen = eocdr->eocdrSize - 44;
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wtype-limits"
     if (eocdr->commentLen > UINT16_MAX) {
         printf("Corrupted file comment length : 0x%08lX\n", eocdr->commentLen);
         return 0; /* FAILED */
     }
-    #pragma GCC diagnostic pop
     if (eocdr->commentLen > 0) {
         eocdr->comment = OPENSSL_malloc(eocdr->commentLen);
         size = fread(eocdr->comment, 1, eocdr->commentLen, file);
@@ -2590,6 +2537,7 @@ static uint64_t fileGetU64(FILE *file)
 {
     uint64_t l = fileGetU32(file);
     uint64_t h = fileGetU32(file);
+    /* coverity[byte_swapping] */
     return h << 32 | l;
 }
 
@@ -2600,6 +2548,7 @@ static uint32_t fileGetU32(FILE *file)
     if (size != 4) {
         return 0; /* FAILED */
     }
+    /* coverity[byte_swapping] */
     return (uint32_t)(b[3] << 24 | b[2] << 16 | b[1] << 8 | b[0]);
 }
 
@@ -2610,6 +2559,7 @@ static uint16_t fileGetU16(FILE *file)
     if (size != 2) {
         return 0; /* FAILED */
     }
+    /* coverity[byte_swapping] */
     return (uint16_t)(b[1] << 8 | b[0]);
 }
 
