@@ -259,8 +259,8 @@ FILE_FORMAT file_format_appx = {
 };
 
 /* Prototypes */
+static BIO *appx_calculate_hashes(FILE_FORMAT_CTX *ctx);
 static BIO *appx_hash_blob_get(FILE_FORMAT_CTX *ctx);
-static int appx_calculate_hashes(FILE_FORMAT_CTX *ctx);
 static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t cdOffset);
 static int appx_write_central_directory(BIO *bio, ZIP_FILE *zip, int removeSignature, uint64_t cdOffset);
 static uint8_t *appx_calc_zip_data_hash(uint64_t *cdOffset, ZIP_FILE *zip, const EVP_MD *md);
@@ -436,16 +436,18 @@ static int appx_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
 
         if (idc) {
+            BIO *hashes;
             if (!appx_extract_hashes(ctx, idc)) {
                 printf("Failed to extract hashes from the signature\n");
                 SpcIndirectDataContent_free(idc);
                 return 0; /* FAILED */
             }
-            if (!appx_calculate_hashes(ctx)) {
-                printf("Failed to calculate one or more hash\n");
+            hashes = appx_calculate_hashes(ctx);
+            if (!hashes) {
                 SpcIndirectDataContent_free(idc);
                 return 0; /* FAILED */
             }
+            BIO_free_all(hashes);
             if (!appx_compare_hashes(ctx)) {
                 printf("Signature hash verification failed\n");
                 SpcIndirectDataContent_free(idc);
@@ -569,8 +571,9 @@ static PKCS7 *appx_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         if (!appx_append_ct_signature_entry(ctx->appx_ctx->zip, entry)) {
             return NULL; /* FAILED */
         }
-        if (!appx_calculate_hashes(ctx)) {
-            printf("Failed to calculate one ore more hash\n");
+        /* create hash blob from concatenated APPX hashes */
+        hashes = appx_calculate_hashes(ctx);
+        if (!hashes) {
             return NULL; /* FAILED */
         }
         /* Create a new PKCS#7 signature */
@@ -579,7 +582,6 @@ static PKCS7 *appx_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             printf("Creating a new signature failed\n");
             return NULL; /* FAILED */
         }
-        hashes = appx_hash_blob_get(ctx);
         if (!add_indirect_data_object(p7, hashes, ctx)) {
             printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
             BIO_free_all(hashes);
@@ -693,10 +695,10 @@ static BIO *appx_bio_free(BIO *hash, BIO *outdata)
  */
 static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
-    /* squash unused parameter warnings */
-    (void)hash;
-    (void)outdata;
-
+    if (outdata) {
+        BIO_free_all(hash);
+        BIO_free_all(outdata);
+    }
     freeZip(ctx->appx_ctx->zip);
     OPENSSL_free(ctx->appx_ctx->calculatedBMHash);
     OPENSSL_free(ctx->appx_ctx->calculatedCTHash);
@@ -715,6 +717,33 @@ static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 /*
  * APPX helper functions
  */
+
+/*
+ * Calculate ZIP hashes.
+ * [in, out] ctx: structure holds input and output data
+ * [returns] pointer to BIO with calculated APPX hashes
+ */
+static BIO *appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
+{
+    uint64_t cdOffset = 0;
+
+    ctx->appx_ctx->calculatedBMHash = zipCalcDigest(ctx->appx_ctx->zip, BLOCK_MAP_FILENAME, ctx->appx_ctx->md);
+    ctx->appx_ctx->calculatedCTHash = zipCalcDigest(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME, ctx->appx_ctx->md);
+    ctx->appx_ctx->calculatedDataHash = appx_calc_zip_data_hash(&cdOffset, ctx->appx_ctx->zip, ctx->appx_ctx->md);
+    ctx->appx_ctx->calculatedCDHash = appx_calc_zip_central_directory_hash(ctx->appx_ctx->zip, ctx->appx_ctx->md, cdOffset);
+    ctx->appx_ctx->calculatedCIHash = zipCalcDigest(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME, ctx->appx_ctx->md);
+
+    if (!ctx->appx_ctx->calculatedBMHash || !ctx->appx_ctx->calculatedCTHash
+        || !ctx->appx_ctx->calculatedCDHash || !ctx->appx_ctx->calculatedDataHash) {
+        printf("One or more hashes calculation failed\n");
+        return NULL; /* FAILED */
+    }
+    if (zipEntryExist(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME) && !ctx->appx_ctx->calculatedCIHash) {
+        printf("Code integrity file exists, but CI hash calculation failed\n");
+        return NULL; /* FAILED */
+    }
+    return appx_hash_blob_get(ctx);
+}
 
 /*
  * Create hash blob from concatenated APPX hashes.
@@ -753,36 +782,12 @@ static BIO *appx_hash_blob_get(FILE_FORMAT_CTX *ctx)
         memcpy(data + pos, ctx->appx_ctx->calculatedCIHash, (size_t)mdlen);
         pos += mdlen;
     }
+    if (ctx->options->verbose) {
+        print_hash("Hash of file: ", "\n", data, pos);
+    }
     ctx->appx_ctx->hashlen = BIO_write(hashes, data, pos);
     OPENSSL_free(data);
     return hashes;
-}
-
-/*
- * Calculate ZIP hashes.
- * [in, out] ctx: structure holds input and output data
- * [returns] 0 on error or 1 on success
- */
-static int appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
-{
-    uint64_t cdOffset = 0;
-
-    ctx->appx_ctx->calculatedBMHash = zipCalcDigest(ctx->appx_ctx->zip, BLOCK_MAP_FILENAME, ctx->appx_ctx->md);
-    ctx->appx_ctx->calculatedCTHash = zipCalcDigest(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME, ctx->appx_ctx->md);
-    ctx->appx_ctx->calculatedDataHash = appx_calc_zip_data_hash(&cdOffset, ctx->appx_ctx->zip, ctx->appx_ctx->md);
-    ctx->appx_ctx->calculatedCDHash = appx_calc_zip_central_directory_hash(ctx->appx_ctx->zip, ctx->appx_ctx->md, cdOffset);
-    ctx->appx_ctx->calculatedCIHash = zipCalcDigest(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME, ctx->appx_ctx->md);
-
-    if (!ctx->appx_ctx->calculatedBMHash || !ctx->appx_ctx->calculatedCTHash
-        || !ctx->appx_ctx->calculatedCDHash || !ctx->appx_ctx->calculatedDataHash) {
-        printf("One or more hashes calculation failed\n");
-        return 0; /* FAILED */
-    }
-    if (zipEntryExist(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME) && !ctx->appx_ctx->calculatedCIHash) {
-        printf("Code integrity file exists, but CI hash calculation failed\n");
-        return 0; /* FAILED */
-    }
-    return 1; /* OK */
 }
 
 /*
@@ -989,13 +994,8 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
     int length = content->messageDigest->digest->length;
     uint8_t *data = content->messageDigest->digest->data;
     int mdlen = EVP_MD_size(ctx->appx_ctx->md);
-    int i, pos = 4;
+    int pos = 4;
 
-    printf("Hash of file: ");
-    for (i=0; i<length; i++) {
-        printf("%X", data[i]);
-    }
-    printf("\n\n");
     /* we are expecting at least 4 hashes + 4 byte header */
     if (length < 4 * mdlen + 4) {
         printf("Hash too short\n");
