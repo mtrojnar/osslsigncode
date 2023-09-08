@@ -44,7 +44,7 @@ static const char *SIGNATURE_CONTENT_TYPES_CLOSING_TAG = "</Types>";
 static const u_char APPX_UUID[] = { 0x4B, 0xDF, 0xC5, 0x0A, 0x07, 0xCE, 0xE2, 0x4D, 0xB7, 0x6E, 0x23, 0xC8, 0x39, 0xA0, 0x9F, 0xD1 };
 static const u_char APPXBUNDLE_UUID[] = { 0xB3, 0x58, 0x5F, 0x0F, 0xDE, 0xAA, 0x9A, 0x4B, 0xA4, 0x34, 0x95, 0x74, 0x2D, 0x92, 0xEC, 0xEB };
 
-static const char PKCX_SIGNATURE[4] = { 'P', 'K', 'C', 'X' }; /* Main header header */
+static const char PKCX_SIGNATURE[4] = { 'P', 'K', 'C', 'X' }; /* P7X format header */
 static const char APPX_SIGNATURE[4] = { 'A', 'P', 'P', 'X' }; /* APPX header */
 static const char AXPC_SIGNATURE[4] = { 'A', 'X', 'P', 'C' }; /* digest of zip file records */
 static const char AXCD_SIGNATURE[4] = { 'A', 'X', 'C', 'D' }; /* digest zip file central directory */
@@ -262,23 +262,23 @@ FILE_FORMAT file_format_appx = {
 static BIO *appx_hash_blob_get(FILE_FORMAT_CTX *ctx);
 static int appx_calculate_hashes(FILE_FORMAT_CTX *ctx);
 static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t cdOffset);
-static int appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSignature, uint64_t cdOffset);
-static uint8_t *appx_calc_zip_data_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t *cdOffset);
+static int appx_write_central_directory(BIO *bio, ZIP_FILE *zip, int removeSignature, uint64_t cdOffset);
+static uint8_t *appx_calc_zip_data_hash(uint64_t *cdOffset, ZIP_FILE *zip, const EVP_MD *md);
 static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *content);
 static int appx_compare_hashes(FILE_FORMAT_CTX *ctx);
 static int appx_remove_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry);
 static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry);
 static const EVP_MD *appx_get_md(ZIP_FILE *zip);
 static ZIP_CENTRAL_DIRECTORY_ENTRY *zipGetCDEntryByName(ZIP_FILE *zip, const char *name);
-static void zipWriteCentralDirectoryEntry(BIO *bio, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint64_t offsetDiff, uint64_t *sizeOnDisk);
-static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data, uint64_t dataSize, int comprs);
-static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data, uint64_t dataSize, int comprs);
+static void zipWriteCentralDirectoryEntry(BIO *bio, uint64_t *sizeOnDisk, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint64_t offsetDiff);
+static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64_t dataSize);
+static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data, uint64_t dataSize);
 static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO *bio, uint64_t *sizeOnDisk);
-static void zipWriteLocalHeader(BIO *bio, ZIP_LOCAL_HEADER *header, uint64_t *sizeonDisk);
+static void zipWriteLocalHeader(BIO *bio, uint64_t *sizeonDisk, ZIP_LOCAL_HEADER *heade);
 static int zipEntryExist(ZIP_FILE *zip, const char *name);
 static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *md);
-static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pData, uint64_t *dataSize);
-static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t **pData, uint64_t *dataSize);
+static int zipReadFileDataByName(uint8_t **pData, uint64_t *dataSize, ZIP_FILE *zip, const char *name);
+static int zipReadFileData(ZIP_FILE *zip, uint8_t **pData, uint64_t *dataSize, ZIP_CENTRAL_DIRECTORY_ENTRY *entry);
 static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t compressedSize);
 static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *sourceLen);
 static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen);
@@ -394,8 +394,9 @@ static ASN1_OBJECT *appx_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX
 }
 
 /*
+ * Get concatenated hashes length.
  * [in] ctx: structure holds input and output data
- * [returns] the size of the hash
+ * [returns] the length of concatenated hashes
  */
 static int appx_hash_length_get(FILE_FORMAT_CTX *ctx)
 {
@@ -404,7 +405,7 @@ static int appx_hash_length_get(FILE_FORMAT_CTX *ctx)
 
 /*
  * Check if the signature exists.
- * [in, out] ctx: structure holds input and output data
+ * [in] ctx: structure holds input and output data
  * [in] detached: embedded/detached PKCS#7 signature switch
  * [returns] 0 on error or 1 on success
  */
@@ -468,9 +469,10 @@ static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     const u_char *blob;
     uint64_t dataSize = 0;
 
-    if (!zipReadFileDataByName(ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME, &data, &dataSize)) {
+    if (!zipReadFileDataByName(&data, &dataSize, ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME)) {
         return NULL; /* FAILED */
     }
+    /* P7X format is just 0x504B4358 (PKCX) followed by PKCS#7 data in the DER format */
     if (memcmp(data, PKCX_SIGNATURE, 4)) {
         printf("Invalid PKCX header\n");
         OPENSSL_free(data);
@@ -524,7 +526,7 @@ static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         }
     }
     cdOffset = (uint64_t)BIO_tell(outdata);
-    if (!appx_write_central_directory(zip, outdata, 1, cdOffset)) {
+    if (!appx_write_central_directory(outdata, zip, 1, cdOffset)) {
         printf("Unable to write central directory\n");
         return 1; /* FAILED */
     }
@@ -652,7 +654,7 @@ static int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     memcpy(blob, PKCX_SIGNATURE, 4);
     memcpy(blob + 4, der, (size_t)len);
     len += 4;
-    if (!zipAppendFile(zip, outdata, APP_SIGNATURE_FILENAME, blob, (uint64_t)len, 1)) {
+    if (!zipAppendSignatureFile(outdata, zip, blob, (uint64_t)len)) {
         OPENSSL_free(blob);
         printf("Failed to append zip file\n");
         return 1; /* FAILED */
@@ -661,7 +663,7 @@ static int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     OPENSSL_free(blob);
     /* again, 32bit api -> will limit us to 2GB files */
     cdOffset = (uint64_t)BIO_tell(outdata);
-    if (!appx_write_central_directory(zip, outdata, 0, cdOffset)) {
+    if (!appx_write_central_directory(outdata, zip, 0, cdOffset)) {
         printf("Unable to write central directory\n");
         return 1; /* FAILED */
     }
@@ -767,7 +769,7 @@ static int appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
 
     ctx->appx_ctx->calculatedBMHash = zipCalcDigest(ctx->appx_ctx->zip, BLOCK_MAP_FILENAME, ctx->appx_ctx->md);
     ctx->appx_ctx->calculatedCTHash = zipCalcDigest(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME, ctx->appx_ctx->md);
-    ctx->appx_ctx->calculatedDataHash = appx_calc_zip_data_hash(ctx->appx_ctx->zip, ctx->appx_ctx->md, &cdOffset);
+    ctx->appx_ctx->calculatedDataHash = appx_calc_zip_data_hash(&cdOffset, ctx->appx_ctx->zip, ctx->appx_ctx->md);
     ctx->appx_ctx->calculatedCDHash = appx_calc_zip_central_directory_hash(ctx->appx_ctx->zip, ctx->appx_ctx->md, cdOffset);
     ctx->appx_ctx->calculatedCIHash = zipCalcDigest(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME, ctx->appx_ctx->md);
 
@@ -801,7 +803,7 @@ static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD
         return NULL; /* FAILED */
     }
     BIO_push(bhash, BIO_new(BIO_s_null()));
-    if (!appx_write_central_directory(zip, bhash, 1, cdOffset)) {
+    if (!appx_write_central_directory(bhash, zip, 1, cdOffset)) {
         printf("Unable to write central directory\n");
         BIO_free_all(bhash);
         return NULL; /* FAILED */
@@ -813,14 +815,14 @@ static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD
 }
 
 /*
- * Write the central directory structure.
- * [in] zip: structure holds specific ZIP data
+ * Write central directory structure.
  * [out] bio: outdata file BIO
+ * [in] zip: structure holds specific ZIP data
  * [in] removeSignature: remove signature switch
  * [in] cdOffset: central directory offset
  * [returns] 0 on error or 1 on success
  */
-static int appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSignature, uint64_t cdOffset)
+static int appx_write_central_directory(BIO *bio, ZIP_FILE *zip, int removeSignature, uint64_t cdOffset)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
     uint64_t offsetDiff = 0, cdSize = 0;
@@ -841,7 +843,7 @@ static int appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSigna
             continue;
         }
         /* APP_SIGNATURE is nt 'tainted' by offset shift after replacing the contents of [content_types] */
-        zipWriteCentralDirectoryEntry(bio, entry, strcmp(entry->fileName, APP_SIGNATURE_FILENAME) ? offsetDiff : 0, &sizeOnDisk);
+        zipWriteCentralDirectoryEntry(bio, &sizeOnDisk, entry, strcmp(entry->fileName, APP_SIGNATURE_FILENAME) ? offsetDiff : 0);
         cdSize += sizeOnDisk;
         if (entry->overrideData) {
             offsetDiff += entry->overrideData->compressedSize - entry->compressedSize;
@@ -910,12 +912,12 @@ static int appx_write_central_directory(ZIP_FILE *zip, BIO *bio, int removeSigna
 
 /*
  * Calculate ZIP data hash.
+ * [out] cdOffset: central directory offset
  * [in] zip: structure holds specific ZIP data
  * [in] md: message digest algorithm type
- * [out] cdOffset: central directory offset
  * [returns] hash
  */
-static uint8_t *appx_calc_zip_data_hash(ZIP_FILE *zip, const EVP_MD *md, uint64_t *cdOffset)
+static uint8_t *appx_calc_zip_data_hash(uint64_t *cdOffset, ZIP_FILE *zip, const EVP_MD *md)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
     u_char *mdbuf = NULL;
@@ -1049,7 +1051,7 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
 }
 
 /*
- * Compare hashes.
+ * Compare extracted and calculated hashes.
  * [in, out] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
@@ -1120,7 +1122,7 @@ static int appx_remove_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
     size_t dataSize, ipos, len;
     int ret;
 
-    if (!zipReadFileData(zip, entry, &data, (uint64_t *)&dataSize)) {
+    if (!zipReadFileData(zip, &data, (uint64_t *)&dataSize, entry)) {
         return 0; /* FAILED */
     }
     cpos = strstr((const char *)data, SIGNATURE_CONTENT_TYPES_ENTRY);
@@ -1134,7 +1136,7 @@ static int appx_remove_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
     len = strlen(SIGNATURE_CONTENT_TYPES_ENTRY);
     memmove(data + ipos, data + ipos + len, dataSize - ipos - len);
     dataSize -= len;
-    ret = zipOverrideFileData(entry, data, (uint64_t)dataSize, 1);
+    ret = zipOverrideFileData(entry, data, (uint64_t)dataSize);
     OPENSSL_free(data);
     return ret;
 }
@@ -1152,7 +1154,7 @@ static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
     size_t dataSize, newSize, ipos, len;
     int ret;
 
-    if (!zipReadFileData(zip, entry, &data, (uint64_t *)&dataSize)) {
+    if (!zipReadFileData(zip, &data, (uint64_t *)&dataSize, entry)) {
         return 0; /* FAILED */
     }
     existingEntry = strstr((const char *)data, SIGNATURE_CONTENT_TYPES_ENTRY);
@@ -1173,7 +1175,7 @@ static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
     memcpy(newData, data, ipos);
     memcpy(newData + ipos, SIGNATURE_CONTENT_TYPES_ENTRY, len);
     memcpy(newData + ipos + len, data + ipos, dataSize - ipos);
-    ret = zipOverrideFileData(entry, newData, (uint64_t)newSize, 1);
+    ret = zipOverrideFileData(entry, newData, (uint64_t)newSize);
     OPENSSL_free(data);
     OPENSSL_free(newData);
     return ret;
@@ -1193,7 +1195,7 @@ static const EVP_MD *appx_get_md(ZIP_FILE *zip)
     const EVP_MD *md = NULL;
     size_t slen;
 
-    if (!zipReadFileDataByName(zip, BLOCK_MAP_FILENAME, &data, &dataSize)) {
+    if (!zipReadFileDataByName(&data, &dataSize, zip, BLOCK_MAP_FILENAME)) {
         printf("Could not read: %s\n", BLOCK_MAP_FILENAME);
         return NULL; /* FAILED */
     }
@@ -1279,12 +1281,12 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipGetCDEntryByName(ZIP_FILE *zip, const cha
 /*
  * Write central directory entry.
  * [out] bio: outdata file BIO
+ * [out] sizeOnDisk: size of central directory structure
  * [in] entry: central directory structure
  * [in] offsetDiff: central directory offset
- * [out] sizeOnDisk: size of central directory structure
  * [returns] none
  */
-static void zipWriteCentralDirectoryEntry(BIO *bio, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint64_t offsetDiff, uint64_t *sizeOnDisk)
+static void zipWriteCentralDirectoryEntry(BIO *bio, uint64_t *sizeOnDisk, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint64_t offsetDiff)
 {
     uint16_t zip64ChunkSize = 0;
 
@@ -1351,37 +1353,42 @@ static void zipWriteCentralDirectoryEntry(BIO *bio, ZIP_CENTRAL_DIRECTORY_ENTRY 
 }
 
 /*
+ * Append signature file blob to outdata bio.
+ * [out] bio: outdata file BIO
+ * [in] zip: structure holds specific ZIP data
+ * [in] data: pointer to signature file blob
+ * [in] dataSize: signature file blob length
  * [returns] 0 on error or 1 on success
  */
-static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data, uint64_t dataSize, int comprs)
+static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64_t dataSize)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
     ZIP_LOCAL_HEADER header;
     time_t tim;
     struct tm *timeinfo;
+    uint64_t offset, dummy = 0, written = 0;
+    uint64_t sizeToWrite = dataSize;
+    uint64_t destLen = dataSize;
     uint32_t crc;
-    uint64_t offset, dummy = 0, written = 0, sizeToWrite = dataSize;
     uint8_t *dataToWrite = data;
+    int ret;
 
     memset(&header, 0, sizeof(ZIP_LOCAL_HEADER));
-    if (comprs) {
-        int ret;
-        uint64_t destLen = dataSize;
-        dataToWrite = OPENSSL_malloc(dataSize);
-        ret = zipDeflate(dataToWrite, &destLen, data, dataSize);
-        if (ret != Z_OK) {
-            printf("Zip deflate failed: %d\n", ret);
-            OPENSSL_free(dataToWrite);
-            return 0; /* FAILED */
-        }
-        sizeToWrite = destLen;
+    dataToWrite = OPENSSL_malloc(dataSize);
+    ret = zipDeflate(dataToWrite, &destLen, data, dataSize);
+    if (ret != Z_OK) {
+        printf("Zip deflate failed: %d\n", ret);
+        OPENSSL_free(dataToWrite);
+        return 0; /* FAILED */
     }
+    sizeToWrite = destLen;
+
     time(&tim);
     timeinfo = localtime(&tim);
 
     header.version = 0x14;
     header.flags = 0;
-    header.compression = comprs ? COMPRESSION_DEFLATE : 0;
+    header.compression = COMPRESSION_DEFLATE;
     header.modTime = (uint16_t)(timeinfo->tm_hour << 11 | \
                                 timeinfo->tm_min << 5 | \
                                 timeinfo->tm_sec >> 1);
@@ -1396,10 +1403,10 @@ static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data,
     header.crc32 = crc;
     header.uncompressedSize = dataSize;
     header.compressedSize = sizeToWrite;
-    header.fileNameLen = (uint16_t)strlen(fn);
+    header.fileNameLen = (uint16_t)strlen(APP_SIGNATURE_FILENAME);
     /* this will be reassigned to CD entry and freed there */
     header.fileName = OPENSSL_zalloc(header.fileNameLen + 1);
-    memcpy(header.fileName, fn, header.fileNameLen);
+    memcpy(header.fileName, APP_SIGNATURE_FILENAME, header.fileNameLen);
     header.extraField = NULL;
     header.extraFieldLen = 0;
 
@@ -1407,7 +1414,7 @@ static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data,
      * should probably rewrite it with using stdio and ftello64 */
     offset = (uint64_t)BIO_tell(bio);
 
-    zipWriteLocalHeader(bio, &header, &dummy);
+    zipWriteLocalHeader(bio, &dummy, &header);
     while (sizeToWrite > 0) {
         uint64_t toWrite = sizeToWrite < SIZE_64K ? sizeToWrite : SIZE_64K;
         size_t check;
@@ -1418,9 +1425,8 @@ static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data,
         sizeToWrite -= toWrite;
         written += toWrite;
     }
-    if (comprs) {
-        OPENSSL_free(dataToWrite);
-    }
+    OPENSSL_free(dataToWrite);
+
     entry = OPENSSL_zalloc(sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
     entry->creatorVersion = 0x2D;
     entry->viewerVersion = header.version;
@@ -1456,11 +1462,17 @@ static int zipAppendFile(ZIP_FILE *zip, BIO *bio, const char *fn, uint8_t *data,
 }
 
 /*
+ * Override file data.
+ * [out] entry: central directory structure
+ * [in] data: pointer to data
+ * [in] dataSize: data size
  * [returns] 0 on error or 1 on success
  */
-static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data, uint64_t dataSize, int comprs)
+static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data, uint64_t dataSize)
 {
+    uint64_t destLen = dataSize;
     uint32_t crc;
+    int ret;
 
     if (entry->overrideData) {
         OPENSSL_free(entry->overrideData->data);
@@ -1476,23 +1488,21 @@ static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data
     entry->overrideData->crc32 = crc;
     entry->overrideData->uncompressedSize = dataSize;
 
-    if (comprs) {
-        uint64_t destLen = dataSize;
-        int ret = zipDeflate(entry->overrideData->data, &destLen, data, dataSize);
-        if (ret != Z_OK) {
-            printf("Zip deflate failed: %d\n", ret);
-            return 0; /* FAILED */
-        }
-        entry->overrideData->compressedSize = destLen;
-    } else {
-        memcpy(entry->overrideData, data, dataSize);
-        entry->overrideData->compressedSize = dataSize;
+    ret = zipDeflate(entry->overrideData->data, &destLen, data, dataSize);
+    if (ret != Z_OK) {
+        printf("Zip deflate failed: %d\n", ret);
+        return 0; /* FAILED */
     }
+    entry->overrideData->compressedSize = destLen;
     return 1; /* OK */
 }
 
 /*
- * [out] sizeOnDisk:
+ * Rewrite data to outdata bio.
+ * [in, out] zip: structure holds specific ZIP data
+ * [out] entry: central directory structure
+ * [out] bio: outdata file BIO
+ * [out] sizeOnDisk: outdata size
  * [returns] 0 on error or 1 on success
  */
 static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO *bio, uint64_t *sizeOnDisk)
@@ -1512,7 +1522,7 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
         header.uncompressedSize = entry->overrideData->uncompressedSize;
         header.crc32 = entry->overrideData->crc32;
     }
-    zipWriteLocalHeader(bio, &header, sizeOnDisk);
+    zipWriteLocalHeader(bio, sizeOnDisk, &header);
     if (entry->overrideData) {
         if (!BIO_write_ex(bio, entry->overrideData->data, entry->overrideData->compressedSize, &check)
             || check != entry->overrideData->compressedSize) {
@@ -1570,13 +1580,13 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
 }
 
 /*
- * Write local file header.
+ * Write local file header to outdata bio.
  * [out] bio: outdata file BIO
+ * [out] sizeonDisk: data size
  * [in] header: local file header structure
- * [out] sizeonDisk: local file header size
  * [returns] none
  */
-static void zipWriteLocalHeader(BIO *bio, ZIP_LOCAL_HEADER *header, uint64_t *sizeonDisk)
+static void zipWriteLocalHeader(BIO *bio, uint64_t *sizeonDisk, ZIP_LOCAL_HEADER *header)
 {
     BIO_write(bio, PKZIP_LH_SIGNATURE, 4);
     bioAddU16(bio, header->version);
@@ -1607,7 +1617,7 @@ static void zipWriteLocalHeader(BIO *bio, ZIP_LOCAL_HEADER *header, uint64_t *si
 }
 
 /*
- * Check if a given ZIP file exists
+ * Check if a given ZIP file exists.
  * [in] zip: structure holds specific ZIP data
  * [in] name: APP_SIGNATURE_FILENAME or CODE_INTEGRITY_FILENAME
  * [returns] 0 on error or 1 on success
@@ -1648,7 +1658,7 @@ static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *
     u_char *mdbuf = NULL;
     BIO *bhash;
 
-    if (!zipReadFileDataByName(zip, fileName, &data, &dataSize)) {
+    if (!zipReadFileDataByName(&data, &dataSize, zip, fileName)) {
         return NULL; /* FAILED */
     }
     bhash = BIO_new(BIO_f_md());
@@ -1674,13 +1684,13 @@ static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *
 
 /*
  * Read file data by name.
- * [in] zip: structure holds specific ZIP data
- * [in] name: one of ZIP container file
  * [out] pData: pointer to data
  * [out] dataSize: data size
+ * [in] zip: structure holds specific ZIP data
+ * [in] name: one of ZIP container file
  * [returns] 0 on error or 1 on success
  */
-static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pData, uint64_t *dataSize)
+static int zipReadFileDataByName(uint8_t **pData, uint64_t *dataSize, ZIP_FILE *zip, const char *name)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
     uint64_t noEntries = 0;
@@ -1696,7 +1706,7 @@ static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pDat
             return 0; /* FAILED */
         }
         if (!strcmp(entry->fileName, name)) {
-            return zipReadFileData(zip, entry, pData, dataSize);
+            return zipReadFileData(zip, pData, dataSize, entry);
         }
     }
     return 0; /* FAILED */
@@ -1704,13 +1714,13 @@ static int zipReadFileDataByName(ZIP_FILE *zip, const char *name, uint8_t **pDat
 
 /*
  * Read file data.
- * [in] zip: structure holds specific ZIP data
- * [in] entry: central directory structure
+ * [in, out] zip: structure holds specific ZIP data
  * [out] pData: pointer to data
  * [out] dataSize: data size
+ * [in] entry: central directory structure
  * [returns] 0 on error or 1 on success
  */
-static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t **pData, uint64_t *dataSize)
+static int zipReadFileData(ZIP_FILE *zip, uint8_t **pData, uint64_t *dataSize, ZIP_CENTRAL_DIRECTORY_ENTRY *entry)
 {
     FILE *file = zip->file;
     uint8_t *compressedData = NULL;
@@ -1784,7 +1794,7 @@ static int zipReadFileData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, ui
 /*
  * Read local file header from a ZIP file.
  * [out] header: local file header
- * [in] zip: structure holds specific ZIP data
+ * [in, out] zip: structure holds specific ZIP data
  * [in] compressedSize: compressed size
  * [returns] 0 on error or 1 on success
  */
@@ -2180,9 +2190,9 @@ static void zipPrintCentralDirectory(ZIP_FILE *zip)
 }
 
 /*
- * Read central directory
+ * Read central directory.
  * [in, out] zip: structure holds specific ZIP data
- * [in] file: FILE pointer to the input file
+ * [in, out] file: FILE pointer to the input file
  * [returns] 0 on error or 1 on success
  */
 static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file)
@@ -2397,9 +2407,9 @@ static void freeZipCentralDirectoryEntry(ZIP_CENTRAL_DIRECTORY_ENTRY *entry)
 }
 
 /*
- * Read Zip end of central directory record
+ * Read Zip end of central directory record.
  * [out] eocdr: end of central directory record
- * [in] file: FILE pointer to the input file
+ * [in, out] file: FILE pointer to the input file
  * [returns] 0 on error or 1 on success
  */
 static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
@@ -2469,9 +2479,9 @@ static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
 }
 
 /*
- * Read Zip64 end of central directory locator
+ * Read Zip64 end of central directory locator.
  * [out] locator: Zip64 end of central directory locator
- * [in] file: FILE pointer to the input file
+ * [in, out] file: FILE pointer to the input file
  * [returns] 0 on error or 1 on success
  */
 static int readZip64EOCDLocator(ZIP64_EOCD_LOCATOR *locator, FILE *file)
@@ -2499,7 +2509,7 @@ static int readZip64EOCDLocator(ZIP64_EOCD_LOCATOR *locator, FILE *file)
 /*
  * Read Zip64 end of central directory record
  * [out] eocdr: Zip64 end of central directory record
- * [in] file: FILE pointer to the input file
+ * [in, out] file: FILE pointer to the input file
  * [in] offset: eocdr struct offset in the file
  * [returns] 0 on error or 1 on success
  */
