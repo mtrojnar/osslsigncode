@@ -13,7 +13,7 @@
 #include "osslsigncode.h"
 #include "helpers.h"
 
-#include <zlib.h> /* crc32() */
+#include <zlib.h>
 #include <inttypes.h>
 
 #if defined(_MSC_VER)
@@ -1342,7 +1342,7 @@ static void zipWriteCentralDirectoryEntry(BIO *bio, uint64_t *sizeOnDisk, ZIP_CE
 #if 0
     if (entry->extraFieldLen > 0 && entry->extraField)
     {
-        /* todo, if override daata, need to rewrite the extra field */
+        /* TODO, if override daata, need to rewrite the extra field */
         BIO_write(bio, entry->extraField, entry->extraFieldLen);
     }
 #endif
@@ -1366,22 +1366,20 @@ static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64
     ZIP_LOCAL_HEADER header;
     time_t tim;
     struct tm *timeinfo;
-    uint64_t offset, dummy = 0, written = 0;
-    uint64_t sizeToWrite = dataSize;
-    uint64_t destLen = dataSize;
-    uint32_t crc;
+    uint64_t offset, crc, len, pos = 0, dummy = 0, written = 0;
+    uint64_t size = dataSize, sizeToWrite = dataSize;
     uint8_t *dataToWrite = data;
     int ret;
 
     memset(&header, 0, sizeof(ZIP_LOCAL_HEADER));
     dataToWrite = OPENSSL_malloc(dataSize);
-    ret = zipDeflate(dataToWrite, &destLen, data, dataSize);
+    ret = zipDeflate(dataToWrite, &size, data, dataSize);
     if (ret != Z_OK) {
         printf("Zip deflate failed: %d\n", ret);
         OPENSSL_free(dataToWrite);
         return 0; /* FAILED */
     }
-    sizeToWrite = destLen;
+    sizeToWrite = size;
 
     time(&tim);
     timeinfo = localtime(&tim);
@@ -1396,11 +1394,15 @@ static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64
                                 (timeinfo->tm_mon + 1) << 5 | \
                                 timeinfo->tm_mday);
 
-    /* TODO */
-    crc = (uint32_t)crc32(0L, Z_NULL, 0);
-    crc = (uint32_t)crc32(crc, data, (uint32_t)dataSize);
-
-    header.crc32 = crc;
+    size = dataSize;
+    crc = crc32(0L, Z_NULL, 0);
+    while (size > 0) {
+        len = MIN(size, UINT32_MAX);
+        crc = crc32(crc, data + pos, (uint32_t)len);
+        pos += len;
+        size -= len;
+    }
+    header.crc32 = (uint32_t)crc;
     header.uncompressedSize = dataSize;
     header.compressedSize = sizeToWrite;
     header.fileNameLen = (uint16_t)strlen(APP_SIGNATURE_FILENAME);
@@ -1470,8 +1472,7 @@ static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64
  */
 static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data, uint64_t dataSize)
 {
-    uint64_t destLen = dataSize;
-    uint32_t crc;
+    uint64_t crc, len, pos = 0, size = dataSize;
     int ret;
 
     if (entry->overrideData) {
@@ -1482,18 +1483,23 @@ static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data
     entry->overrideData = OPENSSL_malloc(sizeof(ZIP_OVERRIDE_DATA));
     entry->overrideData->data = OPENSSL_malloc(dataSize);
 
-    /* TODO */
-    crc = (uint32_t)crc32(0L, Z_NULL, 0);
-    crc = (uint32_t)crc32(crc, data, (uint32_t)dataSize);
-    entry->overrideData->crc32 = crc;
+    crc = crc32(0L, Z_NULL, 0);
+    while (size > 0) {
+        len = MIN(size, UINT32_MAX);
+        crc = crc32(crc, data + pos, (uint32_t)len);
+        pos += len;
+        size -= len;
+    }
+    entry->overrideData->crc32 = (uint32_t)crc;
     entry->overrideData->uncompressedSize = dataSize;
 
-    ret = zipDeflate(entry->overrideData->data, &destLen, data, dataSize);
+    size = dataSize;
+    ret = zipDeflate(entry->overrideData->data, &size, data, dataSize);
     if (ret != Z_OK) {
         printf("Zip deflate failed: %d\n", ret);
         return 0; /* FAILED */
     }
-    entry->overrideData->compressedSize = destLen;
+    entry->overrideData->compressedSize = size;
     return 1; /* OK */
 }
 
