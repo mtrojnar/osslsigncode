@@ -1764,7 +1764,7 @@ static int zipReadFileData(ZIP_FILE *zip, uint8_t **pData, uint64_t *dataSize, Z
 
         compressedData = OPENSSL_zalloc(compressedSize + 1);
         size = fread(compressedData, 1, compressedSize, file);
-        if (size != compressedSize) {
+        if (!compressedData || size != compressedSize) {
             OPENSSL_free(compressedData);
             return 0; /* FAILED */
         }
