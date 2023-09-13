@@ -2548,6 +2548,7 @@ static uint64_t fileGetU64(FILE *file)
     return h << 32 | l;
 }
 
+/* coverity[ -tainted_data_return ] */
 static uint32_t fileGetU32(FILE *file)
 {
     uint8_t b[4];
@@ -2560,6 +2561,7 @@ static uint32_t fileGetU32(FILE *file)
     return (uint32_t)(b[3] << 24 | b[2] << 16 | b[1] << 8 | b[0]);
 }
 
+/* coverity[ -tainted_data_return ] */
 static uint16_t fileGetU16(FILE *file)
 {
     uint8_t b[2];
