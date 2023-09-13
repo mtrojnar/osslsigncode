@@ -2551,7 +2551,7 @@ static uint64_t fileGetU64(FILE *file)
 static uint32_t fileGetU32(FILE *file)
 {
     uint8_t b[4];
-    /* coverity[tainted_data_argument] fread reads valid data */
+    /* coverity[tainted_data_argument] : arg-0 */
     size_t size = fread(b, 1, 4, file);
     if (size != 4) {
         return 0; /* FAILED */
@@ -2563,7 +2563,7 @@ static uint32_t fileGetU32(FILE *file)
 static uint16_t fileGetU16(FILE *file)
 {
     uint8_t b[2];
-    /* coverity[tainted_data_argument] fread reads valid data */
+    /* coverity[tainted_data_argument] : arg-0 */
     size_t size = fread(b, 1, 2, file);
     if (size != 2) {
         return 0; /* FAILED */
