@@ -1764,10 +1764,11 @@ static int zipReadFileData(ZIP_FILE *zip, uint8_t **pData, uint64_t *dataSize, Z
 
         compressedData = OPENSSL_zalloc(compressedSize + 1);
         size = fread(compressedData, 1, compressedSize, file);
-        if (!compressedData || size != compressedSize) {
+        if (size != compressedSize) {
             OPENSSL_free(compressedData);
             return 0; /* FAILED */
         }
+        compressedData[compressedSize] = 0;
     }
     if (entry->compression == COMPRESSION_NONE) {
         *pData = compressedData;
@@ -1845,16 +1846,18 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
         if (size != header->fileNameLen) {
             return 0; /* FAILED */
         }
+        header->fileName[header->fileNameLen] = 0;
     } else {
         header->fileName = NULL;
     }
     /* extra field (variable size) */
     if (header->extraFieldLen > 0) {
-        header->extraField = OPENSSL_zalloc(header->extraFieldLen);
+        header->extraField = OPENSSL_zalloc(header->extraFieldLen + 1);
         size = fread(header->extraField, 1, header->extraFieldLen, file);
         if (size != header->extraFieldLen) {
             return 0; /* FAILED */
         }
+        header->extraField[header->extraFieldLen] = 0;
     } else {
         header->extraField = NULL;
     }
@@ -2281,15 +2284,17 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
             freeZipCentralDirectoryEntry(entry);
             return NULL; /* FAILED */
         }
+        entry->fileName[entry->fileNameLen] = 0;
     }
     /* extra field (variable size) */
     if (entry->extraFieldLen > 0) {
-        entry->extraField = OPENSSL_zalloc(entry->extraFieldLen);
+        entry->extraField = OPENSSL_zalloc(entry->extraFieldLen + 1);
         size = fread(entry->extraField, 1, entry->extraFieldLen, file);
         if (size != entry->extraFieldLen) {
             freeZipCentralDirectoryEntry(entry);
             return NULL; /* FAILED */
         }
+        entry->extraField[entry->extraFieldLen] = 0;
     }
     /* file comment (variable size) */
     if (entry->fileCommentLen > 0) {
@@ -2299,6 +2304,7 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
             freeZipCentralDirectoryEntry(entry);
             return NULL; /* FAILED */
         }
+        entry->fileComment[entry->fileCommentLen] = 0;
     }
     if (entry->uncompressedSize == UINT32_MAX || entry->compressedSize == UINT32_MAX ||
         entry->offsetOfLocalHeader == UINT32_MAX || entry->diskNoStart == UINT16_MAX) {
@@ -2435,6 +2441,7 @@ static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
         if (size != eocdr->commentLen) {
             return 0; /* FAILED */
         }
+        eocdr->comment[eocdr->commentLen] = 0;
     } else {
         eocdr->comment = NULL;
     }
