@@ -291,6 +291,7 @@ static void freeZipCentralDirectoryEntry(ZIP_CENTRAL_DIRECTORY_ENTRY *entry);
 static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file);
 static int readZip64EOCDLocator(ZIP64_EOCD_LOCATOR *locator, FILE *file);
 static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset);
+static int get_current_position(BIO *bio, uint64_t *offset);
 static uint64_t fileGetU64(FILE *file);
 static uint32_t fileGetU32(FILE *file);
 static uint16_t fileGetU16(FILE *file);
@@ -527,7 +528,10 @@ static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             }
         }
     }
-    cdOffset = (uint64_t)BIO_tell(outdata);
+    if (!get_current_position(outdata, &cdOffset)) {
+        printf("Unable to get offset\n");
+        return 1; /* FAILED */
+    }
     if (!appx_write_central_directory(outdata, zip, 1, cdOffset)) {
         printf("Unable to write central directory\n");
         return 1; /* FAILED */
@@ -663,8 +667,10 @@ static int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     }
     OPENSSL_free(der);
     OPENSSL_free(blob);
-    /* again, 32bit api -> will limit us to 2GB files */
-    cdOffset = (uint64_t)BIO_tell(outdata);
+    if (!get_current_position(outdata, &cdOffset)) {
+        printf("Unable to get offset\n");
+        return 1; /* FAILED */
+    }
     if (!appx_write_central_directory(outdata, zip, 0, cdOffset)) {
         printf("Unable to write central directory\n");
         return 1; /* FAILED */
@@ -1412,10 +1418,10 @@ static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64
     header.extraField = NULL;
     header.extraFieldLen = 0;
 
-    /* unfortunately BIO has no 64bit API, so we are limited to 2G files...
-     * should probably rewrite it with using stdio and ftello64 */
-    offset = (uint64_t)BIO_tell(bio);
-
+    if (!get_current_position(bio, &offset)) {
+        printf("Unable to get offset\n");
+        return 1; /* FAILED */
+    }
     zipWriteLocalHeader(bio, &dummy, &header);
     while (sizeToWrite > 0) {
         uint64_t toWrite = sizeToWrite < SIZE_64K ? sizeToWrite : SIZE_64K;
@@ -1762,6 +1768,10 @@ static int zipReadFileData(ZIP_FILE *zip, uint8_t **pData, uint64_t *dataSize, Z
         OPENSSL_free(header.fileName);
         OPENSSL_free(header.extraField);
 
+        if (entry->offsetOfLocalHeader >= (uint64_t)zip->fileSize) {
+            printf("Corrupted relative offset of local header : 0x%08lX\n", entry->offsetOfLocalHeader);
+            return 0; /* FAILED */
+        }
         if (compressedSize > (uint64_t)zip->fileSize - entry->offsetOfLocalHeader) {
             printf("Corrupted compressedSize : 0x%08lX\n", entry->compressedSize);
             return 0; /* FAILED */
@@ -1869,7 +1879,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
         /* Read data descriptor */
         int64_t offset = ftello(file);
         if (offset < 0) {
-           return 0; /* FAILED */
+            return 0; /* FAILED */
         }
         if (fseeko(file, (int64_t)compressedSize, SEEK_CUR) < 0) {
             return 0; /* FAILED */
@@ -2541,6 +2551,20 @@ static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
         printf("The input file is a multipart archive - not supported\n");
         return 0; /* FAILED */
     }
+    return 1; /* OK */
+}
+
+static int get_current_position(BIO *bio, uint64_t *offset)
+{
+    FILE *file = NULL;
+    int64_t pos;
+
+    BIO_get_fp(bio, &file);
+    pos = ftello(file);
+    if (pos < 0) {
+        return 0; /* FAILED */
+    }
+    *offset = (uint64_t)pos;
     return 1; /* OK */
 }
 
