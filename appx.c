@@ -1762,6 +1762,10 @@ static int zipReadFileData(ZIP_FILE *zip, uint8_t **pData, uint64_t *dataSize, Z
         OPENSSL_free(header.fileName);
         OPENSSL_free(header.extraField);
 
+        if (compressedSize > (uint64_t)zip->fileSize - entry->offsetOfLocalHeader) {
+            printf("Corrupted compressedSize : 0x%08lX\n", entry->compressedSize);
+            return 0; /* FAILED */
+        }
         compressedData = OPENSSL_zalloc(compressedSize + 1);
         size = fread(compressedData, 1, compressedSize, file);
         if (size != compressedSize) {
@@ -2258,9 +2262,9 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
     entry->modDate = fileGetU16(file);
     /* crc-32 (4 bytes) */
     entry->crc32 = fileGetU32(file);
-    /* compressed size (4 bytes) */
+    /* compressed size (4 bytes), 0xFFFFFFFF for ZIP64 format */
     entry->compressedSize = fileGetU32(file);
-    /* uncompressed size (4 bytes) */
+    /* uncompressed size (4 bytes), 0xFFFFFFFF for ZIP64 format */
     entry->uncompressedSize = fileGetU32(file);
     /* file name length (2 bytes) */
     entry->fileNameLen = fileGetU16(file);
@@ -2268,13 +2272,13 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
     entry->extraFieldLen = fileGetU16(file);
     /* file comment length (2 bytes) */
     entry->fileCommentLen = fileGetU16(file);
-    /* disk number start (2 bytes) */
+    /* disk number start (2 bytes), 0xFFFFFFFF for ZIP64 format */
     entry->diskNoStart = fileGetU16(file);
     /* internal file attributes (2 bytes) */
     entry->internalAttr = fileGetU16(file);
     /* external file attributes (4 bytes) */
     entry->externalAttr = fileGetU32(file);
-    /* relative offset of local header (4 bytes) */
+    /* relative offset of local header (4 bytes), 0xFFFFFFFF for ZIP64 format */
     entry->offsetOfLocalHeader = fileGetU32(file);
     /* file name (variable size) */
     if (entry->fileNameLen > 0) {
