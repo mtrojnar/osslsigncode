@@ -953,6 +953,7 @@ static uint8_t *appx_calc_zip_data_hash(uint64_t *cdOffset, ZIP_FILE *zip, const
         noEntries++;
         if (!entry->fileName || (entry->fileNameLen == 0)) {
             printf("Warning: Corrupted file name\n");
+            BIO_free_all(bhash);
             return NULL; /* FAILED */
         }
         if (!strcmp(entry->fileName, APP_SIGNATURE_FILENAME)) {
@@ -1420,7 +1421,8 @@ static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64
 
     if (!get_current_position(bio, &offset)) {
         printf("Unable to get offset\n");
-        return 1; /* FAILED */
+        OPENSSL_free(dataToWrite);
+        return 0; /* FAILED */
     }
     zipWriteLocalHeader(bio, &dummy, &header);
     while (sizeToWrite > 0) {
@@ -1428,6 +1430,7 @@ static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64
         size_t check;
         if (!BIO_write_ex(bio, dataToWrite + written, toWrite, &check)
             || check != toWrite) {
+            OPENSSL_free(dataToWrite);
             return 0; /* FAILED */
         }
         sizeToWrite -= toWrite;
@@ -2165,6 +2168,7 @@ static ZIP_FILE *openZip(const char *filename)
     }
     if (zip->centralDirectoryOffset >= (uint64_t)zip->fileSize) {
         printf("Corrupted central directory offset : 0x%08lX\n", zip->centralDirectoryOffset);
+        freeZip(zip);
         return NULL; /* FAILED */
     }
     if (!zipReadCentralDirectory(zip, file)) {
