@@ -2134,6 +2134,7 @@ static ZIP_FILE *openZip(const char *filename)
         }
         if (zip->locator.eocdOffset >= (uint64_t)zip->fileSize) {
             printf("Corrupted end of central directory locator offset : 0x%08lX\n", zip->locator.eocdOffset);
+            freeZip(zip);
             return 0; /* FAILED */
         }
         if (!readZip64EOCDR(&zip->eocdr64, file, zip->locator.eocdOffset)) {
