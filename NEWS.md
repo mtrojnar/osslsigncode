@@ -2,6 +2,7 @@
 
 ### 2.7 (unreleased)
 
+- added APPX support (by Maciej Panek and Małgorzata Olszówka)
 - added a built-in TSA response generation (-TSA-certs, -TSA-key
   and -TSA-time options)
 
