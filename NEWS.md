@@ -1,7 +1,10 @@
 # osslsigncode change log
 
-### 2.7 (unreleased)
+### 2.7 (2023.09.19)
 
+- fixed signing CAB files (by Michael Brown)
+- fixed handling of unsupported commands (by Maxim Bagryantsev)
+- fixed writing DIFAT sectors
 - added APPX support (by Maciej Panek and Małgorzata Olszówka)
 - added a built-in TSA response generation (-TSA-certs, -TSA-key
   and -TSA-time options)
