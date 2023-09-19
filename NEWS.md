@@ -1,5 +1,7 @@
 # osslsigncode change log
 
+### 2.8 (unreleased)
+
 ### 2.7 (2023.09.19)
 
 - fixed signing CAB files (by Michael Brown)
