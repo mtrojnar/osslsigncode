@@ -466,6 +466,7 @@ typedef struct msi_ctx_st MSI_CTX;
 typedef struct pe_ctx_st PE_CTX;
 typedef struct cab_ctx_st CAB_CTX;
 typedef struct cat_ctx_st CAT_CTX;
+typedef struct appx_ctx_st APPX_CTX;
 
 typedef struct {
     FILE_FORMAT *format;
@@ -475,6 +476,7 @@ typedef struct {
         PE_CTX *pe_ctx;
         CAB_CTX *cab_ctx;
         CAT_CTX *cat_ctx;
+        APPX_CTX *appx_ctx;
     };
 } FILE_FORMAT_CTX;
 
@@ -482,10 +484,12 @@ extern FILE_FORMAT file_format_msi;
 extern FILE_FORMAT file_format_pe;
 extern FILE_FORMAT file_format_cab;
 extern FILE_FORMAT file_format_cat;
+extern FILE_FORMAT file_format_appx;
 
 struct file_format_st {
     FILE_FORMAT_CTX *(*ctx_new) (GLOBAL_OPTIONS *option, BIO *hash, BIO *outdata);
     ASN1_OBJECT *(*data_blob_get) (u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
+    int (*hash_length_get) (FILE_FORMAT_CTX *ctx);
     int (*check_file) (FILE_FORMAT_CTX *ctx, int detached);
     u_char *(*digest_calc) (FILE_FORMAT_CTX *ctx, const EVP_MD *md);
     int (*verify_digests) (FILE_FORMAT_CTX *ctx, PKCS7 *p7);

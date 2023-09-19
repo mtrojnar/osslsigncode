@@ -99,7 +99,7 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
 
     if (options->nest)
         /* I've not tried using set_nested_signature as signtool won't do this */
-        printf("Warning: CAT files do not support nesting\n");
+        printf("Warning: CAT files do not support nesting (multiple signature)\n");
     if (options->jp >= 0)
         printf("Warning: -jp option is only valid for CAB files\n");
     if (options->pagehash == 1)

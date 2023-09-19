@@ -2572,6 +2572,8 @@ static int check_attached_data(GLOBAL_OPTIONS *options)
     if (!ctx)
         ctx = file_format_cab.ctx_new(tmp_options, NULL, NULL);
     if (!ctx)
+        ctx = file_format_appx.ctx_new(tmp_options, NULL, NULL);
+    if (!ctx)
         ctx = file_format_cat.ctx_new(tmp_options, NULL, NULL);
     if (!ctx) {
         printf("Corrupt attached signature\n");
@@ -3994,6 +3996,8 @@ int main(int argc, char **argv)
         ctx = file_format_pe.ctx_new(&options, hash, outdata);
     if (!ctx)
         ctx = file_format_cab.ctx_new(&options, hash, outdata);
+    if (!ctx)
+        ctx = file_format_appx.ctx_new(&options, hash, outdata);
     if (!ctx)
         ctx = file_format_cat.ctx_new(&options, hash, outdata);
     if (!ctx) {
