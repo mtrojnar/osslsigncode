@@ -2939,11 +2939,11 @@ static void help_for(const char *argv0, const char *cmd)
     if (on_list(cmd, cmds_CRLfileTSA))
         printf("%-24s= the file containing one or more Time-Stamp Authority CRLs in PEM format\n", "-TSA-CRLfile");
     if (on_list(cmd, cmds_certsTSA))
-        printf("%-24s= Time-Stamp Authority signing certificate\n", "-TSA-certs");
+        printf("%-24s= built-in Time-Stamp Authority signing certificate\n", "-TSA-certs");
     if (on_list(cmd, cmds_keyTSA))
-        printf("%-24s= Time-Stamp Authority private key or PKCS#11 URI identifies a key in the token\n", "-TSA-key");
+        printf("%-24s= built-in Time-Stamp Authority private key or PKCS#11 URI identifies a key in the token\n", "-TSA-key");
     if (on_list(cmd, cmds_timeTSA))
-        printf("%-24s= the unix-time to set the Time-Stamp Authority signing\n", "-TSA-time");
+        printf("%-24s= the unix-time to set the built-in Time-Stamp Authority signing\n", "-TSA-time");
     if (on_list(cmd, cmds_verbose))
         printf("%-24s= include additional output in the log\n", "-verbose");
     usage(argv0, cmd);
