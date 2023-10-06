@@ -277,8 +277,8 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
 static void zipWriteLocalHeader(BIO *bio, uint64_t *sizeonDisk, ZIP_LOCAL_HEADER *heade);
 static int zipEntryExist(ZIP_FILE *zip, const char *name);
 static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *md);
-static int zipReadFileDataByName(uint8_t **pData, uint64_t *dataSize, ZIP_FILE *zip, const char *name);
-static int zipReadFileData(ZIP_FILE *zip, uint8_t **pData, uint64_t *dataSize, ZIP_CENTRAL_DIRECTORY_ENTRY *entry);
+static size_t zipReadFileDataByName(uint8_t **pData, ZIP_FILE *zip, const char *name);
+static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECTORY_ENTRY *entry);
 static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t compressedSize);
 static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *sourceLen);
 static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen);
@@ -470,9 +470,10 @@ static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     PKCS7 *p7;
     uint8_t *data = NULL;
     const u_char *blob;
-    uint64_t dataSize = 0;
+    size_t dataSize;
 
-    if (!zipReadFileDataByName(&data, &dataSize, ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME)) {
+    dataSize = zipReadFileDataByName(&data, ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME);
+    if (dataSize <= 0) {
         return NULL; /* FAILED */
     }
     /* P7X format is just 0x504B4358 (PKCX) followed by PKCS#7 data in the DER format */
@@ -1129,7 +1130,8 @@ static int appx_remove_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
     size_t dataSize, ipos, len;
     int ret;
 
-    if (!zipReadFileData(zip, &data, (uint64_t *)&dataSize, entry)) {
+    dataSize = zipReadFileData(zip, &data, entry);
+    if (dataSize <= 0) {
         return 0; /* FAILED */
     }
     cpos = strstr((const char *)data, SIGNATURE_CONTENT_TYPES_ENTRY);
@@ -1161,7 +1163,8 @@ static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
     size_t dataSize, newSize, ipos, len;
     int ret;
 
-    if (!zipReadFileData(zip, &data, (uint64_t *)&dataSize, entry)) {
+    dataSize = zipReadFileData(zip, &data, entry);
+    if (dataSize <= 0) {
         return 0; /* FAILED */
     }
     existingEntry = strstr((const char *)data, SIGNATURE_CONTENT_TYPES_ENTRY);
@@ -1196,13 +1199,13 @@ static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
 static const EVP_MD *appx_get_md(ZIP_FILE *zip)
 {
     uint8_t *data = NULL;
-    uint64_t dataSize = 0;
     char *start, *end, *pos;
     char *valueStart = NULL, *valueEnd = NULL;
     const EVP_MD *md = NULL;
-    size_t slen;
+    size_t slen, dataSize;
 
-    if (!zipReadFileDataByName(&data, &dataSize, zip, BLOCK_MAP_FILENAME)) {
+    dataSize = zipReadFileDataByName(&data, zip, BLOCK_MAP_FILENAME);
+    if (dataSize <= 0) {
         printf("Could not read: %s\n", BLOCK_MAP_FILENAME);
         return NULL; /* FAILED */
     }
@@ -1677,11 +1680,12 @@ static int zipEntryExist(ZIP_FILE *zip, const char *name)
 static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *md)
 {
     uint8_t *data = NULL;
-    uint64_t dataSize = 0;
+    size_t dataSize;
     u_char *mdbuf = NULL;
     BIO *bhash;
 
-    if (!zipReadFileDataByName(&data, &dataSize, zip, fileName)) {
+    dataSize = zipReadFileDataByName(&data, zip, fileName);
+    if (dataSize <= 0) {
         return NULL; /* FAILED */
     }
     bhash = BIO_new(BIO_f_md());
@@ -1708,12 +1712,11 @@ static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *
 /*
  * Read file data by name.
  * [out] pData: pointer to data
- * [out] dataSize: data size
  * [in] zip: structure holds specific ZIP data
  * [in] name: one of ZIP container file
- * [returns] 0 on error or 1 on success
+ * [returns] 0 on error or data size on success
  */
-static int zipReadFileDataByName(uint8_t **pData, uint64_t *dataSize, ZIP_FILE *zip, const char *name)
+static size_t zipReadFileDataByName(uint8_t **pData, ZIP_FILE *zip, const char *name)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
     uint64_t noEntries = 0;
@@ -1729,7 +1732,7 @@ static int zipReadFileDataByName(uint8_t **pData, uint64_t *dataSize, ZIP_FILE *
             return 0; /* FAILED */
         }
         if (!strcmp(entry->fileName, name)) {
-            return zipReadFileData(zip, pData, dataSize, entry);
+            return zipReadFileData(zip, pData, entry);
         }
     }
     return 0; /* FAILED */
@@ -1739,17 +1742,16 @@ static int zipReadFileDataByName(uint8_t **pData, uint64_t *dataSize, ZIP_FILE *
  * Read file data.
  * [in, out] zip: structure holds specific ZIP data
  * [out] pData: pointer to data
- * [out] dataSize: data size
  * [in] entry: central directory structure
- * [returns] 0 on error or 1 on success
+ * [returns] 0 on error or data size on success
  */
-static int zipReadFileData(ZIP_FILE *zip, uint8_t **pData, uint64_t *dataSize, ZIP_CENTRAL_DIRECTORY_ENTRY *entry)
+static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECTORY_ENTRY *entry)
 {
     FILE *file = zip->file;
     uint8_t *compressedData = NULL;
     uint64_t compressedSize = 0;
     uint64_t uncompressedSize = 0;
-    size_t size;
+    size_t size, dataSize = 0;
 
     if (entry->offsetOfLocalHeader >= (uint64_t)zip->fileSize) {
         printf("Corrupted relative offset of local header : 0x%08lX\n", entry->offsetOfLocalHeader);
@@ -1797,14 +1799,14 @@ static int zipReadFileData(ZIP_FILE *zip, uint8_t **pData, uint64_t *dataSize, Z
     }
     if (entry->compression == COMPRESSION_NONE) {
         *pData = compressedData;
-        *dataSize = compressedSize;
+        dataSize = compressedSize;
     } else if (entry->compression == COMPRESSION_DEFLATE) {
         uint8_t *uncompressedData = OPENSSL_zalloc(uncompressedSize + 1);
         uint64_t destLen = uncompressedSize;
         uint64_t sourceLen = compressedSize;
         int ret;
 
-        ret = zipInflate(uncompressedData, &destLen, compressedData, &sourceLen);
+        ret = zipInflate(uncompressedData, &destLen, compressedData, (uLong *)&sourceLen);
         OPENSSL_free(compressedData);
 
         if (ret != Z_OK) {
@@ -1813,14 +1815,14 @@ static int zipReadFileData(ZIP_FILE *zip, uint8_t **pData, uint64_t *dataSize, Z
             return 0; /* FAILED */
         } else {
             *pData = uncompressedData;
-            *dataSize = destLen;
+            dataSize = destLen;
         }
     } else {
         printf("Unsupported compression mode: %d\n", entry->compression);
         OPENSSL_free(compressedData);
         return 0; /* FAILED */
     }
-    return 1; /* OK */
+    return dataSize;
 }
 
 /*
