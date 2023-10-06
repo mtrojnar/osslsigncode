@@ -39,7 +39,7 @@ We highly recommend downloading a [release tarball](https://github.com/mtrojnar/
 
 * Install prerequisites on a Debian-based distributions, such as Ubuntu:
 ```
-  sudo apt update && sudo apt install cmake libssl-dev libcurl4-openssl-dev
+  sudo apt update && sudo apt install cmake libssl-dev libcurl4-openssl-dev zlib1g-dev python3
 ```
 * Install prerequisites on macOS with Homebrew:
 ```
