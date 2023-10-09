@@ -1798,6 +1798,10 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
         compressedData[compressedSize] = 0;
     }
     if (entry->compression == COMPRESSION_NONE) {
+        if (compressedSize == 0) {
+            OPENSSL_free(compressedData);
+            return 0; /* FAILED */
+        }
         *pData = compressedData;
         dataSize = compressedSize;
     } else if (entry->compression == COMPRESSION_DEFLATE) {
@@ -1814,6 +1818,10 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
             OPENSSL_free(uncompressedData);
             return 0; /* FAILED */
         } else {
+            if (destLen == 0) {
+                OPENSSL_free(uncompressedData);
+                return 0; /* FAILED */
+            }
             *pData = uncompressedData;
             dataSize = destLen;
         }
