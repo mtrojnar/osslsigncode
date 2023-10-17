@@ -217,39 +217,36 @@ PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * Comparison function
- * Windows requires the validity of DER encoded PKCS#7 content in catalog files,
- * see X.690, section 11.6 for the ordering
+ * X.690-compliant certificate comparison function
+ * Windows requires catalog files to use PKCS#7
+ * content ordering specified in X.690 section 11.6
  * https://support.microsoft.com/en-us/topic/october-13-2020-kb4580358-security-only-update-d3f6eb3c-d7c4-a9cb-0de6-759386bf7113
+ * This algorithm is different from X509_cmp()
  * [in] a_ptr, b_ptr: pointers to X509 certificates
  * [returns] certificates order
  */
-static int compare_elements(const X509 *const *a_ptr, const X509 *const *b_ptr)
+static int X509_compare(const X509 *const *a_ptr, const X509 *const *b_ptr)
 {
-    int a_len, b_len, ret;
-    u_char *a_data, *b_data;
-    const X509 *a = *a_ptr;
-    const X509 *b = *b_ptr;
+    u_char *a_data, *b_data, *a_tmp, *b_tmp;
+    size_t a_len, b_len;
+    const X509 *a = *a_ptr, *b = *b_ptr;
+    int ret;
 
-    a_len = i2d_X509(a, NULL);
-    b_len = i2d_X509(b, NULL);
-    a_data = OPENSSL_malloc((size_t)a_len);
-    i2d_X509(a, &a_data);
-    a_data -= a_len;
+    a_len = (size_t)i2d_X509(a, NULL);
+    a_tmp = a_data = OPENSSL_malloc(a_len);
+    i2d_X509(a, &a_tmp);
 
-    b_data = OPENSSL_malloc((size_t)b_len);
-    i2d_X509(b, &b_data);
-    b_data -= b_len;
+    b_len = (size_t)i2d_X509(b, NULL);
+    b_tmp = b_data = OPENSSL_malloc(b_len);
+    i2d_X509(b, &b_tmp);
 
-    ret = memcmp(a_data, b_data, MIN((size_t)a_len, (size_t)b_len));
+    ret = memcmp(a_data, b_data, MIN(a_len, b_len));
     OPENSSL_free(a_data);
     OPENSSL_free(b_data);
-    if (ret != 0)
-        return ret;
-    if (a_len == b_len)
-        return 0;
 
-    return a_len < b_len ? -1 : 1;
+    if (ret == 0 && a_len != b_len) /* identical up to the length of the shorter DER */
+        ret = a_len < b_len ? -1 : 1; /* shorter is smaller */
+    return ret;
 }
 
 /*
@@ -261,7 +258,7 @@ static int compare_elements(const X509 *const *a_ptr, const X509 *const *b_ptr)
 static STACK_OF(X509) *X509_chain_get_sorted(FILE_FORMAT_CTX *ctx, int signer)
 {
     int i;
-    STACK_OF(X509) *chain = sk_X509_new(compare_elements);
+    STACK_OF(X509) *chain = sk_X509_new(X509_compare);
 
     /* add the signer's certificate */
     if (ctx->options->cert != NULL && !sk_X509_push(chain, ctx->options->cert)) {
