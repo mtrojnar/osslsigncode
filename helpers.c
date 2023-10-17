@@ -225,20 +225,19 @@ PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
  * [in] a_ptr, b_ptr: pointers to X509 certificates
  * [returns] certificates order
  */
-static int X509_compare(const X509 *const *a_ptr, const X509 *const *b_ptr)
+static int X509_compare(const X509 *const *a, const X509 *const *b)
 {
     u_char *a_data, *b_data, *a_tmp, *b_tmp;
     size_t a_len, b_len;
-    const X509 *a = *a_ptr, *b = *b_ptr;
     int ret;
 
-    a_len = (size_t)i2d_X509(a, NULL);
+    a_len = (size_t)i2d_X509(*a, NULL);
     a_tmp = a_data = OPENSSL_malloc(a_len);
-    i2d_X509(a, &a_tmp);
+    i2d_X509(*a, &a_tmp);
 
-    b_len = (size_t)i2d_X509(b, NULL);
+    b_len = (size_t)i2d_X509(*b, NULL);
     b_tmp = b_data = OPENSSL_malloc(b_len);
-    i2d_X509(b, &b_tmp);
+    i2d_X509(*b, &b_tmp);
 
     ret = memcmp(a_data, b_data, MIN(a_len, b_len));
     OPENSSL_free(a_data);
