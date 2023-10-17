@@ -217,6 +217,85 @@ PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
 }
 
 /*
+ * Comparison function
+ * Windows requires the validity of DER encoded PKCS#7 content in catalog files,
+ * see X.690, section 11.6 for the ordering
+ * https://support.microsoft.com/en-us/topic/october-13-2020-kb4580358-security-only-update-d3f6eb3c-d7c4-a9cb-0de6-759386bf7113
+ * [in] a_ptr, b_ptr: pointers to X509 certificates
+ * [returns] certificates order
+ */
+static int compare_elements(const X509 *const *a_ptr, const X509 *const *b_ptr)
+{
+    int a_len, b_len, ret;
+    u_char *a_data, *b_data;
+    const X509 *a = *a_ptr;
+    const X509 *b = *b_ptr;
+
+    a_len = i2d_X509(a, NULL);
+    b_len = i2d_X509(b, NULL);
+    a_data = OPENSSL_malloc((size_t)a_len);
+    i2d_X509(a, &a_data);
+    a_data -= a_len;
+
+    b_data = OPENSSL_malloc((size_t)b_len);
+    i2d_X509(b, &b_data);
+    b_data -= b_len;
+
+    ret = memcmp(a_data, b_data, MIN((size_t)a_len, (size_t)b_len));
+    OPENSSL_free(a_data);
+    OPENSSL_free(b_data);
+    if (ret != 0)
+        return ret;
+    if (a_len == b_len)
+        return 0;
+
+    return a_len < b_len ? -1 : 1;
+}
+
+/*
+ * Create certificate chain sorted in ascending order by their DER encoding.
+ * [in] ctx: structure holds input and output data
+ * [in] signer: signer's certificate number in the certificate chain
+ * [returns] sorted certificate chain
+ */
+static STACK_OF(X509) *X509_chain_get_sorted(FILE_FORMAT_CTX *ctx, int signer)
+{
+    int i;
+    STACK_OF(X509) *chain = sk_X509_new(compare_elements);
+
+    /* add the signer's certificate */
+    if (ctx->options->cert != NULL && !sk_X509_push(chain, ctx->options->cert)) {
+        sk_X509_free(chain);
+        return NULL;
+    }
+    if (signer != -1 && !sk_X509_push(chain, sk_X509_value(ctx->options->certs, signer))) {
+        sk_X509_free(chain);
+        return NULL;
+    }
+    /* add the certificate chain */
+    for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
+        if (i == signer)
+            continue;
+        if (!sk_X509_push(chain, sk_X509_value(ctx->options->certs, i))) {
+            sk_X509_free(chain);
+            return NULL;
+        }
+    }
+    /* add all cross certificates */
+    if (ctx->options->xcerts) {
+        for (i=0; i<sk_X509_num(ctx->options->xcerts); i++) {
+            if (!sk_X509_push(chain, sk_X509_value(ctx->options->xcerts, i))) {
+                sk_X509_free(chain);
+                return NULL;
+            }
+        }
+    }
+    /* sort certificate chain using the supplied comparison function */
+    sk_X509_sort(chain);
+    return chain;
+}
+
+/*
  * Allocate, set type, add content and return a new PKCS#7 signature
  * [in] ctx: structure holds input and output data
  * [returns] pointer to PKCS#7 structure
@@ -226,6 +305,7 @@ PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx)
     int i, signer = -1;
     PKCS7 *p7;
     PKCS7_SIGNER_INFO *si = NULL;
+    STACK_OF(X509) *chain = NULL;
 
     p7 = PKCS7_new();
     PKCS7_set_type(p7, NID_pkcs7_signed);
@@ -270,28 +350,22 @@ PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx)
     }
     PKCS7_content_new(p7, NID_pkcs7_data);
 
-    /* add the signer's certificate */
-    if (ctx->options->cert != NULL)
-        PKCS7_add_certificate(p7, ctx->options->cert);
-    if (signer != -1)
-        PKCS7_add_certificate(p7, sk_X509_value(ctx->options->certs, signer));
-
-    /* add the certificate chain */
-    for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
-        if (i == signer)
-            continue;
-        PKCS7_add_certificate(p7, sk_X509_value(ctx->options->certs, i));
+    /* create X509 chain sorted in ascending order by their DER encoding */
+    chain = X509_chain_get_sorted(ctx, signer);
+    if (chain == NULL) {
+        printf("Failed to create a sorted certificate chain\n");
+        return NULL; /* FAILED */
     }
-    /* add all cross certificates */
-    if (ctx->options->xcerts) {
-        for (i=0; i<sk_X509_num(ctx->options->xcerts); i++)
-            PKCS7_add_certificate(p7, sk_X509_value(ctx->options->xcerts, i));
+    /* add sorted certificate chain */
+    for (i=0; i<sk_X509_num(chain); i++) {
+        PKCS7_add_certificate(p7, sk_X509_value(chain, i));
     }
     /* add crls */
     if (ctx->options->crls) {
         for (i=0; i<sk_X509_CRL_num(ctx->options->crls); i++)
             PKCS7_add_crl(p7, sk_X509_CRL_value(ctx->options->crls, i));
     }
+    sk_X509_free(chain);
     return p7; /* OK */
 }
 
