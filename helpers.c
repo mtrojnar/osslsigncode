@@ -9,12 +9,12 @@
 #include "helpers.h"
 
 /* Prototypes */
-static int pkcs7_set_content_blob(PKCS7 *sig, PKCS7 *cursig);
 static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx);
 static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CTX *ctx);
-static int pkcs7_set_spc_indirect_data_content(PKCS7 *p7, BIO *hash, u_char *buf, int len, FILE_FORMAT_CTX *ctx);
 static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
+static STACK_OF(X509) *X509_chain_get_sorted(FILE_FORMAT_CTX *ctx, int signer);
+static int X509_compare(const X509 *const *a, const X509 *const *b);
 
 /*
  * Common functions
@@ -109,60 +109,6 @@ void unmap_file(char *indata, const size_t size)
 }
 
 /*
- * [in, out] si: PKCS7_SIGNER_INFO structure
- * [in] ctx: FILE_FORMAT_CTX structure
- * [returns] 0 on error or 1 on success
- */
-static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
-{
-    SpcSpOpusInfo *opus;
-    ASN1_STRING *astr;
-    int len;
-    u_char *p = NULL;
-
-    opus = spc_sp_opus_info_create(ctx);
-    if ((len = i2d_SpcSpOpusInfo(opus, NULL)) <= 0
-        || (p = OPENSSL_malloc((size_t)len)) == NULL) {
-        SpcSpOpusInfo_free(opus);
-        return 0; /* FAILED */
-    }
-    i2d_SpcSpOpusInfo(opus, &p);
-    p -= len;
-    astr = ASN1_STRING_new();
-    ASN1_STRING_set(astr, p, len);
-    OPENSSL_free(p);
-    SpcSpOpusInfo_free(opus);
-    return PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_SP_OPUS_INFO_OBJID),
-            V_ASN1_SEQUENCE, astr);
-}
-
-/*
- * [in, out] si: PKCS7_SIGNER_INFO structure
- * [in] ctx: structure holds input and output data
- * [returns] 0 on error or 1 on success
- */
-static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
-{
-    static const u_char purpose_ind[] = {
-        0x30, 0x0c, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04,
-        0x01, 0x82, 0x37, 0x02, 0x01, 0x15
-    };
-    static const u_char purpose_comm[] = {
-        0x30, 0x0c, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04,
-        0x01, 0x82, 0x37, 0x02, 0x01, 0x16
-    };
-    ASN1_STRING *purpose = ASN1_STRING_new();
-
-    if (ctx->options->comm) {
-        ASN1_STRING_set(purpose, purpose_comm, sizeof purpose_comm);
-    } else {
-        ASN1_STRING_set(purpose, purpose_ind, sizeof purpose_ind);
-    }
-    return PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_STATEMENT_TYPE_OBJID),
-            V_ASN1_SEQUENCE, purpose);
-}
-
-/*
  * Add a custom, non-trusted time to the PKCS7 structure to prevent OpenSSL
  * adding the _current_ time. This allows to create a deterministic signature
  * when no trusted timestamp server was specified, making osslsigncode
@@ -217,81 +163,6 @@ PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * X.690-compliant certificate comparison function
- * Windows requires catalog files to use PKCS#7
- * content ordering specified in X.690 section 11.6
- * https://support.microsoft.com/en-us/topic/october-13-2020-kb4580358-security-only-update-d3f6eb3c-d7c4-a9cb-0de6-759386bf7113
- * This algorithm is different from X509_cmp()
- * [in] a_ptr, b_ptr: pointers to X509 certificates
- * [returns] certificates order
- */
-static int X509_compare(const X509 *const *a, const X509 *const *b)
-{
-    u_char *a_data, *b_data, *a_tmp, *b_tmp;
-    size_t a_len, b_len;
-    int ret;
-
-    a_len = (size_t)i2d_X509(*a, NULL);
-    a_tmp = a_data = OPENSSL_malloc(a_len);
-    i2d_X509(*a, &a_tmp);
-
-    b_len = (size_t)i2d_X509(*b, NULL);
-    b_tmp = b_data = OPENSSL_malloc(b_len);
-    i2d_X509(*b, &b_tmp);
-
-    ret = memcmp(a_data, b_data, MIN(a_len, b_len));
-    OPENSSL_free(a_data);
-    OPENSSL_free(b_data);
-
-    if (ret == 0 && a_len != b_len) /* identical up to the length of the shorter DER */
-        ret = a_len < b_len ? -1 : 1; /* shorter is smaller */
-    return ret;
-}
-
-/*
- * Create certificate chain sorted in ascending order by their DER encoding.
- * [in] ctx: structure holds input and output data
- * [in] signer: signer's certificate number in the certificate chain
- * [returns] sorted certificate chain
- */
-static STACK_OF(X509) *X509_chain_get_sorted(FILE_FORMAT_CTX *ctx, int signer)
-{
-    int i;
-    STACK_OF(X509) *chain = sk_X509_new(X509_compare);
-
-    /* add the signer's certificate */
-    if (ctx->options->cert != NULL && !sk_X509_push(chain, ctx->options->cert)) {
-        sk_X509_free(chain);
-        return NULL;
-    }
-    if (signer != -1 && !sk_X509_push(chain, sk_X509_value(ctx->options->certs, signer))) {
-        sk_X509_free(chain);
-        return NULL;
-    }
-    /* add the certificate chain */
-    for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
-        if (i == signer)
-            continue;
-        if (!sk_X509_push(chain, sk_X509_value(ctx->options->certs, i))) {
-            sk_X509_free(chain);
-            return NULL;
-        }
-    }
-    /* add all cross certificates */
-    if (ctx->options->xcerts) {
-        for (i=0; i<sk_X509_num(ctx->options->xcerts); i++) {
-            if (!sk_X509_push(chain, sk_X509_value(ctx->options->xcerts, i))) {
-                sk_X509_free(chain);
-                return NULL;
-            }
-        }
-    }
-    /* sort certificate chain using the supplied comparison function */
-    sk_X509_sort(chain);
-    return chain;
-}
-
-/*
  * Allocate, set type, add content and return a new PKCS#7 signature
  * [in] ctx: structure holds input and output data
  * [returns] pointer to PKCS#7 structure
@@ -305,7 +176,7 @@ PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx)
 
     p7 = PKCS7_new();
     PKCS7_set_type(p7, NID_pkcs7_signed);
-
+    PKCS7_content_new(p7, NID_pkcs7_data);
     if (ctx->options->cert != NULL) {
         /*
          * the private key and corresponding certificate are parsed from the PKCS12
@@ -335,17 +206,14 @@ PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx)
         }
     }
     pkcs7_signer_info_add_signing_time(si, ctx);
-
-    if (!pkcs7_signer_info_add_purpose(si, ctx))
+    if (!pkcs7_signer_info_add_purpose(si, ctx)) {
         return NULL; /* FAILED */
-
+    }
     if ((ctx->options->desc || ctx->options->url) &&
             !pkcs7_signer_info_add_spc_sp_opus_info(si, ctx)) {
         printf("Couldn't allocate memory for opus info\n");
         return NULL; /* FAILED */
     }
-    PKCS7_content_new(p7, NID_pkcs7_data);
-
     /* create X509 chain sorted in ascending order by their DER encoding */
     chain = X509_chain_get_sorted(ctx, signer);
     if (chain == NULL) {
@@ -366,12 +234,12 @@ PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx)
 }
 
 /*
+ * PE, MSI, CAB and APPX file specific
+ * Add "1.3.6.1.4.1.311.2.1.4" SPC_INDIRECT_DATA_OBJID signed attribute
  * [in, out] p7: new PKCS#7 signature
- * [in] hash: message digest BIO
- * [in] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
-int add_indirect_data_object(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx)
+int add_indirect_data_object(PKCS7 *p7)
 {
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
     PKCS7_SIGNER_INFO *si;
@@ -385,67 +253,85 @@ int add_indirect_data_object(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx)
     if (!PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
         V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1)))
         return 0; /* FAILED */
-    if (!pkcs7_set_data_content(p7, hash, ctx)) {
-        printf("Signing failed\n");
+    return 1; /* OK */
+}
+
+/*
+ * PE, MSI, CAB and APPX format specific
+ * Sign the MS Authenticode spcIndirectDataContent blob.
+ * The spcIndirectDataContent structure is used in Authenticode signatures
+ * to store the digest and other attributes of the signed file.
+ * [in, out] p7: new PKCS#7 signature
+ * [in] hash: message digest BIO
+ * [in] ctx: structure holds input and output data
+ * [returns] 0 on error or 1 on success
+ */
+int sign_spc_indirect_data_content(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx)
+{
+    u_char mdbuf[5 * EVP_MAX_MD_SIZE + 24];
+    int mdlen, seqhdrlen, hashlen;
+    PKCS7 *td7;
+    u_char *p = NULL;
+    int len = 0;
+    u_char *buf;
+
+    hashlen = ctx->format->hash_length_get(ctx);
+    if (hashlen > EVP_MAX_MD_SIZE) {
+        /* APPX format specific */
+        mdlen = BIO_read(hash, (char*)mdbuf, hashlen);
+    } else {
+        mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
+    }
+    if (!spc_indirect_data_content_get(&p, &len, ctx))
+        return 0; /* FAILED */
+
+    buf = OPENSSL_malloc(SIZE_64K);
+    memcpy(buf, p, (size_t)len);
+    OPENSSL_free(p);
+    memcpy(buf + len, mdbuf, (size_t)mdlen);
+    seqhdrlen = asn1_simple_hdr_len(buf, len);
+
+    if (!pkcs7_sign_content(p7, buf + seqhdrlen, len - seqhdrlen + mdlen)) {
+        printf("Failed to sign content\n");
+        OPENSSL_free(buf);
+        return 0; /* FAILED */
+    }
+    td7 = PKCS7_new();
+    td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+    td7->d.other = ASN1_TYPE_new();
+    td7->d.other->type = V_ASN1_SEQUENCE;
+    td7->d.other->value.sequence = ASN1_STRING_new();
+    ASN1_STRING_set(td7->d.other->value.sequence, buf, len + mdlen);
+    OPENSSL_free(buf);
+    if (!PKCS7_set_content(p7, td7)) {
+        printf("PKCS7_set_content failed\n");
+        PKCS7_free(td7);
         return 0; /* FAILED */
     }
     return 1; /* OK */
 }
 
 /*
+ * Signs the data and place the signature in p7
  * [in, out] p7: new PKCS#7 signature
- * [in] cursig: current PKCS#7 signature
- * [returns] 0 on error or 1 on success
+ * [in] data: content data
+ * [in] len: content length
  */
-int add_ms_ctl_object(PKCS7 *p7, PKCS7 *cursig)
+int pkcs7_sign_content(PKCS7 *p7, u_char *data, int len)
 {
-    STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
-    PKCS7_SIGNER_INFO *si;
+    BIO *p7bio;
 
-    signer_info = PKCS7_get_signer_info(p7);
-    if (!signer_info)
-        return 0; /* FAILED */
-    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
-    if (!si)
-        return 0; /* FAILED */
-    if (!PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
-        V_ASN1_OBJECT, OBJ_txt2obj(MS_CTL_OBJID, 1)))
-        return 0; /* FAILED */
-    if (!pkcs7_set_content_blob(p7, cursig)) {
-        printf("Signing failed\n");
-        return 0; /* FAILED */
-    }
-    return 1; /* OK */
-}
-
-static int pkcs7_set_content_blob(PKCS7 *sig, PKCS7 *cursig)
-{
-    PKCS7 *contents;
-    u_char *content;
-    int seqhdrlen, content_length;
-    BIO *sigbio;
-
-    contents = cursig->d.sign->contents;
-    seqhdrlen = asn1_simple_hdr_len(contents->d.other->value.sequence->data,
-        contents->d.other->value.sequence->length);
-    content = contents->d.other->value.sequence->data + seqhdrlen;
-    content_length = contents->d.other->value.sequence->length - seqhdrlen;
-
-    if ((sigbio = PKCS7_dataInit(sig, NULL)) == NULL) {
+    if ((p7bio = PKCS7_dataInit(p7, NULL)) == NULL) {
         printf("PKCS7_dataInit failed\n");
         return 0; /* FAILED */
     }
-    BIO_write(sigbio, content, content_length);
-    (void)BIO_flush(sigbio);
-    if (!PKCS7_dataFinal(sig, sigbio)) {
+    BIO_write(p7bio, data, len);
+    (void)BIO_flush(p7bio);
+    if (!PKCS7_dataFinal(p7, p7bio)) {
         printf("PKCS7_dataFinal failed\n");
         return 0; /* FAILED */
     }
-    BIO_free_all(sigbio);
-    if (!PKCS7_set_content(sig, PKCS7_dup(contents))) {
-        printf("PKCS7_set_content failed\n");
-        return 0; /* FAILED */
-    }
+    BIO_free_all(p7bio);
     return 1; /* OK */
 }
 
@@ -523,32 +409,6 @@ int is_content_type(PKCS7 *p7, const char *objid)
         p7->d.sign->contents->d.other->type == V_ASN1_OCTET_STRING);
     ASN1_OBJECT_free(indir_objid);
     return ret;
-}
-
-/*
- * [out] p7: new PKCS#7 signature
- * [in] hash: message digest BIO
- * [in] ctx: structure holds input and output data
- * [returns] 0 on error or 1 on success
- */
-int pkcs7_set_data_content(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx)
-{
-    u_char *p = NULL;
-    int len = 0;
-    u_char *buf;
-
-    if (!spc_indirect_data_content_get(&p, &len, ctx))
-        return 0; /* FAILED */
-    buf = OPENSSL_malloc(SIZE_64K);
-    memcpy(buf, p, (size_t)len);
-    OPENSSL_free(p);
-    if (!pkcs7_set_spc_indirect_data_content(p7, hash, buf, len, ctx)) {
-        OPENSSL_free(buf);
-        return 0; /* FAILED */
-    }
-    OPENSSL_free(buf);
-
-    return 1; /* OK */
 }
 
 /*
@@ -673,56 +533,132 @@ static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CT
 }
 
 /*
- * Replace the data part with the MS Authenticode spcIndirectDataContent blob
- * [out] p7: new PKCS#7 signature
- * [in] hash: message digest BIO
- * [in] blob: SpcIndirectDataContent data
- * [in] len: SpcIndirectDataContent data length
+ * [in, out] si: PKCS7_SIGNER_INFO structure
  * [in] ctx: FILE_FORMAT_CTX structure
  * [returns] 0 on error or 1 on success
  */
-static int pkcs7_set_spc_indirect_data_content(PKCS7 *p7, BIO *hash, u_char *buf, int len, FILE_FORMAT_CTX *ctx)
+static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
 {
-    u_char mdbuf[5 * EVP_MAX_MD_SIZE + 24];
-    int mdlen, seqhdrlen, hashlen;
-    BIO *bio;
-    PKCS7 *td7;
+    SpcSpOpusInfo *opus;
+    ASN1_STRING *astr;
+    int len;
+    u_char *p = NULL;
 
-    hashlen = ctx->format->hash_length_get(ctx);
-    if (hashlen > EVP_MAX_MD_SIZE) {
-        /* APPX format specific */
-        mdlen = BIO_read(hash, (char*)mdbuf, hashlen);
+    opus = spc_sp_opus_info_create(ctx);
+    if ((len = i2d_SpcSpOpusInfo(opus, NULL)) <= 0
+        || (p = OPENSSL_malloc((size_t)len)) == NULL) {
+        SpcSpOpusInfo_free(opus);
+        return 0; /* FAILED */
+    }
+    i2d_SpcSpOpusInfo(opus, &p);
+    p -= len;
+    astr = ASN1_STRING_new();
+    ASN1_STRING_set(astr, p, len);
+    OPENSSL_free(p);
+    SpcSpOpusInfo_free(opus);
+    return PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_SP_OPUS_INFO_OBJID),
+            V_ASN1_SEQUENCE, astr);
+}
+
+/*
+ * [in, out] si: PKCS7_SIGNER_INFO structure
+ * [in] ctx: structure holds input and output data
+ * [returns] 0 on error or 1 on success
+ */
+static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
+{
+    static const u_char purpose_ind[] = {
+        0x30, 0x0c, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04,
+        0x01, 0x82, 0x37, 0x02, 0x01, 0x15
+    };
+    static const u_char purpose_comm[] = {
+        0x30, 0x0c, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04,
+        0x01, 0x82, 0x37, 0x02, 0x01, 0x16
+    };
+    ASN1_STRING *purpose = ASN1_STRING_new();
+
+    if (ctx->options->comm) {
+        ASN1_STRING_set(purpose, purpose_comm, sizeof purpose_comm);
     } else {
-        mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
+        ASN1_STRING_set(purpose, purpose_ind, sizeof purpose_ind);
     }
-    memcpy(buf + len, mdbuf, (size_t)mdlen);
-    seqhdrlen = asn1_simple_hdr_len(buf, len);
+    return PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_STATEMENT_TYPE_OBJID),
+            V_ASN1_SEQUENCE, purpose);
+}
 
-    if ((bio = PKCS7_dataInit(p7, NULL)) == NULL) {
-        printf("PKCS7_dataInit failed\n");
-        return 0; /* FAILED */
-    }
-    BIO_write(bio, buf + seqhdrlen, len - seqhdrlen + mdlen);
-    (void)BIO_flush(bio);
+/*
+ * Create certificate chain sorted in ascending order by their DER encoding.
+ * [in] ctx: structure holds input and output data
+ * [in] signer: signer's certificate number in the certificate chain
+ * [returns] sorted certificate chain
+ */
+static STACK_OF(X509) *X509_chain_get_sorted(FILE_FORMAT_CTX *ctx, int signer)
+{
+    int i;
+    STACK_OF(X509) *chain = sk_X509_new(X509_compare);
 
-    if (!PKCS7_dataFinal(p7, bio)) {
-        printf("PKCS7_dataFinal failed\n");
-        return 0; /* FAILED */
+    /* add the signer's certificate */
+    if (ctx->options->cert != NULL && !sk_X509_push(chain, ctx->options->cert)) {
+        sk_X509_free(chain);
+        return NULL;
     }
-    BIO_free_all(bio);
+    if (signer != -1 && !sk_X509_push(chain, sk_X509_value(ctx->options->certs, signer))) {
+        sk_X509_free(chain);
+        return NULL;
+    }
+    /* add the certificate chain */
+    for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
+        if (i == signer)
+            continue;
+        if (!sk_X509_push(chain, sk_X509_value(ctx->options->certs, i))) {
+            sk_X509_free(chain);
+            return NULL;
+        }
+    }
+    /* add all cross certificates */
+    if (ctx->options->xcerts) {
+        for (i=0; i<sk_X509_num(ctx->options->xcerts); i++) {
+            if (!sk_X509_push(chain, sk_X509_value(ctx->options->xcerts, i))) {
+                sk_X509_free(chain);
+                return NULL;
+            }
+        }
+    }
+    /* sort certificate chain using the supplied comparison function */
+    sk_X509_sort(chain);
+    return chain;
+}
 
-    td7 = PKCS7_new();
-    td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
-    td7->d.other = ASN1_TYPE_new();
-    td7->d.other->type = V_ASN1_SEQUENCE;
-    td7->d.other->value.sequence = ASN1_STRING_new();
-    ASN1_STRING_set(td7->d.other->value.sequence, buf, len + mdlen);
-    if (!PKCS7_set_content(p7, td7)) {
-        PKCS7_free(td7);
-        printf("PKCS7_set_content failed\n");
-        return 0; /* FAILED */
-    }
-    return 1; /* OK */
+/*
+ * X.690-compliant certificate comparison function
+ * Windows requires catalog files to use PKCS#7
+ * content ordering specified in X.690 section 11.6
+ * https://support.microsoft.com/en-us/topic/october-13-2020-kb4580358-security-only-update-d3f6eb3c-d7c4-a9cb-0de6-759386bf7113
+ * This algorithm is different from X509_cmp()
+ * [in] a_ptr, b_ptr: pointers to X509 certificates
+ * [returns] certificates order
+ */
+static int X509_compare(const X509 *const *a, const X509 *const *b)
+{
+    u_char *a_data, *b_data, *a_tmp, *b_tmp;
+    size_t a_len, b_len;
+    int ret;
+
+    a_len = (size_t)i2d_X509(*a, NULL);
+    a_tmp = a_data = OPENSSL_malloc(a_len);
+    i2d_X509(*a, &a_tmp);
+
+    b_len = (size_t)i2d_X509(*b, NULL);
+    b_tmp = b_data = OPENSSL_malloc(b_len);
+    i2d_X509(*b, &b_tmp);
+
+    ret = memcmp(a_data, b_data, MIN(a_len, b_len));
+    OPENSSL_free(a_data);
+    OPENSSL_free(b_data);
+
+    if (ret == 0 && a_len != b_len) /* identical up to the length of the shorter DER */
+        ret = a_len < b_len ? -1 : 1; /* shorter is smaller */
+    return ret;
 }
 
 /*

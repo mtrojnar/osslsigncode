@@ -1236,7 +1236,7 @@ static int trusted_cert(X509 *cert, int error) {
     BIO_gets(bhash, (char *)mdbuf, EVP_MD_size(md));
     BIO_free_all(bhash);
 
-    hex = OPENSSL_buf2hexstr(mdbuf, (size_t)EVP_MD_size(md));
+    hex = OPENSSL_buf2hexstr(mdbuf, (long)EVP_MD_size(md));
     if (!hex) {
         return 0; /* FAILED */
     }
@@ -1746,6 +1746,13 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
             p7->d.sign->contents->d.other->value.sequence->length);
     }
     printf("\nSigning Certificate Chain:\n");
+    /*
+     * In the PKCS7_verify() function, the BIO *indata parameter refers to
+     * the signed data if the content is detached from p7.
+     * Otherwise, indata should be NULL, and then the signed data must be in p7.
+     * The OpenSSL error workaround is to put the inner content into BIO *indata parameter
+     * https://github.com/openssl/openssl/pull/22575
+     */
     if (!PKCS7_verify(p7, NULL, store, bio, NULL, 0)) {
         printf("\nPKCS7_verify error\n");
         X509_STORE_free(store);
@@ -2304,21 +2311,25 @@ static int verify_member(FILE_FORMAT_CTX *ctx, CatalogAuthAttr *attribute)
     ASN1_TYPE_free(content);
     if (mdtype == -1) {
         printf("Failed to extract current message digest\n\n");
+        SpcIndirectDataContent_free(idc);
         return 1; /* FAILED */
     }
     if (!ctx->format->digest_calc) {
         printf("Unsupported method: digest_calc\n");
+        SpcIndirectDataContent_free(idc);
         return 1; /* FAILED */
     }
     md = EVP_get_digestbynid(mdtype);
     cmdbuf = ctx->format->digest_calc(ctx, md);
     if (!cmdbuf) {
         printf("Failed to compute a message digest value\n\n");
-        return 1; /* Failed */
+        SpcIndirectDataContent_free(idc);
+        return 1; /* FAILED */
     }
     mdlen = EVP_MD_size(EVP_get_digestbynid(mdtype));
     if (memcmp(mdbuf, cmdbuf, (size_t)mdlen)) {
         OPENSSL_free(cmdbuf);
+        SpcIndirectDataContent_free(idc);
         return 1; /* FAILED */
     } else {
         printf("Message digest algorithm  : %s\n", OBJ_nid2sn(mdtype));

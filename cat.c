@@ -19,10 +19,13 @@ struct cat_ctx_st {
     uint32_t sigpos;
     uint32_t siglen;
     uint32_t fileend;
+    PKCS7 *p7;
 };
 
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
+static int cat_check_file(FILE_FORMAT_CTX *ctx, int detached);
+static int cat_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *cat_pkcs7_extract(FILE_FORMAT_CTX *ctx);
 static PKCS7 *cat_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static int cat_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
@@ -31,6 +34,8 @@ static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 
 FILE_FORMAT file_format_cat = {
     .ctx_new = cat_ctx_new,
+    .check_file = cat_check_file,
+    .verify_digests = cat_verify_digests,
     .pkcs7_extract = cat_pkcs7_extract,
     .pkcs7_prepare = cat_pkcs7_prepare,
     .append_pkcs7 = cat_append_pkcs7,
@@ -40,6 +45,8 @@ FILE_FORMAT file_format_cat = {
 
 /* Prototypes */
 static CAT_CTX *cat_ctx_get(char *indata, uint32_t filesize);
+static int cat_add_ms_ctl_object(PKCS7 *p7);
+static int cat_sign_ms_ctl_content(PKCS7 *p7, PKCS7 *contents);
 
 /*
  * FILE_FORMAT method definitions
@@ -58,17 +65,12 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
     CAT_CTX *cat_ctx;
     uint32_t filesize;
 
-    /* squash unused parameter warnings */
-    (void)outdata;
-    (void)hash;
-
     if (options->cmd == CMD_REMOVE || options->cmd==CMD_ATTACH) {
         printf("Unsupported command\n");
         return NULL; /* FAILED */
     }
     if (options->cmd == CMD_VERIFY) {
-        printf("Use -catalog option\n");
-        return NULL; /* FAILED */
+        printf("Warning: Use -catalog option to verify that a file, listed in catalog file, is signed\n\n");
     }
     filesize = get_file_size(options->infile);
     if (filesize == 0)
@@ -109,6 +111,45 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
     return ctx;
 }
 
+static int cat_check_file(FILE_FORMAT_CTX *ctx, int detached)
+{
+    STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
+    PKCS7_SIGNER_INFO *si;
+
+    if (!ctx) {
+        printf("Init error\n\n");
+        return 0; /* FAILED */
+    }
+    if (detached) {
+        printf("CAT format does not support detached PKCS#7 signature\n\n");
+        return 0; /* FAILED */
+    }
+    signer_info = PKCS7_get_signer_info(ctx->cat_ctx->p7);
+    if (!signer_info) {
+        printf("Failed catalog file\n\n");
+        return 0; /* FAILED */
+    }
+    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
+    if (!si) {
+        printf("No signature found\n\n");
+        return 0; /* FAILED */
+    }
+    return 1; /* OK */
+}
+
+/*
+ * ContentInfo value is the inner content of pkcs7-signedData.
+ * An extra verification is not necessary when a content type data
+ * is the inner content of the signed-data type.
+ */
+static int cat_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
+{
+    /* squash unused parameter warnings */
+    (void)ctx;
+    (void)p7;
+    return 1; /* OK */
+}
+
 /*
  * Extract existing signature in DER format.
  * [in] ctx: structure holds input and output data
@@ -116,7 +157,7 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
  */
 static PKCS7 *cat_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
-    return pkcs7_get(ctx->options->indata, ctx->cat_ctx->sigpos, ctx->cat_ctx->siglen);
+    return PKCS7_dup(ctx->cat_ctx->p7);
 }
 
 /*
@@ -128,36 +169,33 @@ static PKCS7 *cat_pkcs7_extract(FILE_FORMAT_CTX *ctx)
  */
 static PKCS7 *cat_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
-    PKCS7 *cursig = NULL, *p7 = NULL;
+    PKCS7 *p7 = NULL;
 
     /* squash unused parameter warnings */
     (void)outdata;
     (void)hash;
 
     /* Obtain an existing signature */
-    cursig = pkcs7_get(ctx->options->indata, ctx->cat_ctx->sigpos, ctx->cat_ctx->siglen);
-    if (!cursig) {
-        printf("Unable to extract existing signature\n");
-        return NULL; /* FAILED */
-    }
     if (ctx->options->cmd == CMD_ADD || ctx->options->cmd == CMD_ATTACH) {
-        p7 = cursig;
+        p7 = PKCS7_dup(ctx->cat_ctx->p7);
     } else if (ctx->options->cmd == CMD_SIGN) {
         /* Create a new signature */
         p7 = pkcs7_create(ctx);
         if (!p7) {
             printf("Creating a new signature failed\n");
-            PKCS7_free(cursig);
             return NULL; /* FAILED */
         }
-        if (!add_ms_ctl_object(p7, cursig)) {
+        if (!cat_add_ms_ctl_object(p7)) {
             printf("Adding MS_CTL_OBJID failed\n");
             PKCS7_free(p7);
-            PKCS7_free(cursig);
             return NULL; /* FAILED */
         }
-        PKCS7_free(cursig);
-    }
+        if (!cat_sign_ms_ctl_content(p7, ctx->cat_ctx->p7->d.sign->contents)) {
+            printf("Failed to set signed content\n");
+            PKCS7_free(p7);
+            return 0; /* FAILED */
+        }
+   }
     return p7; /* OK */
 }
 
@@ -224,6 +262,7 @@ static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         }
     }
     unmap_file(ctx->options->indata, ctx->cat_ctx->fileend);
+    PKCS7_free(ctx->cat_ctx->p7);
     OPENSSL_free(ctx->cat_ctx);
     OPENSSL_free(ctx);
 }
@@ -233,7 +272,7 @@ static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
  */
 
 /*
- * Verify mapped CAT file TODO and create CAT format specific structure.
+ * Verify mapped CAT file and create CAT format specific structure.
  * [in] indata: mapped CAT file (unused)
  * [in] filesize: size of CAT file
  * [returns] pointer to CAT format specific structure
@@ -241,15 +280,67 @@ static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 static CAT_CTX *cat_ctx_get(char *indata, uint32_t filesize)
 {
     CAT_CTX *cat_ctx;
+    PKCS7 *p7 = pkcs7_get(indata, 0, filesize);
 
-    /* squash the unused parameter warning */
-    (void)indata;
-
+    if (!p7)
+        return NULL; /* FAILED */
     cat_ctx = OPENSSL_zalloc(sizeof(CAT_CTX));
+    cat_ctx->p7 = p7;
     cat_ctx->sigpos = 0;
     cat_ctx->siglen = filesize;
     cat_ctx->fileend = filesize;
     return cat_ctx; /* OK */
+}
+
+/*
+ * Add "1.3.6.1.4.1.311.10.1" MS_CTL_OBJID signed attribute
+ * [in, out] p7: new PKCS#7 signature
+ * [returns] 0 on error or 1 on success
+ */
+static int cat_add_ms_ctl_object(PKCS7 *p7)
+{
+    STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
+    PKCS7_SIGNER_INFO *si;
+
+    signer_info = PKCS7_get_signer_info(p7);
+    if (!signer_info)
+        return 0; /* FAILED */
+    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
+    if (!si)
+        return 0; /* FAILED */
+    if (!PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
+        V_ASN1_OBJECT, OBJ_txt2obj(MS_CTL_OBJID, 1)))
+        return 0; /* FAILED */
+    return 1; /* OK */
+}
+
+/*
+ * Sign the MS CTL blob.
+ * Certificate Trust List (CTL) is a list of file names or thumbprints.
+ * All the items in this list are authenticated (approved) by the signing entity.
+ * [in, out] p7: new PKCS#7 signature
+ * [in] contents: Certificate Trust List (CTL)
+ * [returns] 0 on error or 1 on success
+ */
+static int cat_sign_ms_ctl_content(PKCS7 *p7, PKCS7 *contents)
+{
+    u_char *content;
+    int seqhdrlen, content_length;
+
+    seqhdrlen = asn1_simple_hdr_len(contents->d.other->value.sequence->data,
+        contents->d.other->value.sequence->length);
+    content = contents->d.other->value.sequence->data + seqhdrlen;
+    content_length = contents->d.other->value.sequence->length - seqhdrlen;
+
+    if (!pkcs7_sign_content(p7, content, content_length)) {
+        printf("Failed to sign content\n");
+        return 0; /* FAILED */
+    }
+    if (!PKCS7_set_content(p7, PKCS7_dup(contents))) {
+        printf("PKCS7_set_content failed\n");
+        return 0; /* FAILED */
+    }
+    return 1; /* OK */
 }
 
 /*
