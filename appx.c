@@ -587,10 +587,14 @@ static PKCS7 *appx_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             printf("Creating a new signature failed\n");
             return NULL; /* FAILED */
         }
-        if (!add_indirect_data_object(p7, hashes, ctx)) {
+        if (!add_indirect_data_object(p7)) {
             printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
             BIO_free_all(hashes);
             PKCS7_free(p7);
+            return NULL; /* FAILED */
+        }
+        if (!sign_spc_indirect_data_content(p7, hashes, ctx)) {
+            printf("Failed to set signed content\n");
             return NULL; /* FAILED */
         }
         BIO_free_all(hashes);
