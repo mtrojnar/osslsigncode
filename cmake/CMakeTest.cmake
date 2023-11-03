@@ -134,7 +134,7 @@ add_test(NAME version
 
 ### Sign ###
 
-# Tests 2-5
+# Tests 2-7
 # Sign with PKCS#12 container with legacy RC2-40-CBC private key and certificate encryption algorithm
 foreach(ext ${extensions_all})
     add_test(
@@ -154,7 +154,7 @@ foreach(ext ${extensions_all})
         "-out" "${FILES}/legacy.${ext}")
 endforeach(ext ${extensions_all})
 
-# Tests 6-9
+# Tests 8-13
 # Sign with PKCS#12 container with legacy RC2-40-CBC private key and certificate encryption algorithm
 # Disable legacy mode and don't automatically load the legacy provider
 # Option "-nolegacy" requires OpenSSL 3.0.0 or later
@@ -184,7 +184,7 @@ if(OPENSSL_VERSION VERSION_GREATER_EQUAL 3.0.0)
     endforeach(ext ${extensions_all})
 endif(OPENSSL_VERSION VERSION_GREATER_EQUAL 3.0.0)
 
-# Tests 10-13
+# Tests 14-19
 # Sign with PKCS#12 container with AES-256-CBC private key and certificate encryption algorithm
 foreach(ext ${extensions_all})
     add_test(
@@ -204,7 +204,7 @@ foreach(ext ${extensions_all})
         "-out" "${FILES}/signed.${ext}")
 endforeach(ext ${extensions_all})
 
-# Tests 14-17
+# Tests 20-25
 # Sign with revoked certificate
 foreach(ext ${extensions_all})
     add_test(
@@ -225,7 +225,7 @@ foreach(ext ${extensions_all})
         "-out" "${FILES}/revoked.${ext}")
 endforeach(ext ${extensions_all})
 
-# Tests 18-20
+# Tests 26-30
 # Remove signature
 # Unsupported command for CAT files
 foreach(ext ${extensions_nocat})
@@ -241,7 +241,7 @@ foreach(ext ${extensions_nocat})
         REQUIRED_FILES "${FILES}/signed.${ext}")
 endforeach(ext ${extensions_nocat})
 
-# Tests 21-24
+# Tests 31-36
 # Extract PKCS#7 signature in PEM format
 foreach(ext ${extensions_all})
     add_test(
@@ -257,7 +257,7 @@ foreach(ext ${extensions_all})
         REQUIRED_FILES "${FILES}/signed.${ext}")
 endforeach(ext ${extensions_all})
 
-# Tests 25-28
+# Tests 37-42
 # Extract PKCS#7 signature in default DER format
 foreach(ext ${extensions_all})
     add_test(
@@ -272,7 +272,7 @@ foreach(ext ${extensions_all})
         REQUIRED_FILES "${FILES}/signed.${ext}")
 endforeach(ext ${extensions_all})
 
-# Tests 29-34
+# Tests 43-52
 # Attach signature in PEM or DER format
 # Unsupported command for CAT files
 set(formats "pem" "der")
@@ -302,7 +302,7 @@ foreach(ext ${extensions_nocat})
     endforeach(format ${formats})
 endforeach(ext ${extensions_nocat})
 
-# Tests 35-38
+# Tests 53-58
 # Add an unauthenticated blob to a previously-signed file
 foreach(ext ${extensions_all})
     add_test(
@@ -319,7 +319,7 @@ foreach(ext ${extensions_all})
         REQUIRED_FILES "${FILES}/signed.${ext}")
 endforeach(ext ${extensions_all})
 
-# Tests 39-42
+# Tests 59-64
 # Add the new nested signature instead of replacing the first one
 foreach(ext ${extensions_all})
     add_test(
@@ -350,9 +350,9 @@ endforeach(ext ${extensions_all})
 
 ### Verify signature ###
 
-# Tests 43-45
+# Tests 65-67
 # Verify PE/MSI/CAB files signed in the catalog file
-# APPX does not support detached PKCS#7 signature
+# CAT and APPX files do not support detached PKCS#7 signature
 foreach(ext ${extensions_nocatappx})
     add_test(
         NAME verify_catalog_${ext}
@@ -371,9 +371,64 @@ foreach(ext ${extensions_nocatappx})
         REQUIRED_FILES "${FILES}/unsigned.${ext}")
 endforeach(ext ${extensions_nocatappx})
 
-# Tests 46-69
+# Tests 68-97
 # Verify signature
-set(files "legacy" "signed" "nested" "added" "removed" "revoked" "attached_pem" "attached_der")
+set(files "legacy" "signed" "nested" "added" "revoked")
+foreach(file ${files})
+    foreach(ext ${extensions_all})
+        add_test(
+            NAME verify_${file}_${ext}
+            COMMAND osslsigncode "verify"
+            "-time" "1567296000" # Signature verification time: Sep  1 00:00:00 2019 GMT
+            "-CAfile" "${CERTS}/CACert.pem"
+            "-CRLfile" "${CERTS}/CACertCRL.pem"
+            "-in" "${FILES}/${file}.${ext}")
+        set_tests_properties(
+            verify_${file}_${ext}
+            PROPERTIES
+            DEPENDS "${file}_${ext}"
+            REQUIRED_FILES "${FILES}/${file}.${ext}")
+    endforeach(ext ${extensions_all})
+endforeach(file ${files})
+
+# "revoked" tests are expected to fail
+set(files "revoked")
+foreach(file ${files})
+    foreach(ext ${extensions_all})
+        set_tests_properties(
+            verify_${file}_${ext}
+            PROPERTIES
+            WILL_FAIL TRUE)
+    endforeach(ext ${extensions_all})
+endforeach(file ${files})
+
+# Tests 98-102
+# Verify removed signature
+# "removed" tests are expected to fail
+# "remove-signature" command is unsupported for CAT files
+set(files "removed")
+foreach(file ${files})
+    foreach(ext ${extensions_nocat})
+        add_test(
+            NAME verify_${file}_${ext}
+            COMMAND osslsigncode "verify"
+            "-time" "1567296000" # Signature verification time: Sep  1 00:00:00 2019 GMT
+            "-CAfile" "${CERTS}/CACert.pem"
+            "-CRLfile" "${CERTS}/CACertCRL.pem"
+            "-in" "${FILES}/${file}.${ext}")
+        set_tests_properties(
+            verify_${file}_${ext}
+            PROPERTIES
+            DEPENDS "${file}_${ext}"
+            REQUIRED_FILES "${FILES}/${file}.${ext}"
+            WILL_FAIL TRUE)
+    endforeach(ext ${extensions_nocat})
+endforeach(file ${files})
+
+# Tests 103-112
+# Verify attached signature
+# "attach-signature" command is unsupported for CAT files
+set(files "attached_pem" "attached_der")
 foreach(file ${files})
     foreach(ext ${extensions_nocat})
         add_test(
@@ -391,22 +446,12 @@ foreach(file ${files})
     endforeach(ext ${extensions_nocat})
 endforeach(file ${files})
 
-# "Removed" and "revoked" tests are expected to fail
-set(files "removed" "revoked")
-foreach(file ${files})
-    foreach(ext ${extensions_nocat})
-        set_tests_properties(
-            verify_${file}_${ext}
-            PROPERTIES
-            WILL_FAIL TRUE)
-    endforeach(ext ${extensions_nocat})
-endforeach(file ${files})
 
 if(Python3_FOUND OR server_error)
 
 ### Sign with Time-Stamp Authority ###
 
-    # Tests 70-89
+    # Tests 113-142
     # Sign with the RFC3161 Time-Stamp Authority
     # Use "cert" "expired" "revoked" without X509v3 CRL Distribution Points extension
     # and "cert_crldp" "revoked_crldp" contain X509v3 CRL Distribution Points extension
@@ -439,9 +484,9 @@ if(Python3_FOUND OR server_error)
 
 ### Verify Time-Stamp Authority ###
 
-    # Tests 90-92
+    # Tests 143-148
     # Signature verification time: Sep  1 00:00:00 2019 GMT
-    foreach(ext ${extensions_nocat})
+    foreach(ext ${extensions_all})
         add_test(
             NAME verify_ts_cert_${ext}
             COMMAND osslsigncode "verify"
@@ -455,11 +500,11 @@ if(Python3_FOUND OR server_error)
             DEPENDS "sign_ts_cert_${ext}"
             REQUIRED_FILES "${FILES}/ts_cert.${ext}"
             REQUIRED_FILES "${LOGS}/port.log")
-    endforeach(ext ${extensions_nocat})
+    endforeach(ext ${extensions_all})
 
-    # Tests 93-95
+    # Tests 149-154
     # Signature verification time: Jan  1 00:00:00 2035 GMT
-    foreach(ext ${extensions_nocat})
+    foreach(ext ${extensions_all})
         add_test(
             NAME verify_ts_future_${ext}
             COMMAND osslsigncode "verify"
@@ -473,12 +518,12 @@ if(Python3_FOUND OR server_error)
             DEPENDS "sign_ts_cert_${ext}"
             REQUIRED_FILES "${FILES}/ts_cert.${ext}"
             REQUIRED_FILES "${LOGS}/port.log")
-    endforeach(ext ${extensions_nocat})
+    endforeach(ext ${extensions_all})
 
-    # Tests 96-98
+    # Tests 155-160
     # Verify with ignored timestamp
     # This tests are expected to fail
-    foreach(ext ${extensions_nocat})
+    foreach(ext ${extensions_all})
         add_test(
             NAME verify_ts_ignore_${ext}
             COMMAND osslsigncode "verify"
@@ -494,16 +539,16 @@ if(Python3_FOUND OR server_error)
             REQUIRED_FILES "${FILES}/ts_cert.${ext}"
             REQUIRED_FILES "${LOGS}/port.log"
             WILL_FAIL TRUE)
-    endforeach(ext ${extensions_nocat})
+    endforeach(ext ${extensions_all})
 
 
 ### Verify CRL Distribution Points ###
 
-    # Tests 99-101
+    # Tests 161-166
     # Verify file signed with X509v3 CRL Distribution Points extension
     # Signature verification time: Sep  1 00:00:00 2019 GMT
     # Check X509v3 CRL Distribution Points extension, don't use "-CRLfile" and "-TSA-CRLfile" options
-    foreach(ext ${extensions_nocat})
+    foreach(ext ${extensions_all})
         add_test(
             NAME verify_ts_cert_crldp_${ext}
             COMMAND osslsigncode "verify"
@@ -517,13 +562,13 @@ if(Python3_FOUND OR server_error)
             DEPENDS "sign_ts_cert_crldp_${ext}"
             REQUIRED_FILES "${FILES}/ts_cert_crldp.${ext}"
             REQUIRED_FILES "${LOGS}/port.log")
-    endforeach(ext ${extensions_nocat})
+    endforeach(ext ${extensions_all})
 
-    # Tests 102-107
+    # Tests 167-183
     # Verify with expired or revoked certificate without X509v3 CRL Distribution Points extension
     # This tests are expected to fail
     set(failed_certs "expired" "revoked")
-    foreach(ext ${extensions_nocat})
+    foreach(ext ${extensions_all})
         foreach(cert ${failed_certs})
             add_test(
                 NAME verify_ts_${cert}_${ext}
@@ -541,13 +586,13 @@ if(Python3_FOUND OR server_error)
                 REQUIRED_FILES "${LOGS}/port.log"
                 WILL_FAIL TRUE)
         endforeach(cert ${failed_certs})
-    endforeach(ext ${extensions_nocat})
+    endforeach(ext ${extensions_all})
 
-    # Tests 108-110
+    # Tests 178-184
     # Verify with revoked certificate contains X509v3 CRL Distribution Points extension
     # Check X509v3 CRL Distribution Points extension, don't use "-CRLfile" and "-TSA-CRLfile" options
     # This test is expected to fail
-    foreach(ext ${extensions_nocat})
+    foreach(ext ${extensions_all})
         add_test(
             NAME verify_ts_revoked_crldp_${ext}
             COMMAND osslsigncode "verify"
@@ -562,13 +607,11 @@ if(Python3_FOUND OR server_error)
             REQUIRED_FILES "${FILES}/ts_revoked_crldp.${ext}"
             REQUIRED_FILES "${LOGS}/port.log"
             WILL_FAIL TRUE)
-    endforeach(ext ${extensions_nocat})
+    endforeach(ext ${extensions_all})
 
 
 ### Cleanup ###
-
-    # Test 111
-    # Stop HTTP server
+# Stop HTTP server
     if(STOP_SERVER)
         add_test(NAME stop_server
         COMMAND ${Python3_EXECUTABLE} "${CLIENT_HTTP}")
@@ -584,17 +627,12 @@ else(Python3_FOUND OR server_error)
     message(STATUS "CTest skips some tests")
 endif(Python3_FOUND OR server_error)
 
-
-# Test 112
 # Delete test files
+set(names "legacy" "signed" "signed_crldp" "nested" "revoked" "removed" "added")
 foreach(ext ${extensions_all})
-    set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/legacy.${ext}")
-    set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/signed.${ext}")
-    set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/signed_crldp.${ext}")
-    set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/nested.${ext}")
-    set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/revoked.${ext}")
-    set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/removed.${ext}")
-    set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/added.${ext}")
+    foreach(name ${names})
+        set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/${name}.${ext}")
+    endforeach(name ${names})
     foreach(cert ${pem_certs})
         set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/ts_${cert}.${ext}")
     endforeach(cert ${pem_certs})
