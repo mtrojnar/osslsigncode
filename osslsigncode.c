@@ -4076,6 +4076,13 @@ int main(int argc, char **argv)
         ret = 1; /* FAILED */
         BIO_free_all(hash);
         BIO_free_all(outdata);
+        if (options.outfile) {
+#ifdef WIN32
+            _unlink(options.outfile);
+#else
+            unlink(options.outfile);
+#endif /* WIN32 */
+        }
         DO_EXIT_0("Initialization error or unsupported input file type.\n");
     }
     if (options.cmd == CMD_VERIFY) {
