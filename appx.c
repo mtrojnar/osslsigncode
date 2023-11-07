@@ -709,6 +709,13 @@ static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     if (outdata) {
         BIO_free_all(hash);
         BIO_free_all(outdata);
+        if (ctx->options->outfile) {
+#ifdef WIN32
+            _unlink(ctx->options->outfile);
+#else
+            unlink(ctx->options->outfile);
+#endif /* WIN32 */
+        }
     }
     freeZip(ctx->appx_ctx->zip);
     OPENSSL_free(ctx->appx_ctx->calculatedBMHash);
