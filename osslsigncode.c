@@ -3651,6 +3651,16 @@ static int use_legacy(void)
 }
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 
+static int file_exists(const char *filename)
+{
+    FILE *file = fopen(filename, "rb");
+    if (file) {
+        fclose(file);
+        return 1; /* File exists */
+    }
+    return 0; /* File does not exist */
+}
+
 /*
  * [in] argc, argv
  * [in, out] options: structure holds the input data
@@ -3980,6 +3990,10 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
             options->outfile = *(argv++);
             argc--;
         }
+    }
+    if (cmd != CMD_VERIFY && file_exists(options->outfile)) {
+        printf("Overwriting an existing file is not supported.\n");
+        return 0; /* FAILED */
     }
     if (argc > 0 ||
 #ifdef ENABLE_CURL
