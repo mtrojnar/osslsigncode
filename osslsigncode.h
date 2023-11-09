@@ -21,6 +21,7 @@
 #endif /* HAVE_CONFIG_H */
 
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -79,12 +80,6 @@
 
 #if defined (HAVE_TERMIOS_H) || defined (HAVE_GETPASS)
 #define PROVIDE_ASKPASS 1
-#endif
-
-#ifdef _WIN32
-#define FILE_CREATE_MODE "w+b"
-#else
-#define FILE_CREATE_MODE "w+bx"
 #endif
 
 
