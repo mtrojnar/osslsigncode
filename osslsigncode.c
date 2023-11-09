@@ -4071,8 +4071,10 @@ int main(int argc, char **argv)
             DO_EXIT_0("Unable to set the message digest of BIO\n");
         }
         /* Create outdata file */
-        outdata = BIO_new_file(options.outfile, FILE_CREATE_MODE);
-        if (outdata == NULL) {
+        outdata = BIO_new_file(options.outfile, "w+bx");
+        if (!outdata && errno != EEXIST)
+            outdata = BIO_new_file(options.outfile, "w+b");
+        if (!outdata) {
             BIO_free_all(hash);
             DO_EXIT_1("Failed to create file: %s\n", options.outfile);
         }
