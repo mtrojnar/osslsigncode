@@ -697,8 +697,7 @@ static BIO *appx_bio_free(BIO *hash, BIO *outdata)
 }
 
 /*
- * Deallocate a FILE_FORMAT_CTX structure and PE format specific structure,
- * unmap indata file, unlink outfile.
+ * Deallocate a FILE_FORMAT_CTX structure and PE format specific structure.
  * [out] ctx: structure holds input and output data
  * [out] hash: message digest BIO
  * [in] outdata: outdata file BIO
@@ -709,13 +708,6 @@ static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     if (outdata) {
         BIO_free_all(hash);
         BIO_free_all(outdata);
-        if (ctx->options->outfile) {
-#ifdef WIN32
-            _unlink(ctx->options->outfile);
-#else
-            unlink(ctx->options->outfile);
-#endif /* WIN32 */
-        }
     }
     freeZip(ctx->appx_ctx->zip);
     OPENSSL_free(ctx->appx_ctx->calculatedBMHash);

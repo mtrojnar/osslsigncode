@@ -728,7 +728,7 @@ static BIO *msi_bio_free(BIO *hash, BIO *outdata)
 
 /*
  * Deallocate a FILE_FORMAT_CTX structure and MSI format specific structures,
- * unmap indata file, unlink outfile.
+ * unmap indata file.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO
  * [out] outdata: outdata file BIO
@@ -739,13 +739,6 @@ static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     if (outdata) {
         BIO_free_all(hash);
         BIO_free_all(outdata);
-        if (ctx->options->outfile) {
-#ifdef WIN32
-            _unlink(ctx->options->outfile);
-#else
-            unlink(ctx->options->outfile);
-#endif /* WIN32 */
-        }
     }
     unmap_file(ctx->options->indata, ctx->msi_ctx->fileend);
     msi_file_free(ctx->msi_ctx->msi);
