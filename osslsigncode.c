@@ -3653,10 +3653,12 @@ static int use_legacy(void)
 
 static int file_exists(const char *filename)
 {
-    FILE *file = fopen(filename, "rb");
-    if (file) {
-        fclose(file);
-        return 1; /* File exists */
+    if (filename) {
+        FILE *file = fopen(filename, "rb");
+        if (file) {
+            fclose(file);
+            return 1; /* File exists */
+        }
     }
     return 0; /* File does not exist */
 }
