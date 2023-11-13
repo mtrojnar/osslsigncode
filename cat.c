@@ -69,9 +69,6 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
         printf("Unsupported command\n");
         return NULL; /* FAILED */
     }
-    if (options->cmd == CMD_VERIFY) {
-        printf("Warning: Use -catalog option to verify that a file, listed in catalog file, is signed\n\n");
-    }
     filesize = get_file_size(options->infile);
     if (filesize == 0)
         return NULL; /* FAILED */
@@ -99,6 +96,8 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
     /* Push hash on outdata, if hash is NULL the function does nothing */
     BIO_push(hash, outdata);
 
+    if (options->cmd == CMD_VERIFY)
+        printf("Warning: Use -catalog option to verify that a file, listed in catalog file, is signed\n\n");
     if (options->nest)
         /* I've not tried using set_nested_signature as signtool won't do this */
         printf("Warning: CAT files do not support nesting (multiple signature)\n");
