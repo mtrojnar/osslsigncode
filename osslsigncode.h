@@ -83,6 +83,12 @@
 #endif
 
 
+#ifdef WIN32
+#define remove_file(filename) _unlink(filename)
+#else
+#define remove_file(filename) unlink(filename)
+#endif /* WIN32 */
+
 #define GET_UINT8_LE(p) ((const u_char *)(p))[0]
 
 #define GET_UINT16_LE(p) (uint16_t)(((const u_char *)(p))[0] | \

@@ -4089,16 +4089,13 @@ int main(int argc, char **argv)
     if (!ctx)
         ctx = file_format_cat.ctx_new(&options, hash, outdata);
     if (!ctx) {
-        ret = 1; /* FAILED */
+        if (outdata && options.outfile) {
+            /* unlink outfile */
+            remove_file(options.outfile);
+        }
         BIO_free_all(hash);
         BIO_free_all(outdata);
-        if (options.outfile) {
-#ifdef WIN32
-            _unlink(options.outfile);
-#else
-            unlink(options.outfile);
-#endif /* WIN32 */
-        }
+        ret = 1; /* FAILED */
         DO_EXIT_0("Initialization error or unsupported input file type.\n");
     }
     if (options.cmd == CMD_VERIFY) {
@@ -4172,6 +4169,10 @@ skip_signing:
     }
 
 err_cleanup:
+    if (outdata && options.outfile) {
+        /* unlink outfile */
+        remove_file(options.outfile);
+    }
     if (ctx && ctx->format->ctx_cleanup) {
         ctx->format->ctx_cleanup(ctx, hash, outdata);
     }
