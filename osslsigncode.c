@@ -1745,7 +1745,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
         bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data,
             p7->d.sign->contents->d.other->value.sequence->length);
     }
-    printf("\nSigning Certificate Chain:\n");
+    printf("Signing Certificate Chain:\n");
     /*
      * In the PKCS7_verify() function, the BIO *indata parameter refers to
      * the signed data if the content is detached from p7.
@@ -2594,8 +2594,8 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
                 printf("Catalog verification: failed\n\n");
             }
         } else if (ctx->format->verify_digests) {
+            printf("\nSignature Index: %d %s\n\n", i, i==0 ? " (Primary Signature)" : "");
             if (ctx->format->verify_digests(ctx, sig)) {
-                printf("Signature Index: %d %s\n", i, i==0 ? " (Primary Signature)" : "");
                 ret &= verify_signature(ctx, sig);
             }
         } else {
