@@ -252,7 +252,7 @@ static MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse);
 static int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer, uint32_t len);
 static int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen);
 static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash);
-static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse);
+static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse, PKCS7 *p7);
 static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root);
 static MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi);
 static void msi_file_free(MSI_FILE *msi);
@@ -634,9 +634,6 @@ static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             printf("MSI file has no signature\n\n");
             return NULL; /* FAILED */
         }
-        if (!msi_check_MsiDigitalSignatureEx(ctx, dse)) {
-            return NULL; /* FAILED */
-        }
         len = GET_UINT32_LE(ds->size);
         if (len == 0 || len >= MAXREGSECT) {
             printf("Corrupted DigitalSignature stream length 0x%08X\n", len);
@@ -648,6 +645,10 @@ static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         OPENSSL_free(p);
         if (!cursig) {
             printf("Unable to extract existing signature\n");
+            return NULL; /* FAILED */
+        }
+        if (!msi_check_MsiDigitalSignatureEx(ctx, dse, cursig)) {
+            PKCS7_free(cursig);
             return NULL; /* FAILED */
         }
         if (ctx->options->cmd == CMD_ADD)
@@ -2185,7 +2186,7 @@ out:
  * The file content hashing part stays the same, so the
  * msi_handle_dir() function can be used across both variants.
  *
- * When an MsiDigitalSigntaureEx section is present in an MSI file,
+ * When an MsiDigitalSignatureEx section is present in an MSI file,
  * the meaning of the DigitalSignature section changes:  Instead
  * of being merely a file content hash (as what is output by the
  * msi_handle_dir() function), it is now hashes both content
@@ -2249,24 +2250,30 @@ static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash)
  * section, we can't add a nested signature of a different MD type
  * without breaking the initial signature.
  */
-static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse)
+static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse, PKCS7 *p7)
 {
     if (dse && GET_UINT32_LE(dse->size) != (uint32_t)EVP_MD_size(ctx->options->md)) {
-        printf("Unable to add nested signature with a different MD type (-h parameter) "
-            "than what exists in the MSI file already.\nThis is due to the presence of "
-            "MsiDigitalSignatureEx (-add-msi-dse parameter).\n\n");
+        X509_ALGOR *alg;
+        const ASN1_OBJECT *aoid;
+
+        alg = sk_X509_ALGOR_value(p7->d.sign->md_algs, 0);
+        X509_ALGOR_get0(&aoid, NULL, NULL, alg);
+        printf("Message digest algorithm found : %s\n", OBJ_nid2sn(OBJ_obj2nid(aoid)));
+        printf("It is not possible to add a nested signature of a different MD type to the MSI file "
+            "without invalidating the initial signature, as the file contains MsiDigitalSignatureEx.\n"
+            "The file should be signed again, rather than adding a nested signature.\n");
             return 0; /* FAILED */
     }
     if (!dse && ctx->options->add_msi_dse) {
-        printf("Unable to add signature with -add-msi-dse parameter "
-            "without breaking the initial signature.\n\n");
+        printf("It is not possible to add a nested signature using the -add-msi-dse parameter "
+            "without invalidating the initial signature, as the file does not contain MsiDigitalSignatureEx.\n"
+            "The file should be signed again, rather than adding a nested signature.\n");
             return 0; /* FAILED */
     }
     if (dse && !ctx->options->add_msi_dse) {
-        printf("Unable to add signature without -add-msi-dse parameter "
-            "without breaking the initial signature.\nThis is due to the presence of "
-            "MsiDigitalSignatureEx (-add-msi-dse parameter).\n"
-            "Should use -add-msi-dse options in this case.\n\n");
+        printf("It is not possible to add a signature without using the -add-msi-dse parameter, "
+            "as doing so would invalidate the initial signature due to the presence of MsiDigitalSignatureEx.\n"
+            "In this case, consider using the -add-msi-dse option.\n");
             return 0; /* FAILED */
     }
     return 1; /* OK */
