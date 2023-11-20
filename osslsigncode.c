@@ -2272,35 +2272,24 @@ out:
  * The attribute type is SPC_INDIRECT_DATA_OBJID, so get a digest algorithm and a message digest
  * from the content and compare the message digest against the computed message digest of the file
  * [in] ctx: structure holds input and output data
- * [in] attribute: structure holds input and output data
+ * [in] content: catalog file content
  * [returns] 1 on error or 0 on success
  */
-static int verify_member(FILE_FORMAT_CTX *ctx, CatalogAuthAttr *attribute)
+static int verify_content_member_digest(FILE_FORMAT_CTX *ctx, ASN1_TYPE *content)
 {
     int mdlen, mdtype = -1;
     u_char mdbuf[EVP_MAX_MD_SIZE];
     SpcIndirectDataContent *idc;
     const u_char *data;
     ASN1_STRING *value;
-    STACK_OF(ASN1_TYPE) *contents;
-    ASN1_TYPE *content;
     const EVP_MD *md;
     u_char *cmdbuf = NULL;
 
-    value = attribute->contents->value.sequence;
-    data = value->data;
-    contents = d2i_ASN1_SET_ANY(NULL, &data, value->length);
-    if (contents == NULL) {
-        return 1; /* FAILED */
-    }
-    content = sk_ASN1_TYPE_value(contents, 0);
-    sk_ASN1_TYPE_free(contents);
     value = content->value.sequence;
-    data = value->data;
-    idc = d2i_SpcIndirectDataContent(NULL, &data, value->length);
+    data = ASN1_STRING_get0_data(value);
+    idc = d2i_SpcIndirectDataContent(NULL, &data, ASN1_STRING_length(value));
     if (!idc) {
         printf("Failed to extract SpcIndirectDataContent data\n");
-        ASN1_TYPE_free(content);
         return 1; /* FAILED */
     }
     if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
@@ -2308,7 +2297,6 @@ static int verify_member(FILE_FORMAT_CTX *ctx, CatalogAuthAttr *attribute)
         mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
         memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
     }
-    ASN1_TYPE_free(content);
     if (mdtype == -1) {
         printf("Failed to extract current message digest\n\n");
         SpcIndirectDataContent_free(idc);
@@ -2356,46 +2344,45 @@ static int verify_member(FILE_FORMAT_CTX *ctx, CatalogAuthAttr *attribute)
  */
 static int verify_content(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
-    ASN1_STRING *value;
-    ASN1_OBJECT *indir_objid;
-    const u_char *data;
     MsCtlContent *ctlc;
-    int i, j;
+    int i;
 
-    if (!is_content_type(p7, MS_CTL_OBJID)) {
-        printf("Failed to find MS_CTL_OBJID\n");
-        return 1; /* FAILED */
-    }
-    value = p7->d.sign->contents->d.other->value.sequence;
-    data = value->data;
-    ctlc = d2i_MsCtlContent(NULL, &data, value->length);
+    ctlc = ms_ctl_content_get(p7);
     if (!ctlc) {
         printf("Failed to extract MS_CTL_OBJID data\n");
         return 1; /* FAILED */
     }
-    indir_objid = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
     for (i = 0; i < sk_CatalogInfo_num(ctlc->header_attributes); i++) {
-        STACK_OF(CatalogAuthAttr) *attributes;
+        int j;
         CatalogInfo *header_attr = sk_CatalogInfo_value(ctlc->header_attributes, i);
         if (header_attr == NULL)
             continue;
-        attributes = header_attr->attributes;
-        for (j = 0; j < sk_CatalogAuthAttr_num(attributes); j++) {
-            CatalogAuthAttr *attribute = sk_CatalogAuthAttr_value(attributes, j);
+        for (j = 0; j < sk_CatalogAuthAttr_num(header_attr->attributes); j++) {
+            char object_txt[128];
+            CatalogAuthAttr *attribute;
+            ASN1_TYPE *content;
+
+            attribute = sk_CatalogAuthAttr_value(header_attr->attributes, j);
             if (!attribute)
                 continue;
-            if (OBJ_cmp(attribute->type, indir_objid))
+            content = catalog_content_get(attribute);
+            if (!content)
                 continue;
-            if (!verify_member(ctx, attribute)) {
-                /* computed message digest of the file is found in the catalog file */
-                MsCtlContent_free(ctlc);
-                ASN1_OBJECT_free(indir_objid);
-                return 0; /* OK */
+            object_txt[0] = 0x00;
+            OBJ_obj2txt(object_txt, sizeof object_txt, attribute->type, 1);
+            if (!strcmp(object_txt, SPC_INDIRECT_DATA_OBJID)) {
+                /* SPC_INDIRECT_DATA_OBJID OID: 1.3.6.1.4.1.311.2.1.4 */
+                if (!verify_content_member_digest(ctx, content)) {
+                    /* computed message digest of the file is found in the catalog file */
+                    ASN1_TYPE_free(content);
+                    MsCtlContent_free(ctlc);
+                    return 0; /* OK */
+                }
             }
+            ASN1_TYPE_free(content);
         }
     }
     MsCtlContent_free(ctlc);
-    ASN1_OBJECT_free(indir_objid);
     ERR_print_errors_fp(stdout);
     return 1; /* FAILED */
 }
