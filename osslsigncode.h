@@ -176,6 +176,8 @@
 #define SPC_RFC3161_OBJID            "1.3.6.1.4.1.311.3.3.1"
 /* Microsoft OID Crypto 2.0 */
 #define MS_CTL_OBJID                 "1.3.6.1.4.1.311.10.1"
+/* Microsoft OID Catalog */
+#define CAT_NAMEVALUE_OBJID          "1.3.6.1.4.1.311.12.2.1"
 /* Microsoft OID Microsoft_Java */
 #define MS_JAVA_SOMETHING            "1.3.6.1.4.1.311.15.1"
 

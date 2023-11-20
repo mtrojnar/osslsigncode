@@ -15,6 +15,22 @@ const u_char pkcs7_signed_data[] = {
     0x01, 0x07, 0x02,
 };
 
+typedef struct {
+    ASN1_BMPSTRING *tag;
+    ASN1_INTEGER *flags;
+    ASN1_OCTET_STRING *value;
+} CatNameValueContent;
+
+DECLARE_ASN1_FUNCTIONS(CatNameValueContent)
+
+ASN1_SEQUENCE(CatNameValueContent) = {
+    ASN1_SIMPLE(CatNameValueContent, tag, ASN1_BMPSTRING),
+    ASN1_SIMPLE(CatNameValueContent, flags, ASN1_INTEGER),
+    ASN1_SIMPLE(CatNameValueContent, value, ASN1_OCTET_STRING)
+} ASN1_SEQUENCE_END(CatNameValueContent)
+
+IMPLEMENT_ASN1_FUNCTIONS(CatNameValueContent)
+
 struct cat_ctx_st {
     uint32_t sigpos;
     uint32_t siglen;
@@ -47,6 +63,11 @@ FILE_FORMAT file_format_cat = {
 static CAT_CTX *cat_ctx_get(char *indata, uint32_t filesize);
 static int cat_add_ms_ctl_object(PKCS7 *p7);
 static int cat_sign_ms_ctl_content(PKCS7 *p7, PKCS7 *contents);
+static int cat_list_content(PKCS7 *p7);
+static int cat_print_content_member_digest(ASN1_TYPE *content);
+static int cat_print_content_member_name(ASN1_TYPE *content);
+static void cat_print_base64(ASN1_OCTET_STRING *value);
+static void cat_print_utf16_as_ascii(ASN1_OCTET_STRING *value);
 
 /*
  * FILE_FORMAT method definitions
@@ -97,7 +118,7 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
     BIO_push(hash, outdata);
 
     if (options->cmd == CMD_VERIFY)
-        printf("Warning: Use -catalog option to verify that a file, listed in catalog file, is signed\n\n");
+        printf("Warning: Use -catalog option to verify that a file, listed in catalog file, is signed\n");
     if (options->nest)
         /* I've not tried using set_nested_signature as signtool won't do this */
         printf("Warning: CAT files do not support nesting (multiple signature)\n");
@@ -132,6 +153,9 @@ static int cat_check_file(FILE_FORMAT_CTX *ctx, int detached)
     if (!si) {
         printf("No signature found\n\n");
         return 0; /* FAILED */
+    }
+    if (ctx->options->verbose) {
+        (void)cat_list_content(ctx->cat_ctx->p7);
     }
     return 1; /* OK */
 }
@@ -333,6 +357,150 @@ static int cat_sign_ms_ctl_content(PKCS7 *p7, PKCS7 *contents)
         return 0; /* FAILED */
     }
     return 1; /* OK */
+}
+
+/*
+ * Print each member of the CAT file by using the "-verbose" option.
+ * [in, out] p7: catalog file to verify
+ * [returns] 1 on error or 0 on success
+ */
+static int cat_list_content(PKCS7 *p7)
+{
+    MsCtlContent *ctlc;
+    int i;
+
+    ctlc = ms_ctl_content_get(p7);
+    if (!ctlc) {
+        printf("Failed to extract MS_CTL_OBJID data\n");
+        return 1; /* FAILED */
+    }
+    printf("\nCatalog members:\n");
+    for (i = 0; i < sk_CatalogInfo_num(ctlc->header_attributes); i++) {
+        int j, found = 0;
+        CatalogInfo *header_attr = sk_CatalogInfo_value(ctlc->header_attributes, i);
+        if (header_attr == NULL)
+            continue;
+        for (j = 0; j < sk_CatalogAuthAttr_num(header_attr->attributes); j++) {
+            char object_txt[128];
+            CatalogAuthAttr *attribute;
+            ASN1_TYPE *content;
+
+            attribute = sk_CatalogAuthAttr_value(header_attr->attributes, j);
+            if (!attribute)
+                continue;
+            content = catalog_content_get(attribute);
+            if (!content)
+                continue;
+            object_txt[0] = 0x00;
+            OBJ_obj2txt(object_txt, sizeof object_txt, attribute->type, 1);
+            if (!strcmp(object_txt, CAT_NAMEVALUE_OBJID)) {
+                /* CAT_NAMEVALUE_OBJID OID: 1.3.6.1.4.1.311.12.2.1 */
+                found |= cat_print_content_member_name(content);
+            } else if (!strcmp(object_txt, SPC_INDIRECT_DATA_OBJID)) {
+                /* SPC_INDIRECT_DATA_OBJID OID: 1.3.6.1.4.1.311.2.1.4 */
+                found |= cat_print_content_member_digest(content);
+            }
+            ASN1_TYPE_free(content);
+        }
+        if (found)
+            printf("\n");
+    }
+    MsCtlContent_free(ctlc);
+    ERR_print_errors_fp(stdout);
+    return 0; /* OK */
+}
+
+/*
+ * Print a hash algorithm and a message digest from the SPC_INDIRECT_DATA_OBJID attribute.
+ * [in] content: catalog file content
+ * [returns] 0 on error or 1 on success
+ */
+static int cat_print_content_member_digest(ASN1_TYPE *content)
+{
+    SpcIndirectDataContent *idc;
+    u_char mdbuf[EVP_MAX_MD_SIZE];
+    const u_char *data ;
+    int mdtype = -1;
+    ASN1_STRING *value;
+
+    value = content->value.sequence;
+    data = ASN1_STRING_get0_data(value);
+    idc = d2i_SpcIndirectDataContent(NULL, &data, ASN1_STRING_length(value));
+    if (!idc)
+        return 0; /* FAILED */
+    if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
+        /* get a digest algorithm a message digest of the file from the content */
+        mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
+        memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
+    }
+    SpcIndirectDataContent_free(idc);
+    if (mdtype == -1) {
+        printf("Failed to extract current message digest\n\n");
+        return 0; /* FAILED */
+    }
+    printf("\tHash algorithm: %s\n", OBJ_nid2sn(mdtype));
+    print_hash("\tMessage digest", "", mdbuf, EVP_MD_size(EVP_get_digestbynid(mdtype)));
+    return 1; /* OK */
+}
+
+/*
+ * Print a file name from the CAT_NAMEVALUE_OBJID attribute.
+ * [in] content: catalog file content
+ * [returns] 0 on error or 1 on success
+ */
+static int cat_print_content_member_name(ASN1_TYPE *content)
+{
+    CatNameValueContent *nvc;
+    const u_char *data = NULL;
+    ASN1_STRING *value;
+
+    value = content->value.sequence;
+    data = ASN1_STRING_get0_data(value);
+    nvc = d2i_CatNameValueContent(NULL, &data, ASN1_STRING_length(value));
+    if (!nvc) {
+        return 0; /* FAILED */
+    }
+    printf("\tFile name: ");
+    if (ASN1_INTEGER_get(nvc->flags) & 0x00020000) {
+        cat_print_base64(nvc->value);
+    } else {
+        cat_print_utf16_as_ascii(nvc->value);
+    }
+    printf("\n");
+    CatNameValueContent_free(nvc);
+    return 1; /* OK */
+}
+
+/*
+ * Print a CAT_NAMEVALUE_OBJID attribute represented in base-64 encoding.
+ * [in] value: catalog member file name
+ * [returns] none
+ */
+static void cat_print_base64(ASN1_OCTET_STRING *value)
+{
+    BIO *stdbio, *b64;
+    stdbio = BIO_new_fp(stdout, BIO_NOCLOSE);
+    b64 = BIO_new(BIO_f_base64());
+    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+    stdbio = BIO_push(b64, stdbio);
+    ASN1_STRING_print_ex(stdbio, value, 0);
+    BIO_free_all(stdbio);
+}
+
+/*
+ * Print a CAT_NAMEVALUE_OBJID attribute represented in plaintext.
+ * [in] value: catalog member file name
+ * [returns] none
+ */
+static void cat_print_utf16_as_ascii(ASN1_OCTET_STRING *value)
+{
+    const u_char *data;
+    int len, i;
+
+    data = ASN1_STRING_get0_data(value);
+    len = ASN1_STRING_length(value);
+    for (i = 0; i < len && (data[i] || data[i+1]); i+=2)
+        putchar(isprint(data[i]) && !data[i+1] ? data[i] : '.');
 }
 
 /*

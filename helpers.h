@@ -19,6 +19,8 @@ int asn1_simple_hdr_len(const u_char *p, int len);
 int bio_hash_data(BIO *hash, char *indata, size_t idx, size_t fileend);
 void print_hash(const char *descript1, const char *descript2, const u_char *hashbuf, int length);
 int is_content_type(PKCS7 *p7, const char *objid);
+MsCtlContent *ms_ctl_content_get(PKCS7 *p7);
+ASN1_TYPE *catalog_content_get(CatalogAuthAttr *attribute);
 SpcLink *spc_link_obsolete_get(void);
 PKCS7 *pkcs7_get(char *indata, uint32_t sigpos, uint32_t siglen);
 int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype);

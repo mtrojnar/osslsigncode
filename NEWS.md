@@ -2,6 +2,9 @@
 
 ### 2.8 (unreleased)
 
+- added CAT file verification and listing each member of the CAT file
+  by using the "-verbose" option
+
 ### 2.7 (2023.09.19)
 
 - fixed signing CAB files (by Michael Brown)

@@ -412,6 +412,45 @@ int is_content_type(PKCS7 *p7, const char *objid)
 }
 
 /*
+ * [in] p7: new PKCS#7 signature
+ * [returns] pointer to MsCtlContent structure
+ */
+MsCtlContent *ms_ctl_content_get(PKCS7 *p7)
+{
+    ASN1_STRING *value;
+    const u_char *data;
+
+    if (!is_content_type(p7, MS_CTL_OBJID)) {
+        printf("Failed to find MS_CTL_OBJID\n");
+        return NULL; /* FAILED */
+    }
+    value = p7->d.sign->contents->d.other->value.sequence;
+    data = ASN1_STRING_get0_data(value);
+    return d2i_MsCtlContent(NULL, &data, ASN1_STRING_length(value));
+}
+
+/*
+ * [in] attribute: catalog attribute
+ * [returns] catalog content
+ */
+ASN1_TYPE *catalog_content_get(CatalogAuthAttr *attribute)
+{
+    ASN1_STRING *value;
+    STACK_OF(ASN1_TYPE) *contents;
+    ASN1_TYPE *content;
+    const u_char *contents_data;
+
+    value = attribute->contents->value.sequence;
+    contents_data = ASN1_STRING_get0_data(value);
+    contents = d2i_ASN1_SET_ANY(NULL, &contents_data, ASN1_STRING_length(value));
+    if (!contents)
+        return 0; /* FAILED */
+    content = sk_ASN1_TYPE_value(contents, 0);
+    sk_ASN1_TYPE_free(contents);
+    return content;
+}
+
+/*
  * PE and CAB format specific
  * [in] none
  * [returns] pointer to SpcLink
