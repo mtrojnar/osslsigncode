@@ -70,6 +70,8 @@ else(WIN32 OR APPLE)
             RESULT_VARIABLE server_error)
         if(server_error)
             message(STATUS "HTTP server failed: ${server_error}")
+            message(STATUS "Use python3 to start HTTP server: \"python3 Testing/server_http.py --port 19254\"")
+            set(default_certs 1)
         else(server_error)
             # Check if file exists and is no-empty
             while(NOT EXISTS ${LOGS}/port.log)
