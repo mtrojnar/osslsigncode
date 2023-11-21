@@ -290,12 +290,12 @@ static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
         return NULL; /* FAILED */
     }
     if (memcmp(options->indata, msi_magic, sizeof msi_magic)) {
-        unmap_file(options->infile, filesize);
+        unmap_file(options->indata, filesize);
         return NULL; /* FAILED */
     }
     msi_ctx = msi_ctx_get(options->indata, filesize);
     if (!msi_ctx) {
-        unmap_file(options->infile, filesize);
+        unmap_file(options->indata, filesize);
         return NULL; /* FAILED */
     }
     ctx = OPENSSL_malloc(sizeof(FILE_FORMAT_CTX));

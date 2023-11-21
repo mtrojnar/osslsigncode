@@ -101,12 +101,12 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
     /* the maximum size of a supported cat file is (2^24 -1) bytes */
     if (memcmp(options->indata + ((GET_UINT8_LE(options->indata+1) == 0x82) ? 4 : 5),
             pkcs7_signed_data, sizeof pkcs7_signed_data)) {
-        unmap_file(options->infile, filesize);
+        unmap_file(options->indata, filesize);
         return NULL; /* FAILED */
     }
     cat_ctx = cat_ctx_get(options->indata, filesize);
     if (!cat_ctx) {
-        unmap_file(options->infile, filesize);
+        unmap_file(options->indata, filesize);
         return NULL; /* FAILED */
     }
     ctx = OPENSSL_malloc(sizeof(FILE_FORMAT_CTX));
