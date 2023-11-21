@@ -104,12 +104,12 @@ static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
         return NULL; /* FAILED */
     }
     if (memcmp(options->indata, "MSCF", 4)) {
-        unmap_file(options->infile, filesize);
+        unmap_file(options->indata, filesize);
         return NULL; /* FAILED */
     }
     cab_ctx = cab_ctx_get(options->indata, filesize);
     if (!cab_ctx) {
-        unmap_file(options->infile, filesize);
+        unmap_file(options->indata, filesize);
         return NULL; /* FAILED */
     }
     ctx = OPENSSL_malloc(sizeof(FILE_FORMAT_CTX));
