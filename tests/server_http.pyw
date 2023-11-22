@@ -43,6 +43,7 @@ class RequestHandler(SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-type", "application/crl")
             self.end_headers()
+            resp_data = b''
             # Read the file and send the contents
             if url.path == "/intermediateCA":
                 with open(CACRL, 'rb') as file:
@@ -53,6 +54,7 @@ class RequestHandler(SimpleHTTPRequestHandler):
             self.wfile.write(resp_data)
         except Exception as err: # pylint: disable=broad-except
             print(f"HTTP GET request error: {err}")
+
 
     def do_POST(self): # pylint: disable=invalid-name
         """"Serves the POST request type"""
@@ -76,7 +78,7 @@ class RequestHandler(SimpleHTTPRequestHandler):
                 openssl.check_returncode()
                 self.send_header("Content-type", "application/timestamp-reply")
                 self.end_headers()
-                resp_data = None
+                resp_data = b''
                 with open(RESPONS, mode="rb") as file:
                     resp_data = file.read()
                 self.wfile.write(resp_data)
