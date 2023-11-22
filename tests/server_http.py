@@ -53,7 +53,7 @@ class RequestHandler(SimpleHTTPRequestHandler):
                     resp_data = file.read()
             self.wfile.write(resp_data)
         except Exception as err: # pylint: disable=broad-except
-            print(f"HTTP GET request error: {err}")
+            print("HTTP GET request error: {}".format(err))
 
 
     def do_POST(self): # pylint: disable=invalid-name
@@ -83,7 +83,7 @@ class RequestHandler(SimpleHTTPRequestHandler):
                     resp_data = file.read()
                 self.wfile.write(resp_data)
         except Exception as err: # pylint: disable=broad-except
-            print(f"HTTP POST request error: {err}")
+            print("HTTP POST request error: {}".format(err))
 
 
 class HttpServerThread():
@@ -100,7 +100,7 @@ class HttpServerThread():
         self.server_thread = threading.Thread(target=self.server.serve_forever)
         self.server_thread.start()
         hostname, port = self.server.server_address[:2]
-        print(f"HTTP server started, URL http://{hostname}:{port}")
+        print("HTTP server started, URL http://{}:{}".format(hostname, port))
         return port
 
 
@@ -121,7 +121,7 @@ def main() -> None:
         with open(PORT_LOG, mode="w") as file:
             file.write("{}".format(port))
     except OSError as err:
-        print(f"OSError: {err}")
+        print("OSError: {}".format(err))
         ret = err.errno
     finally:
         sys.exit(ret)
@@ -133,7 +133,7 @@ if __name__ == '__main__':
         if fpid > 0:
             sys.exit(0)
     except OSError as ferr:
-        print(f"Fork #1 failed: {ferr.errno} {ferr.strerror}")
+        print("Fork #1 failed: {} {}".format(ferr.errno, ferr.strerror))
         sys.exit(1)
 
     try:
@@ -141,7 +141,7 @@ if __name__ == '__main__':
         if fpid > 0:
             sys.exit(0)
     except OSError as ferr:
-        print(f"Fork #2 failed: {ferr.errno} {ferr.strerror}")
+        print("Fork #2 failed: {} {}".format(ferr.errno, ferr.strerror))
         sys.exit(1)
 
     # Start the daemon main loop
