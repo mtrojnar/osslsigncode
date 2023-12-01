@@ -1304,7 +1304,7 @@ static int x509_store_load_file(X509_STORE *store, char *cafile)
     lookup = X509_STORE_add_lookup(store, X509_LOOKUP_file());
     if (!lookup || !cafile)
         return 0; /* FAILED */
-    if (!X509_load_cert_file(lookup, cafile, X509_FILETYPE_PEM)) {
+    if (!X509_LOOKUP_load_file(lookup, cafile, X509_FILETYPE_PEM)) {
         printf("\nError: no certificate found\n");
         return 0; /* FAILED */
     }
@@ -1334,7 +1334,7 @@ static int x509_store_load_crlfile(X509_STORE *store, char *cafile, char *crlfil
     lookup = X509_STORE_add_lookup(store, X509_LOOKUP_file());
     if (!lookup)
         return 0; /* FAILED */
-    if (!X509_load_cert_file(lookup, cafile, X509_FILETYPE_PEM)) {
+    if (!X509_LOOKUP_load_file(lookup, cafile, X509_FILETYPE_PEM)) {
         printf("\nError: no certificate found\n");
         return 0; /* FAILED */
     }
