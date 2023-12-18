@@ -233,6 +233,7 @@ struct appx_ctx_st {
 
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
+static const EVP_MD *appx_md_get(FILE_FORMAT_CTX *ctx);
 static ASN1_OBJECT *appx_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
 static int appx_hash_length_get(FILE_FORMAT_CTX *ctx);
 static int appx_check_file(FILE_FORMAT_CTX *ctx, int detached);
@@ -246,6 +247,7 @@ static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 
 FILE_FORMAT file_format_appx = {
     .ctx_new = appx_ctx_new,
+    .md_get = appx_md_get,
     .data_blob_get = appx_spc_sip_info_get,
     .hash_length_get = appx_hash_length_get,
     .check_file = appx_check_file,
@@ -357,6 +359,16 @@ static FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *ou
     if (options->add_msi_dse == 1)
         printf("Warning: -add-msi-dse option is only valid for MSI files\n");
     return ctx;
+}
+
+/*
+ * Return a hash algorithm specified in the AppxBlockMap.xml file.
+ * [in] ctx: structure holds input and output data
+ * [returns] hash algorithm
+ */
+static const EVP_MD *appx_md_get(FILE_FORMAT_CTX *ctx)
+{
+    return ctx->appx_ctx->md;
 }
 
 /*
@@ -542,6 +554,7 @@ static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 
 /*
  * Obtain an existing signature or create a new one.
+ * APPX files do not support nesting.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO (unused)
  * [out] outdata: outdata file BIO (unused)
@@ -549,35 +562,42 @@ static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
  */
 static PKCS7 *appx_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
-    PKCS7 *cursig = NULL, *p7 = NULL;
+    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+    PKCS7 *p7 = NULL;
 
     /* squash unused parameter warnings */
     (void)outdata;
     (void)hash;
 
-    if (ctx->options->cmd == CMD_ADD || ctx->options->cmd == CMD_ATTACH) {
+    if (ctx->options->cmd == CMD_ADD) {
         /* Obtain an existing signature */
-        cursig = appx_pkcs7_extract(ctx);
-        if (!cursig) {
+        p7 = appx_pkcs7_extract(ctx);
+        if (!p7) {
             printf("Unable to extract existing signature\n");
             return NULL; /* FAILED */
         }
-        return cursig;
-    } else if (ctx->options->cmd == CMD_SIGN) {
-        BIO *hashes;
-        ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+        return p7;
+    }
 
-        /* Create a new signature */
-        entry = zipGetCDEntryByName(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME);
-        if (!entry) {
-            printf("Not a valid .appx file: content types file missing\n");
+    /* Create and append a new signature content types entry */
+    entry = zipGetCDEntryByName(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME);
+    if (!entry) {
+        printf("Not a valid .appx file: content types file missing\n");
+        return NULL; /* FAILED */
+    }
+    if (!appx_append_ct_signature_entry(ctx->appx_ctx->zip, entry)) {
+        return NULL; /* FAILED */
+    }
+    if (ctx->options->cmd == CMD_ATTACH) {
+        /* Obtain an existing PKCS#7 signature from a "sigin" file */
+        p7 = pkcs7_get_sigfile(ctx);
+        if (!p7) {
+            printf("Unable to extract valid signature\n");
             return NULL; /* FAILED */
         }
-        if (!appx_append_ct_signature_entry(ctx->appx_ctx->zip, entry)) {
-            return NULL; /* FAILED */
-        }
-        /* create hash blob from concatenated APPX hashes */
-        hashes = appx_calculate_hashes(ctx);
+    } else if (ctx->options->cmd == CMD_SIGN) {
+        /* Create hash blob from concatenated APPX hashes */
+        BIO *hashes = appx_calculate_hashes(ctx);
         if (!hashes) {
             return NULL; /* FAILED */
         }

@@ -542,11 +542,16 @@ static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx)
 static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CTX *ctx)
 {
     u_char *p = NULL;
-    int hashlen, l = 0;
-    int mdtype = EVP_MD_nid(ctx->options->md);
+    int mdtype, hashlen, l = 0;
     void *hash;
     SpcIndirectDataContent *idc = SpcIndirectDataContent_new();
 
+    if (ctx->format->md_get) {
+        /* APPX file specific - use a hash algorithm specified in the AppxBlockMap.xml file */
+        mdtype = EVP_MD_nid(ctx->format->md_get(ctx));
+    } else {
+        mdtype = EVP_MD_nid(ctx->options->md);
+    }
     idc->data->value = ASN1_TYPE_new();
     idc->data->value->type = V_ASN1_SEQUENCE;
     idc->data->value->value.sequence = ASN1_STRING_new();
