@@ -4,6 +4,7 @@
 
 - added CAT file verification and listing each member of the CAT file
   by using the "-verbose" option
+- added new command "extract-data" to extract a PKCS#7 data content to be signed
 
 ### 2.7 (2023.09.19)
 

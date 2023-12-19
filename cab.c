@@ -43,6 +43,7 @@ struct cab_ctx_st {
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
 static ASN1_OBJECT *cab_obsolete_link_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
+static PKCS7 *cab_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_MD *md);
 static int cab_hash_length_get(FILE_FORMAT_CTX *ctx);
 static int cab_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
@@ -58,6 +59,7 @@ static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 FILE_FORMAT file_format_cab = {
     .ctx_new = cab_ctx_new,
     .data_blob_get = cab_obsolete_link_get,
+    .pkcs7_contents_get = cab_pkcs7_contents_get,
     .hash_length_get = cab_hash_length_get,
     .check_file = cab_check_file,
     .digest_calc = cab_digest_calc,
@@ -149,6 +151,32 @@ static ASN1_OBJECT *cab_obsolete_link_get(u_char **p, int *plen, FILE_FORMAT_CTX
     dtype = OBJ_txt2obj(SPC_CAB_DATA_OBJID, 1);
     SpcLink_free(link);
     return dtype; /* OK */
+}
+
+/*
+ * Allocate and return a data content to be signed.
+ * [in] ctx: structure holds input and output data
+ * [in] hash: message digest BIO
+ * [in] md: message digest algorithm
+ * [returns] data content
+ */
+static PKCS7 *cab_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_MD *md)
+{
+    ASN1_OCTET_STRING *content;
+
+    /* squash the unused parameter warning, use initialized message digest BIO */
+    (void)md;
+
+    /* Strip current signature and modify header */
+    if (ctx->cab_ctx->header_size == 20) {
+        if (!cab_modify_header(ctx, hash, NULL))
+            return NULL; /* FAILED */
+    } else {
+        if (!cab_add_header(ctx, hash, NULL))
+            return NULL; /* FAILED */
+    }
+    content = spc_indirect_data_content_get(hash, ctx);
+    return pkcs7_set_content(content);
 }
 
 /*
@@ -363,11 +391,14 @@ static int cab_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
  */
 static PKCS7 *cab_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
+    const u_char *blob;
+
     if (ctx->cab_ctx->sigpos == 0 || ctx->cab_ctx->siglen == 0
         || ctx->cab_ctx->sigpos > ctx->cab_ctx->fileend) {
         return NULL; /* FAILED */
     }
-    return pkcs7_get(ctx->options->indata, ctx->cab_ctx->sigpos, ctx->cab_ctx->siglen);
+    blob = (u_char *)ctx->options->indata + ctx->cab_ctx->sigpos;
+    return d2i_PKCS7(NULL, &blob, ctx->cab_ctx->siglen);
 }
 
 /*
@@ -470,7 +501,7 @@ static PKCS7 *cab_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     if ((ctx->options->cmd == CMD_SIGN && ctx->options->nest)
         || (ctx->options->cmd == CMD_ATTACH && ctx->options->nest)
         || ctx->options->cmd == CMD_ADD) {
-        cursig = pkcs7_get(ctx->options->indata, ctx->cab_ctx->sigpos, ctx->cab_ctx->siglen);
+        cursig = cab_pkcs7_extract(ctx);
         if (!cursig) {
             printf("Unable to extract existing signature\n");
             return NULL; /* FAILED */
@@ -487,6 +518,7 @@ static PKCS7 *cab_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             return NULL; /* FAILED */
         }
     } else if (ctx->options->cmd == CMD_SIGN) {
+        ASN1_OCTET_STRING *content;
         /* Create a new PKCS#7 signature */
         p7 = pkcs7_create(ctx);
         if (!p7) {
@@ -503,10 +535,18 @@ static PKCS7 *cab_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             PKCS7_free(p7);
             return NULL; /* FAILED */
         }
-        if (!sign_spc_indirect_data_content(p7, hash, ctx)) {
-            printf("Failed to set signed content\n");
+        content = spc_indirect_data_content_get(hash, ctx);
+        if (!content) {
+            printf("Failed to get spcIndirectDataContent\n");
             return NULL; /* FAILED */
         }
+        if (!sign_spc_indirect_data_content(p7, content)) {
+            printf("Failed to set signed content\n");
+            PKCS7_free(p7);
+            ASN1_OCTET_STRING_free(content);
+            return NULL; /* FAILED */
+        }
+        ASN1_OCTET_STRING_free(content);
     }
     if (ctx->options->nest)
         ctx->options->prevsig = cursig;

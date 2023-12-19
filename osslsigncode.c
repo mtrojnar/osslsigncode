@@ -2598,30 +2598,6 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
 }
 
 /*
- * [in, out] ctx: structure holds input and output data
- * [out] outdata: BIO outdata file
- * [in] p7: PKCS#7 signature
- * [returns] 1 on error or 0 on success
- */
-static int save_extracted_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
-{
-    int ret;
-
-    (void)BIO_reset(outdata);
-    if (ctx->options->output_pkcs7) {
-        /* PEM format */
-        ret = !PEM_write_bio_PKCS7(outdata, p7);
-    } else {
-        /* default DER format */
-        ret = !i2d_PKCS7_bio(outdata, p7);
-    }
-    if (ret) {
-        printf("Unable to write pkcs7 object\n");
-    }
-    return ret;
-}
-
-/*
  * [in] options: structure holds the input data
  * [returns] 1 on error or 0 on success
  */
@@ -2700,6 +2676,7 @@ static void usage(const char *argv0, const char *cmd)
 {
     const char *cmds_all[] = {"all", NULL};
     const char *cmds_sign[] = {"all", "sign", NULL};
+    const char *cmds_extract_data[] = {"all", "extract-data", NULL};
     const char *cmds_add[] = {"all", "add", NULL};
     const char *cmds_attach[] = {"all", "attach-signature", NULL};
     const char *cmds_extract[] = {"all", "extract-signature", NULL};
@@ -2738,7 +2715,15 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -nest ]\n", "");
         printf("%12s[ -verbose ]\n", "");
         printf("%12s[ -add-msi-dse ]\n", "");
+        printf("%12s[ -pem ]\n", "");
         printf("%12s[ -in ] <infile> [-out ] <outfile>\n\n", "");
+    }
+    if (on_list(cmd, cmds_extract_data)) {
+        printf("%1sextract-data [ -pem ]\n", "");
+        printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
+        printf("%12s[ -ph ]\n", "");
+        printf("%12s[ -add-msi-dse ]\n", "");
+        printf("%12s[ -in ] <infile> [ -out ] <datafile>\n\n", "");
     }
     if (on_list(cmd, cmds_add)) {
         printf("%1sadd [-addUnauthenticatedBlob]\n", "");
@@ -2798,9 +2783,10 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_extract[] = {"extract-signature", NULL};
     const char *cmds_remove[] = {"remove-signature", NULL};
     const char *cmds_sign[] = {"sign", NULL};
+    const char *cmds_extract_data[] = {"extract-data", NULL};
     const char *cmds_verify[] = {"verify", NULL};
     const char *cmds_ac[] = {"sign", NULL};
-    const char *cmds_add_msi_dse[] = {"add", "attach-signature", "sign", NULL};
+    const char *cmds_add_msi_dse[] = {"add", "attach-signature", "sign", "extract-data", NULL};
     const char *cmds_addUnauthenticatedBlob[] = {"sign", "add", NULL};
 #ifdef PROVIDE_ASKPASS
     const char *cmds_askpass[] = {"sign", NULL};
@@ -2811,9 +2797,10 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_comm[] = {"sign", NULL};
     const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
     const char *cmds_CRLfileTSA[] = {"attach-signature", "verify", NULL};
-    const char *cmds_h[] = {"add", "attach-signature", "sign", NULL};
+    const char *cmds_h[] = {"add", "attach-signature", "sign", "extract-data", NULL};
     const char *cmds_i[] = {"sign", NULL};
-    const char *cmds_in[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", "verify", NULL};
+    const char *cmds_in[] = {"add", "attach-signature", "extract-signature",
+        "remove-signature", "sign", "extract-data", "verify", NULL};
     const char *cmds_jp[] = {"sign", NULL};
     const char *cmds_key[] = {"sign", NULL};
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
@@ -2824,13 +2811,14 @@ static void help_for(const char *argv0, const char *cmd)
 #ifdef ENABLE_CURL
     const char *cmds_noverifypeer[] = {"add", "sign", NULL};
 #endif /* ENABLE_CURL */
-    const char *cmds_out[] = {"add", "attach-signature", "extract-signature", "remove-signature", "sign", NULL};
+    const char *cmds_out[] = {"add", "attach-signature", "extract-signature",
+        "remove-signature", "sign", "extract-data", NULL};
 #ifdef ENABLE_CURL
     const char *cmds_p[] = {"add", "sign", NULL};
 #endif /* ENABLE_CURL */
     const char *cmds_pass[] = {"sign", NULL};
-    const char *cmds_pem[] = {"extract-signature", NULL};
-    const char *cmds_ph[] = {"sign", NULL};
+    const char *cmds_pem[] = {"sign", "extract-data", "extract-signature", NULL};
+    const char *cmds_ph[] = {"sign", "extract-data", NULL};
     const char *cmds_pkcs11cert[] = {"sign", NULL};
     const char *cmds_pkcs11engine[] = {"sign", NULL};
     const char *cmds_pkcs11module[] = {"sign", NULL};
@@ -2891,6 +2879,10 @@ static void help_for(const char *argv0, const char *cmd)
         printf("Signing  protects a file from tampering, and allows users to verify the signer\n");
         printf("based on a signing certificate. The options below allow you to specify signing\n");
         printf("parameters and to select the signing certificate you wish to use.\n\n");
+        printf("Options:\n");
+    }
+    if (on_list(cmd, cmds_extract_data)) {
+        printf("\nUse the \"extract-data\" command to extract a data content to be signed.\n\n");
         printf("Options:\n");
     }
     if (on_list(cmd, cmds_verify)) {
@@ -2957,7 +2949,7 @@ static void help_for(const char *argv0, const char *cmd)
     if (on_list(cmd, cmds_pass))
         printf("%-24s= the private key password\n", "-pass");
     if (on_list(cmd, cmds_pem))
-        printf("%-24s= output data format PEM to use (default: DER)\n", "-pem");
+        printf("%-24s= PKCS#7 output data format PEM to use (default: DER)\n", "-pem");
     if (on_list(cmd, cmds_ph))
         printf("%-24s= generate page hashes for executable files\n", "-ph");
     if (on_list(cmd, cmds_pkcs11cert))
@@ -3579,6 +3571,8 @@ static cmd_type_t get_command(char **argv)
         return CMD_HELP;
     } else if (!strcmp(argv[1], "sign"))
         return CMD_SIGN;
+    else if (!strcmp(argv[1], "extract-data"))
+        return CMD_EXTRACT_DATA;
     else if (!strcmp(argv[1], "extract-signature"))
         return CMD_EXTRACT;
     else if (!strcmp(argv[1], "attach-signature"))
@@ -3731,7 +3725,8 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->pkcs12file = *(++argv);
-        } else if ((cmd == CMD_EXTRACT) && !strcmp(*argv, "-pem")) {
+        } else if ((cmd == CMD_SIGN || cmd == CMD_EXTRACT || cmd == CMD_EXTRACT_DATA)
+                && !strcmp(*argv, "-pem")) {
             options->output_pkcs7 = 1;
 #ifndef OPENSSL_NO_ENGINE
         } else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11cert")) {
@@ -3788,7 +3783,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
             options->readpass = *(++argv);
         } else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-comm")) {
             options->comm = 1;
-        } else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-ph")) {
+        } else if ((cmd == CMD_SIGN || cmd == CMD_EXTRACT_DATA) && !strcmp(*argv, "-ph")) {
             options->pagehash = 1;
         } else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-n")) {
             if (--argc < 1) {
@@ -3796,8 +3791,8 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->desc = *(++argv);
-        } else if ((cmd == CMD_SIGN|| cmd == CMD_ADD || cmd == CMD_ATTACH)
-                && !strcmp(*argv, "-h")) {
+        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH
+                || cmd == CMD_EXTRACT_DATA) && !strcmp(*argv, "-h")) {
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
@@ -3860,7 +3855,8 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
             options->ignore_timestamp = 1;
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_VERIFY) && !strcmp(*argv, "-verbose")) {
             options->verbose = 1;
-        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_ATTACH) && !strcmp(*argv, "-add-msi-dse")) {
+        } else if ((cmd == CMD_SIGN || cmd == CMD_EXTRACT_DATA || cmd == CMD_ADD || cmd == CMD_ATTACH)
+                && !strcmp(*argv, "-add-msi-dse")) {
             options->add_msi_dse = 1;
         } else if ((cmd == CMD_VERIFY) && (!strcmp(*argv, "-c") || !strcmp(*argv, "-catalog"))) {
             if (--argc < 1) {
@@ -3936,6 +3932,10 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
             return 0; /* FAILED */
         } else if ((cmd == CMD_SIGN) && !strcmp(*argv, "--help")) {
             help_for(argv0, "sign");
+            cmd = CMD_HELP;
+            return 0; /* FAILED */
+        } else if ((cmd == CMD_EXTRACT_DATA) && !strcmp(*argv, "--help")) {
+            help_for(argv0, "extract-data");
             cmd = CMD_HELP;
             return 0; /* FAILED */
         } else if ((cmd == CMD_VERIFY) && !strcmp(*argv, "--help")) {
@@ -4090,6 +4090,17 @@ int main(int argc, char **argv)
     if (options.cmd == CMD_VERIFY) {
         ret = verify_signed_file(ctx, &options);
         goto skip_signing;
+    } else if (options.cmd == CMD_EXTRACT_DATA) {
+        if (!ctx->format->pkcs7_contents_get) {
+            DO_EXIT_0("Unsupported command: extract-data\n");
+        }
+        p7 = ctx->format->pkcs7_contents_get(ctx, hash, options.md);
+        if (!p7) {
+            DO_EXIT_0("Unable to extract pkcs7 contents\n");
+        }
+        ret = data_write_pkcs7(ctx, outdata, p7);
+        PKCS7_free(p7);
+        goto skip_signing;
     } else if (options.cmd == CMD_EXTRACT) {
         if (!ctx->format->pkcs7_extract) {
             DO_EXIT_0("Unsupported command: extract-signature\n");
@@ -4098,7 +4109,7 @@ int main(int argc, char **argv)
         if (!p7) {
             DO_EXIT_0("Unable to extract existing signature\n");
         }
-        ret = save_extracted_pkcs7(ctx, outdata, p7);
+        ret = data_write_pkcs7(ctx, outdata, p7);
         PKCS7_free(p7);
         goto skip_signing;
     } else if (options.cmd == CMD_REMOVE) {

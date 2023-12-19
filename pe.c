@@ -44,6 +44,7 @@ struct pe_ctx_st {
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
 static ASN1_OBJECT *pe_spc_image_data_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
+static PKCS7 *pe_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_MD *md);
 static int pe_hash_length_get(FILE_FORMAT_CTX *ctx);
 static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static u_char *pe_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
@@ -60,6 +61,7 @@ static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 FILE_FORMAT file_format_pe = {
     .ctx_new = pe_ctx_new,
     .data_blob_get = pe_spc_image_data_get,
+    .pkcs7_contents_get = pe_pkcs7_contents_get,
     .hash_length_get = pe_hash_length_get,
     .check_file = pe_check_file,
     .digest_calc = pe_digest_calc,
@@ -80,6 +82,7 @@ static PKCS7 *pe_pkcs7_get_file(char *indata, PE_CTX *pe_ctx);
 static uint32_t pe_calc_checksum(BIO *bio, uint32_t header_size);
 static uint32_t pe_calc_realchecksum(FILE_FORMAT_CTX *ctx);
 static int pe_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static BIO *pe_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype, SpcAttributeTypeAndOptionalValue *obj);
 static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype);
 static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype);
@@ -171,6 +174,30 @@ static ASN1_OBJECT *pe_spc_image_data_get(u_char **p, int *plen, FILE_FORMAT_CTX
 }
 
 /*
+ * Allocate and return a data content to be signed.
+ * [in] ctx: structure holds input and output data
+ * [in] hash: message digest BIO
+ * [in] md: message digest algorithm
+ * [returns] data content
+ */
+static PKCS7 *pe_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_MD *md)
+{
+    ASN1_OCTET_STRING *content;
+    BIO *bhash;
+
+    /* squash the unused parameter warning */
+    (void)hash;
+
+    bhash = pe_digest_calc_bio(ctx, md);
+    if (!bhash) {
+        return NULL; /* FAILED */
+    }
+    content = spc_indirect_data_content_get(bhash, ctx);
+    BIO_free_all(bhash);
+    return pkcs7_set_content(content);
+}
+
+/*
  * [in] ctx: structure holds input and output data
  * [returns] the size of the message digest when passed an EVP_MD structure (the size of the hash)
  */
@@ -236,64 +263,24 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached)
     return 1; /* OK */
 }
 
-/* Compute a message digest value of a signed or unsigned PE file.
+/*
+ * Returns a message digest value of a signed or unsigned PE file.
  * [in] ctx: structure holds input and output data
  * [in] md: message digest algorithm
  * [returns] pointer to calculated message digest
  */
 static u_char *pe_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
 {
-    size_t written;
-    uint32_t idx = 0, fileend;
-    u_char *mdbuf = NULL;
-    BIO *bhash = BIO_new(BIO_f_md());
-
-    if (!BIO_set_md(bhash, md)) {
-        printf("Unable to set the message digest of BIO\n");
-        BIO_free_all(bhash);
-        return 0;  /* FAILED */
-    }
-    BIO_push(bhash, BIO_new(BIO_s_null()));
-    if (ctx->pe_ctx->sigpos)
-        fileend = ctx->pe_ctx->sigpos;
-    else
-        fileend = ctx->pe_ctx->fileend;
-
-    /* ctx->pe_ctx->header_size + 88 + 4 + 60 + ctx->pe_ctx->pe32plus * 16 + 8 */
-    if (!BIO_write_ex(bhash, ctx->options->indata, ctx->pe_ctx->header_size + 88, &written)
-        || written != ctx->pe_ctx->header_size + 88) {
-        BIO_free_all(bhash);
-        return 0; /* FAILED */
-    }
-    idx += (uint32_t)written + 4;
-    if (!BIO_write_ex(bhash, ctx->options->indata + idx,
-            60 + ctx->pe_ctx->pe32plus * 16, &written)
-        || written != 60 + ctx->pe_ctx->pe32plus * 16) {
-        BIO_free_all(bhash);
-        return 0; /* FAILED */
-    }
-    idx += (uint32_t)written + 8;
-    if (!bio_hash_data(bhash, ctx->options->indata, idx, fileend)) {
-        printf("Unable to calculate digest\n");
-        BIO_free_all(bhash);
-        return 0;  /* FAILED */
-    }
-    if (!ctx->pe_ctx->sigpos) {
-        /* pad (with 0's) unsigned PE file to 8 byte boundary */
-        int len = 8 - ctx->pe_ctx->fileend % 8;
-        if (len > 0 && len != 8) {
-            char *buf = OPENSSL_malloc(8);
-            memset(buf, 0, (size_t)len);
-            BIO_write(bhash, buf, len);
-            OPENSSL_free(buf);
-        }
-    }
+    u_char *mdbuf;
+    BIO *bhash = pe_digest_calc_bio(ctx, md);
+    if (!bhash) {
+         return 0; /* FAILED */
+     }
     mdbuf = OPENSSL_malloc((size_t)EVP_MD_size(md));
     BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
     BIO_free_all(bhash);
-    return mdbuf;  /* OK */
+    return mdbuf; /* OK */
 }
-
 
 /*
  * Calculate message digest and page_hash and compare to values retrieved
@@ -456,6 +443,7 @@ static PKCS7 *pe_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             return NULL; /* FAILED */
         }
     } else if (ctx->options->cmd == CMD_SIGN) {
+        ASN1_OCTET_STRING *content;
         /* Create a new PKCS#7 signature */
         p7 = pkcs7_create(ctx);
         if (!p7) {
@@ -467,10 +455,18 @@ static PKCS7 *pe_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             PKCS7_free(p7);
             return NULL; /* FAILED */
         }
-        if (!sign_spc_indirect_data_content(p7, hash, ctx)) {
-            printf("Failed to set signed content\n");
+        content = spc_indirect_data_content_get(hash, ctx);
+        if (!content) {
+            printf("Failed to get spcIndirectDataContent\n");
             return NULL; /* FAILED */
         }
+        if (!sign_spc_indirect_data_content(p7, content)) {
+            printf("Failed to set signed content\n");
+            PKCS7_free(p7);
+            ASN1_OCTET_STRING_free(content);
+            return NULL; /* FAILED */
+        }
+        ASN1_OCTET_STRING_free(content);
     }
     if (ctx->options->nest)
         ctx->options->prevsig = cursig;
@@ -832,6 +828,62 @@ static int pe_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     OPENSSL_free(buf);
     return 1; /* OK */
 }
+
+/*
+ * Compute a message digest value of a signed or unsigned PE file.
+ * [in] ctx: structure holds input and output data
+ * [in] md: message digest algorithm
+ * [returns] calculated message digest BIO
+ */
+static BIO *pe_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
+{
+    size_t written;
+    uint32_t idx = 0, fileend;
+    BIO *bhash = BIO_new(BIO_f_md());
+
+    if (!BIO_set_md(bhash, md)) {
+        printf("Unable to set the message digest of BIO\n");
+        BIO_free_all(bhash);
+        return 0; /* FAILED */
+    }
+    BIO_push(bhash, BIO_new(BIO_s_null()));
+    if (ctx->pe_ctx->sigpos)
+        fileend = ctx->pe_ctx->sigpos;
+    else
+        fileend = ctx->pe_ctx->fileend;
+
+    /* ctx->pe_ctx->header_size + 88 + 4 + 60 + ctx->pe_ctx->pe32plus * 16 + 8 */
+    if (!BIO_write_ex(bhash, ctx->options->indata, ctx->pe_ctx->header_size + 88, &written)
+        || written != ctx->pe_ctx->header_size + 88) {
+        BIO_free_all(bhash);
+        return 0; /* FAILED */
+    }
+    idx += (uint32_t)written + 4;
+    if (!BIO_write_ex(bhash, ctx->options->indata + idx,
+            60 + ctx->pe_ctx->pe32plus * 16, &written)
+        || written != 60 + ctx->pe_ctx->pe32plus * 16) {
+        BIO_free_all(bhash);
+        return 0; /* FAILED */
+    }
+    idx += (uint32_t)written + 8;
+    if (!bio_hash_data(bhash, ctx->options->indata, idx, fileend)) {
+        printf("Unable to calculate digest\n");
+        BIO_free_all(bhash);
+        return 0;  /* FAILED */
+    }
+    if (!ctx->pe_ctx->sigpos) {
+        /* pad (with 0's) unsigned PE file to 8 byte boundary */
+        int len = 8 - ctx->pe_ctx->fileend % 8;
+        if (len > 0 && len != 8) {
+            char *buf = OPENSSL_malloc(8);
+            memset(buf, 0, (size_t)len);
+            BIO_write(bhash, buf, len);
+            OPENSSL_free(buf);
+        }
+    }
+    return bhash;
+}
+
 
 /*
  * Page hash support
