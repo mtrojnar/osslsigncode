@@ -10,11 +10,6 @@
 #include "osslsigncode.h"
 #include "helpers.h"
 
-const u_char pkcs7_signed_data[] = {
-    0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d,
-    0x01, 0x07, 0x02,
-};
-
 typedef struct {
     ASN1_BMPSTRING *tag;
     ASN1_INTEGER *flags;
@@ -86,7 +81,7 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
     CAT_CTX *cat_ctx;
     uint32_t filesize;
 
-    if (options->cmd == CMD_REMOVE || options->cmd==CMD_ATTACH) {
+    if (options->cmd == CMD_REMOVE || options->cmd==CMD_ATTACH || options->cmd == CMD_EXTRACT_DATA) {
         printf("Unsupported command\n");
         return NULL; /* FAILED */
     }
@@ -96,12 +91,6 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
 
     options->indata = map_file(options->infile, filesize);
     if (!options->indata) {
-        return NULL; /* FAILED */
-    }
-    /* the maximum size of a supported cat file is (2^24 -1) bytes */
-    if (memcmp(options->indata + ((GET_UINT8_LE(options->indata+1) == 0x82) ? 4 : 5),
-            pkcs7_signed_data, sizeof pkcs7_signed_data)) {
-        unmap_file(options->indata, filesize);
         return NULL; /* FAILED */
     }
     cat_ctx = cat_ctx_get(options->indata, filesize);
@@ -200,7 +189,7 @@ static PKCS7 *cat_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 
     /* Obtain an existing signature */
     if (ctx->options->cmd == CMD_ADD || ctx->options->cmd == CMD_ATTACH) {
-        p7 = PKCS7_dup(ctx->cat_ctx->p7);
+        p7 = cat_pkcs7_extract(ctx);
     } else if (ctx->options->cmd == CMD_SIGN) {
         /* Create a new signature */
         p7 = pkcs7_create(ctx);
@@ -224,29 +213,14 @@ static PKCS7 *cat_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 
 /*
  * Append signature to the outfile.
- * [in, out] ctx: structure holds input and output data (unused)
+ * [in, out] ctx: structure holds input and output data
  * [out] outdata: outdata file BIO
  * [in] p7: PKCS#7 signature
  * [returns] 1 on error or 0 on success
  */
 static int cat_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 {
-    u_char *p = NULL;
-    int len; /* signature length */
-
-    /* squash the unused parameter warning */
-    (void)ctx;
-
-    if (((len = i2d_PKCS7(p7, NULL)) <= 0)
-        || (p = OPENSSL_malloc((size_t)len)) == NULL) {
-        printf("i2d_PKCS memory allocation failed: %d\n", len);
-        return 1; /* FAILED */
-    }
-    i2d_PKCS7(p7, &p);
-    p -= len;
-    i2d_PKCS7_bio(outdata, p7);
-    OPENSSL_free(p);
-    return 0; /* OK */
+    return data_write_pkcs7(ctx, outdata, p7);
 }
 
 /*
@@ -288,18 +262,23 @@ static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
  */
 
 /*
- * Verify mapped CAT file and create CAT format specific structure.
- * [in] indata: mapped CAT file (unused)
- * [in] filesize: size of CAT file
+ * Verify mapped PKCS#7 (CAT) file and create CAT format specific structure.
+ * [in] indata: mapped file
+ * [in] filesize: size of file
  * [returns] pointer to CAT format specific structure
  */
 static CAT_CTX *cat_ctx_get(char *indata, uint32_t filesize)
 {
     CAT_CTX *cat_ctx;
-    PKCS7 *p7 = pkcs7_get(indata, 0, filesize);
+    PKCS7 *p7;
 
+    p7 = pkcs7_read_data(indata, filesize);
     if (!p7)
         return NULL; /* FAILED */
+    if (!PKCS7_type_is_signed(p7)) {
+        PKCS7_free(p7);
+        return NULL; /* FAILED */
+    }
     cat_ctx = OPENSSL_zalloc(sizeof(CAT_CTX));
     cat_ctx->p7 = p7;
     cat_ctx->sigpos = 0;

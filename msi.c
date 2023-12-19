@@ -215,6 +215,7 @@ struct msi_ctx_st {
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
 static ASN1_OBJECT *msi_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
+static PKCS7 *msi_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_MD *md);
 static int msi_hash_length_get(FILE_FORMAT_CTX *ctx);
 static int msi_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static u_char *msi_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
@@ -229,6 +230,7 @@ static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 FILE_FORMAT file_format_msi = {
     .ctx_new = msi_ctx_new,
     .data_blob_get = msi_spc_sip_info_get,
+    .pkcs7_contents_get = msi_pkcs7_contents_get,
     .hash_length_get = msi_hash_length_get,
     .check_file = msi_check_file,
     .digest_calc = msi_digest_calc,
@@ -251,6 +253,7 @@ static int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint
 static MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse);
 static int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer, uint32_t len);
 static int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen);
+static BIO *msi_digest_calc_bio(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse, PKCS7 *p7);
 static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root);
@@ -346,6 +349,32 @@ static ASN1_OBJECT *msi_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX 
     dtype = OBJ_txt2obj(SPC_SIPINFO_OBJID, 1);
     SpcSipInfo_free(si);
     return dtype; /* OK */
+}
+
+/*
+ * Allocate and return a data content to be signed.
+ * [in] ctx: structure holds input and output data
+ * [in] hash: message digest BIO
+ * [in] md: message digest algorithm
+ * [returns] data content
+ */
+static PKCS7 *msi_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_MD *md)
+{
+    ASN1_OCTET_STRING *content;
+
+    /* squash the unused parameter warning, use initialized message digest BIO */
+    (void)md;
+
+    if (ctx->options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ctx, hash)) {
+        printf("Unable to calc MsiDigitalSignatureEx\n");
+        return NULL; /* FAILED */
+    }
+    if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1)) {
+        printf("Unable to msi_handle_dir()\n");
+        return NULL; /* FAILED */
+    }
+    content = spc_indirect_data_content_get(hash, ctx);
+    return pkcs7_set_content(content);
 }
 
 /*
@@ -616,12 +645,8 @@ static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     /* squash the unused parameter warning */
     (void)outdata;
 
-    if (ctx->options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ctx, hash)) {
-        printf("Unable to calc MsiDigitalSignatureEx\n");
-        return NULL; /* FAILED */
-    }
-    if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1)) {
-        printf("Unable to msi_handle_dir()\n");
+    hash = msi_digest_calc_bio(ctx, hash);
+    if (!hash) {
         return NULL; /* FAILED */
     }
     /* Obtain a current signature from previously-signed file */
@@ -663,6 +688,7 @@ static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             return NULL; /* FAILED */
         }
     } else if (ctx->options->cmd == CMD_SIGN) {
+        ASN1_OCTET_STRING *content;
         /* Create a new PKCS#7 signature */
         p7 = pkcs7_create(ctx);
         if (!p7) {
@@ -674,10 +700,18 @@ static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             PKCS7_free(p7);
             return NULL; /* FAILED */
         }
-        if (!sign_spc_indirect_data_content(p7, hash, ctx)) {
-            printf("Failed to set signed content\n");
+        content = spc_indirect_data_content_get(hash, ctx);
+        if (!content) {
+            printf("Failed to get spcIndirectDataContent\n");
             return NULL; /* FAILED */
         }
+        if (!sign_spc_indirect_data_content(p7, content)) {
+            printf("Failed to set signed content\n");
+            PKCS7_free(p7);
+            ASN1_OCTET_STRING_free(content);
+            return NULL; /* FAILED */
+        }
+        ASN1_OCTET_STRING_free(content);
    }
     if (ctx->options->nest)
         ctx->options->prevsig = cursig;
@@ -2174,6 +2208,25 @@ out:
     OPENSSL_free(out.fat);
     OPENSSL_free(out.minifat);
     return ret;
+}
+
+/*
+ * Compute a message digest value of a signed or unsigned MSI file.
+ * [in] ctx: structure holds input and output data
+ * [in] md: message digest algorithm
+ * [returns] calculated message digest BIO
+ */
+static BIO *msi_digest_calc_bio(FILE_FORMAT_CTX *ctx, BIO *hash)
+{
+    if (ctx->options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ctx, hash)) {
+        printf("Unable to calc MsiDigitalSignatureEx\n");
+        return NULL; /* FAILED */
+    }
+    if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1)) {
+        printf("Unable to msi_handle_dir()\n");
+        return NULL; /* FAILED */
+    }
+    return hash;
 }
 
 /*

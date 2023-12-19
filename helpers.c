@@ -10,7 +10,7 @@
 
 /* Prototypes */
 static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx);
-static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CTX *ctx);
+static int spc_indirect_data_content_create(u_char **blob, int *len, FILE_FORMAT_CTX *ctx);
 static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 static STACK_OF(X509) *X509_chain_get_sorted(FILE_FORMAT_CTX *ctx, int signer);
@@ -138,8 +138,6 @@ PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
     PKCS7 *p7 = NULL;
     uint32_t filesize;
     char *indata;
-    BIO *bio;
-    const char pemhdr[] = "-----BEGIN PKCS7-----";
 
     filesize = get_file_size(ctx->options->sigfile);
     if (!filesize) {
@@ -150,16 +148,56 @@ PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
         printf("Failed to open file: %s\n", ctx->options->sigfile);
         return NULL; /* FAILED */
     }
-    bio = BIO_new_mem_buf(indata, (int)filesize);
-    if (filesize >= sizeof pemhdr && !memcmp(indata, pemhdr, sizeof pemhdr - 1)) {
+    p7 = pkcs7_read_data(indata, filesize);
+    unmap_file(indata, filesize);
+    return p7;
+}
+
+/*
+ * Retrieve a decoded PKCS#7 structure
+ * [in] data: encoded PEM or DER data
+ * [in] size: data size
+ * [returns] pointer to PKCS#7 structure
+ */
+PKCS7 *pkcs7_read_data(char *data, uint32_t size)
+{
+    PKCS7 *p7 = NULL;
+    BIO *bio;
+    const char pemhdr[] = "-----BEGIN PKCS7-----";
+
+    bio = BIO_new_mem_buf(data, (int)size);
+    if (size >= sizeof pemhdr && !memcmp(data, pemhdr, sizeof pemhdr - 1)) {
         /* PEM format */
         p7 = PEM_read_bio_PKCS7(bio, NULL, NULL, NULL);
     } else { /* DER format */
         p7 = d2i_PKCS7_bio(bio, NULL);
     }
     BIO_free_all(bio);
-    unmap_file(indata, filesize);
     return p7;
+}
+
+/*
+ * [in, out] ctx: structure holds input and output data
+ * [out] outdata: BIO outdata file
+ * [in] p7: PKCS#7 signature
+ * [returns] 1 on error or 0 on success
+ */
+int data_write_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
+{
+    int ret;
+
+    (void)BIO_reset(outdata);
+    if (ctx->options->output_pkcs7) {
+        /* PEM format */
+        ret = !PEM_write_bio_PKCS7(outdata, p7);
+    } else {
+        /* default DER format */
+        ret = !i2d_PKCS7_bio(outdata, p7);
+    }
+    if (ret) {
+        printf("Unable to write pkcs7 object\n");
+    }
+    return ret;
 }
 
 /*
@@ -262,47 +300,32 @@ int add_indirect_data_object(PKCS7 *p7)
  * The spcIndirectDataContent structure is used in Authenticode signatures
  * to store the digest and other attributes of the signed file.
  * [in, out] p7: new PKCS#7 signature
- * [in] hash: message digest BIO
- * [in] ctx: structure holds input and output data
+ * [in] content: spcIndirectDataContent
  * [returns] 0 on error or 1 on success
  */
-int sign_spc_indirect_data_content(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx)
+int sign_spc_indirect_data_content(PKCS7 *p7, ASN1_OCTET_STRING *content)
 {
-    u_char mdbuf[5 * EVP_MAX_MD_SIZE + 24];
-    int mdlen, seqhdrlen, hashlen;
+    int len, hdrlen;
+    const u_char *data;
     PKCS7 *td7;
-    u_char *p = NULL;
-    int len = 0;
-    u_char *buf;
 
-    hashlen = ctx->format->hash_length_get(ctx);
-    if (hashlen > EVP_MAX_MD_SIZE) {
-        /* APPX format specific */
-        mdlen = BIO_read(hash, (char*)mdbuf, hashlen);
-    } else {
-        mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
-    }
-    if (!spc_indirect_data_content_get(&p, &len, ctx))
-        return 0; /* FAILED */
+    data = ASN1_STRING_get0_data(content);
+    len = ASN1_STRING_length(content);
+    hdrlen = ASN1_object_size(0, len, V_ASN1_SEQUENCE) - len;
 
-    buf = OPENSSL_malloc(SIZE_64K);
-    memcpy(buf, p, (size_t)len);
-    OPENSSL_free(p);
-    memcpy(buf + len, mdbuf, (size_t)mdlen);
-    seqhdrlen = asn1_simple_hdr_len(buf, len);
-
-    if (!pkcs7_sign_content(p7, buf + seqhdrlen, len - seqhdrlen + mdlen)) {
-        printf("Failed to sign content\n");
-        OPENSSL_free(buf);
+    if (!pkcs7_sign_content(p7, data + hdrlen, len - hdrlen)) {
+        printf("Failed to sign spcIndirectDataContent\n");
         return 0; /* FAILED */
     }
     td7 = PKCS7_new();
+    if (!td7) {
+        return 0; /* FAILED */
+    }
     td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
     td7->d.other = ASN1_TYPE_new();
     td7->d.other->type = V_ASN1_SEQUENCE;
     td7->d.other->value.sequence = ASN1_STRING_new();
-    ASN1_STRING_set(td7->d.other->value.sequence, buf, len + mdlen);
-    OPENSSL_free(buf);
+    ASN1_STRING_set(td7->d.other->value.sequence, data, len);
     if (!PKCS7_set_content(p7, td7)) {
         printf("PKCS7_set_content failed\n");
         PKCS7_free(td7);
@@ -312,12 +335,91 @@ int sign_spc_indirect_data_content(PKCS7 *p7, BIO *hash, FILE_FORMAT_CTX *ctx)
 }
 
 /*
+ * Add encapsulated content to signed PKCS7 structure.
+ * [in] content: spcIndirectDataContent
+ * [returns] new PKCS#7 signature with encapsulated content
+ */
+PKCS7 *pkcs7_set_content(ASN1_OCTET_STRING *content)
+{
+    PKCS7 *p7, *td7;
+
+    p7 = PKCS7_new();
+    if (!p7) {
+        return NULL; /* FAILED */
+    }
+    if (!PKCS7_set_type(p7, NID_pkcs7_signed)) {
+        PKCS7_free(p7);
+        return NULL; /* FAILED */
+    }
+    if (!PKCS7_content_new(p7, NID_pkcs7_data)) {
+        PKCS7_free(p7);
+        return NULL; /* FAILED */
+    }
+    td7 = PKCS7_new();
+    if (!td7) {
+        PKCS7_free(p7);
+        return NULL; /* FAILED */
+    }
+    td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+    td7->d.other = ASN1_TYPE_new();
+    td7->d.other->type = V_ASN1_SEQUENCE;
+    td7->d.other->value.sequence = content;
+    if (!PKCS7_set_content(p7, td7)) {
+        PKCS7_free(td7);
+        PKCS7_free(p7);
+        return NULL; /* FAILED */
+    }
+    return p7;
+}
+
+/*
+ * Return spcIndirectDataContent.
+ * [in] hash: message digest BIO
+ * [in] ctx: structure holds input and output data
+ * [returns] content
+ */
+ASN1_OCTET_STRING *spc_indirect_data_content_get(BIO *hash, FILE_FORMAT_CTX *ctx)
+{
+    ASN1_OCTET_STRING *content;
+    u_char mdbuf[5 * EVP_MAX_MD_SIZE + 24];
+    int mdlen, hashlen, len = 0;
+    u_char *data, *p = NULL;
+
+    content = ASN1_OCTET_STRING_new();
+    if (!content) {
+        return NULL; /* FAILED */
+    }
+    if (!spc_indirect_data_content_create(&p, &len, ctx)) {
+        ASN1_OCTET_STRING_free(content);
+        return NULL; /* FAILED */
+    }
+    hashlen = ctx->format->hash_length_get(ctx);
+    if (hashlen > EVP_MAX_MD_SIZE) {
+        /* APPX format specific */
+        mdlen = BIO_read(hash, (char*)mdbuf, hashlen);
+    } else {
+        mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
+    }
+    data = OPENSSL_malloc((size_t)(len + mdlen));
+    memcpy(data, p, (size_t)len);
+    OPENSSL_free(p);
+    memcpy(data + len, mdbuf, (size_t)mdlen);
+    if (!ASN1_OCTET_STRING_set(content, data, len + mdlen)) {
+        ASN1_OCTET_STRING_free(content);
+        OPENSSL_free(data);
+        return NULL; /* FAILED */
+    }
+    OPENSSL_free(data);
+    return content;
+}
+
+/*
  * Signs the data and place the signature in p7
  * [in, out] p7: new PKCS#7 signature
  * [in] data: content data
  * [in] len: content length
  */
-int pkcs7_sign_content(PKCS7 *p7, u_char *data, int len)
+int pkcs7_sign_content(PKCS7 *p7, const u_char *data, int len)
 {
     BIO *p7bio;
 
@@ -473,23 +575,6 @@ SpcLink *spc_link_obsolete_get(void)
 }
 
 /*
- * Retrieve a decoded PKCS#7 structure
- * [in] indata: mapped file
- * [in] sigpos: signature data offset
- * [in] siglen: signature data size
- * [returns] pointer to PKCS#7 structure
- */
-PKCS7 *pkcs7_get(char *indata, uint32_t sigpos, uint32_t siglen)
-{
-    PKCS7 *p7 = NULL;
-    const u_char *blob;
-
-    blob = (u_char *)indata + sigpos;
-    p7 = d2i_PKCS7(NULL, &blob, siglen);
-    return p7;
-}
-
-/*
  * [in] mdbuf, cmdbuf: message digests
  * [in] mdtype: message digest algorithm type
  * [returns] 0 on error or 1 on success
@@ -539,7 +624,7 @@ static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx)
  * [in] ctx: FILE_FORMAT_CTX structure
  * [returns] 0 on error or 1 on success
  */
-static int spc_indirect_data_content_get(u_char **blob, int *len, FILE_FORMAT_CTX *ctx)
+static int spc_indirect_data_content_create(u_char **blob, int *len, FILE_FORMAT_CTX *ctx)
 {
     u_char *p = NULL;
     int mdtype, hashlen, l = 0;
