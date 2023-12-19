@@ -128,6 +128,7 @@ enable_testing()
 set(extensions_all "exe" "ex_" "msi" "256appx" "512appx" "cat")
 set(extensions_nocat "exe" "ex_" "msi" "256appx" "512appx")
 set(extensions_nocatappx "exe" "ex_" "msi")
+set(formats "pem" "der")
 
 # Test 1
 # Print osslsigncode version
@@ -277,7 +278,6 @@ endforeach(ext ${extensions_all})
 # Tests 43-52
 # Attach signature in PEM or DER format
 # Unsupported command for CAT files
-set(formats "pem" "der")
 foreach(ext ${extensions_nocat})
     foreach(format ${formats})
         add_test(
@@ -611,6 +611,93 @@ if(Python3_FOUND OR server_error)
             WILL_FAIL TRUE)
     endforeach(ext ${extensions_all})
 
+# Tests 185-234
+# Unsupported command "extract-data" for CAT files
+foreach(ext ${extensions_nocat})
+# Extract PKCS#7 with data content, output in PEM format
+    add_test(
+        NAME data_${ext}_pem
+        COMMAND osslsigncode "extract-data"
+        "-ph"
+        "-h" "sha384"
+        "-add-msi-dse"
+        "-pem" # PEM format
+        "-in" "${FILES}/unsigned.${ext}"
+        "-out" "${FILES}/data_${ext}.pem")
+
+# Extract PKCS#7 with data content, output in default DER format
+    add_test(
+        NAME data_${ext}_der
+        COMMAND osslsigncode "extract-data"
+        "-ph"
+        "-h" "sha384"
+        "-add-msi-dse"
+        "-in" "${FILES}/unsigned.${ext}"
+        "-out" "${FILES}/data_${ext}.der")
+
+# Sign a data content, output in DER format
+    foreach(data_format ${formats})
+    add_test(
+        NAME signed_data_${ext}_${data_format}
+        COMMAND osslsigncode "sign"
+        "-pkcs12" "${CERTS}/cert.p12"
+        "-readpass" "${CERTS}/password.txt"
+        "-ac" "${CERTS}/crosscert.pem"
+        "-time" "1556668800" # Signing time: May  1 00:00:00 2019 GMT
+        "-add-msi-dse"
+        "-comm"
+        "-ph"
+        "-jp" "low"
+        "-h" "sha384" "-i" "https://www.osslsigncode.com/"
+        "-n" "osslsigncode"
+        "-in" "${FILES}/data_${ext}.${data_format}"
+        "-out" "${FILES}/signed_data_${ext}_${data_format}.der")
+    endforeach(data_format ${formats})
+
+# Sign a data content, output in PEM format
+    foreach(data_format ${formats})
+    add_test(
+        NAME signed_data_pem_${ext}_${data_format}
+        COMMAND osslsigncode "sign"
+        "-pkcs12" "${CERTS}/cert.p12"
+        "-readpass" "${CERTS}/password.txt"
+        "-ac" "${CERTS}/crosscert.pem"
+        "-time" "1556668800" # Signing time: May  1 00:00:00 2019 GMT
+        "-add-msi-dse"
+        "-comm"
+        "-ph"
+        "-jp" "low"
+        "-h" "sha384" "-i" "https://www.osslsigncode.com/"
+        "-n" "osslsigncode"
+        "-pem" # PEM format
+        "-in" "${FILES}/data_${ext}.${data_format}"
+        "-out" "${FILES}/signed_data_${ext}_${data_format}.pem")
+    endforeach(data_format ${formats})
+
+# Attach signature in PEM or DER format
+    foreach(data_format ${formats})
+        foreach(format ${formats})
+        add_test(
+            NAME attached_data_${ext}_${data_format}_${format}
+            COMMAND osslsigncode "attach-signature"
+            # sign options
+            "-time" "1567296000" # Signing and signature verification time: Sep  1 00:00:00 2019 GMT
+            "-require-leaf-hash" "SHA256:${leafhash}"
+            "-add-msi-dse"
+            "-h" "sha384"
+            "-sigin" "${FILES}/signed_data_${ext}_${data_format}.${format}"
+            "-in" "${FILES}/unsigned.${ext}"
+            "-out" "${FILES}/attached_data_${data_format}_${format}.${ext}"
+            # verify options
+            "-CAfile" "${CERTS}/CACert.pem"
+            "-CRLfile" "${CERTS}/CACertCRL.pem")
+        set_tests_properties(
+            attached_${format}_${ext}
+            PROPERTIES
+            DEPENDS "signed_data_${ext}_${data_format}:data_${ext}_${format}")
+        endforeach(format ${formats})
+    endforeach(data_format ${formats})
+endforeach(ext ${extensions_nocat})
 
 ### Cleanup ###
 # Stop HTTP server
@@ -642,6 +729,11 @@ foreach(ext ${extensions_all})
         set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/${ext}.${format}")
         set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/${ext}.${format}")
         set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/attached_${format}.${ext}")
+        set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/data_${ext}.${format}")
+        foreach(data_format ${formats})
+            set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/signed_data_${ext}_${format}.${data_format}")
+            set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/attached_data_${data_format}_${format}.${ext}")
+        endforeach(data_format ${formats})
     endforeach(format ${formats})
     set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/jreq.tsq")
     set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/jresp.tsr")
