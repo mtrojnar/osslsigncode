@@ -646,14 +646,11 @@ static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize)
     siglen = GET_UINT32_LE(indata + header_size + 152 + pe32plus * 16 + 4);
     /* Since fix for MS Bulletin MS12-024 we can really assume
        that signature should be last part of file */
-    if ((sigpos > 0 && sigpos < filesize && sigpos + siglen != filesize)
-        || (sigpos >= filesize)) {
-        printf("Corrupt PE file - current signature not at the end of the file\n");
-        return NULL; /* FAILED */
-    }
-    if ((sigpos > 0 && siglen == 0) || (sigpos == 0 && siglen > 0)) {
-        printf("Corrupt signature\n");
-        return NULL; /* FAILED */
+    if ((sigpos != 0 || siglen != 0) &&
+            (sigpos == 0 || siglen == 0 || sigpos >= filesize || sigpos + siglen != filesize)) {
+        printf("Ignoring PE signature not at the end of the file\n");
+        sigpos = 0;
+        siglen = 0;
     }
     pe_ctx = OPENSSL_zalloc(sizeof(PE_CTX));
     pe_ctx->header_size = header_size;
