@@ -95,8 +95,8 @@ class HttpServerThread():
         self.server_thread = None
 
     def start_server(self) -> (int):
-        """Starting HTTP server on localhost and a random available port for binding"""
-        self.server = ThreadingHTTPServer(('localhost', 19254), RequestHandler)
+        """Starting HTTP server on 127.0.0.1 and a random available port for binding"""
+        self.server = ThreadingHTTPServer(('127.0.0.1', 19254), RequestHandler)
         self.server_thread = threading.Thread(target=self.server.serve_forever)
         self.server_thread.start()
         hostname, port = self.server.server_address[:2]

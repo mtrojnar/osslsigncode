@@ -15,7 +15,7 @@ def main() -> None:
     try:
         with open(PORT_LOG, 'r') as file:
             port = file.readline()
-        conn = http.client.HTTPConnection('localhost', port)
+        conn = http.client.HTTPConnection('127.0.0.1', port)
         conn.request('POST', '/kill_server')
         response = conn.getresponse()
         print("HTTP status code:", response.getcode(), end=', ')
