@@ -276,7 +276,7 @@ foreach(ext ${extensions_all})
 endforeach(ext ${extensions_all})
 
 # Tests 43-52
-# Attach signature in PEM or DER format
+# Attach a nested signature in PEM or DER format
 # Unsupported command for CAT files
 foreach(ext ${extensions_nocat})
     foreach(format ${formats})
@@ -284,7 +284,6 @@ foreach(ext ${extensions_nocat})
             NAME attached_${format}_${ext}
             COMMAND osslsigncode "attach-signature"
             # sign options
-            "-time" "1567296000" # Signing and signature verification time: Sep  1 00:00:00 2019 GMT
             "-require-leaf-hash" "SHA256:${leafhash}"
             "-add-msi-dse"
             "-h" "sha512"
@@ -293,6 +292,7 @@ foreach(ext ${extensions_nocat})
             "-in" "${FILES}/signed.${ext}"
             "-out" "${FILES}/attached_${format}.${ext}"
             # verify options
+            "-time" "1567296000" # Signature verification time: Sep  1 00:00:00 2019 GMT
             "-CAfile" "${CERTS}/CACert.pem"
             "-CRLfile" "${CERTS}/CACertCRL.pem")
         set_tests_properties(
@@ -323,6 +323,7 @@ endforeach(ext ${extensions_all})
 
 # Tests 59-64
 # Add the new nested signature instead of replacing the first one
+# APPX files do not support nesting (multiple signature)
 foreach(ext ${extensions_all})
     add_test(
         NAME nested_${ext}
@@ -332,7 +333,7 @@ foreach(ext ${extensions_all})
         "-key" "${CERTS}/key.der"
         "-pass" "passme"
         "-ac" "${CERTS}/crosscert.pem"
-        "-time" "1556668800" # Signing time: May  1 00:00:00 2019 GMT
+        "-time" "1556755200" # Signing time: May  2 00:00:00 2019 GMT
         "-add-msi-dse"
         "-comm"
         "-ph"
@@ -681,7 +682,6 @@ foreach(ext ${extensions_nocat})
             NAME attached_data_${ext}_${data_format}_${format}
             COMMAND osslsigncode "attach-signature"
             # sign options
-            "-time" "1567296000" # Signing and signature verification time: Sep  1 00:00:00 2019 GMT
             "-require-leaf-hash" "SHA256:${leafhash}"
             "-add-msi-dse"
             "-h" "sha384"
@@ -689,6 +689,7 @@ foreach(ext ${extensions_nocat})
             "-in" "${FILES}/unsigned.${ext}"
             "-out" "${FILES}/attached_data_${data_format}_${format}.${ext}"
             # verify options
+            "-time" "1567296000" # Signature verification time: Sep  1 00:00:00 2019 GMT
             "-CAfile" "${CERTS}/CACert.pem"
             "-CRLfile" "${CERTS}/CACertCRL.pem")
         set_tests_properties(
