@@ -9,7 +9,6 @@
 uint32_t get_file_size(const char *infile);
 char *map_file(const char *infile, const size_t size);
 void unmap_file(char *indata, const size_t size);
-int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
 PKCS7 *pkcs7_read_data(char *indata, uint32_t size);
 int data_write_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);

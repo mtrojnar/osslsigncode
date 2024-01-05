@@ -1085,8 +1085,6 @@ static int cursig_set_nested(PKCS7 *cursig, PKCS7 *p7, FILE_FORMAT_CTX *ctx)
         return 0; /* FAILED */
     i2d_PKCS7(p7, &p);
     p -= len;
-
-    pkcs7_signer_info_add_signing_time(si, ctx);
     if (!X509_attribute_chain_append_signature(&(si->unauth_attr), p, len)) {
         OPENSSL_free(p);
         return 0; /* FAILED */

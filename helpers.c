@@ -12,6 +12,7 @@
 static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx);
 static int spc_indirect_data_content_create(u_char **blob, int *len, FILE_FORMAT_CTX *ctx);
 static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
+static int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 static STACK_OF(X509) *X509_chain_get_sorted(FILE_FORMAT_CTX *ctx, int signer);
 static int X509_compare(const X509 *const *a, const X509 *const *b);
@@ -106,24 +107,6 @@ void unmap_file(char *indata, const size_t size)
 #else
     munmap(indata, size);
 #endif /* WIN32 */
-}
-
-/*
- * Add a custom, non-trusted time to the PKCS7 structure to prevent OpenSSL
- * adding the _current_ time. This allows to create a deterministic signature
- * when no trusted timestamp server was specified, making osslsigncode
- * behaviour closer to signtool.exe (which doesn't include any non-trusted
- * time in this case.)
- * [in, out] si: PKCS7_SIGNER_INFO structure
- * [in] ctx: structure holds input and output data
- * [returns] 0 on error or 1 on success
- */
-int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
-{
-    if (ctx->options->time == INVALID_TIME) /* -time option was not specified */
-        return 1; /* SUCCESS */
-    return PKCS7_add_signed_attribute(si, NID_pkcs9_signingTime, V_ASN1_UTCTIME,
-        ASN1_TIME_adj(NULL, ctx->options->time, 0, 0));
 }
 
 /*
@@ -243,7 +226,9 @@ PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx)
             return NULL; /* FAILED */
         }
     }
-    pkcs7_signer_info_add_signing_time(si, ctx);
+    if (!pkcs7_signer_info_add_signing_time(si, ctx)) {
+        return NULL; /* FAILED */
+    }
     if (!pkcs7_signer_info_add_purpose(si, ctx)) {
         return NULL; /* FAILED */
     }
@@ -687,6 +672,24 @@ static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FO
     SpcSpOpusInfo_free(opus);
     return PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_SP_OPUS_INFO_OBJID),
             V_ASN1_SEQUENCE, astr);
+}
+
+/*
+ * Add a custom, non-trusted time to the PKCS7 structure to prevent OpenSSL
+ * adding the _current_ time. This allows to create a deterministic signature
+ * when no trusted timestamp server was specified, making osslsigncode
+ * behaviour closer to signtool.exe (which doesn't include any non-trusted
+ * time in this case.)
+ * [in, out] si: PKCS7_SIGNER_INFO structure
+ * [in] ctx: structure holds input and output data
+ * [returns] 0 on error or 1 on success
+ */
+static int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
+{
+    if (ctx->options->time == INVALID_TIME) /* -time option was not specified */
+        return 1; /* SUCCESS */
+    return PKCS7_add_signed_attribute(si, NID_pkcs9_signingTime, V_ASN1_UTCTIME,
+        ASN1_TIME_adj(NULL, ctx->options->time, 0, 0));
 }
 
 /*
