@@ -416,6 +416,7 @@ int pkcs7_sign_content(PKCS7 *p7, const u_char *data, int len)
     (void)BIO_flush(p7bio);
     if (!PKCS7_dataFinal(p7, p7bio)) {
         printf("PKCS7_dataFinal failed\n");
+        BIO_free_all(p7bio);
         return 0; /* FAILED */
     }
     BIO_free_all(p7bio);
