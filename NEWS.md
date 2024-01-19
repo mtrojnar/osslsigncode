@@ -2,6 +2,11 @@
 
 ### 2.8 (unreleased)
 
+- fixed setting unauthenticated attributes (Countersignature,
+  Unauthenticated Data Blob) in a nested signature
+- added support for verifying the signature at a certain position ("-index" option)
+- added support for adding unauthenticated attributes to the signature
+  at a certain position ("-index" option)
 - added CAT file verification and listing each member of the CAT file
   by using the "-verbose" option
 - added new command "extract-data" to extract a PKCS#7 data content to be signed
