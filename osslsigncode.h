@@ -266,6 +266,7 @@ typedef struct {
 #endif /* ENABLE_CURL */
     int addBlob;
     int nest;
+    int index;
     int ignore_timestamp;
     int verbose;
     int add_msi_dse;

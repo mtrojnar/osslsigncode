@@ -197,12 +197,17 @@ ASN1_SEQUENCE(MsCtlContent) = {
 IMPLEMENT_ASN1_FUNCTIONS(MsCtlContent)
 
 /* Prototypes */
-static int signature_list_append_pkcs7(STACK_OF(PKCS7) **signatures, PKCS7 *p7, int allownest);
 static time_t time_t_get_asn1_time(const ASN1_TIME *s);
 static time_t time_t_get_si_time(PKCS7_SIGNER_INFO *si);
+static ASN1_UTCTIME *asn1_time_get_si_time(PKCS7_SIGNER_INFO *si);
 static time_t time_t_get_cms_time(CMS_ContentInfo *cms);
 static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
     PKCS7_SIGNER_INFO *countersignature);
+static int cursig_set_nested(PKCS7 *cursig, PKCS7 *p7);
+static int X509_attribute_chain_append_object(STACK_OF(X509_ATTRIBUTE) **unauth_attr,
+    u_char *p, int len, const char *oid);
+static STACK_OF(PKCS7) *signature_list_create(PKCS7 *p7);
+static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b);
 
 #ifdef ENABLE_CURL
 
@@ -374,7 +379,7 @@ static BIO *bio_encode_authenticode_request(PKCS7 *p7)
 
 /*
  * If successful the RFC 3161 timestamp will be written into
- * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1].
+ * the PKCS7 SignerInfo structure as an unauthenticated attribute - cont[1].
  * [in, out] p7: new PKCS#7 signature
  * [in] response: RFC3161 response
  * [in] verbose: additional output mode
@@ -383,7 +388,6 @@ static BIO *bio_encode_authenticode_request(PKCS7 *p7)
 static int attach_rfc3161_response(PKCS7 *p7, TS_RESP *response, int verbose)
 {
     PKCS7_SIGNER_INFO *si;
-    STACK_OF(X509_ATTRIBUTE) *attrs;
     TS_STATUS_INFO *status;
     PKCS7 *token;
     u_char *p;
@@ -420,19 +424,17 @@ static int attach_rfc3161_response(PKCS7 *p7, TS_RESP *response, int verbose)
     }
     len = i2d_PKCS7(token, &p);
     p -= len;
-
-    attrs = sk_X509_ATTRIBUTE_new_null();
-    attrs = X509at_add1_attr_by_txt(&attrs, SPC_RFC3161_OBJID, V_ASN1_SET, p, len);
+    if (!X509_attribute_chain_append_object(&(si->unauth_attr), p, len, SPC_RFC3161_OBJID)) {
+        OPENSSL_free(p);
+        return 1; /* FAILED */
+    }
     OPENSSL_free(p);
-
-    PKCS7_set_attributes(si, attrs);
-    sk_X509_ATTRIBUTE_pop_free(attrs, X509_ATTRIBUTE_free);
     return 0; /* OK */
 }
 
 /*
  * If successful the authenticode timestamp will be written into
- * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1]:
+ * the PKCS7 SignerInfo structure as an unauthenticated attribute - cont[1]:
  * p7->d.sign->signer_info->unauth_attr
  * [in, out] p7: new PKCS#7 signature
  * [in] resp: PKCS#7 authenticode response
@@ -442,7 +444,6 @@ static int attach_rfc3161_response(PKCS7 *p7, TS_RESP *response, int verbose)
 static int attach_authenticode_response(PKCS7 *p7, PKCS7 *resp, int verbose)
 {
     PKCS7_SIGNER_INFO *info, *si;
-    STACK_OF(X509_ATTRIBUTE) *attrs;
     u_char *p;
     int len, i;
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
@@ -474,23 +475,17 @@ static int attach_authenticode_response(PKCS7 *p7, PKCS7 *resp, int verbose)
     len = i2d_PKCS7_SIGNER_INFO(info, &p);
     p -= len;
     PKCS7_free(resp);
-
-    attrs = sk_X509_ATTRIBUTE_new_null();
-    attrs = X509at_add1_attr_by_txt(&attrs, PKCS9_COUNTER_SIGNATURE, V_ASN1_SET, p, len);
-    OPENSSL_free(p);
-
     signer_info = PKCS7_get_signer_info(p7);
     if (!signer_info)
         return 1; /* FAILED */
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si)
         return 1; /* FAILED */
-    /*
-     * PKCS7_set_attributes() frees up all elements of si->unauth_attr
-     * and sets there a copy of attrs so overrides the previous timestamp
-     */
-    PKCS7_set_attributes(si, attrs);
-    sk_X509_ATTRIBUTE_pop_free(attrs, X509_ATTRIBUTE_free);
+    if (!X509_attribute_chain_append_object(&(si->unauth_attr), p, len, PKCS9_COUNTER_SIGNATURE)) {
+        OPENSSL_free(p);
+        return 1; /* FAILED */
+    }
+    OPENSSL_free(p);
     return 0; /* OK */
 }
 
@@ -952,7 +947,7 @@ out:
 
 /*
  * If successful the unauthenticated blob will be written into
- * the PKCS7 SignerInfo structure as an unauthorized attribute - cont[1]:
+ * the PKCS7 SignerInfo structure as an unauthenticated attribute - cont[1]:
  * p7->d.sign->signer_info->unauth_attr
  * [in, out] p7: new PKCS#7 signature
  * [returns] 0 on error or 1 on success
@@ -961,16 +956,17 @@ static int add_unauthenticated_blob(PKCS7 *p7)
 {
     PKCS7_SIGNER_INFO *si;
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
-    ASN1_STRING *astr;
     u_char *p = NULL;
-    int nid, len = 1024+4;
+    int len = 1024+4;
     /* Length data for ASN1 attribute plus prefix */
     const char prefix[] = "\x0c\x82\x04\x00---BEGIN_BLOB---";
     const char postfix[] = "---END_BLOB---";
 
     signer_info = PKCS7_get_signer_info(p7);
-    if (!signer_info)
+    if (!signer_info) {
+        printf("Failed to obtain PKCS#7 signer info list\n");
         return 0; /* FAILED */
+    }
     si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
     if (!si)
         return 0; /* FAILED */
@@ -979,16 +975,16 @@ static int add_unauthenticated_blob(PKCS7 *p7)
     memset(p, 0, (size_t)len);
     memcpy(p, prefix, sizeof prefix);
     memcpy(p + len - sizeof postfix, postfix, sizeof postfix);
-    astr = ASN1_STRING_new();
-    ASN1_STRING_set(astr, p, len);
-    nid = OBJ_create(SPC_UNAUTHENTICATED_DATA_BLOB_OBJID,
-        "unauthenticatedData", "unauthenticatedData");
-    PKCS7_add_attribute(si, nid, V_ASN1_SEQUENCE, astr);
+    if (!X509_attribute_chain_append_object(&(si->unauth_attr), p, len, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
+        OPENSSL_free(p);
+        return 1; /* FAILED */
+    }
     OPENSSL_free(p);
     return 1; /* OK */
 }
 
 /*
+ * Add unauthenticated attributes (Countersignature, Unauthenticated Data Blob)
  * [in, out] p7: new PKCS#7 signature
  * [in, out] ctx: structure holds input and output data
  * [returns] 1 on error or 0 on success
@@ -1020,52 +1016,83 @@ static int add_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * [in, out] unauth_attr: unauthorized attributes list
- * [in] p: PKCS#7 data
- * [in] len: PKCS#7 data length
- * [returns] 0 on error or 1 on success
+ * Add unauthenticated attributes to the signature at a certain position
+ * [in, out] p7: new PKCS#7 signature
+ * [in, out] ctx: structure holds input and output data
+ * [in] index: signature index
+ * [returns] 1 on error or 0 on success
  */
-static int X509_attribute_chain_append_signature(STACK_OF(X509_ATTRIBUTE) **unauth_attr, u_char *p, int len)
+static int add_nested_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx, int index)
 {
-    X509_ATTRIBUTE *attr = NULL;
-    int nid = OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID);
+    STACK_OF(PKCS7) *signatures;
+    STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
+    STACK_OF(X509_ATTRIBUTE) *unauth_attr;
+    PKCS7_SIGNER_INFO *si;
+    PKCS7 *p7_tmp;
+    int i;
 
-    if (*unauth_attr == NULL) {
-        if ((*unauth_attr = sk_X509_ATTRIBUTE_new_null()) == NULL)
-            return 0; /* FAILED */
-    } else {
-        /* try to find SPC_NESTED_SIGNATURE_OBJID attribute */
-        int i;
-        for (i = 0; i < sk_X509_ATTRIBUTE_num(*unauth_attr); i++) {
-            attr = sk_X509_ATTRIBUTE_value(*unauth_attr, i);
+    p7_tmp = PKCS7_dup(p7);
+    if (!p7_tmp) {
+        return 1; /* FAILED */
+    }
+    signer_info = PKCS7_get_signer_info(p7);
+    if (!signer_info) {
+        printf("Failed to obtain PKCS#7 signer info list\n");
+        return 1; /* FAILED */
+    }
+    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
+    if (!si) {
+        printf("Failed to obtain PKCS#7 signer info value\n");
+        return 1; /* FAILED */
+    }
+    unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
+    if (unauth_attr) {
+        /* try to find and remove SPC_NESTED_SIGNATURE_OBJID attribute */
+        for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
+            int nid = OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID);
+            X509_ATTRIBUTE *attr = X509at_get_attr(unauth_attr, i);
             if (OBJ_obj2nid(X509_ATTRIBUTE_get0_object(attr)) == nid) {
-                /* append p to the V_ASN1_SEQUENCE */
-                if (!X509_ATTRIBUTE_set1_data(attr, V_ASN1_SEQUENCE, p, len))
-                    return 0; /* FAILED */
-                return 1; /* OK */
+                X509at_delete_attr(unauth_attr, i);
+                X509_ATTRIBUTE_free(attr);
+                break;
             }
         }
     }
-    /* create new unauthorized SPC_NESTED_SIGNATURE_OBJID attribute */
-    attr = X509_ATTRIBUTE_create_by_NID(NULL, nid, V_ASN1_SEQUENCE, p, len);
-    if (!attr)
-        return 0; /* FAILED */
-    if (!sk_X509_ATTRIBUTE_push(*unauth_attr, attr)) {
-        X509_ATTRIBUTE_free(attr);
-        return 0; /* FAILED */
+    signatures = signature_list_create(p7_tmp);
+    if (!signatures) {
+        printf("Failed to create signature list\n\n");
+        return 1; /* FAILED */
     }
-    return 1; /* OK */
+    /* append all nested signature to the primary signature */
+    for (i=1; i<sk_PKCS7_num(signatures); i++) {
+        PKCS7 *sig = sk_PKCS7_value(signatures, i);
+        if (i == index) {
+            printf("Use the signature at index %d\n", i);
+            if (add_timestamp_and_blob(sig, ctx)) {
+                printf("Unable to set unauthenticated attributes\n");
+                sk_PKCS7_pop_free(signatures, PKCS7_free);
+                return 1; /* FAILED */
+            }
+        }
+        if (!cursig_set_nested(p7, sig)) {
+            printf("Unable to append the nested signature to the current signature\n");
+            sk_PKCS7_pop_free(signatures, PKCS7_free);
+            return 1; /* FAILED */
+        }
+    }
+    sk_PKCS7_pop_free(signatures, PKCS7_free);
+    return 0; /* OK */
 }
 
 /*
  * Add the new signature to the current signature as a nested signature:
- * new unauthorized SPC_NESTED_SIGNATURE_OBJID attribute
+ * new unauthenticated SPC_NESTED_SIGNATURE_OBJID attribute
  * [out] cursig: current PKCS#7 signature
  * [in] p7: new PKCS#7 signature
  * [in] ctx: structure holds input and output data
  * [returns] 0 on error or 1 on success
  */
-static int cursig_set_nested(PKCS7 *cursig, PKCS7 *p7, FILE_FORMAT_CTX *ctx)
+static int cursig_set_nested(PKCS7 *cursig, PKCS7 *p7)
 {
     u_char *p = NULL;
     int len = 0;
@@ -1085,13 +1112,69 @@ static int cursig_set_nested(PKCS7 *cursig, PKCS7 *p7, FILE_FORMAT_CTX *ctx)
         return 0; /* FAILED */
     i2d_PKCS7(p7, &p);
     p -= len;
-    if (!X509_attribute_chain_append_signature(&(si->unauth_attr), p, len)) {
+    if (!X509_attribute_chain_append_object(&(si->unauth_attr), p, len, SPC_NESTED_SIGNATURE_OBJID)) {
         OPENSSL_free(p);
         return 0; /* FAILED */
     }
     OPENSSL_free(p);
     return 1; /* OK */
 }
+
+/*
+ * [in, out] unauth_attr: unauthenticated attributes list
+ * [in] p: PKCS#7 data
+ * [in] len: PKCS#7 data length
+ * [in] oid: unauthenticated attribute oid: SPC_UNAUTHENTICATED_DATA_BLOB_OBJID,
+        PKCS9_COUNTER_SIGNATURE, SPC_RFC3161_OBJID or SPC_NESTED_SIGNATURE_OBJID
+ * [returns] 0 on error or 1 on success
+ */
+static int X509_attribute_chain_append_object(STACK_OF(X509_ATTRIBUTE) **unauth_attr,
+    u_char *p, int len, const char *oid)
+{
+    X509_ATTRIBUTE *attr = NULL;
+    ASN1_OBJECT *object;
+    char object_txt[128];
+
+    if (*unauth_attr == NULL) {
+        if ((*unauth_attr = sk_X509_ATTRIBUTE_new_null()) == NULL)
+            return 0; /* FAILED */
+    } else {
+        /* try to find indicated unauthenticated attribute */
+        int i;
+        for (i = 0; i < X509at_get_attr_count(*unauth_attr); i++) {
+            attr = X509at_get_attr(*unauth_attr, i);
+            object = X509_ATTRIBUTE_get0_object(attr);
+            if (object == NULL)
+                continue;
+            object_txt[0] = 0x00;
+            OBJ_obj2txt(object_txt, sizeof object_txt, object, 1);
+            if ((!strcmp(oid, PKCS9_COUNTER_SIGNATURE) || !strcmp(oid, SPC_RFC3161_OBJID))
+                && (!strcmp(object_txt, PKCS9_COUNTER_SIGNATURE) || !strcmp(object_txt, SPC_RFC3161_OBJID))) {
+                /* free up countersignature/timestamp in unauthenticated attributes
+                 * to override the previous timestamp */
+                X509at_delete_attr(*unauth_attr, i);
+                X509_ATTRIBUTE_free(attr);
+                continue;
+            }
+            if (!strcmp(oid, object_txt)) {
+                /* append p to the V_ASN1_SEQUENCE */
+                if (!X509_ATTRIBUTE_set1_data(attr, V_ASN1_SEQUENCE, p, len))
+                    return 0; /* FAILED */
+                return 1; /* OK */
+            }
+        }
+    }
+    /* create new unauthenticated attribute */
+    attr = X509_ATTRIBUTE_create_by_NID(NULL, OBJ_txt2nid(oid), V_ASN1_SEQUENCE, p, len);
+    if (!attr)
+        return 0; /* FAILED */
+    if (!sk_X509_ATTRIBUTE_push(*unauth_attr, attr)) {
+        X509_ATTRIBUTE_free(attr);
+        return 0; /* FAILED */
+    }
+    return 1; /* OK */
+}
+
 
 /*
  * [in, out] store: structure for holding information about X.509 certificates and CRLs
@@ -2150,38 +2233,41 @@ static time_t time_t_get_asn1_time(const ASN1_TIME *s)
 }
 
 /*
- * Get signing time from authorized attributes
+ * Get signing time from authenticated attributes
  * [in] si: PKCS7_SIGNER_INFO structure
  * [returns] INVALID_TIME on error or time_t on success
  */
 static time_t time_t_get_si_time(PKCS7_SIGNER_INFO *si)
 {
+    ASN1_UTCTIME *time = asn1_time_get_si_time(si);
+
+    if (time == NULL)
+        return INVALID_TIME; /* FAILED */
+    return time_t_get_asn1_time(time);
+}
+
+/*
+ * Get signing time from authenticated attributes
+ * [in] si: PKCS7_SIGNER_INFO structure
+ * [returns] NULL on error or ASN1_UTCTIME on success
+ */
+static ASN1_UTCTIME *asn1_time_get_si_time(PKCS7_SIGNER_INFO *si)
+{
     STACK_OF(X509_ATTRIBUTE) *auth_attr;
-    X509_ATTRIBUTE *attr;
-    ASN1_OBJECT *object;
-    ASN1_UTCTIME *time = NULL;
-    time_t posix_time;
-    char object_txt[128];
-    int i;
 
     auth_attr = PKCS7_get_signed_attributes(si);  /* cont[0] */
-    if (auth_attr)
+    if (auth_attr) {
+        int i;
         for (i=0; i<X509at_get_attr_count(auth_attr); i++) {
-            attr = X509at_get_attr(auth_attr, i);
-            object = X509_ATTRIBUTE_get0_object(attr);
-            if (object == NULL)
-                return INVALID_TIME; /* FAILED */
-            object_txt[0] = 0x00;
-            OBJ_obj2txt(object_txt, sizeof object_txt, object, 1);
-            if (!strcmp(object_txt, PKCS9_SIGNING_TIME)) {
+            int nid = OBJ_txt2nid(PKCS9_SIGNING_TIME);
+            X509_ATTRIBUTE *attr = X509at_get_attr(auth_attr, i);
+            if (OBJ_obj2nid(X509_ATTRIBUTE_get0_object(attr)) == nid) {
                 /* PKCS#9 signing time - Policy OID: 1.2.840.113549.1.9.5 */
-                time = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
-                if (time == NULL)
-                    return INVALID_TIME; /* FAILED */
+                return X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL);
             }
         }
-    posix_time = time_t_get_asn1_time(time);
-    return posix_time;
+    }
+    return NULL;
 }
 
 /*
@@ -2450,77 +2536,14 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 }
 
 /*
- * Create new SIGNATURE structure, get signed and unsigned attributes,
- * insert this signature to signature list
- * [in, out] signatures: signature list
- * [in] p7: PKCS#7 signature
- * [in] allownest: allow nested signature switch
- * [returns] 0 on error or 1 on success
- */
-static int signature_list_append_pkcs7(STACK_OF(PKCS7) **signatures, PKCS7 *p7, int allownest)
-{
-    PKCS7_SIGNER_INFO *si;
-    STACK_OF(X509_ATTRIBUTE) *unauth_attr;
-    STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
-
-    if (!signer_info) {
-        printf("Failed to obtain PKCS#7 signer info list\n");
-        return 0; /* FAILED */
-    }
-    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
-    if (!si) {
-        printf("Failed to obtain PKCS#7 signer info value\n");
-        return 0; /* FAILED */
-    }
-    unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
-    if (unauth_attr) {
-        /* find Nested Signature - Policy OID: 1.3.6.1.4.1.311.2.4.1 */
-        int i;
-        for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
-            ASN1_STRING *value;
-            char object_txt[128];
-            const u_char *data;
-            int j;
-            X509_ATTRIBUTE *attr = X509at_get_attr(unauth_attr, i);
-            ASN1_OBJECT *object = X509_ATTRIBUTE_get0_object(attr);
-            if (object == NULL)
-                continue;
-            object_txt[0] = 0x00;
-            OBJ_obj2txt(object_txt, sizeof object_txt, object, 1);
-            if (allownest && !strcmp(object_txt, SPC_NESTED_SIGNATURE_OBJID)) {
-                PKCS7 *nested;
-                for (j=0; j<X509_ATTRIBUTE_count(attr); j++) {
-                    value = X509_ATTRIBUTE_get0_data(attr, j, V_ASN1_SEQUENCE, NULL);
-                    if (value == NULL)
-                        continue;
-                    data = ASN1_STRING_get0_data(value);
-                    nested = d2i_PKCS7(NULL, &data, ASN1_STRING_length(value));
-                    if (nested) {
-                        if (!signature_list_append_pkcs7(signatures, nested, 0)) {
-                            printf("Failed to append signature list\n\n");
-                            PKCS7_free(nested);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if (!sk_PKCS7_unshift(*signatures, p7)) {
-        printf("Failed to insert signature\n");
-        return 0; /* FAILED */
-    }
-    return 1; /* OK */
-}
-
-/*
  * [in] ctx: structure holds input and output data
  * [returns] 1 on error or 0 on success
  */
 static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
 {
-    int i, ret = 1;
+    int i, ret = 1, verified = 0;
     PKCS7 *p7;
-    STACK_OF(PKCS7) *signatures;
+    STACK_OF(PKCS7) *signatures = NULL;
     int detached = options->catalog ? 1 : 0;
 
     if (!ctx->format->check_file) {
@@ -2564,34 +2587,148 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
         printf("Unable to extract existing signature\n");
         return 1; /* FAILED */
     }
-    signatures = sk_PKCS7_new_null();
-    if (!signature_list_append_pkcs7(&signatures, p7, 1)) {
+    signatures = signature_list_create(p7);
+    if (!signatures) {
         printf("Failed to create signature list\n\n");
         sk_PKCS7_pop_free(signatures, PKCS7_free);
         return 1; /* FAILED */
     }
     for (i = 0; i < sk_PKCS7_num(signatures); i++) {
-        PKCS7 *sig = sk_PKCS7_value(signatures, i);
+        PKCS7 *sig;
+
+        if (options->index >= 0 && options->index != i) {
+            printf("Warning: signature verification at index %d was skipped\n", i);
+            continue;
+        }
+        sig = sk_PKCS7_value(signatures, i);
         if (detached) {
             if (!verify_content(ctx, sig)) {
                 ret &= verify_signature(ctx, sig);
             } else {
                 printf("Catalog verification: failed\n\n");
             }
+            verified++;
         } else if (ctx->format->verify_digests) {
             printf("\nSignature Index: %d %s\n\n", i, i==0 ? " (Primary Signature)" : "");
             if (ctx->format->verify_digests(ctx, sig)) {
                 ret &= verify_signature(ctx, sig);
             }
+            verified++;
         } else {
             printf("Unsupported method: verify_digests\n");
             return 1; /* FAILED */
         }
     }
-    printf("Number of verified signatures: %d\n", i);
+    printf("Number of verified signatures: %d\n", verified);
     sk_PKCS7_pop_free(signatures, PKCS7_free);
     if (ret)
         ERR_print_errors_fp(stdout);
+    return ret;
+}
+
+/*
+ * Insert PKCS#7 signature and its nested signatures to the sorted signature list
+ * [in] p7: PKCS#7 signature
+ * [returns] sorted signature list
+ */
+static STACK_OF(PKCS7) *signature_list_create(PKCS7 *p7)
+{
+    STACK_OF(PKCS7) *signatures = NULL;
+    PKCS7_SIGNER_INFO *si;
+    STACK_OF(X509_ATTRIBUTE) *unauth_attr;
+    STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
+
+    if (!signer_info) {
+        printf("Failed to obtain PKCS#7 signer info list\n");
+        return 0; /* FAILED */
+    }
+    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
+    if (!si) {
+        printf("Failed to obtain PKCS#7 signer info value\n");
+        return 0; /* FAILED */
+    }
+    signatures = sk_PKCS7_new(PKCS7_compare);
+    if (!signatures) {
+        printf("Failed to create new signature list\n");
+        return 0; /* FAILED */
+    }
+    /* Unauthenticated attributes */
+    unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
+    if (unauth_attr) {
+        /* find Nested Signature - Policy OID: 1.3.6.1.4.1.311.2.4.1 */
+        int i;
+        for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
+            int nid = OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID);
+            X509_ATTRIBUTE *attr = X509at_get_attr(unauth_attr, i);
+            if (OBJ_obj2nid(X509_ATTRIBUTE_get0_object(attr)) == nid) {
+                int j;
+
+                for (j=0; j<X509_ATTRIBUTE_count(attr); j++) {
+                    ASN1_STRING *value;
+                    const u_char *data;
+                    PKCS7 *nested;
+
+                    value = X509_ATTRIBUTE_get0_data(attr, j, V_ASN1_SEQUENCE, NULL);
+                    if (value == NULL)
+                        continue;
+                    data = ASN1_STRING_get0_data(value);
+                    nested = d2i_PKCS7(NULL, &data, ASN1_STRING_length(value));
+                    if (nested && !sk_PKCS7_push(signatures, nested)) {
+                        printf("Failed to add nested signature\n");
+                        PKCS7_free(nested);
+                        sk_PKCS7_pop_free(signatures, PKCS7_free);
+                        return NULL; /* FAILED */
+                    }
+                }
+            }
+        }
+    }
+    /* sort signatures in ascending order by signing time */
+    sk_PKCS7_sort(signatures);
+    /* insert the prime signature at index 0 */
+    sk_PKCS7_unshift(signatures, p7);
+    return signatures; /* OK */
+}
+
+/*
+ * PKCS#7 signature comparison function
+ * [in] a_ptr, b_ptr: pointers to PKCS#7 signatures
+ * [returns] signatures order
+ */
+static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b)
+{
+    PKCS7 *p7_a = NULL, *p7_b = NULL;
+    STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
+    PKCS7_SIGNER_INFO *si;
+    const ASN1_TIME *time_a, *time_b;
+    int ret = 0;
+
+    p7_a = PKCS7_dup(*a);
+    if (!p7_a)
+        goto out;
+    signer_info = PKCS7_get_signer_info(p7_a);
+    if (!signer_info)
+        goto out;
+    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
+    if (!si)
+        goto out;
+    time_a = asn1_time_get_si_time(si);
+
+    p7_b = PKCS7_dup(*b);
+    if (!p7_b)
+        goto out;
+    signer_info = PKCS7_get_signer_info(p7_b);
+    if (!signer_info)
+        goto out;
+    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
+    if (!si)
+        goto out;
+    time_b = asn1_time_get_si_time(si);
+    ret = ASN1_TIME_compare(time_b, time_a);
+
+out:
+    PKCS7_free(p7_a);
+    PKCS7_free(p7_b);
     return ret;
 }
 
@@ -2732,6 +2869,7 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -TSA-certs <TSA-certfile> ] [ -TSA-key <TSA-keyfile> ]\n", "");
         printf("%12s[ -TSA-time <unix-time> ]\n", "");
         printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
+        printf("%12s[ -index <index> ]\n", "");
         printf("%12s[ -verbose ]\n", "");
         printf("%12s[ -add-msi-dse ]\n", "");
         printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
@@ -2762,6 +2900,7 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -CRLfile <infile> ]\n", "");
         printf("%12s[ -TSA-CAfile <infile> ]\n", "");
         printf("%12s[ -TSA-CRLfile <infile> ]\n", "");
+        printf("%12s[ -index <index> ]\n", "");
         printf("%12s[ -ignore-timestamp ]\n", "");
         printf("%12s[ -time <unix-time> ]\n", "");
         printf("%12s[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n", "");
@@ -2799,6 +2938,7 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_i[] = {"sign", NULL};
     const char *cmds_in[] = {"add", "attach-signature", "extract-signature",
         "remove-signature", "sign", "extract-data", "verify", NULL};
+    const char *cmds_index[] = {"add", "verify", NULL};
     const char *cmds_jp[] = {"sign", NULL};
     const char *cmds_key[] = {"sign", NULL};
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
@@ -2919,6 +3059,8 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%-24s= specifies a URL for expanded description of the signed content\n", "-i");
     if (on_list(cmd, cmds_in))
         printf("%-24s= input file\n", "-in");
+    if (on_list(cmd, cmds_index))
+        printf("%-24s= use the signature at a certain position\n", "-index");
     if (on_list(cmd, cmds_jp)) {
         printf("%-24s= low | medium | high\n", "-jp");
         printf("%26slevels of permissions in Microsoft Internet Explorer 4.x for CAB files\n", "");
@@ -3668,6 +3810,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
     options->md = EVP_sha256();
     options->time = INVALID_TIME;
     options->jp = -1;
+    options->index = -1;
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
 /* Use legacy PKCS#12 container with RC2-40-CBC private key and certificate encryption algorithm */
     options->legacy = 1;
@@ -3849,6 +3992,17 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
             options->addBlob = 1;
         } else if ((cmd == CMD_SIGN || cmd == CMD_ATTACH) && !strcmp(*argv, "-nest")) {
             options->nest = 1;
+        } else if ((cmd == CMD_ADD || cmd == CMD_VERIFY) && !strcmp(*argv, "-index")) {
+            char *tmp_str;
+            if (--argc < 1 ) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            options->index = (int)strtol(*(++argv), &tmp_str, 10);
+            if (tmp_str == *argv ||  *tmp_str != '\0' || errno == ERANGE) { /* not a number */
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
         } else if ((cmd == CMD_VERIFY) && !strcmp(*argv, "-ignore-timestamp")) {
             options->ignore_timestamp = 1;
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_VERIFY) && !strcmp(*argv, "-verbose")) {
@@ -4035,9 +4189,12 @@ int main(int argc, char **argv)
 
     /* create some MS Authenticode OIDS we need later on */
     if (!OBJ_create(SPC_STATEMENT_TYPE_OBJID, NULL, NULL)
+        /* PKCS9_COUNTER_SIGNATURE exists as OpenSSL OBJ_pkcs9_countersignature */
         || !OBJ_create(MS_JAVA_SOMETHING, NULL, NULL)
         || !OBJ_create(SPC_SP_OPUS_INFO_OBJID, NULL, NULL)
-        || !OBJ_create(SPC_NESTED_SIGNATURE_OBJID, NULL, NULL))
+        || !OBJ_create(SPC_NESTED_SIGNATURE_OBJID, NULL, NULL)
+        || !OBJ_create(SPC_UNAUTHENTICATED_DATA_BLOB_OBJID, NULL, NULL)
+        || !OBJ_create(SPC_RFC3161_OBJID, NULL, NULL))
         DO_EXIT_0("Failed to create objects\n");
 
     /* commands and options initialization */
@@ -4127,13 +4284,19 @@ int main(int argc, char **argv)
     } else {
         DO_EXIT_0("Unsupported command\n");
     }
-    ret = add_timestamp_and_blob(p7, ctx);
+    if (options.index > 0) {
+        /* CMD_ADD or CMD_VERIFY */
+        ret = add_nested_timestamp_and_blob(p7, ctx, options.index);
+    } else {
+        ret = add_timestamp_and_blob(p7, ctx);
+    }
     if (ret) {
         PKCS7_free(p7);
         DO_EXIT_0("Unable to set unauthenticated attributes\n");
     }
     if (options.prevsig) {
-        if (!cursig_set_nested(options.prevsig, p7, ctx))
+        /* CMD_SIGN or CMD_ATTACH */
+        if (!cursig_set_nested(options.prevsig, p7))
             DO_EXIT_0("Unable to append the nested signature to the current signature\n");
         PKCS7_free(p7);
         p7 = options.prevsig;
