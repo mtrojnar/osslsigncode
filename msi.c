@@ -676,6 +676,12 @@ static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             PKCS7_free(cursig);
             return NULL; /* FAILED */
         }
+        ctx->options->nested_number = nested_signatures_number_get(cursig);
+        if (ctx->options->nested_number < 0) {
+            printf("Unable to get number of nested signatures\n");
+            PKCS7_free(cursig);
+            return NULL; /* FAILED */
+        }
         if (ctx->options->cmd == CMD_ADD)
             p7 = cursig;
     }

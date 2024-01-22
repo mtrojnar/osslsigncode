@@ -14,6 +14,7 @@ static int spc_indirect_data_content_create(u_char **blob, int *len, FILE_FORMAT
 static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 static int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
+static int pkcs7_signer_info_add_sequence_number(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 static STACK_OF(X509) *X509_chain_get_sorted(FILE_FORMAT_CTX *ctx, int signer);
 static int X509_compare(const X509 *const *a, const X509 *const *b);
 
@@ -235,6 +236,10 @@ PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx)
     if ((ctx->options->desc || ctx->options->url) &&
             !pkcs7_signer_info_add_spc_sp_opus_info(si, ctx)) {
         printf("Couldn't allocate memory for opus info\n");
+        return NULL; /* FAILED */
+    }
+    if ((ctx->options->nested_number >= 0) &&
+            !pkcs7_signer_info_add_sequence_number(si, ctx)) {
         return NULL; /* FAILED */
     }
     /* create X509 chain sorted in ascending order by their DER encoding */
@@ -720,6 +725,25 @@ static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX 
 }
 
 /*
+ * [in, out] si: PKCS7_SIGNER_INFO structure
+ * [in] ctx: structure holds input and output data
+ * [returns] 0 on error or 1 on success
+ */
+static int pkcs7_signer_info_add_sequence_number(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
+{
+    ASN1_INTEGER *number = ASN1_INTEGER_new();
+
+    if (!number)
+        return 0; /* FAILED */
+    if (!ASN1_INTEGER_set(number, ctx->options->nested_number + 1)) {
+        ASN1_INTEGER_free(number);
+        return 0; /* FAILED */
+    }
+    return PKCS7_add_signed_attribute(si, OBJ_txt2nid(PKCS9_SEQUENCE_NUMBER),
+            V_ASN1_INTEGER, number);
+}
+
+/*
  * Create certificate chain sorted in ascending order by their DER encoding.
  * [in] ctx: structure holds input and output data
  * [in] signer: signer's certificate number in the certificate chain
@@ -792,6 +816,37 @@ static int X509_compare(const X509 *const *a, const X509 *const *b)
     if (ret == 0 && a_len != b_len) /* identical up to the length of the shorter DER */
         ret = a_len < b_len ? -1 : 1; /* shorter is smaller */
     return ret;
+}
+
+/*
+ * Return the number of objects in SPC_NESTED_SIGNATURE_OBJID attribute
+ * [in] p7: existing PKCS#7 signature (Primary Signature)
+ * [returns] -1 on error or the number of nested signatures
+ */
+int nested_signatures_number_get(PKCS7 *p7)
+{
+    int i;
+    STACK_OF(X509_ATTRIBUTE) *unauth_attr;
+    PKCS7_SIGNER_INFO *si;
+    STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
+
+    if (!signer_info)
+        return -1; /* FAILED */
+    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
+    if (!si)
+        return -1; /* FAILED */
+    unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
+    if (!unauth_attr)
+        return 0; /* OK, no unauthenticated attributes */
+    for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
+        int nid = OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID);
+        X509_ATTRIBUTE *attr = X509at_get_attr(unauth_attr, i);
+        if (OBJ_obj2nid(X509_ATTRIBUTE_get0_object(attr)) == nid) {
+            /* Nested Signature - Policy OID: 1.3.6.1.4.1.311.2.4.1 */
+            return X509_ATTRIBUTE_count(attr);
+        }
+    }
+    return 0; /* OK, no SPC_NESTED_SIGNATURE_OBJID attribute */
 }
 
 /*

@@ -187,6 +187,7 @@
 #define PKCS9_MESSAGE_DIGEST         "1.2.840.113549.1.9.4"
 #define PKCS9_SIGNING_TIME           "1.2.840.113549.1.9.5"
 #define PKCS9_COUNTER_SIGNATURE      "1.2.840.113549.1.9.6"
+#define PKCS9_SEQUENCE_NUMBER        "1.2.840.113549.1.9.25.4"
 
 /* WIN_CERTIFICATE structure declared in Wintrust.h */
 #define WIN_CERT_REVISION_2_0           0x0200
@@ -291,6 +292,7 @@ typedef struct {
     char *tsa_certfile;
     char *tsa_keyfile;
     time_t tsa_time;
+    int nested_number;
 } GLOBAL_OPTIONS;
 
 /*
