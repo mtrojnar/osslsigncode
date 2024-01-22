@@ -26,6 +26,7 @@ MsCtlContent *ms_ctl_content_get(PKCS7 *p7);
 ASN1_TYPE *catalog_content_get(CatalogAuthAttr *attribute);
 SpcLink *spc_link_obsolete_get(void);
 int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype);
+int nested_signatures_number_get(PKCS7 *p7);
 
 /*
 Local Variables:

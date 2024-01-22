@@ -2037,8 +2037,10 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
     md_nid = OBJ_obj2nid(si->digest_alg->algorithm);
     printf("Message digest algorithm: %s\n",
         (md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2sn(md_nid));
+
+    /* Unauthenticated attributes */
+    auth_attr = PKCS7_get_signed_attributes(si); /* cont[0] */
     printf("\nAuthenticated attributes:\n");
-    auth_attr = PKCS7_get_signed_attributes(si);  /* cont[0] */
     for (i=0; i<X509at_get_attr_count(auth_attr); i++) {
         attr = X509at_get_attr(auth_attr, i);
         object = X509_ATTRIBUTE_get0_object(attr);
@@ -2121,7 +2123,13 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
                 printf("\tLow level of permissions in Microsoft Internet Explorer 4.x for CAB files\n");
             else
                 printf("\tUnrecognized level of permissions in Microsoft Internet Explorer 4.x for CAB files\n");
-            }
+        } else if (!strcmp(object_txt, PKCS9_SEQUENCE_NUMBER)) {
+            /* PKCS#9 sequence number - Policy OID: 1.2.840.113549.1.9.25.4 */
+            ASN1_INTEGER *number = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_INTEGER, NULL);
+            if (number == NULL)
+                continue;
+            printf("\tSequence number: %ld\n", ASN1_INTEGER_get(number));
+         }
     }
 
     /* Unauthenticated attributes */
@@ -2247,15 +2255,13 @@ static time_t time_t_get_si_time(PKCS7_SIGNER_INFO *si)
 }
 
 /*
- * Get signing time from authenticated attributes
+ * Get signing time from authenticated attributes cont[0]
  * [in] si: PKCS7_SIGNER_INFO structure
  * [returns] NULL on error or ASN1_UTCTIME on success
  */
 static ASN1_UTCTIME *asn1_time_get_si_time(PKCS7_SIGNER_INFO *si)
 {
-    STACK_OF(X509_ATTRIBUTE) *auth_attr;
-
-    auth_attr = PKCS7_get_signed_attributes(si);  /* cont[0] */
+    STACK_OF(X509_ATTRIBUTE) *auth_attr = PKCS7_get_signed_attributes(si);
     if (auth_attr) {
         int i;
         for (i=0; i<X509at_get_attr_count(auth_attr); i++) {
@@ -2268,6 +2274,28 @@ static ASN1_UTCTIME *asn1_time_get_si_time(PKCS7_SIGNER_INFO *si)
         }
     }
     return NULL;
+}
+
+/*
+ * Get sequence number from authenticated attributes cont[0]
+ * [in] si: PKCS7_SIGNER_INFO structure
+ * [returns] NULL on error or ASN1_UTCTIME on success
+ */
+static long get_sequence_number(PKCS7_SIGNER_INFO *si)
+{
+    STACK_OF(X509_ATTRIBUTE) *auth_attr = PKCS7_get_signed_attributes(si);
+    if (auth_attr) {
+        int i;
+        for (i=0; i<X509at_get_attr_count(auth_attr); i++) {
+            int nid = OBJ_txt2nid(PKCS9_SEQUENCE_NUMBER);
+            X509_ATTRIBUTE *attr = X509at_get_attr(auth_attr, i);
+            if (OBJ_obj2nid(X509_ATTRIBUTE_get0_object(attr)) == nid) {
+                /* PKCS#9 sequence number - Policy OID:1.2.840.113549.1.9.25.4 */
+                return ASN1_INTEGER_get(X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_INTEGER, NULL));
+            }
+        }
+    }
+    return 0;
 }
 
 /*
@@ -2701,6 +2729,7 @@ static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b)
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
     PKCS7_SIGNER_INFO *si;
     const ASN1_TIME *time_a, *time_b;
+    long index_a, index_b;
     int ret = 0;
 
     p7_a = PKCS7_dup(*a);
@@ -2713,6 +2742,7 @@ static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b)
     if (!si)
         goto out;
     time_a = asn1_time_get_si_time(si);
+    index_a = get_sequence_number(si);
 
     p7_b = PKCS7_dup(*b);
     if (!p7_b)
@@ -2724,7 +2754,12 @@ static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b)
     if (!si)
         goto out;
     time_b = asn1_time_get_si_time(si);
-    ret = ASN1_TIME_compare(time_b, time_a);
+    index_b = get_sequence_number(si);
+
+    if (index_a == index_b)
+        ret = ASN1_TIME_compare(time_a, time_b);
+    else
+        ret = (index_a == 0 || index_a < index_b) ? 1 : -1;
 
 out:
     PKCS7_free(p7_a);
@@ -3811,6 +3846,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
     options->time = INVALID_TIME;
     options->jp = -1;
     options->index = -1;
+    options->nested_number = -1;
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
 /* Use legacy PKCS#12 container with RC2-40-CBC private key and certificate encryption algorithm */
     options->legacy = 1;
@@ -4194,7 +4230,8 @@ int main(int argc, char **argv)
         || !OBJ_create(SPC_SP_OPUS_INFO_OBJID, NULL, NULL)
         || !OBJ_create(SPC_NESTED_SIGNATURE_OBJID, NULL, NULL)
         || !OBJ_create(SPC_UNAUTHENTICATED_DATA_BLOB_OBJID, NULL, NULL)
-        || !OBJ_create(SPC_RFC3161_OBJID, NULL, NULL))
+        || !OBJ_create(SPC_RFC3161_OBJID, NULL, NULL)
+        || !OBJ_create(PKCS9_SEQUENCE_NUMBER, NULL, NULL))
         DO_EXIT_0("Failed to create objects\n");
 
     /* commands and options initialization */

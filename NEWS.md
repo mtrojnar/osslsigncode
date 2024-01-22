@@ -10,6 +10,7 @@
 - added CAT file verification and listing each member of the CAT file
   by using the "-verbose" option
 - added new command "extract-data" to extract a PKCS#7 data content to be signed
+- PKCS9_SEQUENCE_NUMBER authenticated attribute support
 
 ### 2.7 (2023.09.19)
 
