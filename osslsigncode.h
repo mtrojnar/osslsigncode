@@ -288,7 +288,6 @@ typedef struct {
     STACK_OF(X509_CRL) *crls;
     cmd_type_t cmd;
     char *indata;
-    PKCS7 *prevsig;
     char *tsa_certfile;
     char *tsa_keyfile;
     time_t tsa_time;
@@ -504,8 +503,10 @@ struct file_format_st {
     int (*verify_digests) (FILE_FORMAT_CTX *ctx, PKCS7 *p7);
     int (*verify_indirect_data) (FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOptionalValue *obj);
     PKCS7 *(*pkcs7_extract) (FILE_FORMAT_CTX *ctx);
+    PKCS7 *(*pkcs7_extract_to_nest) (FILE_FORMAT_CTX *ctx);
     int (*remove_pkcs7) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
-    PKCS7 *(*pkcs7_prepare) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+    int (*process_data) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+    PKCS7 *(*pkcs7_signature_new) (FILE_FORMAT_CTX *ctx, BIO *hash);
     int (*append_pkcs7) (FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
     void (*update_data_size) (FILE_FORMAT_CTX *data, BIO *outdata, PKCS7 *p7);
     BIO *(*bio_free) (BIO *hash, BIO *outdata);

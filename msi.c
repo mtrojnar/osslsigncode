@@ -221,8 +221,10 @@ static int msi_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static u_char *msi_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *msi_pkcs7_extract(FILE_FORMAT_CTX *ctx);
+static PKCS7 *msi_pkcs7_extract_to_nest(FILE_FORMAT_CTX *ctx);
 static int msi_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
-static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static int msi_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static PKCS7 *msi_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static BIO *msi_bio_free(BIO *hash, BIO *outdata);
 static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
@@ -236,8 +238,10 @@ FILE_FORMAT file_format_msi = {
     .digest_calc = msi_digest_calc,
     .verify_digests = msi_verify_digests,
     .pkcs7_extract = msi_pkcs7_extract,
+    .pkcs7_extract_to_nest = msi_pkcs7_extract_to_nest,
     .remove_pkcs7 = msi_remove_pkcs7,
-    .pkcs7_prepare = msi_pkcs7_prepare,
+    .process_data = msi_process_data,
+    .pkcs7_signature_new = msi_pkcs7_signature_new,
     .append_pkcs7 = msi_append_pkcs7,
     .bio_free = msi_bio_free,
     .ctx_cleanup = msi_ctx_cleanup
@@ -245,8 +249,7 @@ FILE_FORMAT file_format_msi = {
 
 /* Prototypes */
 static MSI_CTX *msi_ctx_get(char *indata, uint32_t filesize);
-static PKCS7 *msi_pkcs7_get_digital_signature(FILE_FORMAT_CTX *ctx, MSI_ENTRY *ds,
-    char **p, uint32_t len);
+static PKCS7 *msi_pkcs7_get_digital_signature(FILE_FORMAT_CTX *ctx, MSI_ENTRY *ds);
 static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent);
 static int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint32_t len_msi,
         u_char *p_msiex, uint32_t len_msiex, BIO *outdata);
@@ -583,21 +586,46 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 static PKCS7 *msi_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
     PKCS7 *p7;
-    uint32_t len;
-    char *p;
-
     MSI_ENTRY *ds = msi_signatures_get(ctx->msi_ctx->dirent, NULL);
+
     if (!ds) {
+        printf("MSI file has no signature\n");
         return NULL; /* FAILED */
     }
-    len = GET_UINT32_LE(ds->size);
-    if (len == 0 || len >= MAXREGSECT) {
-        printf("Corrupted DigitalSignature stream length 0x%08X\n", len);
+    p7 = msi_pkcs7_get_digital_signature(ctx, ds);
+    if (!p7) {
+        printf("Unable to extract existing signature\n");
         return NULL; /* FAILED */
     }
-    p = OPENSSL_malloc((size_t)len);
-    p7 = msi_pkcs7_get_digital_signature(ctx, ds, &p, len);
-    OPENSSL_free(p);
+    return p7;
+}
+
+/*
+ * Extract existing signature in DER format.
+ * Perform a sanity check for the MsiDigitalSignatureEx section.
+ * [in] ctx: structure holds input and output data
+ * [returns] pointer to PKCS#7 structure
+ */
+static PKCS7 *msi_pkcs7_extract_to_nest(FILE_FORMAT_CTX *ctx)
+{
+    PKCS7 *p7;
+    MSI_ENTRY *ds, *dse = NULL;
+
+    ds = msi_signatures_get(ctx->msi_ctx->dirent, &dse);
+    if (!ds) {
+        printf("MSI file has no signature\n");
+        return NULL; /* FAILED */
+    }
+    p7 = msi_pkcs7_get_digital_signature(ctx, ds);
+    if (!p7) {
+        printf("Unable to extract existing signature\n");
+        return NULL; /* FAILED */
+    }
+    /* perform a sanity check for the MsiDigitalSignatureEx section */
+    if (!msi_check_MsiDigitalSignatureEx(ctx, dse, p7)) {
+        PKCS7_free(p7);
+        return NULL; /* FAILED */
+    }
     return p7;
 }
 
@@ -630,97 +658,56 @@ static int msi_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 }
 
 /*
- * Obtain an existing signature or create a new one.
+ * Calculate a hash (message digest) of data.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO
  * [out] outdata: outdata file BIO (unused)
- * [returns] pointer to PKCS#7 structure
+ * [returns] 1 on error or 0 on success
  */
-static PKCS7 *msi_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
+static int msi_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
-    PKCS7 *cursig = NULL, *p7 = NULL;
-    uint32_t len;
-    char *p;
-
     /* squash the unused parameter warning */
     (void)outdata;
 
     hash = msi_digest_calc_bio(ctx, hash);
     if (!hash) {
+        return 1; /* FAILED */
+    }
+    return 0; /* OK */
+}
+
+/*
+ * Create a new PKCS#7 signature.
+ * [in, out] ctx: structure holds input and output data
+ * [out] hash: message digest BIO
+ * [returns] pointer to PKCS#7 structure
+ */
+static PKCS7 *msi_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
+{
+    ASN1_OCTET_STRING *content;
+    PKCS7 *p7 = pkcs7_create(ctx);
+
+    if (!p7) {
+        printf("Creating a new signature failed\n");
         return NULL; /* FAILED */
     }
-    /* Obtain a current signature from previously-signed file */
-    if ((ctx->options->cmd == CMD_SIGN && ctx->options->nest)
-        || (ctx->options->cmd == CMD_ATTACH && ctx->options->nest)
-        || ctx->options->cmd == CMD_ADD) {
-        MSI_ENTRY *dse = NULL;
-        MSI_ENTRY *ds = msi_signatures_get(ctx->msi_ctx->dirent, &dse);
-        if (!ds) {
-            printf("MSI file has no signature\n\n");
-            return NULL; /* FAILED */
-        }
-        len = GET_UINT32_LE(ds->size);
-        if (len == 0 || len >= MAXREGSECT) {
-            printf("Corrupted DigitalSignature stream length 0x%08X\n", len);
-            return NULL; /* FAILED */
-        }
-        p = OPENSSL_malloc((size_t)len);
-        /* get current signature */
-        cursig = msi_pkcs7_get_digital_signature(ctx, ds, &p, len);
-        OPENSSL_free(p);
-        if (!cursig) {
-            printf("Unable to extract existing signature\n");
-            return NULL; /* FAILED */
-        }
-        if (!msi_check_MsiDigitalSignatureEx(ctx, dse, cursig)) {
-            PKCS7_free(cursig);
-            return NULL; /* FAILED */
-        }
-        ctx->options->nested_number = nested_signatures_number_get(cursig);
-        if (ctx->options->nested_number < 0) {
-            printf("Unable to get number of nested signatures\n");
-            PKCS7_free(cursig);
-            return NULL; /* FAILED */
-        }
-        if (ctx->options->cmd == CMD_ADD)
-            p7 = cursig;
+    if (!add_indirect_data_object(p7)) {
+        printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
+        PKCS7_free(p7);
+        return NULL; /* FAILED */
     }
-    if (ctx->options->cmd == CMD_ATTACH) {
-        /* Obtain an existing PKCS#7 signature */
-        p7 = pkcs7_get_sigfile(ctx);
-        if (!p7) {
-            printf("Unable to extract valid signature\n");
-            PKCS7_free(cursig);
-            return NULL; /* FAILED */
-        }
-    } else if (ctx->options->cmd == CMD_SIGN) {
-        ASN1_OCTET_STRING *content;
-        /* Create a new PKCS#7 signature */
-        p7 = pkcs7_create(ctx);
-        if (!p7) {
-            printf("Creating a new signature failed\n");
-            return NULL; /* FAILED */
-        }
-        if (!add_indirect_data_object(p7)) {
-            printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
-            PKCS7_free(p7);
-            return NULL; /* FAILED */
-        }
-        content = spc_indirect_data_content_get(hash, ctx);
-        if (!content) {
-            printf("Failed to get spcIndirectDataContent\n");
-            return NULL; /* FAILED */
-        }
-        if (!sign_spc_indirect_data_content(p7, content)) {
-            printf("Failed to set signed content\n");
-            PKCS7_free(p7);
-            ASN1_OCTET_STRING_free(content);
-            return NULL; /* FAILED */
-        }
+    content = spc_indirect_data_content_get(hash, ctx);
+    if (!content) {
+        printf("Failed to get spcIndirectDataContent\n");
+        return NULL; /* FAILED */
+    }
+    if (!sign_spc_indirect_data_content(p7, content)) {
+        printf("Failed to set signed content\n");
+        PKCS7_free(p7);
         ASN1_OCTET_STRING_free(content);
-   }
-    if (ctx->options->nest)
-        ctx->options->prevsig = cursig;
+        return NULL; /* FAILED */
+    }
+    ASN1_OCTET_STRING_free(content);
     return p7;
 }
 
@@ -829,18 +816,25 @@ static MSI_CTX *msi_ctx_get(char *indata, uint32_t filesize)
     return msi_ctx; /* OK */
 }
 
-static PKCS7 *msi_pkcs7_get_digital_signature(FILE_FORMAT_CTX *ctx, MSI_ENTRY *ds,
-    char **p, uint32_t len)
+static PKCS7 *msi_pkcs7_get_digital_signature(FILE_FORMAT_CTX *ctx, MSI_ENTRY *ds)
 {
     PKCS7 *p7 = NULL;
     const u_char *blob;
+    char *p;
+    uint32_t len = GET_UINT32_LE(ds->size);
 
-    if (!msi_file_read(ctx->msi_ctx->msi, ds, 0, *p, len)) {
+    if (len == 0 || len >= MAXREGSECT) {
+        printf("Corrupted DigitalSignature stream length 0x%08X\n", len);
+        return NULL; /* FAILED */
+    }
+    p = OPENSSL_malloc((size_t)len);
+    if (!msi_file_read(ctx->msi_ctx->msi, ds, 0, p, len)) {
         printf("DigitalSignature stream data error\n");
         return NULL;
     }
-    blob = (u_char *)*p;
+    blob = (u_char *)p;
     p7 = d2i_PKCS7(NULL, &blob, len);
+    OPENSSL_free(p);
     if (!p7) {
         printf("Failed to extract PKCS7 data\n");
         return NULL;

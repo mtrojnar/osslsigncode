@@ -204,10 +204,12 @@ static time_t time_t_get_cms_time(CMS_ContentInfo *cms);
 static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
     PKCS7_SIGNER_INFO *countersignature);
 static int cursig_set_nested(PKCS7 *cursig, PKCS7 *p7);
+static int nested_signatures_number_get(PKCS7 *p7);
 static int X509_attribute_chain_append_object(STACK_OF(X509_ATTRIBUTE) **unauth_attr,
     u_char *p, int len, const char *oid);
 static STACK_OF(PKCS7) *signature_list_create(PKCS7 *p7);
 static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b);
+static PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
 
 #ifdef ENABLE_CURL
 
@@ -1118,6 +1120,37 @@ static int cursig_set_nested(PKCS7 *cursig, PKCS7 *p7)
     }
     OPENSSL_free(p);
     return 1; /* OK */
+}
+
+/*
+ * Return the number of objects in SPC_NESTED_SIGNATURE_OBJID attribute
+ * [in] p7: existing PKCS#7 signature (Primary Signature)
+ * [returns] -1 on error or the number of nested signatures
+ */
+static int nested_signatures_number_get(PKCS7 *p7)
+{
+    int i;
+    STACK_OF(X509_ATTRIBUTE) *unauth_attr;
+    PKCS7_SIGNER_INFO *si;
+    STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
+
+    if (!signer_info)
+        return -1; /* FAILED */
+    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
+    if (!si)
+        return -1; /* FAILED */
+    unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
+    if (!unauth_attr)
+        return 0; /* OK, no unauthenticated attributes */
+    for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
+        int nid = OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID);
+        X509_ATTRIBUTE *attr = X509at_get_attr(unauth_attr, i);
+        if (OBJ_obj2nid(X509_ATTRIBUTE_get0_object(attr)) == nid) {
+            /* Nested Signature - Policy OID: 1.3.6.1.4.1.311.2.4.1 */
+            return X509_ATTRIBUTE_count(attr);
+        }
+    }
+    return 0; /* OK, no SPC_NESTED_SIGNATURE_OBJID attribute */
 }
 
 /*
@@ -2768,6 +2801,33 @@ out:
 }
 
 /*
+ * Retrieve a decoded PKCS#7 structure corresponding to the signature
+ * stored in the "sigin" file
+ * CMD_ATTACH command specific
+ * [in] ctx: structure holds input and output data
+ * [returns] pointer to PKCS#7 structure
+ */
+static PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
+{
+    PKCS7 *p7 = NULL;
+    uint32_t filesize;
+    char *indata;
+
+    filesize = get_file_size(ctx->options->sigfile);
+    if (!filesize) {
+        return NULL; /* FAILED */
+    }
+    indata = map_file(ctx->options->sigfile, filesize);
+    if (!indata) {
+        printf("Failed to open file: %s\n", ctx->options->sigfile);
+        return NULL; /* FAILED */
+    }
+    p7 = pkcs7_read_data(indata, filesize);
+    unmap_file(indata, filesize);
+    return p7;
+}
+
+/*
  * [in] options: structure holds the input data
  * [returns] 1 on error or 0 on success
  */
@@ -2826,9 +2886,6 @@ static void free_options(GLOBAL_OPTIONS *options)
     /* If X509 structure is NULL nothing is done */
     X509_free(options->cert);
     options->cert = NULL;
-    /* If PKCS7 structure is NULL nothing is done */
-    PKCS7_free(options->prevsig);
-    options->prevsig = NULL;
     /* Free up all elements of sk structure and sk itself */
     sk_X509_pop_free(options->certs, X509_free);
     options->certs = NULL;
@@ -4208,7 +4265,7 @@ int main(int argc, char **argv)
 {
     FILE_FORMAT_CTX *ctx = NULL;
     GLOBAL_OPTIONS options;
-    PKCS7 *p7 = NULL;
+    PKCS7 *p7 = NULL, *cursig = NULL;
     BIO *outdata = NULL;
     BIO *hash = NULL;
     int ret = -1;
@@ -4313,10 +4370,70 @@ int main(int argc, char **argv)
             ctx->format->update_data_size(ctx, outdata, NULL);
         }
         goto skip_signing;
-    } else if (ctx->format->pkcs7_prepare) {
-        p7 = ctx->format->pkcs7_prepare(ctx, hash, outdata);
+    } else if (options.cmd == CMD_ADD) {
+        if (!ctx->format->pkcs7_extract) {
+            DO_EXIT_0("Unsupported command: add\n");
+        }
+        /* Obtain a current signature from previously-signed file */
+        p7 = ctx->format->pkcs7_extract(ctx);
         if (!p7) {
-            DO_EXIT_0("Unable to prepare new signature\n");
+            DO_EXIT_0("Unable to extract existing signature\n");
+        }
+        if (ctx->format->process_data) {
+            ctx->format->process_data(ctx, hash, outdata);
+        }
+    } else if (options.cmd == CMD_ATTACH) {
+        if (options.nest) {
+            if (!ctx->format->pkcs7_extract_to_nest) {
+                printf("Warning: Unsupported nesting (multiple signature)\n");
+            } else {
+                /* Obtain a current signature from previously-signed file */
+                cursig = ctx->format->pkcs7_extract_to_nest(ctx);
+                if (!cursig) {
+                    DO_EXIT_0("Unable to extract existing signature\n");
+                }
+                options.nested_number = nested_signatures_number_get(cursig);
+                if (options.nested_number < 0) {
+                    PKCS7_free(cursig);
+                    DO_EXIT_0("Unable to get number of nested signatures\n");
+                }
+            }
+        }
+        /* Obtain an existing PKCS#7 signature from a "sigin" file */
+        p7 = pkcs7_get_sigfile(ctx);
+        if (!p7) {
+            printf("Unable to extract valid signature\n");
+            PKCS7_free(cursig);
+        }
+        if (ctx->format->process_data) {
+            ctx->format->process_data(ctx, hash, outdata);
+        }
+    } else if (options.cmd == CMD_SIGN) {
+        if (options.nest) {
+            if (!ctx->format->pkcs7_extract_to_nest) {
+                printf("Warning: Unsupported nesting (multiple signature)\n");
+            } else {
+                /* Obtain a current signature from previously-signed file */
+                cursig = ctx->format->pkcs7_extract_to_nest(ctx);
+                if (!cursig) {
+                    DO_EXIT_0("Unable to extract existing signature\n");
+                }
+                options.nested_number = nested_signatures_number_get(cursig);
+                if (options.nested_number < 0) {
+                    PKCS7_free(cursig);
+                    DO_EXIT_0("Unable to get number of nested signatures\n");
+                }
+            }
+        }
+        if (ctx->format->process_data) {
+            ctx->format->process_data(ctx, hash, outdata);
+        }
+        if (ctx->format->pkcs7_signature_new) {
+            /* Create a new PKCS#7 signature */
+            p7 = ctx->format->pkcs7_signature_new(ctx, hash);
+            if (!p7) {
+                DO_EXIT_0("Unable to prepare new signature\n");
+            }
         }
     } else {
         DO_EXIT_0("Unsupported command\n");
@@ -4331,13 +4448,13 @@ int main(int argc, char **argv)
         PKCS7_free(p7);
         DO_EXIT_0("Unable to set unauthenticated attributes\n");
     }
-    if (options.prevsig) {
+    if (cursig) {
         /* CMD_SIGN or CMD_ATTACH */
-        if (!cursig_set_nested(options.prevsig, p7))
+        if (!cursig_set_nested(cursig, p7))
             DO_EXIT_0("Unable to append the nested signature to the current signature\n");
         PKCS7_free(p7);
-        p7 = options.prevsig;
-        options.prevsig = NULL;
+        p7 = cursig;
+        cursig = NULL;
     }
     if (ctx->format->append_pkcs7) {
         ret = ctx->format->append_pkcs7(ctx, outdata, p7);
