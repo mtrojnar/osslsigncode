@@ -5,6 +5,7 @@
  * Author: Małgorzata Olszówka <Malgorzata.Olszowka@stunnel.org>
  *
  * Catalog files are a bit odd, in that they are only a PKCS7 blob.
+ * CAT files do not support nesting (multiple signature)
  */
 
 #include "osslsigncode.h"
@@ -38,7 +39,7 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
 static int cat_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static int cat_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *cat_pkcs7_extract(FILE_FORMAT_CTX *ctx);
-static PKCS7 *cat_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static PKCS7 *cat_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int cat_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static BIO *cat_bio_free(BIO *hash, BIO *outdata);
 static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
@@ -48,7 +49,7 @@ FILE_FORMAT file_format_cat = {
     .check_file = cat_check_file,
     .verify_digests = cat_verify_digests,
     .pkcs7_extract = cat_pkcs7_extract,
-    .pkcs7_prepare = cat_pkcs7_prepare,
+    .pkcs7_signature_new = cat_pkcs7_signature_new,
     .append_pkcs7 = cat_append_pkcs7,
     .bio_free = cat_bio_free,
     .ctx_cleanup = cat_ctx_cleanup,
@@ -108,9 +109,6 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
 
     if (options->cmd == CMD_VERIFY)
         printf("Warning: Use -catalog option to verify that a file, listed in catalog file, is signed\n");
-    if (options->nest)
-        /* I've not tried using set_nested_signature as signtool won't do this */
-        printf("Warning: CAT files do not support nesting (multiple signature)\n");
     if (options->jp >= 0)
         printf("Warning: -jp option is only valid for CAB files\n");
     if (options->pagehash == 1)
@@ -173,41 +171,33 @@ static PKCS7 *cat_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * Obtain an existing signature or create a new one.
+ * Create a new PKCS#7 signature.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO (unused)
- * [out] outdata: outdata file BIO (unused)
  * [returns] pointer to PKCS#7 structure
  */
-static PKCS7 *cat_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
+static PKCS7 *cat_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
 {
     PKCS7 *p7 = NULL;
 
     /* squash unused parameter warnings */
-    (void)outdata;
     (void)hash;
 
-    /* Obtain an existing signature */
-    if (ctx->options->cmd == CMD_ADD || ctx->options->cmd == CMD_ATTACH) {
-        p7 = cat_pkcs7_extract(ctx);
-    } else if (ctx->options->cmd == CMD_SIGN) {
-        /* Create a new signature */
-        p7 = pkcs7_create(ctx);
-        if (!p7) {
-            printf("Creating a new signature failed\n");
-            return NULL; /* FAILED */
-        }
-        if (!cat_add_ms_ctl_object(p7)) {
-            printf("Adding MS_CTL_OBJID failed\n");
-            PKCS7_free(p7);
-            return NULL; /* FAILED */
-        }
-        if (!cat_sign_ms_ctl_content(p7, ctx->cat_ctx->p7->d.sign->contents)) {
-            printf("Failed to set signed content\n");
-            PKCS7_free(p7);
-            return 0; /* FAILED */
-        }
-   }
+    p7 = pkcs7_create(ctx);
+    if (!p7) {
+        printf("Creating a new signature failed\n");
+        return NULL; /* FAILED */
+    }
+    if (!cat_add_ms_ctl_object(p7)) {
+        printf("Adding MS_CTL_OBJID failed\n");
+        PKCS7_free(p7);
+        return NULL; /* FAILED */
+    }
+    if (!cat_sign_ms_ctl_content(p7, ctx->cat_ctx->p7->d.sign->contents)) {
+        printf("Failed to set signed content\n");
+        PKCS7_free(p7);
+        return 0; /* FAILED */
+    }
     return p7; /* OK */
 }
 

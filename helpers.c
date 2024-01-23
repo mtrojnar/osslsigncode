@@ -111,33 +111,6 @@ void unmap_file(char *indata, const size_t size)
 }
 
 /*
- * Retrieve a decoded PKCS#7 structure corresponding to the signature
- * stored in the "sigin" file
- * CMD_ATTACH command specific
- * [in] ctx: structure holds input and output data
- * [returns] pointer to PKCS#7 structure
- */
-PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
-{
-    PKCS7 *p7 = NULL;
-    uint32_t filesize;
-    char *indata;
-
-    filesize = get_file_size(ctx->options->sigfile);
-    if (!filesize) {
-        return NULL; /* FAILED */
-    }
-    indata = map_file(ctx->options->sigfile, filesize);
-    if (!indata) {
-        printf("Failed to open file: %s\n", ctx->options->sigfile);
-        return NULL; /* FAILED */
-    }
-    p7 = pkcs7_read_data(indata, filesize);
-    unmap_file(indata, filesize);
-    return p7;
-}
-
-/*
  * Retrieve a decoded PKCS#7 structure
  * [in] data: encoded PEM or DER data
  * [in] size: data size
@@ -816,37 +789,6 @@ static int X509_compare(const X509 *const *a, const X509 *const *b)
     if (ret == 0 && a_len != b_len) /* identical up to the length of the shorter DER */
         ret = a_len < b_len ? -1 : 1; /* shorter is smaller */
     return ret;
-}
-
-/*
- * Return the number of objects in SPC_NESTED_SIGNATURE_OBJID attribute
- * [in] p7: existing PKCS#7 signature (Primary Signature)
- * [returns] -1 on error or the number of nested signatures
- */
-int nested_signatures_number_get(PKCS7 *p7)
-{
-    int i;
-    STACK_OF(X509_ATTRIBUTE) *unauth_attr;
-    PKCS7_SIGNER_INFO *si;
-    STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
-
-    if (!signer_info)
-        return -1; /* FAILED */
-    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
-    if (!si)
-        return -1; /* FAILED */
-    unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
-    if (!unauth_attr)
-        return 0; /* OK, no unauthenticated attributes */
-    for (i=0; i<X509at_get_attr_count(unauth_attr); i++) {
-        int nid = OBJ_txt2nid(SPC_NESTED_SIGNATURE_OBJID);
-        X509_ATTRIBUTE *attr = X509at_get_attr(unauth_attr, i);
-        if (OBJ_obj2nid(X509_ATTRIBUTE_get0_object(attr)) == nid) {
-            /* Nested Signature - Policy OID: 1.3.6.1.4.1.311.2.4.1 */
-            return X509_ATTRIBUTE_count(attr);
-        }
-    }
-    return 0; /* OK, no SPC_NESTED_SIGNATURE_OBJID attribute */
 }
 
 /*

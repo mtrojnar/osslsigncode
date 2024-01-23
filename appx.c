@@ -6,6 +6,7 @@
  * Copyright (C) 2023 Michał Trojnara <Michal.Trojnara@stunnel.org>
  * Author: Małgorzata Olszówka <Malgorzata.Olszowka@stunnel.org>
  *
+  * APPX files do not support nesting (multiple signature)
  */
 
 #define _FILE_OFFSET_BITS 64
@@ -241,7 +242,8 @@ static int appx_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static int appx_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx);
 static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
-static PKCS7 *appx_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static int appx_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static PKCS7 *appx_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static BIO *appx_bio_free(BIO *hash, BIO *outdata);
 static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
@@ -256,7 +258,8 @@ FILE_FORMAT file_format_appx = {
     .verify_digests = appx_verify_digests,
     .pkcs7_extract = appx_pkcs7_extract,
     .remove_pkcs7 = appx_remove_pkcs7,
-    .pkcs7_prepare = appx_pkcs7_prepare,
+    .process_data = appx_process_data,
+    .pkcs7_signature_new = appx_pkcs7_signature_new,
     .append_pkcs7 = appx_append_pkcs7,
     .bio_free = appx_bio_free,
     .ctx_cleanup = appx_ctx_cleanup,
@@ -348,9 +351,6 @@ static FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *ou
     if (zipGetCDEntryByName(zip, APPXBUNDLE_MANIFEST_FILENAME)) {
         ctx->appx_ctx->isBundle = 1;
     }
-    if (options->nest)
-        /* I've not tried using set_nested_signature as signtool won't do this */
-        printf("Warning: APPX files do not support nesting (multiple signature)\n");
     if (options->cmd == CMD_SIGN || options->cmd==CMD_ATTACH
         || options->cmd==CMD_ADD || options->cmd == CMD_EXTRACT_DATA) {
         printf("Warning: Ignore -h option, use the hash algorithm specified in AppxBlockMap.xml\n");
@@ -591,83 +591,78 @@ static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 }
 
 /*
- * Obtain an existing signature or create a new one.
- * APPX files do not support nesting.
+ * Modify specific type data.
  * [in, out] ctx: structure holds input and output data
  * [out] hash: message digest BIO (unused)
  * [out] outdata: outdata file BIO (unused)
- * [returns] pointer to PKCS#7 structure
+ * [returns] 1 on error or 0 on success
  */
-static PKCS7 *appx_pkcs7_prepare(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
+static int appx_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
-    PKCS7 *p7 = NULL;
 
     /* squash unused parameter warnings */
     (void)outdata;
     (void)hash;
 
-    if (ctx->options->cmd == CMD_ADD) {
-        /* Obtain an existing signature */
-        p7 = appx_pkcs7_extract(ctx);
-        if (!p7) {
-            printf("Unable to extract existing signature\n");
-            return NULL; /* FAILED */
-        }
-        return p7;
-    }
-
     /* Create and append a new signature content types entry */
     entry = zipGetCDEntryByName(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME);
     if (!entry) {
         printf("Not a valid .appx file: content types file missing\n");
-        return NULL; /* FAILED */
+        return 1; /* FAILED */
     }
     if (!appx_append_ct_signature_entry(ctx->appx_ctx->zip, entry)) {
+        return 1; /* FAILED */
+    }
+    return 0; /* OK */
+}
+
+/*
+ * Create a new PKCS#7 signature.
+ * [in, out] ctx: structure holds input and output data
+ * [out] hash: message digest BIO (unused)
+ * [returns] pointer to PKCS#7 structure
+ */
+static PKCS7 *appx_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
+{
+    ASN1_OCTET_STRING *content;
+    PKCS7 *p7 = NULL;
+    BIO *hashes;
+
+    /* squash unused parameter warnings */
+    (void)hash;
+
+    /* Create hash blob from concatenated APPX hashes */
+    hashes = appx_calculate_hashes(ctx);
+    if (!hashes) {
         return NULL; /* FAILED */
     }
-    if (ctx->options->cmd == CMD_ATTACH) {
-        /* Obtain an existing PKCS#7 signature from a "sigin" file */
-        p7 = pkcs7_get_sigfile(ctx);
-        if (!p7) {
-            printf("Unable to extract valid signature\n");
-            return NULL; /* FAILED */
-        }
-    } else if (ctx->options->cmd == CMD_SIGN) {
-        ASN1_OCTET_STRING *content;
-        /* Create hash blob from concatenated APPX hashes */
-        BIO *hashes = appx_calculate_hashes(ctx);
-        if (!hashes) {
-            return NULL; /* FAILED */
-        }
-        /* Create a new PKCS#7 signature */
-        p7 = pkcs7_create(ctx);
-        if (!p7) {
-            printf("Creating a new signature failed\n");
-            BIO_free_all(hashes);
-            return NULL; /* FAILED */
-        }
-        if (!add_indirect_data_object(p7)) {
-            printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
-            PKCS7_free(p7);
-            BIO_free_all(hashes);
-            return NULL; /* FAILED */
-        }
-        content = spc_indirect_data_content_get(hashes, ctx);
+    p7 = pkcs7_create(ctx);
+    if (!p7) {
+        printf("Creating a new signature failed\n");
         BIO_free_all(hashes);
-        if (!content) {
-            printf("Failed to get spcIndirectDataContent\n");
-            PKCS7_free(p7);
-            return NULL; /* FAILED */
-        }
-        if (!sign_spc_indirect_data_content(p7, content)) {
-            printf("Failed to set signed content\n");
-            PKCS7_free(p7);
-            ASN1_OCTET_STRING_free(content);
-            return NULL; /* FAILED */
-        }
-        ASN1_OCTET_STRING_free(content);
+        return NULL; /* FAILED */
     }
+    if (!add_indirect_data_object(p7)) {
+        printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
+        PKCS7_free(p7);
+        BIO_free_all(hashes);
+        return NULL; /* FAILED */
+    }
+    content = spc_indirect_data_content_get(hashes, ctx);
+    BIO_free_all(hashes);
+    if (!content) {
+        printf("Failed to get spcIndirectDataContent\n");
+        PKCS7_free(p7);
+        return NULL; /* FAILED */
+    }
+    if (!sign_spc_indirect_data_content(p7, content)) {
+        printf("Failed to set signed content\n");
+        PKCS7_free(p7);
+        ASN1_OCTET_STRING_free(content);
+        return NULL; /* FAILED */
+    }
+    ASN1_OCTET_STRING_free(content);
     return p7; /* OK */
 }
 
