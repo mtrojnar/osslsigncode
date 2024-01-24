@@ -4402,8 +4402,8 @@ int main(int argc, char **argv)
         /* Obtain an existing PKCS#7 signature from a "sigin" file */
         p7 = pkcs7_get_sigfile(ctx);
         if (!p7) {
-            printf("Unable to extract valid signature\n");
             PKCS7_free(cursig);
+            DO_EXIT_0("Unable to extract valid signature\n");
         }
         if (ctx->format->process_data) {
             ctx->format->process_data(ctx, hash, outdata);
