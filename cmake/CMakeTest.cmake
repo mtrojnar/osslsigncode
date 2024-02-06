@@ -5,6 +5,10 @@
 
 option(STOP_SERVER "Stop HTTP server after tests" ON)
 
+# Remove http proxy configuration that may change behavior
+unset(ENV{HTTP_PROXY})
+unset(ENV{http_proxy})
+
 include(FindPython3)
 
 set(TEST_DIR "${PROJECT_BINARY_DIR}/Testing")
@@ -480,6 +484,7 @@ if(Python3_FOUND OR server_error)
             set_tests_properties(
                 sign_ts_${cert}_${ext}
                 PROPERTIES
+                ENVIRONMENT "HTTP_PROXY=;http_proxy=;"
                 REQUIRED_FILES "${LOGS}/port.log")
         endforeach(cert ${pem_certs})
     endforeach(ext ${extensions_all})
@@ -500,6 +505,7 @@ if(Python3_FOUND OR server_error)
         set_tests_properties(
             verify_ts_cert_${ext}
             PROPERTIES
+            ENVIRONMENT "HTTP_PROXY=;http_proxy=;"
             DEPENDS "sign_ts_cert_${ext}"
             REQUIRED_FILES "${FILES}/ts_cert.${ext}"
             REQUIRED_FILES "${LOGS}/port.log")
@@ -518,6 +524,7 @@ if(Python3_FOUND OR server_error)
         set_tests_properties(
             verify_ts_future_${ext}
             PROPERTIES
+            ENVIRONMENT "HTTP_PROXY=;http_proxy=;"
             DEPENDS "sign_ts_cert_${ext}"
             REQUIRED_FILES "${FILES}/ts_cert.${ext}"
             REQUIRED_FILES "${LOGS}/port.log")
@@ -538,6 +545,7 @@ if(Python3_FOUND OR server_error)
         set_tests_properties(
             verify_ts_ignore_${ext}
             PROPERTIES
+            ENVIRONMENT "HTTP_PROXY=;http_proxy=;"
             DEPENDS "sign_ts_cert_${ext}"
             REQUIRED_FILES "${FILES}/ts_cert.${ext}"
             REQUIRED_FILES "${LOGS}/port.log"
@@ -562,6 +570,7 @@ if(Python3_FOUND OR server_error)
         set_tests_properties(
             verify_ts_cert_crldp_${ext}
             PROPERTIES
+            ENVIRONMENT "HTTP_PROXY=;http_proxy=;"
             DEPENDS "sign_ts_cert_crldp_${ext}"
             REQUIRED_FILES "${FILES}/ts_cert_crldp.${ext}"
             REQUIRED_FILES "${LOGS}/port.log")
@@ -584,6 +593,7 @@ if(Python3_FOUND OR server_error)
             set_tests_properties(
                 verify_ts_${cert}_${ext}
                 PROPERTIES
+                ENVIRONMENT "HTTP_PROXY=;http_proxy=;"
                 DEPENDS "sign_ts_${cert}_${ext}"
                 REQUIRED_FILES "${FILES}/ts_${cert}.${ext}"
                 REQUIRED_FILES "${LOGS}/port.log"
@@ -606,6 +616,7 @@ if(Python3_FOUND OR server_error)
         set_tests_properties(
             verify_ts_revoked_crldp_${ext}
             PROPERTIES
+            ENVIRONMENT "HTTP_PROXY=;http_proxy=;"
             DEPENDS "sign_ts_revoked_crldp_${ext}"
             REQUIRED_FILES "${FILES}/ts_revoked_crldp.${ext}"
             REQUIRED_FILES "${LOGS}/port.log"
