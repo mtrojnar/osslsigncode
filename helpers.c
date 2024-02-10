@@ -268,15 +268,16 @@ int add_indirect_data_object(PKCS7 *p7)
  */
 int sign_spc_indirect_data_content(PKCS7 *p7, ASN1_OCTET_STRING *content)
 {
-    int len, hdrlen;
-    const u_char *data;
+    int len, inf, tag, class;
+    long plen;
+    const u_char *data, *p;
     PKCS7 *td7;
 
-    data = ASN1_STRING_get0_data(content);
+    p = data = ASN1_STRING_get0_data(content);
     len = ASN1_STRING_length(content);
-    hdrlen = ASN1_object_size(0, len, V_ASN1_SEQUENCE) - len;
-
-    if (!pkcs7_sign_content(p7, data + hdrlen, len - hdrlen)) {
+    inf = ASN1_get_object(&p, &plen, &tag, &class, len);
+    if (inf != V_ASN1_CONSTRUCTED || tag != V_ASN1_SEQUENCE
+        || !pkcs7_sign_content(p7, p, (int)plen)) {
         printf("Failed to sign spcIndirectDataContent\n");
         return 0; /* FAILED */
     }
