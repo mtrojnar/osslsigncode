@@ -86,8 +86,8 @@ FILE_FORMAT file_format_script = {
 
 /* helper functions */
 static SCRIPT_CTX *script_ctx_get(char *indata, uint32_t filesize, const SCRIPT_COMMENT *comment, int utf);
-static void write_commented(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *data, size_t length);
-static void write_in_encoding(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *line, size_t length);
+static int write_commented(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *data, size_t length);
+static int write_in_encoding(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *line, size_t length);
 static size_t utf8_to_utf16(const char *data, size_t len, uint16_t **out_utf16);
 static size_t utf16_to_utf8(const uint16_t *data, size_t len, char **out_utf8);
 static BIO *script_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
@@ -548,6 +548,7 @@ static int script_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     BUF_MEM *buffer;
     size_t i;
     static const char crlf[] = {0x0d, 0x0a};
+    int ret = 1;
 
     /* convert to BASE64 */
     b64 = BIO_new(BIO_f_base64()); /* BIO for base64 encoding */
@@ -569,20 +570,26 @@ static int script_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     (void)BIO_set_close(bio, BIO_NOCLOSE);
 
     /* split to individual lines and write to outdata */
-    write_commented(ctx, outdata, signature_begin, strlen(signature_begin));
+    if (!write_commented(ctx, outdata, signature_begin, strlen(signature_begin)))
+        goto cleanup;
     for (i = 0; i < buffer->length; i += 64) {
-        write_commented(ctx, outdata, buffer->data + i,
-            buffer->length - i < 64 ? buffer->length - i : 64);
+        if (!write_commented(ctx, outdata, buffer->data + i,
+            buffer->length - i < 64 ? buffer->length - i : 64)) {
+            goto cleanup;
+        }
     }
-    write_commented(ctx, outdata, signature_end, strlen(signature_end));
+    if (!write_commented(ctx, outdata, signature_end, strlen(signature_end)))
+        goto cleanup;
 
     /* signtool expects CRLF terminator at the end of the text file */
-    write_in_encoding(ctx, outdata, crlf, sizeof crlf);
+    if (!write_in_encoding(ctx, outdata, crlf, sizeof crlf))
+        goto cleanup;
+    ret = 0;  /* OK */
 
+cleanup:
     BUF_MEM_free(buffer);
     BIO_free_all(bio);
-
-    return 0; /* OK */
+    return ret;
 }
 
 /*
@@ -679,8 +686,10 @@ static SCRIPT_CTX *script_ctx_get(char *indata, uint32_t filesize, const SCRIPT_
 /* write a commented line to the bio:
  * - prepend with CRLF ("\r\n")
  * - add opening/closing comment tags
- * - adjust encoding if needed */
-static void write_commented(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *data, size_t length)
+ * - adjust encoding if needed
+ * [returns] 0 on error or 1 on success
+ */
+static int write_commented(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *data, size_t length)
 {
     const char *open_tag = ctx->script_ctx->comment_text->open;
     const char *close_tag = ctx->script_ctx->comment_text->close;
@@ -702,23 +711,37 @@ static void write_commented(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *data
     strcat(line, close_tag);
 
     /* adjust encoding */
-    write_in_encoding(ctx, outdata, line, strlen(line));
+    if (!write_in_encoding(ctx, outdata, line, strlen(line))) {
+        OPENSSL_free(line);
+        return 0; /* FAILED */
+    }
     OPENSSL_free(line);
+    return 1; /* OK */
 }
 
-/* adjust encoding if needed */
-static void write_in_encoding(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *line, size_t length)
+/* adjust encoding if needed
+ * [returns] 0 on error or 1 on success
+ */
+static int write_in_encoding(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *line, size_t length)
 {
     size_t written;
     if (ctx->script_ctx->utf == 8) {
-        BIO_write_ex(outdata, line, length, &written);
+        if (!BIO_write_ex(outdata, line, length, &written)
+            || written != length) {
+            return 0; /* FAILED */
+        }
     } else {
         uint16_t *utf16_data = NULL;
         size_t utf16_len = utf8_to_utf16(line, length, &utf16_data);
 
-        BIO_write_ex(outdata, utf16_data, utf16_len, &written);
+        if (!BIO_write_ex(outdata, utf16_data, utf16_len, &written)
+            || written != utf16_len) {
+            OPENSSL_free(utf16_data);
+            return 0; /* FAILED */
+        }
         OPENSSL_free(utf16_data);
     }
+    return 1; /* OK */
 }
 
 /* convert len bytes of UTF-8 to UTF-16
