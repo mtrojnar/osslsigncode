@@ -3785,6 +3785,8 @@ static char *get_cafile(void)
 
 static void print_version(void)
 {
+    char *cafile = get_cafile();
+
 #ifdef PACKAGE_STRING
     printf("%s, using:\n", PACKAGE_STRING);
 #else /* PACKAGE_STRING */
@@ -3796,6 +3798,12 @@ static void print_version(void)
 #else /* ENABLE_CURL */
     printf("\t%s\n", "no libcurl available");
 #endif /* ENABLE_CURL */
+    if (cafile) {
+        printf("Default -CAfile location: %s\n", cafile);
+        OPENSSL_free(cafile);
+    } else {
+        printf("No default -CAfile location detected\n");
+    }
 #ifdef PACKAGE_BUGREPORT
     printf("\nPlease send bug-reports to " PACKAGE_BUGREPORT "\n");
 #endif /* PACKAGE_BUGREPORT */
