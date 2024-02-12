@@ -547,6 +547,8 @@ static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx)
  */
 static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
+    uint8_t *data = NULL;
+    size_t dataSize;
     uint64_t cdOffset, noEntries = 0;
     ZIP_FILE *zip = ctx->appx_ctx->zip;
     ZIP_CENTRAL_DIRECTORY_ENTRY *entry = zipGetCDEntryByName(zip, CONTENT_TYPES_FILENAME);
@@ -558,6 +560,12 @@ static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         printf("Not a valid .appx file: content types file missing\n");
         return 1; /* FAILED */
     }
+    /* read signature data */
+    dataSize = zipReadFileDataByName(&data, ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME);
+    if (dataSize <= 0) {
+        return 1; /* FAILED, no signature */
+    }
+    OPENSSL_free(data);
     if (!appx_remove_ct_signature_entry(zip, entry)) {
         printf("Failed to remove signature entry\n");
         return 1; /* FAILED */

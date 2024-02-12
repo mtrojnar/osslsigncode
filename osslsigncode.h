@@ -82,6 +82,10 @@
 #define PROVIDE_ASKPASS 1
 #endif
 
+#ifdef _MSC_VER
+/* not WIN32, because strcasecmp exists in MinGW */
+#define strcasecmp _stricmp
+#endif
 
 #ifdef WIN32
 #define remove_file(filename) _unlink(filename)
@@ -333,6 +337,18 @@ typedef struct {
 DECLARE_ASN1_FUNCTIONS(SpcSpOpusInfo)
 
 typedef struct {
+    ASN1_INTEGER *a;
+    ASN1_OCTET_STRING *string;
+    ASN1_INTEGER *b;
+    ASN1_INTEGER *c;
+    ASN1_INTEGER *d;
+    ASN1_INTEGER *e;
+    ASN1_INTEGER *f;
+} SpcSipInfo;
+
+DECLARE_ASN1_FUNCTIONS(SpcSipInfo)
+
+typedef struct {
     ASN1_OBJECT *type;
     ASN1_TYPE *value;
 } SpcAttributeTypeAndOptionalValue;
@@ -468,6 +484,8 @@ typedef struct {
 DECLARE_ASN1_FUNCTIONS(MsCtlContent)
 
 typedef struct file_format_st FILE_FORMAT;
+
+typedef struct script_ctx_st SCRIPT_CTX;
 typedef struct msi_ctx_st MSI_CTX;
 typedef struct pe_ctx_st PE_CTX;
 typedef struct cab_ctx_st CAB_CTX;
@@ -478,6 +496,7 @@ typedef struct {
     FILE_FORMAT *format;
     GLOBAL_OPTIONS *options;
     union {
+        SCRIPT_CTX *script_ctx;
         MSI_CTX *msi_ctx;
         PE_CTX *pe_ctx;
         CAB_CTX *cab_ctx;
@@ -486,6 +505,7 @@ typedef struct {
     };
 } FILE_FORMAT_CTX;
 
+extern FILE_FORMAT file_format_script;
 extern FILE_FORMAT file_format_msi;
 extern FILE_FORMAT file_format_pe;
 extern FILE_FORMAT file_format_cab;

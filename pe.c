@@ -404,9 +404,9 @@ static PKCS7 *pe_pkcs7_extract_to_nest(FILE_FORMAT_CTX *ctx)
  */
 static int pe_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
-    if (ctx->pe_ctx->sigpos == 0) {
-        printf("PE file does not have any signature\n");
-        return 1; /* FAILED */
+    if (ctx->pe_ctx->sigpos == 0 || ctx->pe_ctx->siglen == 0
+        || ctx->pe_ctx->sigpos > ctx->pe_ctx->fileend) {
+        return 1; /* FAILED, no signature */
     }
     /* Strip current signature */
     ctx->pe_ctx->fileend = ctx->pe_ctx->sigpos;

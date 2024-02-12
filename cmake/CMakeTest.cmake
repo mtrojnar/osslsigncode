@@ -129,9 +129,9 @@ string(SUBSTRING ${sha256sum} 0 64 leafhash)
 
 enable_testing()
 
-set(extensions_all "exe" "ex_" "msi" "256appx" "512appx" "cat")
-set(extensions_nocat "exe" "ex_" "msi" "256appx" "512appx")
-set(extensions_nocatappx "exe" "ex_" "msi")
+set(extensions_all "exe" "ex_" "msi" "256appx" "512appx" "cat" "ps1" "psc1" "mof")
+set(extensions_nocat "exe" "ex_" "msi" "256appx" "512appx" "ps1" "psc1" "mof")
+set(extensions_nocatappx "exe" "ex_" "msi" "ps1" "psc1" "mof")
 set(formats "pem" "der")
 
 # Test 1

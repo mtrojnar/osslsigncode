@@ -101,30 +101,6 @@ static const u_char msi_zeroes[] = {
 };
 
 typedef struct {
-    ASN1_INTEGER *a;
-    ASN1_OCTET_STRING *string;
-    ASN1_INTEGER *b;
-    ASN1_INTEGER *c;
-    ASN1_INTEGER *d;
-    ASN1_INTEGER *e;
-    ASN1_INTEGER *f;
-} SpcSipInfo;
-
-DECLARE_ASN1_FUNCTIONS(SpcSipInfo)
-
-ASN1_SEQUENCE(SpcSipInfo) = {
-    ASN1_SIMPLE(SpcSipInfo, a, ASN1_INTEGER),
-    ASN1_SIMPLE(SpcSipInfo, string, ASN1_OCTET_STRING),
-    ASN1_SIMPLE(SpcSipInfo, b, ASN1_INTEGER),
-    ASN1_SIMPLE(SpcSipInfo, c, ASN1_INTEGER),
-    ASN1_SIMPLE(SpcSipInfo, d, ASN1_INTEGER),
-    ASN1_SIMPLE(SpcSipInfo, e, ASN1_INTEGER),
-    ASN1_SIMPLE(SpcSipInfo, f, ASN1_INTEGER),
-} ASN1_SEQUENCE_END(SpcSipInfo)
-
-IMPLEMENT_ASN1_FUNCTIONS(SpcSipInfo)
-
-typedef struct {
     u_char signature[8];      /* 0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1 */
     u_char unused_clsid[16];  /* reserved and unused */
     uint16_t minorVersion;
@@ -321,6 +297,10 @@ static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
 
 /*
  * Allocate and return SpcSipInfo object.
+ * Subject Interface Package (SIP) is an internal Microsoft API for
+ * transforming arbitrary files into a digestible stream.
+ * These ClassIDs are found in the indirect data section and identify
+ * the type of processor needed to validate the signature.
  * [out] p: SpcSipInfo data
  * [out] plen: SpcSipInfo data length
  * [in] ctx: structure holds input and output data (unused)
@@ -328,7 +308,7 @@ static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
  */
 static ASN1_OBJECT *msi_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx)
 {
-    const u_char msistr[] = {
+    const u_char SpcUUIDSipInfoMsi[] = {
         0xf1, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00,
         0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46
     };
@@ -344,7 +324,7 @@ static ASN1_OBJECT *msi_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX 
     ASN1_INTEGER_set(si->d, 0);
     ASN1_INTEGER_set(si->e, 0);
     ASN1_INTEGER_set(si->f, 0);
-    ASN1_OCTET_STRING_set(si->string, msistr, sizeof msistr);
+    ASN1_OCTET_STRING_set(si->string, SpcUUIDSipInfoMsi, sizeof SpcUUIDSipInfoMsi);
     *plen = i2d_SpcSipInfo(si, NULL);
     *p = OPENSSL_malloc((size_t)*plen);
     i2d_SpcSipInfo(si, p);
@@ -638,9 +618,15 @@ static PKCS7 *msi_pkcs7_extract_to_nest(FILE_FORMAT_CTX *ctx)
  */
 static int msi_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
+    MSI_ENTRY *ds;
+
     /* squash the unused parameter warning */
     (void)hash;
 
+    ds = msi_signatures_get(ctx->msi_ctx->dirent, NULL);
+    if (!ds) {
+        return 1; /* FAILED, no signature */
+    }
     if (!msi_dirent_delete(ctx->msi_ctx->dirent, digital_signature_ex,
             sizeof digital_signature_ex)) {
         return 1; /* FAILED */

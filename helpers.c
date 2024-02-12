@@ -595,6 +595,9 @@ static int spc_indirect_data_content_create(u_char **blob, int *len, FILE_FORMAT
     void *hash;
     SpcIndirectDataContent *idc = SpcIndirectDataContent_new();
 
+    if (!ctx->format->data_blob_get || !ctx->format->hash_length_get) {
+        return 0; /* FAILED */
+    }
     if (ctx->format->md_get) {
         /* APPX file specific - use a hash algorithm specified in the AppxBlockMap.xml file */
         mdtype = EVP_MD_nid(ctx->format->md_get(ctx));

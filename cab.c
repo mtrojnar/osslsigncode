@@ -427,11 +427,16 @@ static int cab_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     size_t i, written, len;
     uint32_t tmp;
     uint16_t nfolders, flags;
-    char *buf = OPENSSL_malloc(SIZE_64K);
+    char *buf;
 
     /* squash the unused parameter warning */
     (void)hash;
 
+    if (ctx->cab_ctx->sigpos == 0 || ctx->cab_ctx->siglen == 0
+        || ctx->cab_ctx->sigpos > ctx->cab_ctx->fileend) {
+        return 1; /* FAILED, no signature */
+    }
+    buf = OPENSSL_malloc(SIZE_64K);
     /*
      * u1 signature[4] 4643534D MSCF: 0-3
      * u4 reserved1 00000000: 4-7

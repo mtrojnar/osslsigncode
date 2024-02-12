@@ -123,6 +123,18 @@ ASN1_SEQUENCE(SpcSpOpusInfo) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(SpcSpOpusInfo)
 
+ASN1_SEQUENCE(SpcSipInfo) = {
+    ASN1_SIMPLE(SpcSipInfo, a, ASN1_INTEGER),
+    ASN1_SIMPLE(SpcSipInfo, string, ASN1_OCTET_STRING),
+    ASN1_SIMPLE(SpcSipInfo, b, ASN1_INTEGER),
+    ASN1_SIMPLE(SpcSipInfo, c, ASN1_INTEGER),
+    ASN1_SIMPLE(SpcSipInfo, d, ASN1_INTEGER),
+    ASN1_SIMPLE(SpcSipInfo, e, ASN1_INTEGER),
+    ASN1_SIMPLE(SpcSipInfo, f, ASN1_INTEGER),
+} ASN1_SEQUENCE_END(SpcSipInfo)
+
+IMPLEMENT_ASN1_FUNCTIONS(SpcSipInfo)
+
 ASN1_SEQUENCE(SpcAttributeTypeAndOptionalValue) = {
     ASN1_SIMPLE(SpcAttributeTypeAndOptionalValue, type, ASN1_OBJECT),
     ASN1_OPT(SpcAttributeTypeAndOptionalValue, value, ASN1_ANY)
@@ -2844,7 +2856,9 @@ static int check_attached_data(GLOBAL_OPTIONS *options)
     tmp_options->infile = options->outfile;
     tmp_options->cmd = CMD_VERIFY;
 
-    ctx = file_format_msi.ctx_new(tmp_options, NULL, NULL);
+    ctx = file_format_script.ctx_new(tmp_options, NULL, NULL);
+    if (!ctx)
+        ctx = file_format_msi.ctx_new(tmp_options, NULL, NULL);
     if (!ctx)
         ctx = file_format_pe.ctx_new(tmp_options, NULL, NULL);
     if (!ctx)
@@ -4317,7 +4331,9 @@ int main(int argc, char **argv)
             DO_EXIT_1("Failed to create file: %s\n", options.outfile);
         }
     }
-    ctx = file_format_msi.ctx_new(&options, hash, outdata);
+    ctx = file_format_script.ctx_new(&options, hash, outdata);
+    if (!ctx)
+        ctx = file_format_msi.ctx_new(&options, hash, outdata);
     if (!ctx)
         ctx = file_format_pe.ctx_new(&options, hash, outdata);
     if (!ctx)
@@ -4366,6 +4382,9 @@ int main(int argc, char **argv)
             DO_EXIT_0("Unsupported command: remove-signature\n");
         }
         ret = ctx->format->remove_pkcs7(ctx, hash, outdata);
+        if (ret) {
+            DO_EXIT_0("Unable to remove existing signature\n");
+        }
         if (ctx->format->update_data_size) {
             ctx->format->update_data_size(ctx, outdata, NULL);
         }

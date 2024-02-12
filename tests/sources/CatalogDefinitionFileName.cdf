@@ -46,3 +46,12 @@ CATATTR1=0x11010001:OSAttr:2:6.0
 
 <HASH>CABfile=..\files\unsigned.ex_
 <HASH>CABfileATTR1=0x11010001:File:unsigned.ex_
+
+<HASH>PS1file=..\files\unsigned.ps1
+<HASH>PS1fileATTR1=0x11010001:File:unsigned.ps1
+
+<HASH>PSC1file=..\files\unsigned.psc1
+<HASH>PSC1fileATTR1=0x11010001:File:unsigned.psc1
+
+<HASH>MOFfile=..\files\unsigned.mof
+<HASH>MOFfileATTR1=0x11010001:File:unsigned.mof
