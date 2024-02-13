@@ -26,8 +26,8 @@ const SCRIPT_FORMAT supported_formats[] = {
     {NULL,      comment_not_found},
 };
 
-const char *signature_begin = "SIG # Begin signature block";
-const char *signature_end = "SIG # End signature block";
+const char *signature_header = "SIG # Begin signature block";
+const char *signature_footer = "SIG # End signature block";
 
 typedef struct {
     const char *open;
@@ -353,8 +353,8 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     const char *close_tag = ctx->script_ctx->comment_text->close;
     size_t open_tag_len = strlen(open_tag);
     size_t close_tag_len = strlen(close_tag);
-    size_t signature_begin_len = strlen(signature_begin);
-    size_t signature_end_len = strlen(signature_end);
+    size_t signature_header_len = strlen(signature_header);
+    size_t signature_footer_len = strlen(signature_footer);
     PKCS7 *retval = NULL;
 
     /* extract Base64 signature */
@@ -388,12 +388,12 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
             }
             ptr++;
         }
-        /* process signature_begin and signature_end */
-        if (ptr + signature_begin_len < base64_data + base64_len &&
-                !memcmp(ptr, signature_begin, signature_begin_len))
-            ptr += signature_begin_len;
-        if (ptr + signature_end_len <= base64_data + base64_len &&
-                !memcmp(ptr, signature_end, signature_end_len))
+        /* process signature_header and signature_footer */
+        if (ptr + signature_header_len < base64_data + base64_len &&
+                !memcmp(ptr, signature_header, signature_header_len))
+            ptr += signature_header_len;
+        if (ptr + signature_footer_len <= base64_data + base64_len &&
+                !memcmp(ptr, signature_footer, signature_footer_len))
             break; /* success */
 
         /* copy until the closing tag */
@@ -570,7 +570,7 @@ static int script_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     (void)BIO_set_close(bio, BIO_NOCLOSE);
 
     /* split to individual lines and write to outdata */
-    if (!write_commented(ctx, outdata, signature_begin, strlen(signature_begin)))
+    if (!write_commented(ctx, outdata, signature_header, strlen(signature_header)))
         goto cleanup;
     for (i = 0; i < buffer->length; i += 64) {
         if (!write_commented(ctx, outdata, buffer->data + i,
@@ -578,7 +578,7 @@ static int script_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
             goto cleanup;
         }
     }
-    if (!write_commented(ctx, outdata, signature_end, strlen(signature_end)))
+    if (!write_commented(ctx, outdata, signature_footer, strlen(signature_footer)))
         goto cleanup;
 
     /* signtool expects CRLF terminator at the end of the text file */
@@ -633,22 +633,28 @@ static SCRIPT_CTX *script_ctx_get(char *indata, uint32_t filesize, const SCRIPT_
     SCRIPT_CTX *script_ctx;
 
     const char *input_pos, *signature_pos, *ptr;
-    uint32_t line[LINE_MAX_LEN], sig_start[40], cr, lf;
-    size_t sig_pos = 0, line_pos = 0, sig_start_pos = 0;
-    size_t sig_start_size = sizeof sig_start / sizeof(uint32_t);
+    uint32_t line[LINE_MAX_LEN], commented_header[40], cr, lf;
+    size_t sig_pos = 0, line_pos = 0, commented_header_len = 0;
+    size_t commented_header_size = sizeof commented_header / sizeof(uint32_t);
 
     utf8DecodeRune("\r", 1, &cr);
     utf8DecodeRune("\n", 1, &lf);
 
-    /* compute runes for the beginning of the signature */
-    for (ptr = comment->open; *ptr && sig_start_pos < sig_start_size; sig_start_pos++)
-        ptr = utf8DecodeRune(ptr, 1, sig_start + sig_start_pos);
-    for (ptr = signature_begin; *ptr && sig_start_pos < sig_start_size; sig_start_pos++)
-        ptr = utf8DecodeRune(ptr, 1, sig_start + sig_start_pos);
-    for (ptr = comment->close; *ptr && sig_start_pos < sig_start_size; sig_start_pos++)
-        ptr = utf8DecodeRune(ptr, 1, sig_start + sig_start_pos);
+    /* compute runes for the commented signature header */
+    for (ptr = comment->open;
+            *ptr && commented_header_len < commented_header_size;
+            commented_header_len++)
+        ptr = utf8DecodeRune(ptr, 1, commented_header + commented_header_len);
+    for (ptr = signature_header;
+            *ptr && commented_header_len < commented_header_size;
+            commented_header_len++)
+        ptr = utf8DecodeRune(ptr, 1, commented_header + commented_header_len);
+    for (ptr = comment->close;
+            *ptr && commented_header_len < commented_header_size;
+            commented_header_len++)
+        ptr = utf8DecodeRune(ptr, 1, commented_header + commented_header_len);
 
-    /* find the beginning of the signature */
+    /* find the signature header */
     for (signature_pos = input_pos = indata; input_pos < indata + filesize; ) {
         const char *input_prev = input_pos;
 
@@ -661,8 +667,8 @@ static SCRIPT_CTX *script_ctx_get(char *indata, uint32_t filesize, const SCRIPT_
                 line + line_pos);
 
         if (!memcmp(line + line_pos, &lf, sizeof lf)) {
-            if (line_pos >= sig_start_pos &&
-                    !memcmp(line, sig_start, sig_start_pos * sizeof(uint32_t))) {
+            if (line_pos >= commented_header_len &&
+                    !memcmp(line, commented_header, commented_header_len * sizeof(uint32_t))) {
                 sig_pos = (size_t)(signature_pos - indata);
                 if (!memcmp(line + line_pos - 1, &cr, sizeof cr))
                     sig_pos -= (size_t)utf / 8;
