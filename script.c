@@ -635,16 +635,17 @@ static SCRIPT_CTX *script_ctx_get(char *indata, uint32_t filesize, const SCRIPT_
     const char *input_pos, *signature_pos, *ptr;
     uint32_t line[LINE_MAX_LEN], sig_start[40], cr, lf;
     size_t sig_pos = 0, line_pos = 0, sig_start_pos = 0;
+    size_t sig_start_size = sizeof sig_start / sizeof(uint32_t);
 
     utf8DecodeRune("\r", 1, &cr);
     utf8DecodeRune("\n", 1, &lf);
 
     /* compute runes for the beginning of the signature */
-    for (ptr = comment->open; *ptr; sig_start_pos++)
+    for (ptr = comment->open; *ptr && sig_start_pos < sig_start_size; sig_start_pos++)
         ptr = utf8DecodeRune(ptr, 1, sig_start + sig_start_pos);
-    for (ptr = signature_begin; *ptr; sig_start_pos++)
+    for (ptr = signature_begin; *ptr && sig_start_pos < sig_start_size; sig_start_pos++)
         ptr = utf8DecodeRune(ptr, 1, sig_start + sig_start_pos);
-    for (ptr = comment->close; *ptr; sig_start_pos++)
+    for (ptr = comment->close; *ptr && sig_start_pos < sig_start_size; sig_start_pos++)
         ptr = utf8DecodeRune(ptr, 1, sig_start + sig_start_pos);
 
     /* find the beginning of the signature */
