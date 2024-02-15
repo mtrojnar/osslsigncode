@@ -1799,8 +1799,8 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
         } else {
             printf("TSA's CRL distribution point: %s\n", url);
             crl = x509_crl_get(url);
-            OPENSSL_free(url);
         }
+        OPENSSL_free(url);
         if (!crl && !ctx->options->tsa_crlfile) {
             printf("Use the \"-TSA-CRLfile\" option to add one or more Time-Stamp Authority CRLs in PEM format.\n");
         }
@@ -1924,8 +1924,8 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
         } else {
             printf("CRL distribution point: %s\n", url);
             crl = x509_crl_get(url);
-            OPENSSL_free(url);
         }
+        OPENSSL_free(url);
         if (!crl && !ctx->options->crlfile) {
             printf("Use the \"-CRLfile\" option to add one or more CRLs in PEM format.\n");
             goto out;
