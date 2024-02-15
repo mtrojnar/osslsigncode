@@ -1773,9 +1773,13 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
     url = clrdp_url_get_x509(signer);
 #ifdef ENABLE_CURL
     if (url) {
-        printf("TSA's CRL distribution point: %s\n", url);
-        crl = x509_crl_get(url);
-        OPENSSL_free(url);
+        if (ctx->options->ignore_cdp) {
+            printf("Ignored TSA's CRL distribution point: %s\n", url);
+        } else {
+            printf("TSA's CRL distribution point: %s\n", url);
+            crl = x509_crl_get(url);
+            OPENSSL_free(url);
+        }
         if (!crl && !ctx->options->tsa_crlfile) {
             printf("Use the \"-TSA-CRLfile\" option to add one or more Time-Stamp Authority CRLs in PEM format.\n");
         }
@@ -1892,9 +1896,13 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
     url = clrdp_url_get_x509(signer);
 #ifdef ENABLE_CURL
     if (url) {
-        printf("CRL distribution point: %s\n", url);
-        crl = x509_crl_get(url);
-        OPENSSL_free(url);
+        if (ctx->options->ignore_cdp) {
+            printf("Ignored CRL distribution point: %s\n", url);
+        } else {
+            printf("CRL distribution point: %s\n", url);
+            crl = x509_crl_get(url);
+            OPENSSL_free(url);
+        }
         if (!crl && !ctx->options->crlfile) {
             printf("Use the \"-CRLfile\" option to add one or more CRLs in PEM format.\n");
             goto out;
@@ -3072,6 +3080,7 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_sigin[] = {"attach-signature", NULL};
     const char *cmds_time[] = {"attach-signature", "sign", "verify", NULL};
     const char *cmds_ignore_timestamp[] = {"verify", NULL};
+    const char *cmds_ignore_cdp[] = {"verify", NULL};
 #ifdef ENABLE_CURL
     const char *cmds_t[] = {"add", "sign", NULL};
     const char *cmds_ts[] = {"add", "sign", NULL};
@@ -3218,6 +3227,8 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%-24s= a file containing the signature to be attached\n", "-sigin");
     if (on_list(cmd, cmds_ignore_timestamp))
         printf("%-24s= disable verification of the Timestamp Server signature\n", "-ignore-timestamp");
+    if (on_list(cmd, cmds_ignore_cdp))
+        printf("%-24s= disable CRL Distribution Points online verification\n", "-ignore-cdp");
 #ifdef ENABLE_CURL
     if (on_list(cmd, cmds_t)) {
         printf("%-24s= specifies that the digital signature will be timestamped\n", "-t");
@@ -4120,6 +4131,8 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
             }
         } else if ((cmd == CMD_VERIFY) && !strcmp(*argv, "-ignore-timestamp")) {
             options->ignore_timestamp = 1;
+        } else if ((cmd == CMD_VERIFY) && !strcmp(*argv, "-ignore-cdp")) {
+            options->ignore_cdp = 1;
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_VERIFY) && !strcmp(*argv, "-verbose")) {
             options->verbose = 1;
         } else if ((cmd == CMD_SIGN || cmd == CMD_EXTRACT_DATA || cmd == CMD_ADD || cmd == CMD_ATTACH)
