@@ -1295,6 +1295,8 @@ static void print_cert(X509 *cert, int i)
     char *subject, *issuer, *serial;
     BIGNUM *serialbn;
 
+    if (!cert)
+        return;
     subject = X509_NAME_oneline(X509_get_subject_name(cert), NULL, 0);
     issuer = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
     serialbn = ASN1_INTEGER_to_BN(X509_get_serialNumber(cert), NULL);
@@ -1312,6 +1314,19 @@ static void print_cert(X509 *cert, int i)
     OPENSSL_free(issuer);
     BN_free(serialbn);
     OPENSSL_free(serial);
+}
+
+/*
+ * [in] certs: X509 certificate chain
+ * [returns] none
+ */
+static void print_certs_chain(STACK_OF(X509) *certs)
+{
+    int i;
+
+    for (i=0; i<sk_X509_num(certs); i++) {
+        print_cert(sk_X509_value(certs, i), i);
+    }
 }
 
 /*
@@ -1515,7 +1530,7 @@ static int verify_crl(char *cafile, char *crlfile, STACK_OF(X509_CRL) *crls,
     if (crls)
         X509_STORE_CTX_set0_crls(ctx, crls);
 
-    printf("\nCertificate Revocation List verified by:\n");
+    printf("\nCertificate Revocation List verified using:\n");
     if (X509_verify_cert(ctx) <= 0) {
         int error = X509_STORE_CTX_get_error(ctx);
         printf("\nX509_verify_cert: certificate verify error: %s\n",
@@ -1757,10 +1772,16 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
     }
 
     /* verify a CMS SignedData structure */
-    printf("\nTimestamp verified by:\n");
+    printf("\nTimestamp verified using:\n");
     if (!CMS_verify(timestamp, NULL, store, 0, NULL, 0)) {
+        STACK_OF(X509) *cms_certs;
+
         printf("\nCMS_verify error\n");
         X509_STORE_free(store);
+        printf("\nFailed timestamp certificate chain retrieved from the signature:\n");
+        cms_certs = CMS_get1_certs(timestamp);
+        print_certs_chain(cms_certs);
+        sk_X509_pop_free(cms_certs, X509_free);
         goto out;
     }
     X509_STORE_free(store);
@@ -1871,7 +1892,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
         bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data,
             p7->d.sign->contents->d.other->value.sequence->length);
     }
-    printf("Signing Certificate Chain:\n");
+    printf("Signing certificate chain verified using:\n");
     /*
      * In the PKCS7_verify() function, the BIO *indata parameter refers to
      * the signed data if the content is detached from p7.
@@ -1883,6 +1904,8 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
         printf("\nPKCS7_verify error\n");
         X509_STORE_free(store);
         BIO_free(bio);
+        printf("\nFailed signing certificate chain retrieved from the signature:\n");
+        print_certs_chain(p7->d.sign->cert);
         goto out;
     }
     X509_STORE_free(store);
