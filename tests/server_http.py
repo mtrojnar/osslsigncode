@@ -6,7 +6,8 @@ import subprocess
 import sys
 import threading
 from urllib.parse import urlparse
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import SimpleHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 
 RESULT_PATH = os.getcwd()
 FILES_PATH = os.path.join(RESULT_PATH, "./Testing/files/")
@@ -27,6 +28,8 @@ OPENSSL_TS = ["openssl", "ts",
     "-queryfile", REQUEST,
     "-out", RESPONS]
 
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
 
 class RequestHandler(SimpleHTTPRequestHandler):
     """Handle the HTTP POST request that arrive at the server"""
