@@ -7,6 +7,7 @@ import sys
 import threading
 from urllib.parse import urlparse
 from http.server import SimpleHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 
 RESULT_PATH = os.getcwd()
 FILES_PATH = os.path.join(RESULT_PATH, "./Testing/files/")
@@ -27,6 +28,8 @@ OPENSSL_TS = ["openssl", "ts",
     "-queryfile", REQUEST,
     "-out", RESPONS]
 
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
 
 class RequestHandler(SimpleHTTPRequestHandler):
     """Handle the HTTP POST request that arrive at the server"""
@@ -96,7 +99,7 @@ class HttpServerThread():
 
     def start_server(self, port) -> (int):
         """Starting HTTP server on 127.0.0.1 and a random available port for binding"""
-        self.server = HTTPServer(('127.0.0.1', port), RequestHandler)
+        self.server = ThreadingHTTPServer(('127.0.0.1', port), RequestHandler)
         self.server_thread = threading.Thread(target=self.server.serve_forever)
         self.server_thread.start()
         hostname, port = self.server.server_address[:2]
