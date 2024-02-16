@@ -227,6 +227,26 @@ static PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
 
 static int blob_has_nl = 0;
 
+static void print_proxy(char *proxy)
+{
+    if (proxy) {
+        printf ("Using configured proxy: %s\n", proxy);
+    } else {
+        char *http_proxy, *https_proxy;
+
+        http_proxy = getenv("http_proxy");
+        if (!http_proxy)
+            http_proxy = getenv("HTTP_PROXY");
+        if (http_proxy && *http_proxy != '\0')
+            printf ("Using environmental HTTP proxy: %s\n", http_proxy);
+        https_proxy = getenv("https_proxy");
+        if (!https_proxy)
+            https_proxy = getenv("HTTPS_PROXY");
+        if (https_proxy && *https_proxy != '\0')
+            printf ("Using environmental HTTPS proxy: %s\n", https_proxy);
+    }
+}
+
 /*
  * Callback for writing received data
  */
@@ -527,6 +547,7 @@ static BIO *bio_get_http(long *http_code, char *url, BIO *bout, char *proxy,
     if (!url) {
         return NULL; /* FAILED */
     }
+    print_proxy(proxy);
     /* Start a libcurl easy session and set options for a curl easy handle */
     printf("Connecting to %s\n", url);
     curl = curl_easy_init();
@@ -1591,16 +1612,17 @@ out:
 /*
  * Get Certificate Revocation List from a CRL distribution point
  * and write it into the X509_CRL structure.
+ * [in] proxy: proxy to getting CRL through
  * [in] url: URL of the CRL distribution point server
  * [returns] X509 Certificate Revocation List
  */
-static X509_CRL *x509_crl_get(char *url)
+static X509_CRL *x509_crl_get(char *proxy, char *url)
 {
     X509_CRL *crl;
     BIO *bio;
     long http_code = -1;
 
-    bio = bio_get_http(&http_code, url, NULL, NULL, 0, 1, 0);
+    bio = bio_get_http(&http_code, url, NULL, proxy, 0, 1, 0);
     if (!bio) {
         printf("Warning: Faild to get CRL from %s\n\n", url);
         return NULL; /* FAILED */
@@ -1798,11 +1820,12 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
             printf("Ignored TSA's CRL distribution point: %s\n", url);
         } else {
             printf("TSA's CRL distribution point: %s\n", url);
-            crl = x509_crl_get(url);
+            crl = x509_crl_get(ctx->options->proxy, url);
         }
         OPENSSL_free(url);
         if (!crl && !ctx->options->tsa_crlfile) {
             printf("Use the \"-TSA-CRLfile\" option to add one or more Time-Stamp Authority CRLs in PEM format.\n");
+            goto out;
         }
     }
 #endif /* ENABLE_CURL */
@@ -1923,7 +1946,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
             printf("Ignored CRL distribution point: %s\n", url);
         } else {
             printf("CRL distribution point: %s\n", url);
-            crl = x509_crl_get(url);
+            crl = x509_crl_get(ctx->options->proxy, url);
         }
         OPENSSL_free(url);
         if (!crl && !ctx->options->crlfile) {
@@ -3037,6 +3060,7 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -CRLfile <infile> ]\n", "");
         printf("%12s[ -TSA-CAfile <infile> ]\n", "");
         printf("%12s[ -TSA-CRLfile <infile> ]\n", "");
+        printf("%12s[ -p <proxy> ]\n", "");
         printf("%12s[ -index <index> ]\n", "");
         printf("%12s[ -ignore-timestamp ]\n", "");
         printf("%12s[ -ignore-cdp ]\n", "");
@@ -3090,7 +3114,7 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_out[] = {"add", "attach-signature", "extract-signature",
         "remove-signature", "sign", "extract-data", NULL};
 #ifdef ENABLE_CURL
-    const char *cmds_p[] = {"add", "sign", NULL};
+    const char *cmds_p[] = {"add", "sign", "verify", NULL};
 #endif /* ENABLE_CURL */
     const char *cmds_pass[] = {"sign", NULL};
     const char *cmds_pem[] = {"sign", "extract-data", "extract-signature", NULL};
@@ -3223,7 +3247,7 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%-24s= output file\n", "-out");
 #ifdef ENABLE_CURL
     if (on_list(cmd, cmds_p))
-        printf("%-24s= proxy to connect to the desired Time-Stamp Authority server\n", "-p");
+        printf("%-24s= proxy to connect to the desired Time-Stamp Authority server or CRL distribution point\n", "-p");
 #endif /* ENABLE_CURL */
     if (on_list(cmd, cmds_pass))
         printf("%-24s= the private key password\n", "-pass");
@@ -4129,7 +4153,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->tsurl[options->ntsurl++] = *(++argv);
-        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-p")) {
+        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_VERIFY) && !strcmp(*argv, "-p")) {
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */

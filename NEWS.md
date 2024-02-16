@@ -11,8 +11,10 @@
   by using the "-verbose" option
 - added new command "extract-data" to extract a PKCS#7 data content to be signed
 - PKCS9_SEQUENCE_NUMBER authenticated attribute support
-- added the "-ignore-cdp" option to disable CRL Distribution Points
-  online verification
+- added the "-ignore-cdp" option to disable CRL Distribution Points (CDP)
+  online verification, inability to retrieve CRL from CDP is a critical error
+- modified the "-p" option to also connect to CRL Distribution Points
+  through the configured proxy when verifying
 
 ### 2.7 (2023.09.19)
 
