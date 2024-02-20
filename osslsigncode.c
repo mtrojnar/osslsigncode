@@ -1872,6 +1872,28 @@ out:
     return verok;
 }
 
+#if OPENSSL_VERSION_NUMBER<0x30000000L
+static int PKCS7_type_is_other(PKCS7 *p7)
+{
+    int isOther = 1;
+    int nid = OBJ_obj2nid(p7->type);
+
+    switch (nid) {
+    case NID_pkcs7_data:
+    case NID_pkcs7_signed:
+    case NID_pkcs7_enveloped:
+    case NID_pkcs7_signedAndEnveloped:
+    case NID_pkcs7_digest:
+    case NID_pkcs7_encrypted:
+        isOther = 0;
+        break;
+    default:
+        isOther = 1;
+    }
+    return isOther;
+}
+#endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
+
 /*
  * [in] ctx: structure holds input and output data
  * [in] p7: PKCS#7 signature
@@ -1887,6 +1909,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
     BIO *bio = NULL;
     int verok = 0;
     char *url;
+    PKCS7 *contents = p7->d.sign->contents;
 
     store = X509_STORE_new();
     if (!store)
@@ -1915,17 +1938,32 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
         }
     }
     /* verify a PKCS#7 signedData structure */
-    if (p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE) {
-        /* only verify the contents of the sequence */
-        int seqhdrlen;
-        seqhdrlen = asn1_simple_hdr_len(p7->d.sign->contents->d.other->value.sequence->data,
-            p7->d.sign->contents->d.other->value.sequence->length);
-        bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data + seqhdrlen,
-            p7->d.sign->contents->d.other->value.sequence->length - seqhdrlen);
+    if (PKCS7_type_is_other(contents) && (contents->d.other != NULL)
+        && (contents->d.other->value.sequence != NULL)
+        && (contents->d.other->value.sequence->length > 0)) {
+        if (contents->d.other->type == V_ASN1_SEQUENCE) {
+            /* only verify the content of the sequence */
+            const unsigned char *data = contents->d.other->value.sequence->data;
+            long len;
+            int inf, tag, class;
+
+            inf = ASN1_get_object(&data, &len, &tag, &class,
+                contents->d.other->value.sequence->length);
+            if (inf != V_ASN1_CONSTRUCTED || tag != V_ASN1_SEQUENCE) {
+                printf("Corrupted data content\n");
+                X509_STORE_free(store);
+                goto out;
+            }
+            bio = BIO_new_mem_buf(data, (int)len);
+        } else {
+            /* verify the entire value */
+            bio = BIO_new_mem_buf(contents->d.other->value.sequence->data,
+                contents->d.other->value.sequence->length);
+        }
     } else {
-        /* verify the entire value */
-        bio = BIO_new_mem_buf(p7->d.sign->contents->d.other->value.sequence->data,
-            p7->d.sign->contents->d.other->value.sequence->length);
+        printf("Corrupted data content\n");
+        X509_STORE_free(store);
+        goto out;
     }
     printf("Signing certificate chain verified using:\n");
     /*
