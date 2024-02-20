@@ -12,7 +12,7 @@
 2) Run "MSYS2 MinGW 64-bit" and build 64-bit Windows executables.
 ```
   cd osslsigncode-folder
-  x86_64-w64-mingw32-gcc osslsigncode.c msi.c -o osslsigncode.exe \
+  x86_64-w64-mingw32-gcc *.c -o osslsigncode.exe \
     -lcrypto -lssl -lcurl \
     -D 'PACKAGE_STRING="osslsigncode x.y"' \
     -D 'PACKAGE_BUGREPORT="Your.Email@example.com"' \
@@ -71,7 +71,7 @@
 3) Build 64-bit Windows executables.
 ```
   cd osslsigncode-folder
-  x86_64-w64-mingw32-gcc osslsigncode.c msi.c -o osslsigncode.exe \
+  x86_64-w64-mingw32-gcc *.c -o osslsigncode.exe \
     -L 'C:/OpenSSL/lib/' -lcrypto -lssl \
     -I 'C:/OpenSSL/include/' \
     -L 'C:/curl/lib' -lcurl \
