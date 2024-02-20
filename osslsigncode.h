@@ -74,9 +74,9 @@
 #endif /* SOCKET */
 #endif /* __CYGWIN__ */
 #include <curl/curl.h>
+#endif /* ENABLE_CURL */
 
 #define MAX_TS_SERVERS 256
-#endif /* ENABLE_CURL */
 
 #if defined (HAVE_TERMIOS_H) || defined (HAVE_GETPASS)
 #define PROVIDE_ASKPASS 1
@@ -261,14 +261,12 @@ typedef struct {
     const EVP_MD *md;
     char *url;
     time_t time;
-#ifdef ENABLE_CURL
     char *turl[MAX_TS_SERVERS];
     int nturl;
     char *tsurl[MAX_TS_SERVERS];
     int ntsurl;
     char *proxy;
     int noverifypeer;
-#endif /* ENABLE_CURL */
     int addBlob;
     int nest;
     int index;
@@ -392,8 +390,6 @@ typedef struct {
 
 DECLARE_ASN1_FUNCTIONS(MessageImprint)
 
-#ifdef ENABLE_CURL
-
 typedef struct {
     ASN1_OBJECT *type;
     ASN1_OCTET_STRING *signature;
@@ -435,8 +431,6 @@ typedef struct {
 } TimeStampReq;
 
 DECLARE_ASN1_FUNCTIONS(TimeStampReq)
-
-#endif /* ENABLE_CURL */
 
 typedef struct {
     ASN1_INTEGER *seconds;

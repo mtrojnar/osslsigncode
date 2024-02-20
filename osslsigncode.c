@@ -170,7 +170,6 @@ ASN1_SEQUENCE(CatalogAuthAttr) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(CatalogAuthAttr)
 
-#ifdef ENABLE_CURL
 /*
  * Structures for Authenticode Timestamp
  */
@@ -188,7 +187,6 @@ ASN1_SEQUENCE(TimeStampRequest) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(TimeStampRequest)
 
-#endif /* ENABLE_CURL */
 
 ASN1_SEQUENCE(CatalogInfo) = {
     ASN1_SIMPLE(CatalogInfo, digest, ASN1_OCTET_STRING),
@@ -223,45 +221,8 @@ static STACK_OF(PKCS7) *signature_list_create(PKCS7 *p7);
 static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b);
 static PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
 
-#ifdef ENABLE_CURL
 
 static int blob_has_nl = 0;
-
-static void print_proxy(char *proxy)
-{
-    if (proxy) {
-        printf ("Using configured proxy: %s\n", proxy);
-    } else {
-        char *http_proxy, *https_proxy;
-
-        http_proxy = getenv("http_proxy");
-        if (!http_proxy)
-            http_proxy = getenv("HTTP_PROXY");
-        if (http_proxy && *http_proxy != '\0')
-            printf ("Using environmental HTTP proxy: %s\n", http_proxy);
-        https_proxy = getenv("https_proxy");
-        if (!https_proxy)
-            https_proxy = getenv("HTTPS_PROXY");
-        if (https_proxy && *https_proxy != '\0')
-            printf ("Using environmental HTTPS proxy: %s\n", https_proxy);
-    }
-}
-
-/*
- * Callback for writing received data
- */
-static size_t curl_write(void *ptr, size_t sz, size_t nmemb, void *stream)
-{
-    size_t written, len = sz * nmemb;
-
-    if (len > 0 && !blob_has_nl) {
-        if (memchr(ptr, '\n', len))
-            blob_has_nl = 1;
-    }
-    if (!BIO_write_ex((BIO*)stream, ptr, len, &written) || written != len)
-        return 0; /* FAILED */
-    return written;
-}
 
 /*
   A timestamp request looks like this:
@@ -523,6 +484,44 @@ static int attach_authenticode_response(PKCS7 *p7, PKCS7 *resp, int verbose)
     return 0; /* OK */
 }
 
+#ifdef ENABLE_CURL
+
+static void print_proxy(char *proxy)
+{
+    if (proxy) {
+        printf ("Using configured proxy: %s\n", proxy);
+    } else {
+        char *http_proxy, *https_proxy;
+
+        http_proxy = getenv("http_proxy");
+        if (!http_proxy)
+            http_proxy = getenv("HTTP_PROXY");
+        if (http_proxy && *http_proxy != '\0')
+            printf ("Using environmental HTTP proxy: %s\n", http_proxy);
+        https_proxy = getenv("https_proxy");
+        if (!https_proxy)
+            https_proxy = getenv("HTTPS_PROXY");
+        if (https_proxy && *https_proxy != '\0')
+            printf ("Using environmental HTTPS proxy: %s\n", https_proxy);
+    }
+}
+
+/*
+ * Callback for writing received data
+ */
+static size_t curl_write(void *ptr, size_t sz, size_t nmemb, void *stream)
+{
+    size_t written, len = sz * nmemb;
+
+    if (len > 0 && !blob_has_nl) {
+        if (memchr(ptr, '\n', len))
+            blob_has_nl = 1;
+    }
+    if (!BIO_write_ex((BIO*)stream, ptr, len, &written) || written != len)
+        return 0; /* FAILED */
+    return written;
+}
+
 /*
  * Get data from HTTP server.
  * [out] http_code: HTTP status
@@ -643,6 +642,7 @@ static BIO *bio_get_http(long *http_code, char *url, BIO *bout, char *proxy,
     curl_easy_cleanup(curl);
     return bin;
 }
+#endif /* ENABLE_CURL */
 
 /*
  * Decode a curl response from BIO and write it into the PKCS7 structure
@@ -670,6 +670,7 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
     if (!bout) {
         return 1; /* FAILED */
     }
+#ifdef ENABLE_CURL
     if (rfc3161) {
         bin = bio_get_http(&http_code, url, bout, ctx->options->proxy,
             ctx->options->noverifypeer, verbose, 1);
@@ -678,6 +679,11 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
             ctx->options->noverifypeer, verbose, 2);
     }
     BIO_free_all(bout);
+#else /* ENABLE_CURL */
+    /* TODO implement an HTTP session */
+    printf("Could NOT find CURL\n");
+    return 1; /* FAILED */
+#endif /* ENABLE_CURL */
 
     if (bin) {
         if (rfc3161) {
@@ -744,7 +750,6 @@ static int add_timestamp_rfc3161(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
     }
     return 0; /* FAILED */
 }
-#endif /* ENABLE_CURL */
 
 /*
  * [in] resp_ctx: a response context that can be used for generating responses
@@ -1026,7 +1031,6 @@ static int add_unauthenticated_blob(PKCS7 *p7)
  */
 static int add_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 {
-#ifdef ENABLE_CURL
     /* add counter-signature/timestamp */
     if (ctx->options->nturl && !add_timestamp_authenticode(p7, ctx)) {
         printf("%s\n%s\n", "Authenticode timestamping failed",
@@ -1042,7 +1046,6 @@ static int add_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
         printf("Built-in timestamping failed\n");
         return 1; /* FAILED */
     }
-#endif /* ENABLE_CURL */
     if (ctx->options->addBlob && !add_unauthenticated_blob(p7)) {
         printf("Adding unauthenticated blob failed\n");
         return 1; /* FAILED */
@@ -1619,10 +1622,17 @@ out:
 static X509_CRL *x509_crl_get(char *proxy, char *url)
 {
     X509_CRL *crl;
-    BIO *bio;
+    BIO *bio = NULL;
+#ifdef ENABLE_CURL
     long http_code = -1;
 
     bio = bio_get_http(&http_code, url, NULL, proxy, 0, 1, 0);
+#else /* ENABLE_CURL */
+    /* TODO implement an HTTP session */
+    (void)proxy;
+    printf("Could NOT find CURL\n");
+    return NULL; /* FAILED */
+#endif /* ENABLE_CURL */
     if (!bio) {
         printf("Warning: Faild to get CRL from %s\n\n", url);
         return NULL; /* FAILED */
@@ -1814,7 +1824,6 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
 
     /* verify a Certificate Revocation List */
     url = clrdp_url_get_x509(signer);
-#ifdef ENABLE_CURL
     if (url) {
         if (ctx->options->ignore_cdp) {
             printf("Ignored TSA's CRL distribution point: %s\n", url);
@@ -1828,7 +1837,6 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
             goto out;
         }
     }
-#endif /* ENABLE_CURL */
     if (p7->d.sign->crl || crl) {
         crls = x509_crl_list_get(p7, crl);
         if (!crls) {
@@ -1940,7 +1948,6 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
 
     /* verify a Certificate Revocation List */
     url = clrdp_url_get_x509(signer);
-#ifdef ENABLE_CURL
     if (url) {
         if (ctx->options->ignore_cdp) {
             printf("Ignored CRL distribution point: %s\n", url);
@@ -1954,7 +1961,6 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
             goto out;
         }
     }
-#endif /* ENABLE_CURL */
     if (p7->d.sign->crl || crl) {
         crls = x509_crl_list_get(p7, crl);
         if (!crls) {
@@ -2331,9 +2337,9 @@ static time_t time_t_get_asn1_time(const ASN1_TIME *s)
     if (ASN1_TIME_to_tm(s, &tm)) {
 #ifdef _WIN32
         return _mkgmtime(&tm);
-#else
+#else /* _WIN32 */
         return timegm(&tm);
-#endif
+#endif /* _WIN32 */
     } else {
         return INVALID_TIME;
     }
@@ -2999,10 +3005,8 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
         printf("%12s[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n", "");
         printf("%12s[ -ph ]\n", "");
-#ifdef ENABLE_CURL
         printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
         printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
-#endif /* ENABLE_CURL */
         printf("%12s[ -TSA-certs <TSA-certfile> ] [ -TSA-key <TSA-keyfile> ]\n", "");
         printf("%12s[ -TSA-time <unix-time> ]\n", "");
         printf("%12s[ -time <unix-time> ]\n", "");
@@ -3022,10 +3026,8 @@ static void usage(const char *argv0, const char *cmd)
     }
     if (on_list(cmd, cmds_add)) {
         printf("%1sadd [-addUnauthenticatedBlob]\n", "");
-#ifdef ENABLE_CURL
         printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
         printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
-#endif /* ENABLE_CURL */
         printf("%12s[ -TSA-certs <TSA-certfile> ] [ -TSA-key <TSA-keyfile> ]\n", "");
         printf("%12s[ -TSA-time <unix-time> ]\n", "");
         printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
@@ -3108,14 +3110,10 @@ static void help_for(const char *argv0, const char *cmd)
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
     const char *cmds_n[] = {"sign", NULL};
     const char *cmds_nest[] = {"attach-signature", "sign", NULL};
-#ifdef ENABLE_CURL
     const char *cmds_noverifypeer[] = {"add", "sign", NULL};
-#endif /* ENABLE_CURL */
     const char *cmds_out[] = {"add", "attach-signature", "extract-signature",
         "remove-signature", "sign", "extract-data", NULL};
-#ifdef ENABLE_CURL
     const char *cmds_p[] = {"add", "sign", "verify", NULL};
-#endif /* ENABLE_CURL */
     const char *cmds_pass[] = {"sign", NULL};
     const char *cmds_pem[] = {"sign", "extract-data", "extract-signature", NULL};
     const char *cmds_ph[] = {"sign", "extract-data", NULL};
@@ -3129,10 +3127,8 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_time[] = {"attach-signature", "sign", "verify", NULL};
     const char *cmds_ignore_timestamp[] = {"verify", NULL};
     const char *cmds_ignore_cdp[] = {"verify", NULL};
-#ifdef ENABLE_CURL
     const char *cmds_t[] = {"add", "sign", NULL};
     const char *cmds_ts[] = {"add", "sign", NULL};
-#endif /* ENABLE_CURL */
     const char *cmds_CAfileTSA[] = {"attach-signature", "verify", NULL};
     const char *cmds_certsTSA[] = {"add", "sign", NULL};
     const char *cmds_keyTSA[] = {"add", "sign", NULL};
@@ -3239,16 +3235,12 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%-24s= specifies a description of the signed content\n", "-n");
     if (on_list(cmd, cmds_nest))
         printf("%-24s= add the new nested signature instead of replacing the first one\n", "-nest");
-#ifdef ENABLE_CURL
     if (on_list(cmd, cmds_noverifypeer))
         printf("%-24s= do not verify the Time-Stamp Authority's SSL certificate\n", "-noverifypeer");
-#endif /* ENABLE_CURL */
     if (on_list(cmd, cmds_out))
         printf("%-24s= output file\n", "-out");
-#ifdef ENABLE_CURL
     if (on_list(cmd, cmds_p))
         printf("%-24s= proxy to connect to the desired Time-Stamp Authority server or CRL distribution point\n", "-p");
-#endif /* ENABLE_CURL */
     if (on_list(cmd, cmds_pass))
         printf("%-24s= the private key password\n", "-pass");
     if (on_list(cmd, cmds_pem))
@@ -3277,7 +3269,6 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%-24s= disable verification of the Timestamp Server signature\n", "-ignore-timestamp");
     if (on_list(cmd, cmds_ignore_cdp))
         printf("%-24s= disable CRL Distribution Points online verification\n", "-ignore-cdp");
-#ifdef ENABLE_CURL
     if (on_list(cmd, cmds_t)) {
         printf("%-24s= specifies that the digital signature will be timestamped\n", "-t");
         printf("%26sby the Time-Stamp Authority (TSA) indicated by the URL\n", "");
@@ -3287,7 +3278,6 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%-24s= specifies the URL of the RFC 3161 Time-Stamp Authority server\n", "-ts");
         printf("%26sthis option cannot be used with the -t option\n", "");
     }
-#endif /* ENABLE_CURL */
     if (on_list(cmd, cmds_time))
         printf("%-24s= the unix-time to set the signing and/or verifying time\n", "-time");
     if (on_list(cmd, cmds_CAfileTSA))
@@ -3338,11 +3328,11 @@ static char *getpassword(const char *prompt)
     pass = OPENSSL_strdup(passbuf);
     memset(passbuf, 0, sizeof passbuf);
     return pass;
-#else
+#else /* HAVE_TERMIOS_H */
     return getpass(prompt);
-#endif
+#endif /* HAVE_TERMIOS_H */
 }
-#endif
+#endif /* PROVIDE_ASKPASS */
 
 /*
  * [in, out] options: structure holds the input data
@@ -3375,7 +3365,7 @@ static int read_password(GLOBAL_OPTIONS *options)
         memcpy(passbuf, faddress, passlen);
         UnmapViewOfFile(faddress);
         CloseHandle(fhandle);
-#else
+#else /* WIN32 */
         int passfd = open(options->readpass, O_RDONLY);
         if (passfd < 0) {
             return 0; /* FAILED */
@@ -3838,7 +3828,7 @@ static char *get_cafile(void)
             return OPENSSL_strdup(files[i]);
         }
     }
-#endif
+#endif /* WIN32 */
     return NULL;
 }
 
@@ -4085,7 +4075,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->askpass = 1;
-#endif
+#endif /* PROVIDE_ASKPASS */
         } else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-readpass")) {
             if (options->askpass || options->pass) {
                 usage(argv0, "all");
@@ -4140,7 +4130,6 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->time = (time_t)strtoull(*(++argv), NULL, 10);
-#ifdef ENABLE_CURL
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-t")) {
             if (--argc < 1) {
                 usage(argv0, "all");
@@ -4161,7 +4150,6 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
             options->proxy = *(++argv);
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-noverifypeer")) {
             options->noverifypeer = 1;
-#endif
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-addUnauthenticatedBlob")) {
             options->addBlob = 1;
         } else if ((cmd == CMD_SIGN || cmd == CMD_ATTACH) && !strcmp(*argv, "-nest")) {
@@ -4313,11 +4301,9 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
         return 0; /* FAILED */
     }
     if (argc > 0 ||
-#ifdef ENABLE_CURL
         (options->nturl && options->ntsurl) ||
         (options->nturl && options->tsa_certfile && options->tsa_keyfile) ||
         (options->ntsurl && options->tsa_certfile && options->tsa_keyfile) ||
-#endif
         !options->infile ||
         (cmd != CMD_VERIFY && !options->outfile) ||
         (cmd == CMD_SIGN && !((options->certfile && options->keyfile) ||
