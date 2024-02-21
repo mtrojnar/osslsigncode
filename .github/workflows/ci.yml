@@ -107,6 +107,11 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
 
+    - name: Install brew dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install python@3.8
+
     - name: Install Xcode (macOS)
       if: runner.os == 'macOS'
       uses: maxim-lobanov/setup-xcode@v1
@@ -140,8 +145,8 @@ jobs:
       working-directory: ${{github.workspace}}/build
       if: runner.os == 'macOS'
       run: |
-        python3 --version
-        python3 ./Testing/server_http.py --port 19254
+        python3.8 --version
+        python3.8 ./Testing/server_http.py --port 19254
         while test ! -s ./Testing/logs/port.log; do sleep 1; done
 
     - name: Start HTTP server (Windows)
