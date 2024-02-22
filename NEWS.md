@@ -2,6 +2,7 @@
 
 ### 2.8 (unreleased)
 
+- Microsoft PowerShell signing sponsored by Cisco Systems, Inc.
 - fixed setting unauthenticated attributes (Countersignature,
   Unauthenticated Data Blob) in a nested signature
 - added support for verifying the signature at a certain position ("-index" option)
