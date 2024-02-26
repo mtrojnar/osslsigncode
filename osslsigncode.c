@@ -221,6 +221,7 @@ static int X509_attribute_chain_append_object(STACK_OF(X509_ATTRIBUTE) **unauth_
 static STACK_OF(PKCS7) *signature_list_create(PKCS7 *p7);
 static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b);
 static PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
+static void print_cert(X509 *cert, int i);
 
 
 static int blob_has_nl = 0;
@@ -523,8 +524,6 @@ static int attach_authenticode_response(PKCS7 *p7, PKCS7 *resp, int verbose)
     return 0; /* OK */
 }
 
-#ifdef ENABLE_CURL
-
 static void print_proxy(char *proxy)
 {
     if (proxy) {
@@ -544,6 +543,9 @@ static void print_proxy(char *proxy)
             printf ("Using environmental HTTPS proxy: %s\n", https_proxy);
     }
 }
+
+#if OPENSSL_VERSION_NUMBER<0x30000000L
+#ifndef ENABLE_CURL
 
 /*
  * Callback for writing received data
@@ -565,14 +567,14 @@ static size_t curl_write(void *ptr, size_t sz, size_t nmemb, void *stream)
  * Get data from HTTP server.
  * [out] http_code: HTTP status
  * [in] url: URL of the CRL distribution point or Time-Stamp Authority HTTP server
- * [in] bout: timestamp request
+ * [in] req: timestamp request
  * [in] proxy: proxy to getting the timestamp through
  * [in] noverifypeer: do not verify the Time-Stamp Authority's SSL certificate
  * [in] verbose: additional output mode
  * [in] content: CRL distribution point (0), RFC3161 TSA (1), Authenticode TSA (2)
- * [returns] pointer to BIO with X509 Certificate Revocation List
+ * [returns] pointer to BIO with X509 Certificate Revocation List or timestamp response
  */
-static BIO *bio_get_http(long *http_code, char *url, BIO *bout, char *proxy,
+static BIO *bio_get_http_curl(long *http_code, char *url, BIO *req, char *proxy,
     int noverifypeer, int verbose, int content)
 {
     CURL *curl;
@@ -638,7 +640,7 @@ static BIO *bio_get_http(long *http_code, char *url, BIO *bout, char *proxy,
         if (res != CURLE_OK) {
             printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
         }
-        len = BIO_get_mem_data(bout, &p);
+        len = BIO_get_mem_data(req, &p);
         res = curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, len);
         if (res != CURLE_OK) {
             printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
@@ -683,8 +685,137 @@ static BIO *bio_get_http(long *http_code, char *url, BIO *bout, char *proxy,
 }
 #endif /* ENABLE_CURL */
 
+#else /* OPENSSL_VERSION_NUMBER<0x30000000L */
+
+/* HTTP callback function that supports TLS connection also via HTTPS proxy */
+static BIO *http_tls_cb(BIO *bio, void *arg, int connect, int detail)
+{
+    HTTP_TLS_Info *info = (HTTP_TLS_Info *)arg;
+    SSL_CTX *ssl_ctx = info->ssl_ctx;
+
+    if (ssl_ctx == NULL) {
+        /* not using TLS */
+        return bio;
+    }
+    if (connect && detail) {
+        /* connecting with TLS */
+        SSL *ssl;
+        BIO *sbio = NULL;
+
+        /* adapt after fixing callback design flaw, see #17088 */
+        if ((info->use_proxy
+            && !OSSL_HTTP_proxy_connect(bio, info->server, info->port,
+                NULL, NULL, info->timeout, NULL, NULL))
+                || (sbio = BIO_new(BIO_f_ssl())) == NULL) {
+            return NULL;
+        }
+        if ((ssl = SSL_new(ssl_ctx)) == NULL) {
+            BIO_free(sbio);
+            return NULL;
+        }
+        SSL_set_connect_state(ssl);
+        BIO_set_ssl(sbio, ssl, BIO_CLOSE);
+        bio = BIO_push(sbio, bio);
+    } else if (!connect) {
+        /* disconnect from TLS */
+        BIO *hbio;
+
+        BIO_ssl_shutdown(bio);
+        hbio = BIO_pop(bio);
+        BIO_free(bio); /* SSL BIO */
+        bio = hbio;
+    }
+    return bio;
+}
+
+static int verify_callback(int ok, X509_STORE_CTX *ctx)
+{
+    if (!ok) {
+        print_cert(X509_STORE_CTX_get_current_cert(ctx), 0);
+        printf("verify error: %s\n", X509_verify_cert_error_string(X509_STORE_CTX_get_error(ctx)));
+    }
+    return ok;
+}
+
 /*
- * Decode a curl response from BIO and write it into the PKCS7 structure
+ * Get data from HTTP server.
+ * [in] url: URL of the CRL distribution point or Time-Stamp Authority HTTP server
+ * [in] req: timestamp request
+ * [in] proxy: proxy to getting the timestamp through
+ * [in] cafile: file contains concatenated CA certificates in PEM format
+ * [in] rfc3161:  Authenticode / RFC3161 Timestamp switch
+ * [returns] pointer to BIO with X509 Certificate Revocation List or timestamp response
+ */
+static BIO *bio_get_http(char *url, BIO *req, char *proxy, char *cafile, int rfc3161)
+{
+    int timeout = 5;
+    BIO *resp = NULL;
+
+    if (!url) {
+        return NULL; /* FAILED */
+    }
+    print_proxy(proxy);
+    printf("Connecting to %s\n", url);
+
+    if (!req) { /* GET */
+        resp = OSSL_HTTP_get(url, proxy, NULL, NULL, NULL, NULL, NULL, 0, NULL,
+            NULL, 1, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout);
+    } else { /* POST */
+        HTTP_TLS_Info info;
+        int use_ssl;
+        SSL_CTX *ssl_ctx = NULL;
+        char *server = NULL;
+        char *port = NULL;
+        char *path = NULL;
+        const char *content_type = "application/timestamp-query"; /* RFC3161 Timestamp */
+        const char *expected_content_type = "application/timestamp-reply";
+        BIO *tmp_bio = NULL;
+
+        if (!rfc3161) {
+            u_char *p = NULL;
+            long len = BIO_get_mem_data(req, &p);
+
+            tmp_bio = BIO_new(BIO_s_mem());
+            BIO_write(tmp_bio, p, (int)len);
+            req = BIO_push(tmp_bio, req);
+            content_type = "application/octet-stream"; /* Authenticode Timestamp */
+            expected_content_type = "application/octet-stream";
+        }
+        if (!OSSL_HTTP_parse_url(url, &use_ssl, NULL, &server, &port, NULL, &path, NULL, NULL)) {
+            return NULL; /* FAILED */
+        }
+        if (use_ssl) {
+            ssl_ctx = SSL_CTX_new(TLS_client_method());
+            if (cafile) {
+                SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, verify_callback);
+                printf("TSA-CAfile: %s\n", cafile);
+                if (!SSL_CTX_load_verify_locations(ssl_ctx, cafile, NULL))
+                    return NULL; /* FAILED */
+                /* TODO CRLS */
+            } else {
+                printf("Warning: Time-Stamp Authority verification was skipped\n");
+            }
+        }
+        info.server = server;
+        info.port = port;
+        info.use_proxy = OSSL_HTTP_adapt_proxy(proxy, NULL, server, use_ssl) != NULL;
+        info.timeout = timeout;
+        info.ssl_ctx = ssl_ctx;
+        resp = OSSL_HTTP_transfer(NULL, server, port, path, use_ssl, proxy, NULL,
+            NULL, NULL, http_tls_cb, &info, 0, NULL, content_type, req,
+            expected_content_type, 0, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout, 0);
+        OPENSSL_free(server);
+        OPENSSL_free(port);
+        OPENSSL_free(path);
+        BIO_free(tmp_bio);
+        SSL_CTX_free(ssl_ctx);
+    }
+    return resp;
+}
+#endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
+
+/*
+ * Decode a HTTP response from BIO and write it into the PKCS7 structure
  * Add timestamp to the PKCS7 SignerInfo structure:
  * sig->d.sign->signer_info->unauth_attr
  * [in, out] p7: new PKCS#7 signature
@@ -695,41 +826,51 @@ static BIO *bio_get_http(long *http_code, char *url, BIO *bout, char *proxy,
  */
 static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161)
 {
-    BIO *bout, *bin;
+    BIO *req, *resp;
     int verbose = ctx->options->verbose || ctx->options->ntsurl == 1;
     int res = 1;
     long http_code = -1;
 
     /* Encode timestamp request */
     if (rfc3161) {
-        bout = bio_encode_rfc3161_request(p7, ctx->options->md);
+        req = bio_encode_rfc3161_request(p7, ctx->options->md);
     } else {
-        bout = bio_encode_authenticode_request(p7);
+        req = bio_encode_authenticode_request(p7);
     }
-    if (!bout) {
+    if (!req) {
         return 1; /* FAILED */
     }
-#ifdef ENABLE_CURL
+#if OPENSSL_VERSION_NUMBER<0x30000000L
+#ifndef ENABLE_CURL
+    (void)url;
+    (void)rfc3161;
+    printf("Could NOT find CURL\n");
+    BIO_free_all(req);
+    return NULL; /* FAILED */
+#else /* ENABLE_CURL */
     if (rfc3161) {
-        bin = bio_get_http(&http_code, url, bout, ctx->options->proxy,
+        resp = bio_get_http_curl(&http_code, url, req, ctx->options->proxy,
             ctx->options->noverifypeer, verbose, 1);
     } else {
-        bin = bio_get_http(&http_code, url, bout, ctx->options->proxy,
+        resp = bio_get_http_curl(&http_code, url, req, ctx->options->proxy,
             ctx->options->noverifypeer, verbose, 2);
     }
-    BIO_free_all(bout);
-#else /* ENABLE_CURL */
-    /* TODO implement an HTTP session */
-    printf("Could NOT find CURL\n");
-    return 1; /* FAILED */
 #endif /* ENABLE_CURL */
-
-    if (bin) {
+#else /* OPENSSL_VERSION_NUMBER<0x30000000L */
+    if (rfc3161) {
+        resp = bio_get_http(url, req, ctx->options->proxy,
+            ctx->options->noverifypeer ? NULL : ctx->options->tsa_cafile, 1);
+    } else {
+        resp = bio_get_http(url, req, ctx->options->proxy,
+            ctx->options->noverifypeer ? NULL : ctx->options->tsa_cafile, 0);
+    }
+#endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
+    BIO_free_all(req);
+    if (resp != NULL) {
         if (rfc3161) {
             /* decode a RFC 3161 response from BIO */
-            TS_RESP *response = d2i_TS_RESP_bio(bin, NULL);
-            BIO_free_all(bin);
-
+            TS_RESP *response = d2i_TS_RESP_bio(resp, NULL);
+            BIO_free_all(resp);
             res = attach_rfc3161_response(p7, response, verbose);
             TS_RESP_free(response);
         } else {
@@ -740,10 +881,9 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
             b64 = BIO_new(BIO_f_base64());
             if (!blob_has_nl)
                 BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
-            b64_bin = BIO_push(b64, bin);
+            b64_bin = BIO_push(b64, resp);
             response = d2i_PKCS7_bio(b64_bin, NULL);
             BIO_free_all(b64_bin);
-
             res = attach_authenticode_response(p7, response, verbose);
         }
         if (res && verbose) {
@@ -751,8 +891,7 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
                 printf("Failed to convert timestamp reply from %s; "
                 "HTTP status %ld\n", url, http_code);
             } else {
-                printf("Failed to convert timestamp reply from %s; "
-                "no HTTP status available", url);
+                printf("Failed to convert timestamp reply from %s\n", url);
             }
             ERR_print_errors_fp(stdout);
         }
@@ -1669,16 +1808,18 @@ static X509_CRL *x509_crl_get(char *proxy, char *url)
 {
     X509_CRL *crl;
     BIO *bio = NULL;
-#ifdef ENABLE_CURL
-    long http_code = -1;
 
-    bio = bio_get_http(&http_code, url, NULL, proxy, 0, 1, 0);
-#else /* ENABLE_CURL */
-    /* TODO implement an HTTP session */
-    (void)proxy;
+#if OPENSSL_VERSION_NUMBER<0x30000000L
+#ifndef ENABLE_CURL
     printf("Could NOT find CURL\n");
     return NULL; /* FAILED */
+#else /* ENABLE_CURL */
+    long http_code = -1;
+    bio = bio_get_http_curl(&http_code, url, NULL, proxy, 0, 1, 0);
 #endif /* ENABLE_CURL */
+#else /* OPENSSL_VERSION_NUMBER<0x30000000L */
+    bio = bio_get_http(url, NULL, proxy, NULL, 0);
+#endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
     if (!bio) {
         printf("Warning: Faild to get CRL from %s\n\n", url);
         return NULL; /* FAILED */
@@ -3093,6 +3234,7 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
         printf("%12s[ -TSA-certs <TSA-certfile> ] [ -TSA-key <TSA-keyfile> ]\n", "");
         printf("%12s[ -TSA-time <unix-time> ]\n", "");
+        printf("%12s[ -TSA-CAfile <infile> ]\n", "");
         printf("%12s[ -time <unix-time> ]\n", "");
         printf("%12s[ -addUnauthenticatedBlob ]\n", "");
         printf("%12s[ -nest ]\n", "");
@@ -3213,7 +3355,7 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_ignore_cdp[] = {"verify", NULL};
     const char *cmds_t[] = {"add", "sign", NULL};
     const char *cmds_ts[] = {"add", "sign", NULL};
-    const char *cmds_CAfileTSA[] = {"attach-signature", "verify", NULL};
+    const char *cmds_CAfileTSA[] = {"attach-signature", "sign", "verify", NULL};
     const char *cmds_certsTSA[] = {"add", "sign", NULL};
     const char *cmds_keyTSA[] = {"add", "sign", NULL};
     const char *cmds_timeTSA[] = {"add", "sign", NULL};
@@ -4067,7 +4209,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
     if (cmd == CMD_HELP) {
         return 0; /* FAILED */
     }
-    if (cmd == CMD_VERIFY || cmd == CMD_ATTACH) {
+    if (cmd == CMD_SIGN || cmd == CMD_VERIFY || cmd == CMD_ATTACH) {
         options->cafile = get_cafile();
         options->tsa_cafile = get_cafile();
     }
@@ -4277,11 +4419,12 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->crlfile = OPENSSL_strdup(*++argv);
-        } else if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && (!strcmp(*argv, "-untrusted") || !strcmp(*argv, "-TSA-CAfile"))) {
+        } else if ((cmd == CMD_SIGN || cmd == CMD_VERIFY || cmd == CMD_ATTACH)
+            && (!strcmp(*argv, "-untrusted") || !strcmp(*argv, "-TSA-CAfile"))) {
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
-      }
+            }
             OPENSSL_free(options->tsa_cafile);
             options->tsa_cafile = OPENSSL_strdup(*++argv);
         } else if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && (!strcmp(*argv, "-CRLuntrusted") || !strcmp(*argv, "-TSA-CRLfile"))) {

@@ -63,6 +63,7 @@
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 #include <openssl/rand.h>
 #include <openssl/safestack.h>
+#include <openssl/ssl.h>
 #include <openssl/ts.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h> /* X509_PURPOSE */
@@ -479,6 +480,14 @@ typedef struct {
 } MsCtlContent;
 
 DECLARE_ASN1_FUNCTIONS(MsCtlContent)
+
+typedef struct {
+    const char *server;
+    const char *port;
+    int use_proxy;
+    int timeout;
+    SSL_CTX *ssl_ctx;
+} HTTP_TLS_Info;
 
 typedef struct file_format_st FILE_FORMAT;
 
