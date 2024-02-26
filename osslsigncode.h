@@ -280,6 +280,8 @@ typedef struct {
     char *catalog;
     char *cafile;
     char *crlfile;
+    char *https_cafile;
+    char *https_crlfile;
     char *tsa_cafile;
     char *tsa_crlfile;
     char *leafhash;

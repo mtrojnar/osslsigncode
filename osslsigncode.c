@@ -222,6 +222,7 @@ static STACK_OF(PKCS7) *signature_list_create(PKCS7 *p7);
 static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b);
 static PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
 static void print_cert(X509 *cert, int i);
+static int x509_store_load_crlfile(X509_STORE *store, char *cafile, char *crlfile);
 
 
 static int blob_has_nl = 0;
@@ -727,12 +728,26 @@ static BIO *http_tls_cb(BIO *bio, void *arg, int connect, int detail)
     }
     return bio;
 }
+static char *clrdp_url_get_x509(X509 *cert);
 
 static int verify_callback(int ok, X509_STORE_CTX *ctx)
 {
     if (!ok) {
+        int error = X509_STORE_CTX_get_error(ctx);
+
         print_cert(X509_STORE_CTX_get_current_cert(ctx), 0);
-        printf("verify error: %s\n", X509_verify_cert_error_string(X509_STORE_CTX_get_error(ctx)));
+        if (error == X509_V_ERR_UNABLE_TO_GET_CRL) {
+            char *url = clrdp_url_get_x509(X509_STORE_CTX_get_current_cert(ctx));
+
+            printf("\tWarning: Ignoring %s error for CRL validation\n",
+                X509_verify_cert_error_string(error));
+            printf("\nUse the \"-HTTPS-CRLfile\" option to verify CRL\n");
+            printf("HTTPS's CRL distribution point: %s\n", url);
+            OPENSSL_free(url);
+            return 1;
+        } else {
+            printf("\tError: %s\n", X509_verify_cert_error_string(error));
+        }
     }
     return ok;
 }
@@ -742,11 +757,12 @@ static int verify_callback(int ok, X509_STORE_CTX *ctx)
  * [in] url: URL of the CRL distribution point or Time-Stamp Authority HTTP server
  * [in] req: timestamp request
  * [in] proxy: proxy to getting the timestamp through
- * [in] cafile: file contains concatenated CA certificates in PEM format
  * [in] rfc3161:  Authenticode / RFC3161 Timestamp switch
+ * [in] cafile: file contains concatenated CA certificates in PEM format
+ * [in] crlfile: file contains Certificate Revocation List (CRLs)
  * [returns] pointer to BIO with X509 Certificate Revocation List or timestamp response
  */
-static BIO *bio_get_http(char *url, BIO *req, char *proxy, char *cafile, int rfc3161)
+static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *cafile, char *crlfile)
 {
     int timeout = 5;
     BIO *resp = NULL;
@@ -764,6 +780,7 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, char *cafile, int rfc
         HTTP_TLS_Info info;
         int use_ssl;
         SSL_CTX *ssl_ctx = NULL;
+        X509_STORE *store = NULL;
         char *server = NULL;
         char *port = NULL;
         char *path = NULL;
@@ -787,13 +804,15 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, char *cafile, int rfc
         if (use_ssl) {
             ssl_ctx = SSL_CTX_new(TLS_client_method());
             if (cafile) {
+                printf("HTTPS-CAfile: %s\n", cafile);
+                if (crlfile)
+                    printf("HTTPS-CRLfile: %s\n", crlfile);
+                store = SSL_CTX_get_cert_store(ssl_ctx);
+                if (!x509_store_load_crlfile(store, cafile, crlfile))
+                    goto out;
                 SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, verify_callback);
-                printf("TSA-CAfile: %s\n", cafile);
-                if (!SSL_CTX_load_verify_locations(ssl_ctx, cafile, NULL))
-                    return NULL; /* FAILED */
-                /* TODO CRLS */
             } else {
-                printf("Warning: Time-Stamp Authority verification was skipped\n");
+                printf("Warning: HTTPS verification was skipped\n");
             }
         }
         info.server = server;
@@ -804,6 +823,7 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, char *cafile, int rfc
         resp = OSSL_HTTP_transfer(NULL, server, port, path, use_ssl, proxy, NULL,
             NULL, NULL, http_tls_cb, &info, 0, NULL, content_type, req,
             expected_content_type, 0, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout, 0);
+out:
         OPENSSL_free(server);
         OPENSSL_free(port);
         OPENSSL_free(path);
@@ -858,11 +878,13 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
 #endif /* ENABLE_CURL */
 #else /* OPENSSL_VERSION_NUMBER<0x30000000L */
     if (rfc3161) {
-        resp = bio_get_http(url, req, ctx->options->proxy,
-            ctx->options->noverifypeer ? NULL : ctx->options->tsa_cafile, 1);
+        resp = bio_get_http(url, req, ctx->options->proxy, 1,
+            ctx->options->noverifypeer ? NULL : ctx->options->https_cafile,
+            ctx->options->noverifypeer ? NULL : ctx->options->https_crlfile);
     } else {
-        resp = bio_get_http(url, req, ctx->options->proxy,
-            ctx->options->noverifypeer ? NULL : ctx->options->tsa_cafile, 0);
+        resp = bio_get_http(url, req, ctx->options->proxy, 0,
+            ctx->options->noverifypeer ? NULL : ctx->options->https_cafile,
+            ctx->options->noverifypeer ? NULL : ctx->options->https_crlfile);
     }
 #endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
     BIO_free_all(req);
@@ -1818,7 +1840,7 @@ static X509_CRL *x509_crl_get(char *proxy, char *url)
     bio = bio_get_http_curl(&http_code, url, NULL, proxy, 0, 1, 0);
 #endif /* ENABLE_CURL */
 #else /* OPENSSL_VERSION_NUMBER<0x30000000L */
-    bio = bio_get_http(url, NULL, proxy, NULL, 0);
+    bio = bio_get_http(url, NULL, proxy, 0, NULL, NULL);
 #endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
     if (!bio) {
         printf("Warning: Faild to get CRL from %s\n\n", url);
@@ -3176,8 +3198,10 @@ static void free_options(GLOBAL_OPTIONS *options)
 {
     /* If memory has not been allocated nothing is done */
     OPENSSL_free(options->cafile);
-    OPENSSL_free(options->tsa_cafile);
     OPENSSL_free(options->crlfile);
+    OPENSSL_free(options->https_cafile);
+    OPENSSL_free(options->https_crlfile);
+    OPENSSL_free(options->tsa_cafile);
     OPENSSL_free(options->tsa_crlfile);
     /* If key is NULL nothing is done */
     EVP_PKEY_free(options->pkey);
@@ -3234,7 +3258,8 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
         printf("%12s[ -TSA-certs <TSA-certfile> ] [ -TSA-key <TSA-keyfile> ]\n", "");
         printf("%12s[ -TSA-time <unix-time> ]\n", "");
-        printf("%12s[ -TSA-CAfile <infile> ]\n", "");
+        printf("%12s[ -HTTPS-CAfile <infile> ]\n", "");
+        printf("%12s[ -HTTPS-CRLfile <infile> ]\n", "");
         printf("%12s[ -time <unix-time> ]\n", "");
         printf("%12s[ -addUnauthenticatedBlob ]\n", "");
         printf("%12s[ -nest ]\n", "");
@@ -3256,6 +3281,8 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
         printf("%12s[ -TSA-certs <TSA-certfile> ] [ -TSA-key <TSA-keyfile> ]\n", "");
         printf("%12s[ -TSA-time <unix-time> ]\n", "");
+        printf("%12s[ -HTTPS-CAfile <infile> ]\n", "");
+        printf("%12s[ -HTTPS-CRLfile <infile> ]\n", "");
         printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
         printf("%12s[ -index <index> ]\n", "");
         printf("%12s[ -verbose ]\n", "");
@@ -3323,6 +3350,7 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_certs[] = {"sign", NULL};
     const char *cmds_comm[] = {"sign", NULL};
     const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
+    const char *cmds_CRLfileHTTPS[] = {"add", "sign", NULL};
     const char *cmds_CRLfileTSA[] = {"attach-signature", "verify", NULL};
     const char *cmds_h[] = {"add", "attach-signature", "sign", "extract-data", NULL};
     const char *cmds_i[] = {"sign", NULL};
@@ -3355,7 +3383,8 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_ignore_cdp[] = {"verify", NULL};
     const char *cmds_t[] = {"add", "sign", NULL};
     const char *cmds_ts[] = {"add", "sign", NULL};
-    const char *cmds_CAfileTSA[] = {"attach-signature", "sign", "verify", NULL};
+    const char *cmds_CAfileHTTPS[] = {"add", "sign", NULL};
+    const char *cmds_CAfileTSA[] = {"attach-signature", "verify", NULL};
     const char *cmds_certsTSA[] = {"add", "sign", NULL};
     const char *cmds_keyTSA[] = {"add", "sign", NULL};
     const char *cmds_timeTSA[] = {"add", "sign", NULL};
@@ -3506,6 +3535,10 @@ static void help_for(const char *argv0, const char *cmd)
     }
     if (on_list(cmd, cmds_time))
         printf("%-24s= the unix-time to set the signing and/or verifying time\n", "-time");
+    if (on_list(cmd, cmds_CAfileHTTPS))
+        printf("%-24s= the file containing one or more HTTPS certificates in PEM format\n", "-HTTPS-CAfile");
+    if (on_list(cmd, cmds_CRLfileHTTPS))
+        printf("%-24s= the file containing one or more HTTPS CRLs in PEM format\n", "-HTTPS-CRLfile");
     if (on_list(cmd, cmds_CAfileTSA))
         printf("%-24s= the file containing one or more Time-Stamp Authority certificates in PEM format\n", "-TSA-CAfile");
     if (on_list(cmd, cmds_CRLfileTSA))
@@ -4211,6 +4244,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
     }
     if (cmd == CMD_SIGN || cmd == CMD_VERIFY || cmd == CMD_ATTACH) {
         options->cafile = get_cafile();
+        options->https_cafile = get_cafile();
         options->tsa_cafile = get_cafile();
     }
     for (argc--,argv++; argc >= 1; argc--,argv++) {
@@ -4419,8 +4453,20 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->crlfile = OPENSSL_strdup(*++argv);
-        } else if ((cmd == CMD_SIGN || cmd == CMD_VERIFY || cmd == CMD_ATTACH)
-            && (!strcmp(*argv, "-untrusted") || !strcmp(*argv, "-TSA-CAfile"))) {
+        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-HTTPS-CAfile")) {
+            if (--argc < 1) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            OPENSSL_free(options->https_cafile);
+            options->https_cafile = OPENSSL_strdup(*++argv);
+        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-HTTPS-CRLfile")) {
+            if (--argc < 1) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            options->https_crlfile = OPENSSL_strdup(*++argv);
+        } else if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && (!strcmp(*argv, "-untrusted") || !strcmp(*argv, "-TSA-CAfile"))) {
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
