@@ -42,11 +42,11 @@ make_certs() {
   echo -n "$password" > tmp/password.txt
 
 ################################################################################
-# Root CA certificate
+# Root CA certificates
 ################################################################################
 
-  printf "\nGenerate root CA certificate\n" >> "makecerts.log"
-  "$OPENSSL" genrsa -out CA/CA.key \
+  printf "\nGenerate trusted root CA certificate\n" >> "makecerts.log"
+ "$OPENSSL" genrsa -out CA/CAroot.key \
       2>> "makecerts.log" 1>&2
   test_result $?
   TZ=GMT faketime -f '@2017-01-01 00:00:00' /bin/bash -c '
@@ -54,8 +54,45 @@ make_certs() {
     OPENSSL="$0"
     export LD_LIBRARY_PATH="$1"
     CONF="${script_path}/openssl_root.cnf"
-    "$OPENSSL" req -config "$CONF" -new -x509 -days 3600 -key CA/CA.key -out tmp/CACert.pem \
+    "$OPENSSL" req -config "$CONF" -new -x509 -days 7300 -key CA/CAroot.key -out tmp/CAroot.pem \
+        -subj "/C=PL/O=osslsigncode/OU=Certification Authority/CN=Trusted Root CA" \
+        2>> "makecerts.log" 1>&2' "$OPENSSL" "$LD_LIBRARY_PATH"
+  test_result $?
+
+  printf "\nPrepare the Certificate Signing Request (CSR)\n" >> "makecerts.log"
+  "$OPENSSL" genrsa -out CA/CA.key \
+      2>> "makecerts.log" 1>&2
+  TZ=GMT faketime -f '@2017-01-01 00:00:00' /bin/bash -c '
+    script_path=$(pwd)
+    OPENSSL="$0"
+    export LD_LIBRARY_PATH="$1"
+    CONF="${script_path}/openssl_root.cnf"
+    "$OPENSSL" req -config "$CONF" -new -key CA/CA.key -out CA/CACert.csr \
         -subj "/C=PL/O=osslsigncode/OU=Certification Authority/CN=Root CA" \
+        2>> "makecerts.log" 1>&2' "$OPENSSL" "$LD_LIBRARY_PATH"
+  test_result $?
+
+  printf "\nGenerate Self-signed root CA certificate\n" >> "makecerts.log"
+  TZ=GMT faketime -f '@2017-01-01 00:00:00' /bin/bash -c '
+    script_path=$(pwd)
+    OPENSSL="$0"
+    export LD_LIBRARY_PATH="$1"
+    CONF="${script_path}/openssl_root.cnf"
+    "$OPENSSL" x509 -req -days 7300 -extfile "$CONF" -extensions ca_extensions \
+        -signkey CA/CA.key \
+        -in CA/CACert.csr -out tmp/CACert.pem \
+        2>> "makecerts.log" 1>&2' "$OPENSSL" "$LD_LIBRARY_PATH"
+  test_result $?
+
+  printf "\nGenerate Cross-signed root CA certificate\n" >> "makecerts.log"
+  TZ=GMT faketime -f '@2018-01-01 00:00:00' /bin/bash -c '
+    script_path=$(pwd)
+    OPENSSL="$0"
+    export LD_LIBRARY_PATH="$1"
+    CONF="${script_path}/openssl_root.cnf"
+    "$OPENSSL" x509 -req -days 7300 -extfile "$CONF" -extensions ca_extensions \
+        -CA tmp/CAroot.pem -CAkey CA/CAroot.key -CAserial CA/CAroot.srl \
+        -CAcreateserial -in CA/CACert.csr -out tmp/CAcross.pem \
         2>> "makecerts.log" 1>&2' "$OPENSSL" "$LD_LIBRARY_PATH"
   test_result $?
 
@@ -144,19 +181,6 @@ make_certs() {
     CONF="${script_path}/openssl_intermediate.cnf"
     "$OPENSSL" ca -config "$CONF" -gencrl -crldays 8766 -out tmp/CACertCRL.pem \
         2>> "makecerts.log" 1>&2' "$OPENSSL" "$LD_LIBRARY_PATH"
-  test_result $?
-
-  printf "\nGenerate CSP Cross-Certificate\n" >> "makecerts.log"
-  "$OPENSSL" genrsa -out CA/cross.key \
-      2>> "makecerts.log" 1>&2
-  TZ=GMT faketime -f '@2018-01-01 00:00:00' /bin/bash -c '
-    script_path=$(pwd)
-    OPENSSL="$0"
-    export LD_LIBRARY_PATH="$1"
-    CONF="${script_path}/openssl_intermediate.cnf"
-    "$OPENSSL" req -config "$CONF" -new -x509 -days 900 -key CA/cross.key -out tmp/crosscert.pem \
-       -subj "/C=PL/O=osslsigncode/OU=CSP/CN=crosscert/emailAddress=osslsigncode@example.com" \
-       2>> "makecerts.log" 1>&2' "$OPENSSL" "$LD_LIBRARY_PATH"
   test_result $?
 
   printf "\nGenerate code signing certificate\n" >> "makecerts.log"
@@ -319,7 +343,7 @@ make_certs() {
     OPENSSL="$0"
     export LD_LIBRARY_PATH="$1"
     CONF="${script_path}/openssl_tsa_root.cnf"
-    "$OPENSSL" req -config "$CONF" -new -x509 -days 3600 -key CA/TSACA.key -out tmp/TSACA.pem \
+    "$OPENSSL" req -config "$CONF" -new -x509 -days 7300 -key CA/TSACA.key -out tmp/TSACA.pem \
         2>> "makecerts.log" 1>&2' "$OPENSSL" "$LD_LIBRARY_PATH"
   test_result $?
 
@@ -377,14 +401,14 @@ make_certs() {
 # Copy new files
 ################################################################################
 
-  if test -s tmp/CACert.pem \
+  if test -s tmp/CACert.pem -a -s tmp/CAcross.pem -a -s tmp/CAroot.pem  \
       -a -s tmp/intermediateCA.pem -a -s tmp/intermediateCA_crldp.pem \
       -a -s tmp/CACertCRL.pem -a -s tmp/CACertCRL.der \
       -a -s tmp/TSACertCRL.pem -a -s tmp/TSACertCRL.der \
       -a -s tmp/key.pem -a -s tmp/keyp.pem -a -s tmp/key.der -a -s tmp/key.pvk \
       -a -s tmp/cert.pem -a -s tmp/cert.der -a -s tmp/cert.spc \
       -a -s tmp/cert.p12 -a -s tmp/legacy.p12 -a -s tmp/cert_crldp.pem\
-      -a -s tmp/crosscert.pem -a -s tmp/expired.pem \
+      -a -s tmp/expired.pem \
       -a -s tmp/revoked.pem -a -s tmp/revoked_crldp.pem \
       -a -s tmp/TSA_revoked.pem \
       -a -s tmp/TSA.pem -a -s tmp/TSA.key -a -s tmp/tsa-chain.pem
