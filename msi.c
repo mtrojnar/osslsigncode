@@ -193,7 +193,6 @@ static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
 static ASN1_OBJECT *msi_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
 static PKCS7 *msi_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_MD *md);
 static int msi_hash_length_get(FILE_FORMAT_CTX *ctx);
-static int msi_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static u_char *msi_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *msi_pkcs7_extract(FILE_FORMAT_CTX *ctx);
@@ -204,13 +203,13 @@ static PKCS7 *msi_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static BIO *msi_bio_free(BIO *hash, BIO *outdata);
 static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static int msi_is_detaching_supported(void);
 
 FILE_FORMAT file_format_msi = {
     .ctx_new = msi_ctx_new,
     .data_blob_get = msi_spc_sip_info_get,
     .pkcs7_contents_get = msi_pkcs7_contents_get,
     .hash_length_get = msi_hash_length_get,
-    .check_file = msi_check_file,
     .digest_calc = msi_digest_calc,
     .verify_digests = msi_verify_digests,
     .pkcs7_extract = msi_pkcs7_extract,
@@ -220,7 +219,8 @@ FILE_FORMAT file_format_msi = {
     .pkcs7_signature_new = msi_pkcs7_signature_new,
     .append_pkcs7 = msi_append_pkcs7,
     .bio_free = msi_bio_free,
-    .ctx_cleanup = msi_ctx_cleanup
+    .ctx_cleanup = msi_ctx_cleanup,
+    .is_detaching_supported = msi_is_detaching_supported
 };
 
 /* Prototypes */
@@ -242,6 +242,7 @@ static MSI_FILE *msi_file_new(char *buffer, uint32_t len);
 static int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT **ret);
 static void msi_dirent_free(MSI_DIRENT *dirent);
 static int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root);
+static int msi_check_file(FILE_FORMAT_CTX *ctx);
 
 /*
  * FILE_FORMAT method definitions
@@ -358,77 +359,6 @@ static PKCS7 *msi_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_
     }
     content = spc_indirect_data_content_get(hash, ctx);
     return pkcs7_set_content(content);
-}
-
-/*
- * [in] ctx: structure holds input and output data
- * [returns] the size of the message digest when passed an EVP_MD structure (the size of the hash)
- */
-static int msi_hash_length_get(FILE_FORMAT_CTX *ctx)
-{
-    return EVP_MD_size(ctx->options->md);
-}
-
-/*
- * Get DigitalSignature and MsiDigitalSignatureEx streams,
- * check if the signature exists.
- * [in, out] ctx: structure holds input and output data
- * [in] detached: embedded/detached PKCS#7 signature switch (unused)
- * [returns] 0 on error or 1 on successs
- */
-static int msi_check_file(FILE_FORMAT_CTX *ctx, int detached)
-{
-    char *indata = NULL;
-    uint32_t inlen;
-    MSI_ENTRY *ds, *dse = NULL;
-
-    /* squash the unused parameter warning */
-    (void)detached;
-
-    if (!ctx) {
-        printf("Init error\n\n");
-        return 0; /* FAILED */
-    }
-    if (detached) {
-        printf("Checking the specified catalog file\n\n");
-        return 1; /* OK */
-    }
-    ds = msi_signatures_get(ctx->msi_ctx->dirent, &dse);
-    if (!ds) {
-        printf("MSI file has no signature\n\n");
-        return 0; /* FAILED */
-    }
-    inlen = GET_UINT32_LE(ds->size);
-    if (inlen == 0 || inlen >= MAXREGSECT) {
-        printf("Corrupted DigitalSignature stream length 0x%08X\n", inlen);
-        return 0; /* FAILED */
-    }
-    indata = OPENSSL_malloc((size_t)inlen);
-    if (!msi_file_read(ctx->msi_ctx->msi, ds, 0, indata, inlen)) {
-        printf("DigitalSignature stream data error\n\n");
-        OPENSSL_free(indata);
-        return 0; /* FAILED */
-    }
-    if (!dse) {
-        printf("Warning: MsiDigitalSignatureEx stream doesn't exist\n");
-    } else {
-        ctx->msi_ctx->len_msiex = GET_UINT32_LE(dse->size);
-        if (ctx->msi_ctx->len_msiex == 0 || ctx->msi_ctx->len_msiex >= MAXREGSECT) {
-            printf("Corrupted MsiDigitalSignatureEx stream length 0x%08X\n",
-                ctx->msi_ctx->len_msiex);
-            OPENSSL_free(indata);
-            return 0; /* FAILED */
-        }
-        ctx->msi_ctx->p_msiex = OPENSSL_malloc((size_t)ctx->msi_ctx->len_msiex);
-        if (!msi_file_read(ctx->msi_ctx->msi, dse, 0, (char *)ctx->msi_ctx->p_msiex,
-                ctx->msi_ctx->len_msiex)) {
-            printf("MsiDigitalSignatureEx stream data error\n\n");
-            OPENSSL_free(indata);
-            return 0; /* FAILED */
-        }
-    }
-    OPENSSL_free(indata);
-    return 1; /* OK */
 }
 
 /*
@@ -566,7 +496,12 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 static PKCS7 *msi_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
     PKCS7 *p7;
-    MSI_ENTRY *ds = msi_signatures_get(ctx->msi_ctx->dirent, NULL);
+    MSI_ENTRY *ds;
+
+    if (!msi_check_file(ctx)) {
+        return NULL; /* FAILED, no signature */
+    }
+    ds = msi_signatures_get(ctx->msi_ctx->dirent, NULL);
 
     if (!ds) {
         printf("MSI file has no signature\n");
@@ -591,6 +526,9 @@ static PKCS7 *msi_pkcs7_extract_to_nest(FILE_FORMAT_CTX *ctx)
     PKCS7 *p7;
     MSI_ENTRY *ds, *dse = NULL;
 
+    if (!msi_check_file(ctx)) {
+        return NULL; /* FAILED, no signature */
+    }
     ds = msi_signatures_get(ctx->msi_ctx->dirent, &dse);
     if (!ds) {
         printf("MSI file has no signature\n");
@@ -760,6 +698,11 @@ static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     OPENSSL_free(ctx->msi_ctx->p_msiex);
     OPENSSL_free(ctx->msi_ctx);
     OPENSSL_free(ctx);
+}
+
+static int msi_is_detaching_supported(void)
+{
+    return 1; /* OK */
 }
 
 /*
@@ -2315,6 +2258,69 @@ static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse,
             "In this case, consider using the -add-msi-dse option.\n");
             return 0; /* FAILED */
     }
+    return 1; /* OK */
+}
+
+/*
+ * [in] ctx: structure holds input and output data
+ * [returns] the size of the message digest when passed an EVP_MD structure (the size of the hash)
+ */
+static int msi_hash_length_get(FILE_FORMAT_CTX *ctx)
+{
+    return EVP_MD_size(ctx->options->md);
+}
+
+/*
+ * Get DigitalSignature and MsiDigitalSignatureEx streams
+ * to check if the signature exists.
+ * [in, out] ctx: structure holds input and output datafv
+ * [returns] 0 on error or 1 on successs
+ */
+static int msi_check_file(FILE_FORMAT_CTX *ctx)
+{
+    char *indata = NULL;
+    uint32_t inlen;
+    MSI_ENTRY *ds, *dse = NULL;
+
+    if (!ctx) {
+        printf("Init error\n\n");
+        return 0; /* FAILED */
+    }
+    ds = msi_signatures_get(ctx->msi_ctx->dirent, &dse);
+    if (!ds) {
+        printf("MSI file has no signature\n\n");
+        return 0; /* FAILED */
+    }
+    inlen = GET_UINT32_LE(ds->size);
+    if (inlen == 0 || inlen >= MAXREGSECT) {
+        printf("Corrupted DigitalSignature stream length 0x%08X\n", inlen);
+        return 0; /* FAILED */
+    }
+    indata = OPENSSL_malloc((size_t)inlen);
+    if (!msi_file_read(ctx->msi_ctx->msi, ds, 0, indata, inlen)) {
+        printf("DigitalSignature stream data error\n\n");
+        OPENSSL_free(indata);
+        return 0; /* FAILED */
+    }
+    if (!dse) {
+        printf("Warning: MsiDigitalSignatureEx stream doesn't exist\n");
+    } else {
+        ctx->msi_ctx->len_msiex = GET_UINT32_LE(dse->size);
+        if (ctx->msi_ctx->len_msiex == 0 || ctx->msi_ctx->len_msiex >= MAXREGSECT) {
+            printf("Corrupted MsiDigitalSignatureEx stream length 0x%08X\n",
+                ctx->msi_ctx->len_msiex);
+            OPENSSL_free(indata);
+            return 0; /* FAILED */
+        }
+        ctx->msi_ctx->p_msiex = OPENSSL_malloc((size_t)ctx->msi_ctx->len_msiex);
+        if (!msi_file_read(ctx->msi_ctx->msi, dse, 0, (char *)ctx->msi_ctx->p_msiex,
+                ctx->msi_ctx->len_msiex)) {
+            printf("MsiDigitalSignatureEx stream data error\n\n");
+            OPENSSL_free(indata);
+            return 0; /* FAILED */
+        }
+    }
+    OPENSSL_free(indata);
     return 1; /* OK */
 }
 

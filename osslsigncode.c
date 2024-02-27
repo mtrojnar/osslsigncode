@@ -2717,17 +2717,15 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
     STACK_OF(PKCS7) *signatures = NULL;
     int detached = options->catalog ? 1 : 0;
 
-    if (!ctx->format->check_file) {
-        printf("Unsupported method: check_file\n");
-        return 1; /* FAILED */
-    }
-
-    if (!ctx->format->check_file(ctx, detached))
-        return 1; /* FAILED */
-
     if (detached) {
         GLOBAL_OPTIONS *cat_options;
         FILE_FORMAT_CTX *cat_ctx;
+
+        if (!ctx->format->is_detaching_supported || !ctx->format->is_detaching_supported()) {
+            printf("This format does not support detached PKCS#7 signature\n");
+            return 1; /* FAILED */
+        }
+        printf("Checking the specified catalog file\n\n");
         cat_options = OPENSSL_memdup(options, sizeof(GLOBAL_OPTIONS));
         if (!cat_options) {
             printf("OPENSSL_memdup error.\n");

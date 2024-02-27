@@ -250,7 +250,6 @@ static const EVP_MD *appx_md_get(FILE_FORMAT_CTX *ctx);
 static ASN1_OBJECT *appx_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
 static PKCS7 *appx_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_MD *md);
 static int appx_hash_length_get(FILE_FORMAT_CTX *ctx);
-static int appx_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static int appx_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx);
 static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
@@ -266,7 +265,6 @@ FILE_FORMAT file_format_appx = {
     .data_blob_get = appx_spc_sip_info_get,
     .pkcs7_contents_get = appx_pkcs7_contents_get,
     .hash_length_get = appx_hash_length_get,
-    .check_file = appx_check_file,
     .verify_digests = appx_verify_digests,
     .pkcs7_extract = appx_pkcs7_extract,
     .remove_pkcs7 = appx_remove_pkcs7,
@@ -467,25 +465,6 @@ static int appx_hash_length_get(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * Check if the signature exists.
- * [in] ctx: structure holds input and output data
- * [in] detached: embedded/detached PKCS#7 signature switch
- * [returns] 0 on error or 1 on success
- */
-static int appx_check_file(FILE_FORMAT_CTX *ctx, int detached)
-{
-    if (detached) {
-        printf("APPX format does not support detached PKCS#7 signature\n");
-        return 0; /* FAILED */
-    }
-    if (!zipEntryExist(ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME)) {
-        printf("%s does not exist\n", APP_SIGNATURE_FILENAME);
-        return 0; /* FAILED */
-    }
-    return 1; /* OK */
-}
-
-/*
  * Calculate message digest and compare to value retrieved from PKCS#7 signedData.
  * [in] ctx: structure holds input and output data
  * [in] p7: PKCS#7 signature
@@ -534,6 +513,11 @@ static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     const u_char *blob;
     size_t dataSize;
 
+    /* Check if the signature exists */
+    if (!zipEntryExist(ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME)) {
+        printf("%s does not exist\n", APP_SIGNATURE_FILENAME);
+        return NULL; /* FAILED */
+    }
     dataSize = zipReadFileDataByName(&data, ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME);
     if (dataSize <= 0) {
         return NULL; /* FAILED */

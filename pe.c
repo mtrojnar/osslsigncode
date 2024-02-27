@@ -46,7 +46,6 @@ static FILE_FORMAT_CTX *pe_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outd
 static ASN1_OBJECT *pe_spc_image_data_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
 static PKCS7 *pe_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_MD *md);
 static int pe_hash_length_get(FILE_FORMAT_CTX *ctx);
-static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static u_char *pe_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static int pe_verify_indirect_data(FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOptionalValue *obj);
@@ -59,13 +58,13 @@ static int pe_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static void pe_update_data_size(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static BIO *pe_bio_free(BIO *hash, BIO *outdata);
 static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static int pe_is_detaching_supported(void);
 
 FILE_FORMAT file_format_pe = {
     .ctx_new = pe_ctx_new,
     .data_blob_get = pe_spc_image_data_get,
     .pkcs7_contents_get = pe_pkcs7_contents_get,
     .hash_length_get = pe_hash_length_get,
-    .check_file = pe_check_file,
     .digest_calc = pe_digest_calc,
     .verify_digests = pe_verify_digests,
     .verify_indirect_data = pe_verify_indirect_data,
@@ -77,7 +76,8 @@ FILE_FORMAT file_format_pe = {
     .append_pkcs7 = pe_append_pkcs7,
     .update_data_size = pe_update_data_size,
     .bio_free = pe_bio_free,
-    .ctx_cleanup = pe_ctx_cleanup
+    .ctx_cleanup = pe_ctx_cleanup,
+    .is_detaching_supported = pe_is_detaching_supported
 };
 
 /* Prototypes */
@@ -91,6 +91,7 @@ static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype, SpcAttributeTy
 static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype);
 static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype);
 static SpcLink *pe_page_hash_link_get(FILE_FORMAT_CTX *ctx, int phtype);
+static int pe_check_file(FILE_FORMAT_CTX *ctx);
 
 
 /*
@@ -211,63 +212,6 @@ static int pe_hash_length_get(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * Print current and calculated PE checksum,
- * check if the signature exists.
- * [in, out] ctx: structure holds input and output data
- * [in] detached: embedded/detached PKCS#7 signature switch
- * [returns] 0 on error or 1 on success
- */
-static int pe_check_file(FILE_FORMAT_CTX *ctx, int detached)
-{
-    uint32_t real_pe_checksum, sum = 0;
-
-    if (!ctx) {
-        printf("Init error\n\n");
-        return 0; /* FAILED */
-    }
-    real_pe_checksum = pe_calc_realchecksum(ctx);
-    if (ctx->pe_ctx->pe_checksum == real_pe_checksum) {
-        printf("PE checksum   : %08X\n\n", real_pe_checksum);
-    } else {
-        printf("Current PE checksum   : %08X\n", ctx->pe_ctx->pe_checksum);
-        printf("Calculated PE checksum: %08X\n", real_pe_checksum);
-        printf("Warning: invalid PE checksum\n\n");
-    }
-    if (detached) {
-        printf("Checking the specified catalog file\n\n");
-        return 1; /* OK */
-    }
-    if (ctx->pe_ctx->sigpos == 0 || ctx->pe_ctx->siglen == 0
-        || ctx->pe_ctx->sigpos > ctx->pe_ctx->fileend) {
-        printf("No signature found\n\n");
-        return 0; /* FAILED */
-    }
-    /*
-     * If the sum of the rounded dwLength values does not equal the Size value,
-     * then either the attribute certificate table or the Size field is corrupted.
-     */
-    while (sum < ctx->pe_ctx->siglen) {
-        uint32_t len = GET_UINT32_LE(ctx->options->indata + ctx->pe_ctx->sigpos + sum);
-        if (ctx->pe_ctx->siglen - len > 8) {
-            printf("Corrupted attribute certificate table\n");
-            printf("Attribute certificate table size  : %08X\n", ctx->pe_ctx->siglen);
-            printf("Attribute certificate entry length: %08X\n\n", len);
-            return 0; /* FAILED */
-        }
-        /* quadword align data */
-        len += len % 8 ? 8 - len % 8 : 0;
-        sum += len;
-    }
-    if (sum != ctx->pe_ctx->siglen) {
-        printf("Corrupted attribute certificate table\n");
-        printf("Attribute certificate table size  : %08X\n", ctx->pe_ctx->siglen);
-        printf("Sum of the rounded dwLength values: %08X\n\n", sum);
-        return 0; /* FAILED */
-    }
-    return 1; /* OK */
-}
-
-/*
  * Returns a message digest value of a signed or unsigned PE file.
  * [in] ctx: structure holds input and output data
  * [in] md: message digest algorithm
@@ -378,8 +322,7 @@ static int pe_verify_indirect_data(FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOpti
  */
 static PKCS7 *pe_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
-    if (ctx->pe_ctx->sigpos == 0 || ctx->pe_ctx->siglen == 0
-        || ctx->pe_ctx->sigpos > ctx->pe_ctx->fileend) {
+    if (!pe_check_file(ctx)) {
         return NULL; /* FAILED */
     }
     return pe_pkcs7_get_file(ctx->options->indata, ctx->pe_ctx);
@@ -404,8 +347,7 @@ static PKCS7 *pe_pkcs7_extract_to_nest(FILE_FORMAT_CTX *ctx)
  */
 static int pe_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
-    if (ctx->pe_ctx->sigpos == 0 || ctx->pe_ctx->siglen == 0
-        || ctx->pe_ctx->sigpos > ctx->pe_ctx->fileend) {
+    if (!pe_check_file(ctx)) {
         return 1; /* FAILED, no signature */
     }
     /* Strip current signature */
@@ -579,6 +521,11 @@ static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     unmap_file(ctx->options->indata, ctx->pe_ctx->fileend);
     OPENSSL_free(ctx->pe_ctx);
     OPENSSL_free(ctx);
+}
+
+static int pe_is_detaching_supported(void)
+{
+    return 1; /* OK */
 }
 
 /*
@@ -1215,6 +1162,58 @@ static SpcLink *pe_page_hash_link_get(FILE_FORMAT_CTX *ctx, int phtype)
     link->type = 1;
     link->value.moniker = so;
     return link;
+}
+
+/*
+ * Print current and calculated PE checksum,
+ * check if the signature exists.
+ * [in, out] ctx: structure holds input and output data
+ * [returns] 0 on error or 1 on success
+ */
+static int pe_check_file(FILE_FORMAT_CTX *ctx)
+{
+    uint32_t real_pe_checksum, sum = 0;
+
+    if (!ctx) {
+        printf("Init error\n\n");
+        return 0; /* FAILED */
+    }
+    real_pe_checksum = pe_calc_realchecksum(ctx);
+    if (ctx->pe_ctx->pe_checksum == real_pe_checksum) {
+        printf("PE checksum   : %08X\n\n", real_pe_checksum);
+    } else {
+        printf("Current PE checksum   : %08X\n", ctx->pe_ctx->pe_checksum);
+        printf("Calculated PE checksum: %08X\n", real_pe_checksum);
+        printf("Warning: invalid PE checksum\n\n");
+    }
+    if (ctx->pe_ctx->sigpos == 0 || ctx->pe_ctx->siglen == 0
+        || ctx->pe_ctx->sigpos > ctx->pe_ctx->fileend) {
+        printf("No signature found\n\n");
+        return 0; /* FAILED */
+    }
+    /*
+     * If the sum of the rounded dwLength values does not equal the Size value,
+     * then either the attribute certificate table or the Size field is corrupted.
+     */
+    while (sum < ctx->pe_ctx->siglen) {
+        uint32_t len = GET_UINT32_LE(ctx->options->indata + ctx->pe_ctx->sigpos + sum);
+        if (ctx->pe_ctx->siglen - len > 8) {
+            printf("Corrupted attribute certificate table\n");
+            printf("Attribute certificate table size  : %08X\n", ctx->pe_ctx->siglen);
+            printf("Attribute certificate entry length: %08X\n\n", len);
+            return 0; /* FAILED */
+        }
+        /* quadword align data */
+        len += len % 8 ? 8 - len % 8 : 0;
+        sum += len;
+    }
+    if (sum != ctx->pe_ctx->siglen) {
+        printf("Corrupted attribute certificate table\n");
+        printf("Attribute certificate table size  : %08X\n", ctx->pe_ctx->siglen);
+        printf("Sum of the rounded dwLength values: %08X\n\n", sum);
+        return 0; /* FAILED */
+    }
+    return 1; /* OK */
 }
 
 /*
