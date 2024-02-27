@@ -149,7 +149,7 @@ foreach(ext ${extensions_all})
         COMMAND osslsigncode "sign"
         "-pkcs12" "${CERTS}/legacy.p12"
         "-readpass" "${CERTS}/password.txt"
-        "-ac" "${CERTS}/crosscert.pem"
+        "-ac" "${CERTS}/CAcross.pem"
         "-time" "1556668800" # Signing time: May  1 00:00:00 2019 GMT
         "-add-msi-dse"
         "-comm"
@@ -174,7 +174,7 @@ if(OPENSSL_VERSION VERSION_GREATER_EQUAL 3.0.0)
             "-pkcs12" "${CERTS}/legacy.p12"
             "-readpass" "${CERTS}/password.txt"
             "-nolegacy" # Disable legacy mode
-            "-ac" "${CERTS}/crosscert.pem"
+            "-ac" "${CERTS}/CAcross.pem"
             "-time" "1556668800" # Signing time: May  1 00:00:00 2019 GMT
             "-add-msi-dse"
             "-comm"
@@ -199,7 +199,7 @@ foreach(ext ${extensions_all})
         COMMAND osslsigncode "sign"
         "-pkcs12" "${CERTS}/cert.p12"
         "-readpass" "${CERTS}/password.txt"
-        "-ac" "${CERTS}/crosscert.pem"
+        "-ac" "${CERTS}/CAcross.pem"
         "-time" "1556668800" # Signing time: May  1 00:00:00 2019 GMT
         "-add-msi-dse"
         "-comm"
@@ -220,7 +220,7 @@ foreach(ext ${extensions_all})
         "-certs" "${CERTS}/revoked.pem"
         "-key" "${CERTS}/keyp.pem"
         "-readpass" "${CERTS}/password.txt"
-        "-ac" "${CERTS}/crosscert.pem"
+        "-ac" "${CERTS}/CAcross.pem"
         "-time" "1556668800" # Signing time: May  1 00:00:00 2019 GMT
         "-add-msi-dse"
         "-comm"
@@ -336,7 +336,7 @@ foreach(ext ${extensions_all})
         "-certs" "${CERTS}/cert.pem"
         "-key" "${CERTS}/key.der"
         "-pass" "passme"
-        "-ac" "${CERTS}/crosscert.pem"
+        "-ac" "${CERTS}/CAcross.pem"
         "-time" "1556755200" # Signing time: May  2 00:00:00 2019 GMT
         "-add-msi-dse"
         "-comm"
@@ -470,7 +470,7 @@ if((Python3_FOUND OR server_error) AND CURL_FOUND)
                 COMMAND osslsigncode "sign"
                 "-certs" "${CERTS}/${cert}.pem"
                 "-key" "${CERTS}/key.pem"
-                "-ac" "${CERTS}/crosscert.pem"
+                "-ac" "${CERTS}/CAcross.pem"
                 "-comm"
                 "-ph"
                 "-jp" "low"
@@ -654,7 +654,7 @@ foreach(ext ${extensions_nocat})
         COMMAND osslsigncode "sign"
         "-pkcs12" "${CERTS}/cert.p12"
         "-readpass" "${CERTS}/password.txt"
-        "-ac" "${CERTS}/crosscert.pem"
+        "-ac" "${CERTS}/CAcross.pem"
         "-time" "1556668800" # Signing time: May  1 00:00:00 2019 GMT
         "-add-msi-dse"
         "-comm"
@@ -673,7 +673,7 @@ foreach(ext ${extensions_nocat})
         COMMAND osslsigncode "sign"
         "-pkcs12" "${CERTS}/cert.p12"
         "-readpass" "${CERTS}/password.txt"
-        "-ac" "${CERTS}/crosscert.pem"
+        "-ac" "${CERTS}/CAcross.pem"
         "-time" "1556668800" # Signing time: May  1 00:00:00 2019 GMT
         "-add-msi-dse"
         "-comm"
