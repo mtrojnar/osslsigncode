@@ -680,7 +680,7 @@ static SCRIPT_CTX *script_ctx_get(char *indata, uint32_t filesize, const SCRIPT_
             line_pos++; /* we can ignore lines longer than our buffer */
         }
     }
-    printf("Signature position: %ld\n", sig_pos);
+    printf("Signature position: %zu\n", sig_pos);
 
     script_ctx = OPENSSL_malloc(sizeof(SCRIPT_CTX));
     script_ctx->comment_text = comment;
