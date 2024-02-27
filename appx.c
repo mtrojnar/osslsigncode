@@ -17,10 +17,22 @@
 #include <zlib.h>
 #include <inttypes.h>
 
+#ifndef PRIX64
+#if defined(_MSC_VER)
+#define PRIX64 "I64X"
+#else /* _MSC_VER */
+#if ULONG_MAX == 0xFFFFFFFFFFFFFFFF
+#define PRIX64 "lX"
+#else /* ULONG_MAX == 0xFFFFFFFFFFFFFFFF */
+#define PRIX64 "llX"
+#endif /* ULONG_MAX == 0xFFFFFFFFFFFFFFFF */
+#endif /* _MSC_VER */
+#endif /* PRIX64 */
+
 #if defined(_MSC_VER)
 #define fseeko _fseeki64
 #define ftello _ftelli64
-#endif
+#endif /* _MSC_VER */
 
 #define EOCDR_SIZE 22
 #define ZIP64_EOCD_LOCATOR_SIZE 20
@@ -1605,7 +1617,7 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
 
     memset(&header, 0, sizeof(header));
     if (entry->offsetOfLocalHeader >= (uint64_t)zip->fileSize) {
-        printf("Corrupted relative offset of local header : 0x%08lX\n", entry->offsetOfLocalHeader);
+        printf("Corrupted relative offset of local header : 0x%08" PRIX64 "\n", entry->offsetOfLocalHeader);
         return 0; /* FAILED */
     }
     if (fseeko(zip->file, (int64_t)entry->offsetOfLocalHeader, SEEK_SET) < 0) {
@@ -1626,7 +1638,7 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
             return 0; /* FAILED */
         }
         if (entry->compressedSize > (uint64_t)zip->fileSize - entry->offsetOfLocalHeader) {
-            printf("Corrupted compressedSize : 0x%08lX\n", entry->compressedSize);
+            printf("Corrupted compressedSize : 0x%08" PRIX64 "\n", entry->compressedSize);
             return 0; /* FAILED */
         }
         if (fseeko(zip->file, (int64_t)entry->compressedSize, SEEK_CUR) < 0) {
@@ -1829,7 +1841,7 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
     size_t size, dataSize = 0;
 
     if (entry->offsetOfLocalHeader >= (uint64_t)zip->fileSize) {
-        printf("Corrupted relative offset of local header : 0x%08lX\n", entry->offsetOfLocalHeader);
+        printf("Corrupted relative offset of local header : 0x%08" PRIX64 "\n", entry->offsetOfLocalHeader);
         return 0; /* FAILED */
     }
     if (fseeko(file, (int64_t)entry->offsetOfLocalHeader, SEEK_SET) < 0) {
@@ -1861,7 +1873,7 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
         OPENSSL_free(header.extraField);
 
         if (compressedSize > (uint64_t)zip->fileSize - entry->offsetOfLocalHeader) {
-            printf("Corrupted compressedSize : 0x%08lX\n", entry->compressedSize);
+            printf("Corrupted compressedSize : 0x%08" PRIX64 "\n", entry->compressedSize);
             return 0; /* FAILED */
         }
         compressedData = OPENSSL_zalloc(compressedSize + 1);
@@ -1978,7 +1990,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
             return 0; /* FAILED */
         }
         if (compressedSize > (uint64_t)(zip->fileSize - offset)) {
-            printf("Corrupted compressedSize : 0x%08lX\n", compressedSize);
+            printf("Corrupted compressedSize : 0x%08" PRIX64 "\n", compressedSize);
             return 0; /* FAILED */
         }
         if (fseeko(file, (int64_t)compressedSize, SEEK_CUR) < 0) {
@@ -2218,7 +2230,7 @@ static ZIP_FILE *openZip(const char *filename)
             return NULL; /* FAILED */
         }
         if (zip->locator.eocdOffset >= (uint64_t)zip->fileSize) {
-            printf("Corrupted end of central directory locator offset : 0x%08lX\n", zip->locator.eocdOffset);
+            printf("Corrupted end of central directory locator offset : 0x%08" PRIX64 "\n", zip->locator.eocdOffset);
             freeZip(zip);
             return 0; /* FAILED */
         }
@@ -2247,13 +2259,13 @@ static ZIP_FILE *openZip(const char *filename)
         zip->centralDirectorySize = zip->eocdr.centralDirectorySize;
         zip->centralDirectoryRecordCount = (uint64_t)zip->eocdr.totalEntries;
         if (zip->centralDirectoryRecordCount > UINT16_MAX) {
-            printf("Corrupted total number of entries in the central directory : 0x%08lX\n", zip->centralDirectoryRecordCount);
+            printf("Corrupted total number of entries in the central directory : 0x%08" PRIX64 "\n", zip->centralDirectoryRecordCount);
             freeZip(zip);
             return NULL; /* FAILED */
         }
     }
     if (zip->centralDirectoryOffset >= (uint64_t)zip->fileSize) {
-        printf("Corrupted central directory offset : 0x%08lX\n", zip->centralDirectoryOffset);
+        printf("Corrupted central directory offset : 0x%08" PRIX64 "\n", zip->centralDirectoryOffset);
         freeZip(zip);
         return NULL; /* FAILED */
     }
@@ -2645,7 +2657,7 @@ static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
     /* zip64 extensible data sector (comment) */
     eocdr->commentLen = eocdr->eocdrSize - 44;
     if (eocdr->commentLen > UINT16_MAX) {
-        printf("Corrupted file comment length : 0x%08lX\n", eocdr->commentLen);
+        printf("Corrupted file comment length : 0x%08" PRIX64 "\n", eocdr->commentLen);
         return 0; /* FAILED */
     }
     if (eocdr->commentLen > 0) {
