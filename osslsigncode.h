@@ -513,7 +513,6 @@ struct file_format_st {
     ASN1_OBJECT *(*data_blob_get) (u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
     PKCS7 *(*pkcs7_contents_get) (FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_MD *md);
     int (*hash_length_get) (FILE_FORMAT_CTX *ctx);
-    int (*check_file) (FILE_FORMAT_CTX *ctx, int detached);
     u_char *(*digest_calc) (FILE_FORMAT_CTX *ctx, const EVP_MD *md);
     int (*verify_digests) (FILE_FORMAT_CTX *ctx, PKCS7 *p7);
     int (*verify_indirect_data) (FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOptionalValue *obj);
@@ -526,6 +525,7 @@ struct file_format_st {
     void (*update_data_size) (FILE_FORMAT_CTX *data, BIO *outdata, PKCS7 *p7);
     BIO *(*bio_free) (BIO *hash, BIO *outdata);
     void (*ctx_cleanup) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+    int (*is_detaching_supported) (void);
 };
 
 /*

@@ -45,7 +45,6 @@ static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
 static ASN1_OBJECT *cab_obsolete_link_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
 static PKCS7 *cab_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_MD *md);
 static int cab_hash_length_get(FILE_FORMAT_CTX *ctx);
-static int cab_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int cab_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *cab_pkcs7_extract(FILE_FORMAT_CTX *ctx);
@@ -57,13 +56,13 @@ static int cab_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static void cab_update_data_size(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static BIO *cab_bio_free(BIO *hash, BIO *outdata);
 static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static int cab_is_detaching_supported(void);
 
 FILE_FORMAT file_format_cab = {
     .ctx_new = cab_ctx_new,
     .data_blob_get = cab_obsolete_link_get,
     .pkcs7_contents_get = cab_pkcs7_contents_get,
     .hash_length_get = cab_hash_length_get,
-    .check_file = cab_check_file,
     .digest_calc = cab_digest_calc,
     .verify_digests = cab_verify_digests,
     .pkcs7_extract = cab_pkcs7_extract,
@@ -74,7 +73,8 @@ FILE_FORMAT file_format_cab = {
     .append_pkcs7 = cab_append_pkcs7,
     .update_data_size = cab_update_data_size,
     .bio_free = cab_bio_free,
-    .ctx_cleanup = cab_ctx_cleanup
+    .ctx_cleanup = cab_ctx_cleanup,
+    .is_detaching_supported = cab_is_detaching_supported
 };
 
 /* Prototypes */
@@ -83,6 +83,7 @@ static int cab_add_jp_attribute(PKCS7 *p7, int jp);
 static size_t cab_write_optional_names(BIO *outdata, char *indata, size_t len, uint16_t flags);
 static int cab_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static int cab_add_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static int cab_check_file(FILE_FORMAT_CTX *ctx);
 
 /*
  * FILE_FORMAT method definitions
@@ -190,34 +191,6 @@ static PKCS7 *cab_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_
 static int cab_hash_length_get(FILE_FORMAT_CTX *ctx)
 {
     return EVP_MD_size(ctx->options->md);
-}
-
-/*
- * Check if the signature exists.
- * [in, out] ctx: structure holds input and output data
- * [in] detached: embedded/detached PKCS#7 signature switch
- * [returns] 0 on error or 1 on success
- */
-static int cab_check_file(FILE_FORMAT_CTX *ctx, int detached)
-{
-    if (!ctx) {
-        printf("Init error\n\n");
-        return 0; /* FAILED */
-    }
-    if (detached) {
-        printf("Checking the specified catalog file\n\n");
-        return 1; /* OK */
-    }
-    if (ctx->cab_ctx->header_size != 20) {
-        printf("No signature found\n\n");
-        return 0; /* FAILED */
-    }
-    if (ctx->cab_ctx->sigpos == 0 || ctx->cab_ctx->siglen == 0
-        || ctx->cab_ctx->sigpos > ctx->cab_ctx->fileend) {
-        printf("No signature found\n\n");
-        return 0; /* FAILED */
-    }
-    return 1; /* OK */
 }
 
 /*
@@ -397,8 +370,7 @@ static PKCS7 *cab_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
     const u_char *blob;
 
-    if (ctx->cab_ctx->sigpos == 0 || ctx->cab_ctx->siglen == 0
-        || ctx->cab_ctx->sigpos > ctx->cab_ctx->fileend) {
+    if (!cab_check_file(ctx)) {
         return NULL; /* FAILED */
     }
     blob = (u_char *)ctx->options->indata + ctx->cab_ctx->sigpos;
@@ -432,8 +404,7 @@ static int cab_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     /* squash the unused parameter warning */
     (void)hash;
 
-    if (ctx->cab_ctx->sigpos == 0 || ctx->cab_ctx->siglen == 0
-        || ctx->cab_ctx->sigpos > ctx->cab_ctx->fileend) {
+    if (!cab_check_file(ctx)) {
         return 1; /* FAILED, no signature */
     }
     buf = OPENSSL_malloc(SIZE_64K);
@@ -653,6 +624,11 @@ static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     unmap_file(ctx->options->indata, ctx->cab_ctx->fileend);
     OPENSSL_free(ctx->cab_ctx);
     OPENSSL_free(ctx);
+}
+
+static int cab_is_detaching_supported(void)
+{
+    return 1; /* OK */
 }
 
 /*
@@ -968,6 +944,29 @@ static int cab_add_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
             return 0; /* FAILED */
         len -= written;
         i += written;
+    }
+    return 1; /* OK */
+}
+
+/*
+ * Check if the signature exists.
+ * [in, out] ctx: structure holds input and output data
+ * [returns] 0 on error or 1 on success
+ */
+static int cab_check_file(FILE_FORMAT_CTX *ctx)
+{
+    if (!ctx) {
+        printf("Init error\n\n");
+        return 0; /* FAILED */
+    }
+    if (ctx->cab_ctx->header_size != 20) {
+        printf("No signature found\n\n");
+        return 0; /* FAILED */
+    }
+    if (ctx->cab_ctx->sigpos == 0 || ctx->cab_ctx->siglen == 0
+        || ctx->cab_ctx->sigpos > ctx->cab_ctx->fileend) {
+        printf("No signature found\n\n");
+        return 0; /* FAILED */
     }
     return 1; /* OK */
 }

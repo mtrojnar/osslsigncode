@@ -36,7 +36,6 @@ struct cat_ctx_st {
 
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
-static int cat_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static int cat_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *cat_pkcs7_extract(FILE_FORMAT_CTX *ctx);
 static PKCS7 *cat_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash);
@@ -46,7 +45,6 @@ static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 
 FILE_FORMAT file_format_cat = {
     .ctx_new = cat_ctx_new,
-    .check_file = cat_check_file,
     .verify_digests = cat_verify_digests,
     .pkcs7_extract = cat_pkcs7_extract,
     .pkcs7_signature_new = cat_pkcs7_signature_new,
@@ -64,6 +62,7 @@ static int cat_print_content_member_digest(ASN1_TYPE *content);
 static int cat_print_content_member_name(ASN1_TYPE *content);
 static void cat_print_base64(ASN1_OCTET_STRING *value);
 static void cat_print_utf16_as_ascii(ASN1_OCTET_STRING *value);
+static int cat_check_file(FILE_FORMAT_CTX *ctx);
 
 /*
  * FILE_FORMAT method definitions
@@ -118,35 +117,6 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
     return ctx;
 }
 
-static int cat_check_file(FILE_FORMAT_CTX *ctx, int detached)
-{
-    STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
-    PKCS7_SIGNER_INFO *si;
-
-    if (!ctx) {
-        printf("Init error\n\n");
-        return 0; /* FAILED */
-    }
-    if (detached) {
-        printf("CAT format does not support detached PKCS#7 signature\n\n");
-        return 0; /* FAILED */
-    }
-    signer_info = PKCS7_get_signer_info(ctx->cat_ctx->p7);
-    if (!signer_info) {
-        printf("Failed catalog file\n\n");
-        return 0; /* FAILED */
-    }
-    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
-    if (!si) {
-        printf("No signature found\n\n");
-        return 0; /* FAILED */
-    }
-    if (ctx->options->verbose) {
-        (void)cat_list_content(ctx->cat_ctx->p7);
-    }
-    return 1; /* OK */
-}
-
 /*
  * ContentInfo value is the inner content of pkcs7-signedData.
  * An extra verification is not necessary when a content type data
@@ -167,6 +137,9 @@ static int cat_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
  */
 static PKCS7 *cat_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
+    if (!cat_check_file(ctx)) {
+        return NULL; /* FAILED */
+    }
     return PKCS7_dup(ctx->cat_ctx->p7);
 }
 
@@ -472,6 +445,35 @@ static void cat_print_utf16_as_ascii(ASN1_OCTET_STRING *value)
         putchar(isprint(data[i]) && !data[i+1] ? data[i] : '.');
 }
 
+/*
+ * Check if the signature exists.
+ * [in, out] ctx: structure holds input and output data
+ * [returns] 0 on error or 1 on success
+ */
+static int cat_check_file(FILE_FORMAT_CTX *ctx)
+{
+    STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
+    PKCS7_SIGNER_INFO *si;
+
+    if (!ctx) {
+        printf("Init error\n\n");
+        return 0; /* FAILED */
+    }
+    signer_info = PKCS7_get_signer_info(ctx->cat_ctx->p7);
+    if (!signer_info) {
+        printf("Failed catalog file\n\n");
+        return 0; /* FAILED */
+    }
+    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
+    if (!si) {
+        printf("No signature found\n\n");
+        return 0; /* FAILED */
+    }
+    if (ctx->options->verbose) {
+        (void)cat_list_content(ctx->cat_ctx->p7);
+    }
+    return 1; /* OK */
+}
 /*
 Local Variables:
    c-basic-offset: 4

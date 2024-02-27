@@ -54,7 +54,6 @@ static FILE_FORMAT_CTX *script_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *
 static ASN1_OBJECT *script_spc_sip_info_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
 static PKCS7 *script_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_MD *md);
 static int script_hash_length_get(FILE_FORMAT_CTX *ctx);
-static int script_check_file(FILE_FORMAT_CTX *ctx, int detached);
 static u_char *script_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int script_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx);
@@ -65,13 +64,13 @@ static PKCS7 *script_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int script_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static BIO *script_bio_free(BIO *hash, BIO *outdata);
 static void script_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static int script_is_detaching_supported(void);
 
 FILE_FORMAT file_format_script = {
     .ctx_new        = script_ctx_new,
     .data_blob_get  = script_spc_sip_info_get,
     .pkcs7_contents_get = script_pkcs7_contents_get,
     .hash_length_get = script_hash_length_get,
-    .check_file     = script_check_file,
     .digest_calc    = script_digest_calc,
     .verify_digests = script_verify_digests,
     .pkcs7_extract  = script_pkcs7_extract,
@@ -82,6 +81,7 @@ FILE_FORMAT file_format_script = {
     .append_pkcs7   = script_append_pkcs7,
     .bio_free       = script_bio_free,
     .ctx_cleanup    = script_ctx_cleanup,
+    .is_detaching_supported = script_is_detaching_supported
 };
 
 /* helper functions */
@@ -93,6 +93,7 @@ static size_t utf16_to_utf8(const uint16_t *data, size_t len, char **out_utf8);
 static BIO *script_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int script_digest_convert(BIO *hash, FILE_FORMAT_CTX *ctx, size_t len);
 static int script_write_bio(BIO *data, char *indata, size_t len);
+static int script_check_file(FILE_FORMAT_CTX *ctx);
 
 /*
  * Allocate and return a script file format context.
@@ -230,32 +231,6 @@ static int script_hash_length_get(FILE_FORMAT_CTX *ctx)
 }
 
 /*
- * Check if the signature exists.
- * FIXME: check it in pkcs7_extract()
- * [in, out] ctx: structure holds input and output data
- * [in] detached: embedded/detached PKCS#7 signature switch
- * [returns] 0 on error or 1 on success
- */
-static int script_check_file(FILE_FORMAT_CTX *ctx, int detached)
-{
-    if (!ctx) {
-        printf("Init error\n\n");
-        return 0; /* FAILED */
-    }
-    if (detached) {
-        printf("Checking the specified catalog file\n\n");
-        return 1; /* OK */
-    }
-    if (ctx->script_ctx->sigpos == 0
-        || ctx->script_ctx->sigpos > ctx->script_ctx->fileend) {
-        printf("No signature found\n\n");
-        return 0; /* FAILED */
-    }
-
-    return 1; /* OK */
-}
-
-/*
  * Compute a simple sha1/sha256 message digest of the MSI file
  * for use with a catalog file.
  * [in] ctx: structure holds input and output data
@@ -357,6 +332,9 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     size_t signature_footer_len = strlen(signature_footer);
     PKCS7 *retval = NULL;
 
+    if (!script_check_file(ctx)) {
+        return NULL; /* FAILED, no signature */
+    }
     /* extract Base64 signature */
     if (ctx->script_ctx->utf == 8) {
         base64_len = signature_len;
@@ -470,8 +448,7 @@ static int script_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
     /* squash the unused parameter warning */
     (void)hash;
-    if (ctx->script_ctx->sigpos == 0
-        || ctx->script_ctx->sigpos > ctx->script_ctx->fileend) {
+    if (!script_check_file(ctx)) {
         return 1; /* FAILED, no signature */
     }
     if (!script_write_bio(outdata, ctx->options->indata, ctx->script_ctx->sigpos)) {
@@ -622,6 +599,11 @@ static void script_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     unmap_file(ctx->options->indata, ctx->script_ctx->fileend);
     OPENSSL_free(ctx->script_ctx);
     OPENSSL_free(ctx);
+}
+
+static int script_is_detaching_supported(void)
+{
+    return 1; /* OK */
 }
 
 /*
@@ -881,6 +863,26 @@ static int script_write_bio(BIO *bio, char *indata, size_t len)
         len -= written;
         i += written;
     }
+    return 1; /* OK */
+}
+
+/*
+ * Check if the signature exists.
+ * [in, out] ctx: structure holds input and output data
+ * [returns] 0 on error or 1 on success
+ */
+static int script_check_file(FILE_FORMAT_CTX *ctx)
+{
+    if (!ctx) {
+        printf("Init error\n\n");
+        return 0; /* FAILED */
+    }
+    if (ctx->script_ctx->sigpos == 0
+        || ctx->script_ctx->sigpos > ctx->script_ctx->fileend) {
+        printf("No signature found\n\n");
+        return 0; /* FAILED */
+    }
+
     return 1; /* OK */
 }
 
