@@ -523,8 +523,8 @@ struct file_format_st {
     PKCS7 *(*pkcs7_signature_new) (FILE_FORMAT_CTX *ctx, BIO *hash);
     int (*append_pkcs7) (FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
     void (*update_data_size) (FILE_FORMAT_CTX *data, BIO *outdata, PKCS7 *p7);
-    BIO *(*bio_free) (BIO *hash, BIO *outdata);
-    void (*ctx_cleanup) (FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+    void (*bio_free) (BIO *hash, BIO *outdata);
+    void (*ctx_cleanup) (FILE_FORMAT_CTX *ctx);
     int (*is_detaching_supported) (void);
 };
 

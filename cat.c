@@ -40,8 +40,8 @@ static int cat_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7);
 static PKCS7 *cat_pkcs7_extract(FILE_FORMAT_CTX *ctx);
 static PKCS7 *cat_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int cat_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
-static BIO *cat_bio_free(BIO *hash, BIO *outdata);
-static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static void cat_bio_free(BIO *hash, BIO *outdata);
+static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx);
 
 FILE_FORMAT file_format_cat = {
     .ctx_new = cat_ctx_new,
@@ -192,13 +192,11 @@ static int cat_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
  * [out] outdata: outdata file BIO (unused)
  * [returns] none
  */
-static BIO *cat_bio_free(BIO *hash, BIO *outdata)
+static void cat_bio_free(BIO *hash, BIO *outdata)
 {
     /* squash the unused parameter warning */
     (void)outdata;
-
     BIO_free_all(hash);
-    return NULL;
 }
 
 /*
@@ -209,11 +207,8 @@ static BIO *cat_bio_free(BIO *hash, BIO *outdata)
  * [in] outdata: outdata file BIO
  * [returns] none
  */
-static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
+static void cat_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 {
-    if (outdata) {
-        BIO_free_all(hash);
-    }
     unmap_file(ctx->options->indata, ctx->cat_ctx->fileend);
     PKCS7_free(ctx->cat_ctx->p7);
     OPENSSL_free(ctx->cat_ctx);

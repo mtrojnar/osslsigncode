@@ -2743,7 +2743,7 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
             return 1; /* FAILED */
         }
         p7 = cat_ctx->format->pkcs7_extract(cat_ctx);
-        cat_ctx->format->ctx_cleanup(cat_ctx, NULL, NULL);
+        cat_ctx->format->ctx_cleanup(cat_ctx);
         OPENSSL_free(cat_options);
     } else {
         if (!ctx->format->pkcs7_extract) {
@@ -2970,11 +2970,11 @@ static int check_attached_data(GLOBAL_OPTIONS *options)
     }
     if (verify_signed_file(ctx, tmp_options)) {
         printf("Signature mismatch\n");
-        ctx->format->ctx_cleanup(ctx, NULL, NULL);
+        ctx->format->ctx_cleanup(ctx);
         OPENSSL_free(tmp_options);
         return 1; /* Failed */
     }
-    ctx->format->ctx_cleanup(ctx, NULL, NULL);
+    ctx->format->ctx_cleanup(ctx);
     OPENSSL_free(tmp_options);
     return 0; /* OK */
 }
@@ -4440,6 +4440,7 @@ int main(int argc, char **argv)
         }
         BIO_free_all(hash);
         BIO_free_all(outdata);
+        outdata = NULL;
         ret = 1; /* FAILED */
         DO_EXIT_0("Initialization error or unsupported input file type.\n");
     }
@@ -4580,7 +4581,8 @@ int main(int argc, char **argv)
 
 skip_signing:
     if (ctx->format->bio_free) {
-        outdata = ctx->format->bio_free(hash, outdata);
+        ctx->format->bio_free(hash, outdata);
+        outdata = NULL;
     }
     if (!ret && options.cmd == CMD_ATTACH) {
         ret = check_attached_data(&options);
@@ -4594,12 +4596,17 @@ skip_signing:
     }
 
 err_cleanup:
-    if (outdata && options.outfile) {
-        /* unlink outfile */
-        remove_file(options.outfile);
+    if (outdata) {
+        if (options.outfile) {
+            /* unlink outfile */
+            remove_file(options.outfile);
+        }
+        if (hash)
+            BIO_free(hash);
+        BIO_free(outdata);
     }
     if (ctx && ctx->format->ctx_cleanup) {
-        ctx->format->ctx_cleanup(ctx, hash, outdata);
+        ctx->format->ctx_cleanup(ctx);
     }
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
     providers_cleanup();

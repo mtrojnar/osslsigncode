@@ -256,8 +256,8 @@ static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static int appx_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static PKCS7 *appx_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
-static BIO *appx_bio_free(BIO *hash, BIO *outdata);
-static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static void appx_bio_free(BIO *hash, BIO *outdata);
+static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx);
 
 FILE_FORMAT file_format_appx = {
     .ctx_new = appx_ctx_new,
@@ -757,11 +757,10 @@ static int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
  * [out] outdata: outdata file BIO
  * [returns] none
  */
-static BIO *appx_bio_free(BIO *hash, BIO *outdata)
+static void appx_bio_free(BIO *hash, BIO *outdata)
 {
     BIO_free_all(outdata);
     BIO_free_all(hash);
-    return NULL; /* OK */
 }
 
 /*
@@ -771,12 +770,8 @@ static BIO *appx_bio_free(BIO *hash, BIO *outdata)
  * [in] outdata: outdata file BIO
  * [returns] none
  */
-static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
+static void appx_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 {
-    if (outdata) {
-        BIO_free_all(hash);
-        BIO_free_all(outdata);
-    }
     freeZip(ctx->appx_ctx->zip);
     OPENSSL_free(ctx->appx_ctx->calculatedBMHash);
     OPENSSL_free(ctx->appx_ctx->calculatedCTHash);
