@@ -54,8 +54,8 @@ static int cab_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static PKCS7 *cab_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int cab_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 static void cab_update_data_size(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
-static BIO *cab_bio_free(BIO *hash, BIO *outdata);
-static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static void cab_bio_free(BIO *hash, BIO *outdata);
+static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx);
 static int cab_is_detaching_supported(void);
 
 FILE_FORMAT file_format_cab = {
@@ -599,13 +599,11 @@ static void cab_update_data_size(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
  * [out] outdata: outdata file BIO (unused)
  * [returns] none
  */
-static BIO *cab_bio_free(BIO *hash, BIO *outdata)
+static void cab_bio_free(BIO *hash, BIO *outdata)
 {
     /* squash the unused parameter warning */
     (void)outdata;
-
     BIO_free_all(hash);
-    return NULL;
 }
 
 /*
@@ -616,11 +614,8 @@ static BIO *cab_bio_free(BIO *hash, BIO *outdata)
  * [in] outdata: outdata file BIO
  * [returns] none
  */
-static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
+static void cab_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 {
-    if (outdata) {
-        BIO_free_all(hash);
-    }
     unmap_file(ctx->options->indata, ctx->cab_ctx->fileend);
     OPENSSL_free(ctx->cab_ctx);
     OPENSSL_free(ctx);

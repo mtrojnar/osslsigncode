@@ -62,8 +62,8 @@ static int script_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static int script_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static PKCS7 *script_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int script_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
-static BIO *script_bio_free(BIO *hash, BIO *outdata);
-static void script_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static void script_bio_free(BIO *hash, BIO *outdata);
+static void script_ctx_cleanup(FILE_FORMAT_CTX *ctx);
 static int script_is_detaching_supported(void);
 
 FILE_FORMAT file_format_script = {
@@ -575,12 +575,10 @@ cleanup:
  * [out] outdata: outdata file BIO
  * [returns] none
  */
-static BIO *script_bio_free(BIO *hash, BIO *outdata)
+static void script_bio_free(BIO *hash, BIO *outdata)
 {
     BIO_free_all(hash);
     BIO_free_all(outdata);
-    /* FIXME: why doesn't the function return void instead of BIO *? */
-    return NULL;
 }
 
 /*
@@ -590,12 +588,8 @@ static BIO *script_bio_free(BIO *hash, BIO *outdata)
  * [out] outdata: outdata file BIO
  * [returns] none
  */
-static void script_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
+static void script_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 {
-    if (outdata) {
-        BIO_free_all(hash);
-        BIO_free_all(outdata);
-    }
     unmap_file(ctx->options->indata, ctx->script_ctx->fileend);
     OPENSSL_free(ctx->script_ctx);
     OPENSSL_free(ctx);

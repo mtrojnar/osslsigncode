@@ -201,8 +201,8 @@ static int msi_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static int msi_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static PKCS7 *msi_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
-static BIO *msi_bio_free(BIO *hash, BIO *outdata);
-static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
+static void msi_bio_free(BIO *hash, BIO *outdata);
+static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx);
 static int msi_is_detaching_supported(void);
 
 FILE_FORMAT file_format_msi = {
@@ -671,11 +671,10 @@ static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
  * [out] outdata: outdata file BIO
  * [returns] none
  */
-static BIO *msi_bio_free(BIO *hash, BIO *outdata)
+static void msi_bio_free(BIO *hash, BIO *outdata)
 {
     BIO_free_all(hash);
     BIO_free_all(outdata);
-    return NULL;
 }
 
 /*
@@ -686,12 +685,8 @@ static BIO *msi_bio_free(BIO *hash, BIO *outdata)
  * [out] outdata: outdata file BIO
  * [returns] none
  */
-static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
+static void msi_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 {
-    if (outdata) {
-        BIO_free_all(hash);
-        BIO_free_all(outdata);
-    }
     unmap_file(ctx->options->indata, ctx->msi_ctx->fileend);
     msi_file_free(ctx->msi_ctx->msi);
     msi_dirent_free(ctx->msi_ctx->dirent);
