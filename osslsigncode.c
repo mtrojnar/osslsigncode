@@ -4602,7 +4602,7 @@ err_cleanup:
             remove_file(options.outfile);
         }
         if (hash)
-            BIO_free(hash);
+            BIO_free_all(hash);
         BIO_free(outdata);
     }
     if (ctx && ctx->format->ctx_cleanup) {

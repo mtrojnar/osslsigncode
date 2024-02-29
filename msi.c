@@ -2211,6 +2211,11 @@ static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash)
         printf("Unable to calculate MSI pre-hash ('metadata') hash\n");
         return 0; /* FAILED */
     }
+    if (ctx->msi_ctx->p_msiex) {
+        /* attach-signature counts MsiDigitalSignatureEx stream data twice */
+        OPENSSL_free(ctx->msi_ctx->p_msiex);
+        ctx->msi_ctx->p_msiex = NULL;
+    }
     ctx->msi_ctx->p_msiex = OPENSSL_malloc(EVP_MAX_MD_SIZE);
     ctx->msi_ctx->len_msiex = (uint32_t)BIO_gets(prehash,
         (char *)ctx->msi_ctx->p_msiex, EVP_MAX_MD_SIZE);
