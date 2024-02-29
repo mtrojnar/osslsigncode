@@ -16,6 +16,10 @@
   online verification, inability to retrieve CRL from CDP is a critical error
 - modified the "-p" option to also connect to CRL Distribution Points
   through the configured proxy when verifying
+- added Microsoft Root Authority, serial number: 00C1008B3C3C8811D13EF663ECDF40
+  to the certificate whitelist
+- added listing of certificate chain retrieved from the signature in case
+  of verification failure
 
 ### 2.7 (2023.09.19)
 
