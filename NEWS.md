@@ -1,25 +1,26 @@
 # osslsigncode change log
 
-### 2.8 (unreleased)
+### 2.8 (2024.03.03)
 
 - Microsoft PowerShell signing sponsored by Cisco Systems, Inc.
-- fixed setting unauthenticated attributes (Countersignature,
-  Unauthenticated Data Blob) in a nested signature
-- added support for verifying the signature at a certain position ("-index" option)
-- added support for adding unauthenticated attributes to the signature
-  at a certain position ("-index" option)
-- added CAT file verification and listing each member of the CAT file
-  by using the "-verbose" option
-- added new command "extract-data" to extract a PKCS#7 data content to be signed
-- PKCS9_SEQUENCE_NUMBER authenticated attribute support
+- fixed setting unauthenticated attributes (Countersignature, Unauthenticated
+  Data Blob) in a nested signature
+- added the "-index" option to verify a specific signature or modify its
+  unauthenticated attributes
+- added CAT file verification
+- added listing the contents of a CAT file with the "-verbose" option
+- added the new "extract-data" command to extract a PKCS#7 data content to be
+  signed with "sign" and attached with "attach-signature"
+- added PKCS9_SEQUENCE_NUMBER authenticated attribute support
 - added the "-ignore-cdp" option to disable CRL Distribution Points (CDP)
-  online verification, inability to retrieve CRL from CDP is a critical error
-- modified the "-p" option to also connect to CRL Distribution Points
-  through the configured proxy when verifying
-- added Microsoft Root Authority, serial number: 00C1008B3C3C8811D13EF663ECDF40
-  to the certificate whitelist
-- added listing of certificate chain retrieved from the signature in case
-  of verification failure
+  online verification
+- unsuccessful CRL retrieval and verification changed into a critical error
+- the "-p" option modified to also use to configured proxy to connect CRL
+  Distribution Points
+- added implicit allowlisting of the Microsoft Root Authority serial number
+  00C1008B3C3C8811D13EF663ECDF40
+- added listing of certificate chain retrieved from the signature in case of
+  verification failure
 
 ### 2.7 (2023.09.19)
 
