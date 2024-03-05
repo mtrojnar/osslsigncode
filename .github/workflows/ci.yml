@@ -72,11 +72,11 @@ jobs:
       VCPKG_ROOT: ${{matrix.vcpkg_root}}
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Cache the vcpkg archives
       if: matrix.cache != ''
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ${{matrix.cache}}
         key: ${{matrix.id}}-${{hashFiles('vcpkg.json')}}
@@ -120,7 +120,7 @@ jobs:
 
     - name: Setup the oldest supported version of cmake (macOS)
       if: runner.os == 'macOS'
-      uses: jwlawson/actions-setup-cmake@v1.12
+      uses: jwlawson/actions-setup-cmake@v2.0
       with:
         cmake-version: '3.17.0'
 
@@ -173,7 +173,7 @@ jobs:
       run: ctest -C ${{env.BUILD_TYPE}}
 
     - name: Upload the errors
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: failure()
       with:
         name: errors-${{matrix.id}}
@@ -187,7 +187,7 @@ jobs:
       run: cmake --install ${{github.workspace}}/build
 
     - name: Upload the executables
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{env.version}}-${{matrix.id}}
         path: ${{github.workspace}}/dist
