@@ -1,5 +1,7 @@
 # osslsigncode change log
 
+### 2.9 (unreleased)
+
 ### 2.8 (2024.03.03)
 
 - Microsoft PowerShell signing sponsored by Cisco Systems, Inc.
