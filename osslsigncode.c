@@ -1676,7 +1676,11 @@ static X509_CRL *x509_crl_get(char *proxy, char *url)
         printf("Warning: Faild to get CRL from %s\n\n", url);
         return NULL; /* FAILED */
     }
-    crl = d2i_X509_CRL_bio(bio, NULL);
+    crl = d2i_X509_CRL_bio(bio, NULL);  /* DER format */
+    if (!crl) {
+        (void)BIO_seek(bio, 0);
+        crl = PEM_read_bio_X509_CRL(bio, NULL, NULL, NULL); /* PEM format */
+    }
     BIO_free_all(bio);
     if (!crl) {
          printf("Warning: Faild to decode CRL from %s\n\n", url);
