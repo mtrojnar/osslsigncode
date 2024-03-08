@@ -207,6 +207,7 @@ ASN1_SEQUENCE(MsCtlContent) = {
 IMPLEMENT_ASN1_FUNCTIONS(MsCtlContent)
 
 /* Prototypes */
+static ASN1_INTEGER *create_nonce(int bits);
 static time_t time_t_get_asn1_time(const ASN1_TIME *s);
 static time_t time_t_get_si_time(PKCS7_SIGNER_INFO *si);
 static ASN1_UTCTIME *asn1_time_get_si_time(PKCS7_SIGNER_INFO *si);
@@ -262,6 +263,7 @@ static BIO *bio_encode_rfc3161_request(PKCS7 *p7, const EVP_MD *md)
     PKCS7_SIGNER_INFO *si;
     u_char mdbuf[EVP_MAX_MD_SIZE];
     TS_MSG_IMPRINT *msg_imprint = NULL;
+    ASN1_INTEGER *nonce = NULL;
     X509_ALGOR *alg = NULL;
     TS_REQ *req = NULL;
     BIO *bout = NULL, *bhash = NULL;
@@ -306,6 +308,12 @@ static BIO *bio_encode_rfc3161_request(PKCS7 *p7, const EVP_MD *md)
         goto out;
     if (!TS_REQ_set_msg_imprint(req, msg_imprint))
         goto out;
+    /* Setting nonce */
+    nonce = create_nonce(NONCE_LENGTH);
+    if (!nonce)
+        goto out;
+    if (!TS_REQ_set_nonce(req, nonce))
+        goto out;
     /* TSA is expected to include its signing certificate in the response, flag 0xFF */
     if (!TS_REQ_set_cert_req(req, 1))
         goto out;
@@ -322,11 +330,42 @@ static BIO *bio_encode_rfc3161_request(PKCS7 *p7, const EVP_MD *md)
 
 out:
     BIO_free_all(bhash);
+    ASN1_INTEGER_free(nonce);
     TS_MSG_IMPRINT_free(msg_imprint);
     X509_ALGOR_free(alg);
     TS_REQ_free(req);
 
     return bout;
+}
+
+static ASN1_INTEGER *create_nonce(int bits)
+{
+    unsigned char buf[20];
+    ASN1_INTEGER *nonce = NULL;
+    int len = (bits - 1) / 8 + 1;
+    int i;
+
+    if (len > (int)sizeof(buf)) {
+        printf("Invalid nonce size\n");
+        return NULL;
+    }
+    if (RAND_bytes(buf, len) <= 0) {
+        printf("Random nonce generation failed\n");
+        return NULL;
+    }
+    /* Find the first non-zero byte and creating ASN1_INTEGER object. */
+    for (i = 0; i < len && !buf[i]; ++i) {
+    }
+    nonce = ASN1_INTEGER_new();
+    if (!nonce) {
+        printf("Could not create nonce\n");
+        return NULL;
+    }
+    OPENSSL_free(nonce->data);
+    nonce->length = len - i;
+    nonce->data = OPENSSL_malloc((size_t)nonce->length + 1);
+    memcpy(nonce->data, buf + i, (size_t)nonce->length);
+    return nonce;
 }
 
 /*

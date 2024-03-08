@@ -76,6 +76,8 @@
 #include <curl/curl.h>
 #endif /* ENABLE_CURL */
 
+/* Request nonce length, in bits (must be a multiple of 8). */
+#define NONCE_LENGTH    64
 #define MAX_TS_SERVERS 256
 
 #if defined (HAVE_TERMIOS_H) || defined (HAVE_GETPASS)
