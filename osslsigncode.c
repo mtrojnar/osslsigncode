@@ -2167,8 +2167,6 @@ static int print_cms_timestamp(CMS_ContentInfo *timestamp, time_t time)
 
     /* PKCS#9 signing time - Policy OID: 1.2.840.113549.1.9.5 */
     attr = CMS_signed_get_attr(si, CMS_signed_get_attr_by_NID(si, NID_pkcs9_signingTime, -1));
-    if (attr == NULL)
-        return 0; /* FAILED */
     printf("\tSigning time: ");
     print_time_t(time_t_get_asn1_time(X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTCTIME, NULL)));
 
