@@ -4645,13 +4645,24 @@ skip_signing:
 
 err_cleanup:
     if (outdata) {
+        BIO *head = hash;
+        int outdata_in_hash = 0;
+
+        while (head) {
+            BIO *tail = BIO_pop(head);
+
+            if (head == outdata)
+                outdata_in_hash = 1;
+            BIO_free(head);
+            head = tail;
+        }
+        if (!outdata_in_hash)
+            BIO_free_all(outdata);
+
         if (options.outfile) {
             /* unlink outfile */
             remove_file(options.outfile);
         }
-        if (hash)
-            BIO_free_all(hash);
-        BIO_free(outdata);
     }
     if (ctx && ctx->format->ctx_cleanup) {
         ctx->format->ctx_cleanup(ctx);
