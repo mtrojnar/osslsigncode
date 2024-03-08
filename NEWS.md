@@ -2,6 +2,8 @@
 
 ### 2.9 (unreleased)
 
+- added a 64 bit long pseudo-random NONCE in the TSA request
+
 ### 2.8 (2024.03.03)
 
 - Microsoft PowerShell signing sponsored by Cisco Systems, Inc.
