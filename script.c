@@ -316,12 +316,10 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 {
     const char *signature_data = ctx->options->indata + ctx->script_ctx->sigpos;
     size_t signature_len = ctx->script_ctx->fileend - ctx->script_ctx->sigpos;
-    size_t base64_len, der_max_length, der_length;
+    size_t base64_len;
     char *ptr;
     BIO *bio_mem, *bio_b64 = NULL;
     char *base64_data = NULL;
-    char *der_data = NULL;
-    const char *der_tmp;
     char *clean_base64 = NULL;
     int clean_base64_len = 0;
     const char *open_tag = ctx->script_ctx->comment_text->open;
@@ -403,26 +401,12 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     BIO_push(bio_b64, bio_mem);
     BIO_set_flags(bio_b64, BIO_FLAGS_BASE64_NO_NL);
 
-    /* allocate memory for DER output */
-    der_max_length = BIO_ctrl_pending(bio_b64);
-    der_data = OPENSSL_malloc(der_max_length);
-    if (!der_data)
-        goto cleanup;
-
-    /* decode Base64 to DER */
-    if (!BIO_read_ex(bio_b64, der_data, der_max_length, &der_length))
-        goto cleanup;
-    if (der_length <= 0)
-        goto cleanup;
-
     /* decode DER */
-    der_tmp = der_data;
-    retval = d2i_PKCS7(NULL, (const unsigned char **)&der_tmp, (int)der_length);
+    retval = d2i_PKCS7_bio(bio_b64, NULL);
 
 cleanup:
     OPENSSL_free(base64_data);
     OPENSSL_free(clean_base64);
-    OPENSSL_free(der_data);
     BIO_free_all(bio_b64);
     return retval;
 }
