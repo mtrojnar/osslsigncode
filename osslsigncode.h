@@ -484,7 +484,7 @@ typedef struct {
 DECLARE_ASN1_FUNCTIONS(MsCtlContent)
 
 typedef struct {
-    const char *server;
+    char *server;
     const char *port;
     int use_proxy;
     int timeout;
