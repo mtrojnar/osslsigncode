@@ -728,14 +728,6 @@ static BIO *http_tls_cb(BIO *bio, void *arg, int connect, int detail)
         SSL_set_connect_state(ssl);
         BIO_set_ssl(sbio, ssl, BIO_CLOSE);
         bio = BIO_push(sbio, bio);
-    } else if (!connect) {
-        /* disconnect from TLS */
-        BIO *hbio;
-
-        BIO_ssl_shutdown(bio);
-        hbio = BIO_pop(bio);
-        BIO_free(bio); /* SSL BIO */
-        bio = hbio;
     }
     return bio;
 }
@@ -773,32 +765,27 @@ static int socket_bio_read(BIO *resp, BIO *s_bio)
     int retry = 1, ok = 0;
     char *buf = OPENSSL_malloc(OSSL_HTTP_DEFAULT_MAX_RESP_LEN);
 
+    ERR_clear_error();
     while (retry) {
-        int n = BIO_read(s_bio, buf, OSSL_HTTP_DEFAULT_MAX_RESP_LEN);
+        int n;
 
+        errno = 0;
+        n = BIO_read(s_bio, buf, OSSL_HTTP_DEFAULT_MAX_RESP_LEN);
         if (n > 0) {
             BIO_write(resp, buf, n);
-        } else if (n == 0) {
+        } else if (BIO_should_retry(s_bio)) {
+        } else if (BIO_eof(s_bio) == 1) {
             ok = 1;
             retry = 0; /* EOF */
         } else {
             unsigned long err = ERR_get_error();
 
-            switch (ERR_GET_REASON(err)) {
-                case 0:
-                    ok = 1;
-                    retry = 0;
-                    break;
-                case ASN1_R_WRONG_TAG:
-                case ERR_R_NESTED_ASN1_ERROR:
-                case ERR_R_PASSED_INVALID_ARGUMENT:
-                case ERR_R_PASSED_NULL_PARAMETER:
-                case ERR_R_UNSUPPORTED:
-                case SSL_R_READ_BIO_NOT_SET:
-                    break; /* ignore */
-                default:
-                    printf("\nHTTP failure: error %ld: %s\n", err, ERR_reason_error_string(err));
-                    retry = 0; /* FAILED */
+            if (err == 0) {
+                ok = 1;
+                retry = 0; /* EOF */
+            } else {
+                printf("\nHTTP failure: error %ld: %s\n", err, ERR_reason_error_string(err));
+                retry = 0; /* FAILED */
             }
         }
     }
@@ -916,7 +903,7 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
         info.ssl_ctx = ssl_ctx;
         s_bio = OSSL_HTTP_transfer(&rctx, server, port, path, use_ssl, proxy, NULL,
             NULL, NULL, http_tls_cb, &info, 0, NULL, content_type, req,
-            expected_content_type, 0, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout, 1);
+            expected_content_type, 0, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout, 0);
 
         OPENSSL_free(server);
         OPENSSL_free(port);
