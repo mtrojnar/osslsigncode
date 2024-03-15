@@ -760,10 +760,11 @@ static int verify_callback(int ok, X509_STORE_CTX *ctx)
  * [in] s_bio: socket BIO
  * [returns] 1 on success or 0 on error
  */
-static int socket_bio_read(BIO *resp, BIO *s_bio)
+static BIO *socket_bio_read(BIO *s_bio)
 {
     int retry = 1, ok = 0;
     char *buf = OPENSSL_malloc(OSSL_HTTP_DEFAULT_MAX_RESP_LEN);
+    BIO *resp = BIO_new(BIO_s_mem());
 
     ERR_clear_error();
     while (retry) {
@@ -782,7 +783,7 @@ static int socket_bio_read(BIO *resp, BIO *s_bio)
 
             if (err == 0) {
                 ok = 1;
-                retry = 0; /* EOF */
+                retry = 0; /* use_ssl EOF */
             } else {
                 printf("\nHTTP failure: error %ld: %s\n", err, ERR_reason_error_string(err));
                 retry = 0; /* FAILED */
@@ -790,7 +791,11 @@ static int socket_bio_read(BIO *resp, BIO *s_bio)
         }
     }
     OPENSSL_free(buf);
-    return ok;
+    if (!ok) {
+        BIO_free_all(resp);
+        resp = NULL;
+    }
+    return resp;
 }
 
 /*
@@ -844,8 +849,7 @@ static void check_authenticode_timestamp(BIO **resp)
  */
 static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *cafile, char *crlfile)
 {
-    OSSL_HTTP_REQ_CTX *rctx = NULL;
-    int timeout = 30, ok = 0;
+    int timeout = 30;
     BIO *tmp_bio = NULL, *s_bio = NULL, *resp = NULL;
 
     if (!url) {
@@ -901,7 +905,7 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
         info.use_proxy = OSSL_HTTP_adapt_proxy(proxy, NULL, server, use_ssl) != NULL;
         info.timeout = timeout;
         info.ssl_ctx = ssl_ctx;
-        s_bio = OSSL_HTTP_transfer(&rctx, server, port, path, use_ssl, proxy, NULL,
+        s_bio = OSSL_HTTP_transfer(NULL, server, port, path, use_ssl, proxy, NULL,
             NULL, NULL, http_tls_cb, &info, 0, NULL, content_type, req,
             expected_content_type, 0, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout, 0);
 
@@ -912,20 +916,13 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
         SSL_CTX_free(ssl_ctx);
     }
     if (s_bio) {
-        resp = BIO_new(BIO_s_mem());
-        ok = socket_bio_read(resp, s_bio);
+        resp = socket_bio_read(s_bio);
         BIO_free_all(s_bio);
-        if (!ok) {
-            BIO_free_all(resp);
-            resp = NULL;
-        } else if (req && !rfc3161) {
+        if (resp && req && !rfc3161)
             check_authenticode_timestamp(&resp);
-        }
     } else {
         printf("\nHTTP failure: Failed to get data from %s\n", url);
     }
-    if (rctx)
-        OSSL_HTTP_close(rctx, ok);
 
     return resp;
 }
