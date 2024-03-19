@@ -760,11 +760,14 @@ static int verify_callback(int ok, X509_STORE_CTX *ctx)
  * [in] s_bio: socket BIO
  * [returns] 1 on success or 0 on error
  */
-static BIO *socket_bio_read(BIO *s_bio)
+static BIO *socket_bio_read(BIO *s_bio, OSSL_HTTP_REQ_CTX *rctx)
 {
-    int retry = 1, ok = 0;
+    int retry = 1, ok = 0, written = 0, resp_len = 0;
     char *buf = OPENSSL_malloc(OSSL_HTTP_DEFAULT_MAX_RESP_LEN);
     BIO *resp = BIO_new(BIO_s_mem());
+
+    if (rctx)
+        resp_len = (int)OSSL_HTTP_REQ_CTX_get_resp_len(rctx);
 
     ERR_clear_error();
     while (retry) {
@@ -773,11 +776,11 @@ static BIO *socket_bio_read(BIO *s_bio)
         errno = 0;
         n = BIO_read(s_bio, buf, OSSL_HTTP_DEFAULT_MAX_RESP_LEN);
         if (n > 0) {
-            BIO_write(resp, buf, n);
-        } else if (BIO_should_retry(s_bio)) {
+            written += BIO_write(resp, buf, n);
         } else if (BIO_eof(s_bio) == 1) {
             ok = 1;
             retry = 0; /* EOF */
+        } else if (BIO_should_retry(s_bio)) {
         } else {
             unsigned long err = ERR_get_error();
 
@@ -789,7 +792,12 @@ static BIO *socket_bio_read(BIO *s_bio)
                 retry = 0; /* FAILED */
             }
         }
+        if (resp_len > 0 && resp_len == written) {
+            ok = 1;
+            retry = 0; /* all response has been read */
+        }
     }
+    OSSL_HTTP_close(rctx, ok);
     OPENSSL_free(buf);
     if (!ok) {
         BIO_free_all(resp);
@@ -851,6 +859,8 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
 {
     int timeout = 30;
     BIO *tmp_bio = NULL, *s_bio = NULL, *resp = NULL;
+    OSSL_HTTP_REQ_CTX *rctx = NULL;
+    int keep_alive = 1; /* prefer */
 
     if (!url) {
         return NULL; /* FAILED */
@@ -905,9 +915,9 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
         info.use_proxy = OSSL_HTTP_adapt_proxy(proxy, NULL, server, use_ssl) != NULL;
         info.timeout = timeout;
         info.ssl_ctx = ssl_ctx;
-        s_bio = OSSL_HTTP_transfer(NULL, server, port, path, use_ssl, proxy, NULL,
+        s_bio = OSSL_HTTP_transfer(&rctx, server, port, path, use_ssl, proxy, NULL,
             NULL, NULL, http_tls_cb, &info, 0, NULL, content_type, req,
-            expected_content_type, 0, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout, 0);
+            expected_content_type, 0, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout, keep_alive);
 
         OPENSSL_free(server);
         OPENSSL_free(port);
@@ -916,7 +926,7 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
         SSL_CTX_free(ssl_ctx);
     }
     if (s_bio) {
-        resp = socket_bio_read(s_bio);
+        resp = socket_bio_read(s_bio, rctx);
         BIO_free_all(s_bio);
         if (resp && req && !rfc3161)
             check_authenticode_timestamp(&resp);
