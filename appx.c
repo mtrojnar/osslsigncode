@@ -153,6 +153,8 @@ typedef struct zipCentralDirectoryEntry_struct {
     struct zipCentralDirectoryEntry_struct *next;
 } ZIP_CENTRAL_DIRECTORY_ENTRY;
 
+DEFINE_STACK_OF(ZIP_CENTRAL_DIRECTORY_ENTRY)
+
 /* Zip64 end of central directory record */
 typedef struct {
     uint64_t eocdrSize;
@@ -301,6 +303,7 @@ static int zipInflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong *
 static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong sourceLen);
 static ZIP_FILE *openZip(const char *filename);
 static void freeZip(ZIP_FILE *zip);
+static ZIP_FILE *zipSortCentralDirectory(ZIP_FILE *zip);
 static void zipPrintCentralDirectory(ZIP_FILE *zip);
 static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file);
 static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file);
@@ -2252,7 +2255,7 @@ static ZIP_FILE *openZip(const char *filename)
         freeZip(zip);
         return NULL; /* FAILED */
     }
-    return zip;
+    return zipSortCentralDirectory(zip);
 }
 
 /*
@@ -2279,6 +2282,55 @@ static void freeZip(ZIP_FILE *zip)
         freeZipCentralDirectoryEntry(entry);
     }
     OPENSSL_free(zip);
+}
+
+/*
+ * Offset comparison function.
+ * [in] a_ptr, b_ptr: pointers to ZIP_CENTRAL_DIRECTORY_ENTRY structure
+ * [returns] entries order
+ */
+static int entry_compare(const ZIP_CENTRAL_DIRECTORY_ENTRY *const *a, const ZIP_CENTRAL_DIRECTORY_ENTRY *const *b)
+{
+    return (*a)->offsetOfLocalHeader < (*b)->offsetOfLocalHeader ? -1 : 1;
+}
+
+/*
+ * Sort central directory entries in ascending order by offset.
+ * [in] zip:  ZIP_FILE structure
+ * [returns] pointer to sorted ZIP_FILE structure
+ */
+static ZIP_FILE *zipSortCentralDirectory(ZIP_FILE *zip)
+{
+    uint64_t noEntries = 0;
+    int i;
+    ZIP_CENTRAL_DIRECTORY_ENTRY *entry;
+    STACK_OF(ZIP_CENTRAL_DIRECTORY_ENTRY) *chain = sk_ZIP_CENTRAL_DIRECTORY_ENTRY_new(entry_compare);
+
+    for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
+        if (noEntries >= zip->centralDirectoryRecordCount) {
+            printf("Corrupted central directory structure\n");
+            sk_ZIP_CENTRAL_DIRECTORY_ENTRY_free(chain);
+            freeZip(zip);
+            return NULL;
+        }
+        noEntries++;
+        if (!sk_ZIP_CENTRAL_DIRECTORY_ENTRY_push(chain, entry)) {
+            printf("Failed to add central directory entry\n");
+            sk_ZIP_CENTRAL_DIRECTORY_ENTRY_free(chain);
+            freeZip(zip);
+            return NULL;
+        }
+    }
+    sk_ZIP_CENTRAL_DIRECTORY_ENTRY_sort(chain);
+    zip->centralDirectoryHead = entry = sk_ZIP_CENTRAL_DIRECTORY_ENTRY_value(chain, 0);
+    for (i=1; i<sk_ZIP_CENTRAL_DIRECTORY_ENTRY_num(chain); i++) {
+        entry->next = sk_ZIP_CENTRAL_DIRECTORY_ENTRY_value(chain, i);
+        entry = entry->next;
+    }
+    entry->next = NULL;
+    sk_ZIP_CENTRAL_DIRECTORY_ENTRY_free(chain);
+
+    return zip;
 }
 
 /*
