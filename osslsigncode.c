@@ -3086,6 +3086,7 @@ static void usage(const char *argv0, const char *cmd)
         printf("%1s [ -askpass ]", "");
 #endif /* PROVIDE_ASKPASS */
         printf("%1s[ -readpass <file> ]\n", "");
+        printf("%12s(use \"-\" with readpass to read from stdin)\n", "");
         printf("%12s[ -ac <crosscertfile> ]\n", "");
         printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
         printf("%12s[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n", "");
@@ -3425,39 +3426,43 @@ static char *getpassword(const char *prompt)
  */
 static int read_password(GLOBAL_OPTIONS *options)
 {
-    char passbuf[4096];
+    char passbuf[4096] = {0};
     int passlen;
     const u_char utf8_bom[] = {0xef, 0xbb, 0xbf};
 
     if (options->readpass) {
+        if (!strcmp(options->readpass, "-")) {
+            passlen = read(fileno(stdin), passbuf, sizeof(passbuf)-1);
+        } else {
 #ifdef WIN32
-        HANDLE fhandle, fmap;
-        LPVOID faddress;
-        fhandle = CreateFile(options->readpass, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-        if (fhandle == INVALID_HANDLE_VALUE) {
-            return 0; /* FAILED */
-        }
-        fmap = CreateFileMapping(fhandle, NULL, PAGE_READONLY, 0, 0, NULL);
-        if (fmap == NULL) {
-            return 0; /* FAILED */
-        }
-        faddress = MapViewOfFile(fmap, FILE_MAP_READ, 0, 0, 0);
-        CloseHandle(fmap);
-        if (faddress == NULL) {
-            return 0; /* FAILED */
-        }
-        passlen = (int)GetFileSize(fhandle, NULL);
-        memcpy(passbuf, faddress, passlen);
-        UnmapViewOfFile(faddress);
-        CloseHandle(fhandle);
+            HANDLE fhandle, fmap;
+            LPVOID faddress;
+            fhandle = CreateFile(options->readpass, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+            if (fhandle == INVALID_HANDLE_VALUE) {
+                return 0; /* FAILED */
+            }
+            fmap = CreateFileMapping(fhandle, NULL, PAGE_READONLY, 0, 0, NULL);
+            if (fmap == NULL) {
+                return 0; /* FAILED */
+            }
+            faddress = MapViewOfFile(fmap, FILE_MAP_READ, 0, 0, 0);
+            CloseHandle(fmap);
+            if (faddress == NULL) {
+                return 0; /* FAILED */
+            }
+            passlen = (int)GetFileSize(fhandle, NULL);
+            memcpy(passbuf, faddress, passlen);
+            UnmapViewOfFile(faddress);
+            CloseHandle(fhandle);
 #else /* WIN32 */
-        int passfd = open(options->readpass, O_RDONLY);
-        if (passfd < 0) {
-            return 0; /* FAILED */
-        }
-        passlen = (int)read(passfd, passbuf, sizeof passbuf - 1);
-        close(passfd);
+            int passfd = open(options->readpass, O_RDONLY);
+            if (passfd < 0) {
+                return 0; /* FAILED */
+            }
+            passlen = (int)read(passfd, passbuf, sizeof passbuf - 1);
+            close(passfd);
 #endif /* WIN32 */
+        }
         if (passlen <= 0) {
             return 0; /* FAILED */
         }
