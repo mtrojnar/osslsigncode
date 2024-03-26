@@ -3074,9 +3074,10 @@ static void usage(const char *argv0, const char *cmd)
         printf("%1s[ --help ]\n\n", "");
     }
     if (on_list(cmd, cmds_sign)) {
-        printf("%1s[ sign ] ( -certs | -spc <certfile> -key <keyfile> | -pkcs12 <pkcs12file> |\n", "");
-        printf("%12s  [ -pkcs11engine <engine> ] -pkcs11module <module> -pkcs11cert <pkcs11 cert id> |\n", "");
-        printf("%12s  -certs <certfile> -key <pkcs11 key id>)\n", "");
+        printf("%1s[ sign ] ( -pkcs12 <pkcs12file>\n", "");
+        printf("%13s | ( -certs <certfile> | -spc <certfile> ) -key <keyfile>\n", "");
+        printf("%13s | [ -pkcs11engine <engine> ] -pkcs11module <module>\n", "");
+        printf("%15s ( -pkcs11cert <pkcs11 cert id> | -certs <certfile> ) -key <pkcs11 key id> )\n", "");
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
         printf("%12s[ -nolegacy ]\n", "");
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
