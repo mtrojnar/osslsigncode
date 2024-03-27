@@ -44,7 +44,7 @@ class RequestHandler(SimpleHTTPRequestHandler):
         try:
             url = urlparse(self.path)
             self.send_response(200)
-            self.send_header("Content-type", "application/crl")
+            self.send_header("Content-type", "application/pkix-crl")
             self.end_headers()
             resp_data = b''
             # Read the file and send the contents
