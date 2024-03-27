@@ -744,8 +744,10 @@ static int verify_callback(int ok, X509_STORE_CTX *ctx)
             printf("\tWarning: Ignoring \'%s\' error for CRL validation\n",
                 X509_verify_cert_error_string(error));
             printf("\nUse the \"-HTTPS-CRLfile\" option to verify CRL\n");
-            printf("HTTPS's CRL distribution point: %s\n", url);
-            OPENSSL_free(url);
+            if (url) {
+                printf("HTTPS's CRL distribution point: %s\n", url);
+                OPENSSL_free(url);
+            }
             return 1;
         } else {
             printf("\tError: %s\n", X509_verify_cert_error_string(error));
@@ -756,19 +758,36 @@ static int verify_callback(int ok, X509_STORE_CTX *ctx)
 
 /*
  * Read data from socket BIO
- * [in, out] resp: memory BIO
  * [in] s_bio: socket BIO
- * [returns] 1 on success or 0 on error
+ * [in] rctx: open connection context
+ * [in] use_ssl: HTTPS request switch
+ * [returns] memory BIO
  */
-static BIO *socket_bio_read(BIO *s_bio, OSSL_HTTP_REQ_CTX *rctx)
+static BIO *socket_bio_read(BIO *s_bio, OSSL_HTTP_REQ_CTX *rctx, int use_ssl)
 {
     int retry = 1, ok = 0, written = 0, resp_len = 0;
     char *buf = OPENSSL_malloc(OSSL_HTTP_DEFAULT_MAX_RESP_LEN);
     BIO *resp = BIO_new(BIO_s_mem());
 
-    if (rctx)
+    if (rctx) {
         resp_len = (int)OSSL_HTTP_REQ_CTX_get_resp_len(rctx);
+    }
+    if (resp_len == 0) {
+        int fd = (int)BIO_get_fd(s_bio, NULL);
 
+        if (fd >= 0) {
+            if (!BIO_socket_nbio(fd, 0)) /* set to nonblocking mode */
+                return NULL;
+            if (use_ssl)
+                BIO_ssl_shutdown(s_bio);
+            else
+#ifdef WIN32
+                (void)shutdown(fd, SD_SEND);
+#else /* WIN32 */
+                (void)shutdown(fd, SHUT_WR);
+#endif /* WIN32 */
+        }
+    }
     ERR_clear_error();
     while (retry) {
         int n;
@@ -803,6 +822,7 @@ static BIO *socket_bio_read(BIO *s_bio, OSSL_HTTP_REQ_CTX *rctx)
         BIO_free_all(resp);
         resp = NULL;
     }
+
     return resp;
 }
 
@@ -861,6 +881,7 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
     BIO *tmp_bio = NULL, *s_bio = NULL, *resp = NULL;
     OSSL_HTTP_REQ_CTX *rctx = NULL;
     int keep_alive = 1; /* prefer */
+    int use_ssl = 0;
 
     if (!url) {
         return NULL; /* FAILED */
@@ -873,7 +894,6 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
             "application/pkix-crl", 0, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout);
     } else { /* POST */
         HTTP_TLS_Info info;
-        int use_ssl;
         SSL_CTX *ssl_ctx = NULL;
         X509_STORE *store = NULL;
         char *server = NULL;
@@ -926,7 +946,7 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
         SSL_CTX_free(ssl_ctx);
     }
     if (s_bio) {
-        resp = socket_bio_read(s_bio, rctx);
+        resp = socket_bio_read(s_bio, rctx, use_ssl);
         BIO_free_all(s_bio);
         if (resp && req && !rfc3161)
             check_authenticode_timestamp(&resp);
