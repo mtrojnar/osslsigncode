@@ -4219,11 +4219,13 @@ static void print_version(void)
     printf("%s, using:\n", "osslsigncode custom build");
 #endif /* PACKAGE_STRING */
     printf("\t%s (Library: %s)\n", OPENSSL_VERSION_TEXT, OpenSSL_version(OPENSSL_VERSION));
+#if OPENSSL_VERSION_NUMBER<0x30000000L
 #ifdef ENABLE_CURL
     printf("\t%s\n", curl_version());
 #else /* ENABLE_CURL */
     printf("\t%s\n", "no libcurl available");
 #endif /* ENABLE_CURL */
+#endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
     if (cafile) {
         printf("Default -CAfile location: %s\n", cafile);
         OPENSSL_free(cafile);
