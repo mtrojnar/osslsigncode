@@ -43,6 +43,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 
 #include <openssl/asn1t.h>
 #include <openssl/bio.h>
