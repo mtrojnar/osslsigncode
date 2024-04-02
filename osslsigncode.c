@@ -776,7 +776,7 @@ static BIO *socket_bio_read(BIO *s_bio, OSSL_HTTP_REQ_CTX *rctx, int use_ssl)
         int fd = (int)BIO_get_fd(s_bio, NULL);
 
         if (fd >= 0) {
-            if (!BIO_socket_nbio(fd, 0)) /* set to nonblocking mode */
+            if (!BIO_socket_nbio(fd, 0)) /* disable nonblocking mode */
                 return NULL;
             if (use_ssl)
                 BIO_ssl_shutdown(s_bio);
