@@ -776,8 +776,6 @@ static BIO *socket_bio_read(BIO *s_bio, OSSL_HTTP_REQ_CTX *rctx, int use_ssl)
         int fd = (int)BIO_get_fd(s_bio, NULL);
 
         if (fd >= 0) {
-            if (!BIO_socket_nbio(fd, 0)) /* disable nonblocking mode */
-                return NULL;
             if (use_ssl)
                 BIO_ssl_shutdown(s_bio);
             else
@@ -877,9 +875,9 @@ static void check_authenticode_timestamp(BIO **resp)
  */
 static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *cafile, char *crlfile)
 {
-    int timeout = 30;
     BIO *tmp_bio = NULL, *s_bio = NULL, *resp = NULL;
     OSSL_HTTP_REQ_CTX *rctx = NULL;
+    int timeout = -1; /* blocking mode, exactly one try, see BIO_do_connect_retry() */
     int keep_alive = 1; /* prefer */
     int use_ssl = 0;
 
