@@ -773,17 +773,18 @@ static BIO *socket_bio_read(BIO *s_bio, OSSL_HTTP_REQ_CTX *rctx, int use_ssl)
         resp_len = (int)OSSL_HTTP_REQ_CTX_get_resp_len(rctx);
     }
     if (resp_len == 0) {
-        int fd = (int)BIO_get_fd(s_bio, NULL);
+        if (use_ssl)
+            BIO_ssl_shutdown(s_bio);
+        else {
+            int fd = (int)BIO_get_fd(s_bio, NULL);
 
-        if (fd >= 0) {
-            if (use_ssl)
-                BIO_ssl_shutdown(s_bio);
-            else
+            if (fd >= 0) {
 #ifdef WIN32
                 (void)shutdown(fd, SD_SEND);
 #else /* WIN32 */
                 (void)shutdown(fd, SHUT_WR);
 #endif /* WIN32 */
+            }
         }
     }
     ERR_clear_error();
