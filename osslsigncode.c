@@ -878,6 +878,9 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
 {
     BIO *tmp_bio = NULL, *s_bio = NULL, *resp = NULL;
     OSSL_HTTP_REQ_CTX *rctx = NULL;
+    HTTP_TLS_Info info;
+    SSL_CTX *ssl_ctx = NULL;
+    char *server = NULL, *port = NULL, *path = NULL;
     int timeout = -1; /* blocking mode, exactly one try, see BIO_do_connect_retry() */
     int keep_alive = 1; /* prefer */
     int use_ssl = 0;
@@ -888,16 +891,38 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
     print_proxy(proxy);
     printf("Connecting to %s\n", url);
 
-    if (!req) { /* GET */
-        s_bio = OSSL_HTTP_get(url, proxy, NULL, NULL, NULL, NULL, NULL, 0, NULL,
-            "application/pkix-crl", 0, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout);
-    } else { /* POST */
-        HTTP_TLS_Info info;
-        SSL_CTX *ssl_ctx = NULL;
+    if (!OSSL_HTTP_parse_url(url, &use_ssl, NULL, &server, &port, NULL, &path, NULL, NULL)) {
+        return NULL; /* FAILED */
+    }
+    if (use_ssl) {
         X509_STORE *store = NULL;
-        char *server = NULL;
-        char *port = NULL;
-        char *path = NULL;
+
+        ssl_ctx = SSL_CTX_new(TLS_client_method());
+        if (cafile) {
+            printf("HTTPS-CAfile: %s\n", cafile);
+            if (crlfile)
+                printf("HTTPS-CRLfile: %s\n", crlfile);
+            store = SSL_CTX_get_cert_store(ssl_ctx);
+            if (x509_store_load_crlfile(store, cafile, crlfile))
+                SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, verify_callback);
+            else
+                printf("Warning: HTTPS verification was skipped\n");
+        } else {
+            printf("Warning: HTTPS verification was skipped\n");
+        }
+    }
+    info.server = server;
+    info.port = port;
+    info.use_proxy = OSSL_HTTP_adapt_proxy(proxy, NULL, server, use_ssl) != NULL;
+    info.timeout = timeout;
+    info.ssl_ctx = ssl_ctx;
+
+    if (!req) { /* GET */
+        const char *expected_content_type = "application/pkix-crl";
+
+        s_bio = OSSL_HTTP_get(url, proxy, NULL, NULL, NULL, http_tls_cb, &info, 0,
+            NULL, expected_content_type, 0, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout);
+    } else { /* POST */
         const char *content_type = "application/timestamp-query"; /* RFC3161 Timestamp */
         const char *expected_content_type = "application/timestamp-reply";
 
@@ -911,39 +936,16 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
             content_type = "application/octet-stream"; /* Authenticode Timestamp */
             expected_content_type = "application/octet-stream";
         }
-        if (!OSSL_HTTP_parse_url(url, &use_ssl, NULL, &server, &port, NULL, &path, NULL, NULL)) {
-            return NULL; /* FAILED */
-        }
-        if (use_ssl) {
-            ssl_ctx = SSL_CTX_new(TLS_client_method());
-            if (cafile) {
-                printf("HTTPS-CAfile: %s\n", cafile);
-                if (crlfile)
-                    printf("HTTPS-CRLfile: %s\n", crlfile);
-                store = SSL_CTX_get_cert_store(ssl_ctx);
-                if (x509_store_load_crlfile(store, cafile, crlfile))
-                    SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, verify_callback);
-                else
-                    printf("Warning: HTTPS verification was skipped\n");
-            } else {
-                printf("Warning: HTTPS verification was skipped\n");
-            }
-        }
-        info.server = server;
-        info.port = port;
-        info.use_proxy = OSSL_HTTP_adapt_proxy(proxy, NULL, server, use_ssl) != NULL;
-        info.timeout = timeout;
-        info.ssl_ctx = ssl_ctx;
         s_bio = OSSL_HTTP_transfer(&rctx, server, port, path, use_ssl, proxy, NULL,
             NULL, NULL, http_tls_cb, &info, 0, NULL, content_type, req,
             expected_content_type, 0, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout, keep_alive);
-
-        OPENSSL_free(server);
-        OPENSSL_free(port);
-        OPENSSL_free(path);
         BIO_free(tmp_bio);
-        SSL_CTX_free(ssl_ctx);
     }
+    OPENSSL_free(server);
+    OPENSSL_free(port);
+    OPENSSL_free(path);
+    SSL_CTX_free(ssl_ctx);
+
     if (s_bio) {
         resp = socket_bio_read(s_bio, rctx, use_ssl);
         BIO_free_all(s_bio);
@@ -1939,11 +1941,11 @@ out:
 /*
  * Get Certificate Revocation List from a CRL distribution point
  * and write it into the X509_CRL structure.
- * [in] proxy: proxy to getting CRL through
+ * [in] ctx: structure holds input and output data
  * [in] url: URL of the CRL distribution point server
  * [returns] X509 Certificate Revocation List
  */
-static X509_CRL *x509_crl_get(char *proxy, char *url)
+static X509_CRL *x509_crl_get(FILE_FORMAT_CTX *ctx, char *url)
 {
     X509_CRL *crl;
     BIO *bio = NULL;
@@ -1954,10 +1956,12 @@ static X509_CRL *x509_crl_get(char *proxy, char *url)
     return NULL; /* FAILED */
 #else /* ENABLE_CURL */
     long http_code = -1;
-    bio = bio_get_http_curl(&http_code, url, NULL, proxy, 0, 1, 0);
+    bio = bio_get_http_curl(&http_code, url, NULL, ctx->options->proxy, 0, 1, 0);
 #endif /* ENABLE_CURL */
 #else /* OPENSSL_VERSION_NUMBER<0x30000000L */
-    bio = bio_get_http(url, NULL, proxy, 0, NULL, NULL);
+    bio = bio_get_http(url, NULL, ctx->options->proxy, 0,
+        ctx->options->noverifypeer ? NULL : ctx->options->https_cafile,
+        ctx->options->noverifypeer ? NULL : ctx->options->https_crlfile);
 #endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
     if (!bio) {
         printf("Warning: Faild to get CRL from %s\n\n", url);
@@ -2159,7 +2163,7 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
             printf("Ignored TSA's CRL distribution point: %s\n", url);
         } else {
             printf("TSA's CRL distribution point: %s\n", url);
-            crl = x509_crl_get(ctx->options->proxy, url);
+            crl = x509_crl_get(ctx, url);
         }
         OPENSSL_free(url);
         if (!crl && !ctx->options->tsa_crlfile) {
@@ -2321,7 +2325,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
             printf("Ignored CRL distribution point: %s\n", url);
         } else {
             printf("CRL distribution point: %s\n", url);
-            crl = x509_crl_get(ctx->options->proxy, url);
+            crl = x509_crl_get(ctx, url);
         }
         OPENSSL_free(url);
         if (!crl && !ctx->options->crlfile) {
@@ -3430,6 +3434,8 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -c | -catalog <infile> ]\n", "");
         printf("%12s[ -CAfile <infile> ]\n", "");
         printf("%12s[ -CRLfile <infile> ]\n", "");
+        printf("%12s[ -HTTPS-CAfile <infile> ]\n", "");
+        printf("%12s[ -HTTPS-CRLfile <infile> ]\n", "");
         printf("%12s[ -TSA-CAfile <infile> ]\n", "");
         printf("%12s[ -TSA-CRLfile <infile> ]\n", "");
         printf("%12s[ -p <proxy> ]\n", "");
@@ -3467,7 +3473,7 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_certs[] = {"sign", NULL};
     const char *cmds_comm[] = {"sign", NULL};
     const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
-    const char *cmds_CRLfileHTTPS[] = {"add", "sign", NULL};
+    const char *cmds_CRLfileHTTPS[] = {"add", "sign", "verify", NULL};
     const char *cmds_CRLfileTSA[] = {"attach-signature", "verify", NULL};
     const char *cmds_h[] = {"add", "attach-signature", "sign", "extract-data", NULL};
     const char *cmds_i[] = {"sign", NULL};
@@ -3500,7 +3506,7 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_ignore_cdp[] = {"verify", NULL};
     const char *cmds_t[] = {"add", "sign", NULL};
     const char *cmds_ts[] = {"add", "sign", NULL};
-    const char *cmds_CAfileHTTPS[] = {"add", "sign", NULL};
+    const char *cmds_CAfileHTTPS[] = {"add", "sign", "verify", NULL};
     const char *cmds_CAfileTSA[] = {"attach-signature", "verify", NULL};
     const char *cmds_certsTSA[] = {"add", "sign", NULL};
     const char *cmds_keyTSA[] = {"add", "sign", NULL};
@@ -4572,14 +4578,16 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->crlfile = OPENSSL_strdup(*++argv);
-        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-HTTPS-CAfile")) {
+        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_VERIFY)
+                && !strcmp(*argv, "-HTTPS-CAfile")) {
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
             OPENSSL_free(options->https_cafile);
             options->https_cafile = OPENSSL_strdup(*++argv);
-        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-HTTPS-CRLfile")) {
+        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_VERIFY)
+                && !strcmp(*argv, "-HTTPS-CRLfile")) {
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
