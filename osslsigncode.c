@@ -921,7 +921,7 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
         const char *expected_content_type = "application/pkix-crl";
 
         s_bio = OSSL_HTTP_get(url, proxy, NULL, NULL, NULL, http_tls_cb, &info, 0,
-            NULL, expected_content_type, 0, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout);
+            NULL, expected_content_type, 0, 0, timeout);
     } else { /* POST */
         const char *content_type = "application/timestamp-query"; /* RFC3161 Timestamp */
         const char *expected_content_type = "application/timestamp-reply";
@@ -938,7 +938,7 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
         }
         s_bio = OSSL_HTTP_transfer(&rctx, server, port, path, use_ssl, proxy, NULL,
             NULL, NULL, http_tls_cb, &info, 0, NULL, content_type, req,
-            expected_content_type, 0, OSSL_HTTP_DEFAULT_MAX_RESP_LEN, timeout, keep_alive);
+            expected_content_type, 0, 0, timeout, keep_alive);
         BIO_free(tmp_bio);
     }
     OPENSSL_free(server);
