@@ -1748,7 +1748,7 @@ static int verify_ca_callback(int ok, X509_STORE_CTX *ctx)
         if (trusted_cert(current_cert, error)) {
             return 1;
         } else if (error == X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN) {
-            printf("\tError: Unable to get local CA certificate; %s\n",
+            printf("\tError: Certificate not found in local repository: %s\n",
                 X509_verify_cert_error_string(error));
         } else {
             printf("\tError: %s\n", X509_verify_cert_error_string(error));
@@ -1772,7 +1772,7 @@ static int verify_crl_callback(int ok, X509_STORE_CTX *ctx)
                 X509_verify_cert_error_string(error));
             return 1;
         } else if (error == X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN) {
-            printf("\tError: Unable to get local CA certificate; %s\n",
+            printf("\tError: Certificate not found in local repository: %s\n",
                 X509_verify_cert_error_string(error));
         }
          else {
