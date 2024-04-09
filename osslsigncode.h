@@ -14,6 +14,7 @@
 #define NOCRYPT
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <winsock2.h>
 #endif /* HAVE_WINDOWS_H */
 
 #ifdef HAVE_CONFIG_H
@@ -32,6 +33,7 @@
 
 #ifndef _WIN32
 #include <unistd.h>
+#include <sys/socket.h>
 #ifdef HAVE_SYS_MMAN_H
 #include <sys/mman.h>
 #endif /* HAVE_SYS_MMAN_H */
@@ -63,6 +65,7 @@
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 #include <openssl/rand.h>
 #include <openssl/safestack.h>
+#include <openssl/ssl.h>
 #include <openssl/ts.h>
 #include <openssl/x509.h>
 #include <openssl/x509v3.h> /* X509_PURPOSE */
@@ -279,6 +282,8 @@ typedef struct {
     char *catalog;
     char *cafile;
     char *crlfile;
+    char *https_cafile;
+    char *https_crlfile;
     char *tsa_cafile;
     char *tsa_crlfile;
     char *leafhash;
@@ -479,6 +484,14 @@ typedef struct {
 } MsCtlContent;
 
 DECLARE_ASN1_FUNCTIONS(MsCtlContent)
+
+typedef struct {
+    char *server;
+    const char *port;
+    int use_proxy;
+    int timeout;
+    SSL_CTX *ssl_ctx;
+} HTTP_TLS_Info;
 
 typedef struct file_format_st FILE_FORMAT;
 

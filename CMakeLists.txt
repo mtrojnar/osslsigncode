@@ -29,7 +29,9 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # load CMake library modules
 include(FindOpenSSL)
-include(FindCURL)
+if(OPENSSL_VERSION VERSION_LESS "3.0.0")
+    include(FindCURL)
+endif(OPENSSL_VERSION VERSION_LESS "3.0.0")
 include(FindZLIB)
 
 # load CMake project modules
@@ -64,20 +66,25 @@ target_include_directories(osslsigncode PRIVATE ${OPENSSL_INCLUDE_DIR})
 target_link_libraries(osslsigncode PRIVATE ${OPENSSL_LIBRARIES})
 
 # set cURL includes/libraries
-if(CURL_FOUND)
+if(OPENSSL_VERSION VERSION_LESS "3.0.0" AND CURL_FOUND)
     target_compile_definitions(osslsigncode PRIVATE ENABLE_CURL=1)
     target_include_directories(osslsigncode PRIVATE ${CURL_INCLUDE_DIRS})
     target_link_libraries(osslsigncode PRIVATE ${CURL_LIBRARIES})
     message(STATUS "cURL support enabled")
-else(CURL_FOUND)
+else(OPENSSL_VERSION VERSION_LESS "3.0.0" AND CURL_FOUND)
     message(STATUS "cURL support disabled (library not found)")
-endif(CURL_FOUND)
+endif(OPENSSL_VERSION VERSION_LESS "3.0.0" AND CURL_FOUND)
 
 if(NOT ZLIB_FOUND)
     message(FATAL_ERROR "Zlib library not found")
 endif(NOT ZLIB_FOUND)
 target_include_directories(osslsigncode PRIVATE ${ZLIB_INCLUDE_DIR})
 target_link_libraries(osslsigncode PRIVATE ${ZLIB_LIBRARIES})
+
+if(NOT UNIX)
+# https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-shutdown
+target_link_libraries(osslsigncode PRIVATE Ws2_32.lib)
+endif(NOT UNIX)
 
 # add paths to linker search and installed rpath
 set_target_properties(osslsigncode PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
