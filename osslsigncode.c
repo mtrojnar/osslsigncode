@@ -3737,7 +3737,7 @@ static int read_password(GLOBAL_OPTIONS *options)
 
     if (options->readpass) {
         if (!strcmp(options->readpass, "-")) {
-            passlen = read(fileno(stdin), passbuf, sizeof(passbuf)-1);
+            passlen = (int)read(fileno(stdin), passbuf, sizeof(passbuf)-1);
         } else {
 #ifdef WIN32
             HANDLE fhandle, fmap;
