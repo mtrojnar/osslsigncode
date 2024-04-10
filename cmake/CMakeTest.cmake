@@ -454,7 +454,7 @@ foreach(file ${files})
 endforeach(file ${files})
 
 
-if((Python3_FOUND OR server_error) AND CURL_FOUND)
+if((Python3_FOUND OR server_error) AND (OPENSSL_VERSION VERSION_GREATER_EQUAL "3.0.0" OR CURL_FOUND))
 
 ### Sign with Time-Stamp Authority ###
 
@@ -724,9 +724,9 @@ endforeach(ext ${extensions_nocat})
         message(STATUS "Keep HTTP server after tests")
     endif(STOP_SERVER)
 
-else((Python3_FOUND OR server_error) AND CURL_FOUND)
+else((Python3_FOUND OR server_error) AND (OPENSSL_VERSION VERSION_GREATER_EQUAL "3.0.0" OR CURL_FOUND))
     message(STATUS "CTest skips some tests")
-endif((Python3_FOUND OR server_error) AND CURL_FOUND)
+endif((Python3_FOUND OR server_error) AND (OPENSSL_VERSION VERSION_GREATER_EQUAL "3.0.0" OR CURL_FOUND))
 
 # Delete test files
 set(names "legacy" "signed" "signed_crldp" "nested" "revoked" "removed" "added")
