@@ -974,7 +974,11 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
     BIO *req, *resp;
     int verbose = ctx->options->verbose || ctx->options->ntsurl == 1;
     int res = 1;
+#if OPENSSL_VERSION_NUMBER<0x30000000L
+#ifdef ENABLE_CURL
     long http_code = -1;
+#endif /* ENABLE_CURL */
+#endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
 
     /* Encode timestamp request */
     if (rfc3161) {
@@ -1027,12 +1031,15 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
             res = attach_authenticode_response(p7, response, verbose);
         }
         if (res && verbose) {
-            if (http_code != -1) {
+#if OPENSSL_VERSION_NUMBER<0x30000000L
+#ifdef ENABLE_CURL
+            if (http_code != -1)
                 printf("Failed to convert timestamp reply from %s; "
                 "HTTP status %ld\n", url, http_code);
-            } else {
+            else
+#endif /* ENABLE_CURL */
+#endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
                 printf("Failed to convert timestamp reply from %s\n", url);
-            }
             ERR_print_errors_fp(stdout);
         }
         BIO_free_all(resp);
