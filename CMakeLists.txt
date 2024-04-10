@@ -83,7 +83,7 @@ target_link_libraries(osslsigncode PRIVATE ${ZLIB_LIBRARIES})
 
 if(NOT UNIX)
 # https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-shutdown
-target_link_libraries(osslsigncode PRIVATE Ws2_32.lib)
+target_link_libraries(osslsigncode PRIVATE Ws2_32.lib crypt32.lib)
 endif(NOT UNIX)
 
 # add paths to linker search and installed rpath
