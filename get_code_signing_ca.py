@@ -21,7 +21,7 @@ def download_cert(hash):
             stderr.flush()
             return resp.content.decode('utf-8')
         except RequestException as e:
-            print('\nAn error occurred:', e, file=stderr)
+            print(f'\n{e}', file=stderr)
     print('\nGiving up on', hash, file=stderr)
 
 resp = get('https://ccadb-public.secure.force.com/microsoft/IncludedCACertificateReportForMSFTCSV')
@@ -34,3 +34,4 @@ with ThreadPoolExecutor(max_workers=5) as executor:
 for cert in certs:
     if cert is not None:
         print(cert)
+print('\nDone', file=stderr)
