@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 """Implementation of a HTTP client"""
 
 import os
@@ -5,17 +6,17 @@ import sys
 import http.client
 
 RESULT_PATH = os.getcwd()
-LOGS_PATH = os.path.join(RESULT_PATH, "./Testing/logs/")
-PORT_LOG = os.path.join(LOGS_PATH, "./port.log")
 
 
 def main() -> None:
     """Creating a POST Request"""
     ret = 0
     try:
-        with open(PORT_LOG, 'r') as file:
-            port = file.readline()
-        conn = http.client.HTTPConnection('127.0.0.1', port)
+        file_path = os.path.join(RESULT_PATH, "./Testing/logs/url.log")
+        with open(file_path, mode="r", encoding="utf-8") as file:
+            url = file.readline()
+        host, port = url.split(":")
+        conn = http.client.HTTPConnection(host, port)
         conn.request('POST', '/kill_server')
         response = conn.getresponse()
         print("HTTP status code:", response.getcode(), end=', ')

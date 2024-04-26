@@ -105,12 +105,13 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
+        sudo apt-get install -y libssl-dev libcurl4-openssl-dev python3-cryptography
 
     - name: Install brew dependencies (macOS)
       if: runner.os == 'macOS'
       run: |
         brew install python@3.8
+        pip install cryptography
 
     - name: Install Xcode (macOS)
       if: runner.os == 'macOS'
@@ -123,6 +124,11 @@ jobs:
       uses: jwlawson/actions-setup-cmake@v2.0
       with:
         cmake-version: '3.17.0'
+
+    - name: Install cryptography module (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        pip install cryptography
 
     - name: Configure CMake
       run: cmake
@@ -137,25 +143,6 @@ jobs:
       run: cmake
         --build ${{github.workspace}}/build
         --config ${{env.BUILD_TYPE}}
-
-    - name: Start HTTP server (macOS)
-      working-directory: ${{github.workspace}}/build
-      if: runner.os == 'macOS'
-      run: |
-        python3.8 --version
-        python3.8 ./Testing/server_http.py --port 19254
-        while test ! -s ./Testing/logs/port.log; do sleep 1; done
-
-    - name: Start HTTP server (Windows)
-      working-directory: ${{github.workspace}}\build
-      if: runner.os == 'Windows'
-      run: |
-        python.exe --version
-        $Args = '.\Testing\server_http.pyw --port 19254'
-        $File = '.\Testing\logs\port.log'
-        Start-Process -FilePath pythonw.exe -ArgumentList $Args
-        while(-not(Test-Path -Path $File -PathType Leaf) -or [String]::IsNullOrWhiteSpace((Get-Content $File))) {Start-Sleep -Seconds 1}
-        Get-Content '.\Testing\logs\server.log'
 
     - name: List files (Linux/macOS)
       if: runner.os != 'Windows'

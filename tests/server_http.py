@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 """Implementation of a HTTP server"""
 
 import argparse
@@ -8,6 +9,11 @@ import threading
 from urllib.parse import urlparse
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
+try:
+    from make_certificates import MakeTestCertificates
+except ModuleNotFoundError:
+    print("Python3 cryptography module is not installed")
+    sys.exit(1)
 
 RESULT_PATH = os.getcwd()
 FILES_PATH = os.path.join(RESULT_PATH, "./Testing/files/")
@@ -16,11 +22,8 @@ CONF_PATH = os.path.join(RESULT_PATH, "./Testing/conf/")
 LOGS_PATH = os.path.join(RESULT_PATH, "./Testing/logs/")
 REQUEST = os.path.join(FILES_PATH, "./jreq.tsq")
 RESPONS = os.path.join(FILES_PATH, "./jresp.tsr")
-CACRL = os.path.join(CERTS_PATH, "./CACertCRL.der")
-TSACRL = os.path.join(CERTS_PATH, "./TSACertCRL.der")
 OPENSSL_CONF = os.path.join(CONF_PATH, "./openssl_tsa.cnf")
-PORT_LOG = os.path.join(LOGS_PATH, "./port.log")
-
+URL_LOG = os.path.join(LOGS_PATH, "./url.log")
 
 OPENSSL_TS = ["openssl", "ts",
     "-reply", "-config", OPENSSL_CONF,
@@ -28,8 +31,11 @@ OPENSSL_TS = ["openssl", "ts",
     "-queryfile", REQUEST,
     "-out", RESPONS]
 
+
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """This variant of HTTPServer creates a new thread for every connection"""
     daemon_threads = True
+
 
 class RequestHandler(SimpleHTTPRequestHandler):
     """Handle the HTTP POST request that arrive at the server"""
@@ -49,10 +55,12 @@ class RequestHandler(SimpleHTTPRequestHandler):
             resp_data = b''
             # Read the file and send the contents
             if url.path == "/intermediateCA":
-                with open(CACRL, 'rb') as file:
+                file_path = os.path.join(CERTS_PATH, "./CACertCRL.der")
+                with open(file_path, 'rb') as file:
                     resp_data = file.read()
             if url.path == "/TSACA":
-                with open(TSACRL, 'rb') as file:
+                file_path = os.path.join(CERTS_PATH, "./TSACertCRL.der")
+                with open(file_path, 'rb') as file:
                     resp_data = file.read()
             self.wfile.write(resp_data)
         except Exception as err: # pylint: disable=broad-except
@@ -65,8 +73,8 @@ class RequestHandler(SimpleHTTPRequestHandler):
             url = urlparse(self.path)
             self.send_response(200)
             if url.path == "/kill_server":
-                self.log_message(f"Deleting file: {PORT_LOG}")
-                os.remove(f"{PORT_LOG}")
+                self.log_message(f"Deleting file: {URL_LOG}")
+                os.remove(f"{URL_LOG}")
                 self.send_header('Content-type', 'text/plain')
                 self.end_headers()
                 self.wfile.write(bytes('Shutting down HTTP server', 'utf-8'))
@@ -76,8 +84,7 @@ class RequestHandler(SimpleHTTPRequestHandler):
                 post_data = self.rfile.read(content_length)
                 with open(REQUEST, mode="wb") as file:
                     file.write(post_data)
-                openssl = subprocess.run(OPENSSL_TS,
-                    check=True, universal_newlines=True)
+                openssl = subprocess.run(OPENSSL_TS, check=True, universal_newlines=True)
                 openssl.check_returncode()
                 self.send_header("Content-type", "application/timestamp-reply")
                 self.end_headers()
@@ -85,6 +92,7 @@ class RequestHandler(SimpleHTTPRequestHandler):
                 with open(RESPONS, mode="rb") as file:
                     resp_data = file.read()
                 self.wfile.write(resp_data)
+
         except Exception as err: # pylint: disable=broad-except
             print("HTTP POST request error: {}".format(err))
 
@@ -108,7 +116,8 @@ class HttpServerThread():
 
 
 def main() -> None:
-    """Start HTTP server"""
+    """Start HTTP server, make test certificates."""
+
     ret = 0
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -121,11 +130,15 @@ def main() -> None:
     try:
         server = HttpServerThread()
         port = server.start_server(args.port)
-        with open(PORT_LOG, mode="w") as file:
-            file.write("{}".format(port))
+        with open(URL_LOG, mode="w", encoding="utf-8") as file:
+            file.write("127.0.0.1:{}".format(port))
+        MakeTestCertificates(port)
     except OSError as err:
         print("OSError: {}".format(err))
         ret = err.errno
+    except Exception as err: # pylint: disable=broad-except
+        print("Error: {}".format(err))
+        ret = 1
     finally:
         sys.exit(ret)
 
@@ -135,6 +148,10 @@ if __name__ == '__main__':
         fpid = os.fork()
         if fpid > 0:
             sys.exit(0)
+        log_path = os.path.join(LOGS_PATH, "./server.log")
+        with open(log_path, mode='w', encoding='utf-8') as log:
+            os.dup2(log.fileno(), sys.stdout.fileno())
+            os.dup2(log.fileno(), sys.stderr.fileno())
     except OSError as ferr:
         print("Fork #1 failed: {} {}".format(ferr.errno, ferr.strerror))
         sys.exit(1)
