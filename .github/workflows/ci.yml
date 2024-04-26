@@ -111,7 +111,6 @@ jobs:
       if: runner.os == 'macOS'
       run: |
         brew install python@3.8
-        pip install cryptography
 
     - name: Install Xcode (macOS)
       if: runner.os == 'macOS'
@@ -125,10 +124,15 @@ jobs:
       with:
         cmake-version: '3.17.0'
 
-    - name: Install cryptography module (Windows)
+    - name: Install python3 cryptography module (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        python3.8 -m pip install cryptography
+
+    - name: Install python3 cryptography module (Windows)
       if: runner.os == 'Windows'
       run: |
-        pip install cryptography
+        python.exe -m pip install cryptography
 
     - name: Configure CMake
       run: cmake
@@ -143,6 +147,20 @@ jobs:
       run: cmake
         --build ${{github.workspace}}/build
         --config ${{env.BUILD_TYPE}}
+
+    - name: Show python version (macOS)
+      working-directory: ${{github.workspace}}/build
+      if: runner.os == 'macOS'
+      run: |
+        python3.8 --version
+        python3.8 -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
+
+    - name: Show python version (Windows)
+      working-directory: ${{github.workspace}}\build
+      if: runner.os == 'Windows'
+      run: |
+        python.exe --version
+        python.exe -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
 
     - name: List files (Linux/macOS)
       if: runner.os != 'Windows'
