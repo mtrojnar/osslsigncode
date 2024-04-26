@@ -100,7 +100,8 @@ if(Python3_FOUND AND NOT cryptography_error)
     add_test(NAME "calc_leafhash"
         COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/calc_leafhash.py")
     set_tests_properties("calc_leafhash" PROPERTIES
-        DEPENDS "start_server")
+        DEPENDS "start_server"
+        TIMEOUT 60)
 
     set(ALL_TESTS "version" "start_server" "calc_leafhash")
 
