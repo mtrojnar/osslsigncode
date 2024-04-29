@@ -127,11 +127,15 @@ jobs:
     - name: Install python3 cryptography module (macOS)
       if: runner.os == 'macOS'
       run: |
+        python3.8 -m ensurepip
+        python3.8 -m pip install --upgrade pip
         python3.8 -m pip install cryptography
 
     - name: Install python3 cryptography module (Windows)
       if: runner.os == 'Windows'
       run: |
+        python.exe -m ensurepip
+        python.exe -m pip install --upgrade pip
         python.exe -m pip install cryptography
 
     - name: Configure CMake

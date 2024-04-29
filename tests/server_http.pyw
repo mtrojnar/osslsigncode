@@ -119,7 +119,7 @@ def main() -> None:
         server = HttpServerThread()
         port = server.start_server()
         with open(URL_LOG, mode="w") as file:
-            file.write("{}".format(port))
+            file.write("127.0.0.1:{}".format(port))
         MakeTestCertificates(port)
     except OSError as err:
         print("OSError: {}".format(err))
