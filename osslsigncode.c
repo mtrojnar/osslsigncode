@@ -2163,39 +2163,41 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
     cmssi = sk_CMS_SignerInfo_value(sinfos, 0);
     CMS_SignerInfo_get0_algs(cmssi, NULL, &signer, NULL, NULL);
 
-    /* verify a Certificate Revocation List */
-    url = clrdp_url_get_x509(signer);
-    if (url) {
-        if (ctx->options->ignore_cdp) {
-            printf("Ignored TSA's CRL distribution point: %s\n", url);
-        } else {
-            printf("TSA's CRL distribution point: %s\n", url);
-            crl = x509_crl_get(ctx, url);
-        }
-        OPENSSL_free(url);
-        if (!crl && !ctx->options->tsa_crlfile) {
-            printf("Use the \"-TSA-CRLfile\" option to add one or more Time-Stamp Authority CRLs in PEM format.\n");
-            goto out;
-        }
-    }
-    if (p7->d.sign->crl || crl) {
-        crls = x509_crl_list_get(p7, crl);
-        if (!crls) {
-            printf("Failed to use CRL distribution point\n");
-            goto out;
-        }
-    }
-    if (ctx->options->tsa_crlfile || crls) {
-        STACK_OF(X509) *chain = CMS_get1_certs(timestamp);
-        int crlok = verify_crl(ctx->options->tsa_cafile, ctx->options->tsa_crlfile,
-            crls, signer, chain);
-        sk_X509_pop_free(chain, X509_free);
-        sk_X509_CRL_pop_free(crls, X509_CRL_free);
-        printf("Timestamp Server Signature CRL verification: %s\n", crlok ? "ok" : "failed");
-        if (!crlok)
-            goto out;
-    } else {
-        printf("\n");
+    if (! ctx->options->ignore_crl) {
+      /* verify a Certificate Revocation List */
+      url = clrdp_url_get_x509(signer);
+      if (url) {
+          if (ctx->options->ignore_cdp) {
+              printf("Ignored TSA's CRL distribution point: %s\n", url);
+          } else {
+              printf("TSA's CRL distribution point: %s\n", url);
+              crl = x509_crl_get(ctx, url);
+          }
+          OPENSSL_free(url);
+          if (!crl && !ctx->options->tsa_crlfile) {
+              printf("Use the \"-TSA-CRLfile\" option to add one or more Time-Stamp Authority CRLs in PEM format.\n");
+              goto out;
+          }
+      }
+      if (p7->d.sign->crl || crl) {
+          crls = x509_crl_list_get(p7, crl);
+          if (!crls) {
+              printf("Failed to use CRL distribution point\n");
+              goto out;
+          }
+      }
+      if (ctx->options->tsa_crlfile || crls) {
+          STACK_OF(X509) *chain = CMS_get1_certs(timestamp);
+          int crlok = verify_crl(ctx->options->tsa_cafile, ctx->options->tsa_crlfile,
+              crls, signer, chain);
+          sk_X509_pop_free(chain, X509_free);
+          sk_X509_CRL_pop_free(crls, X509_CRL_free);
+          printf("Timestamp Server Signature CRL verification: %s\n", crlok ? "ok" : "failed");
+          if (!crlok)
+              goto out;
+      } else {
+          printf("\n");
+      }
     }
     /* check extended key usage flag XKU_TIMESTAMP */
     if (!(X509_get_extended_key_usage(signer) & XKU_TIMESTAMP)) {
@@ -2325,36 +2327,38 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
     X509_STORE_free(store);
     BIO_free(bio);
 
-    /* verify a Certificate Revocation List */
-    url = clrdp_url_get_x509(signer);
-    if (url) {
-        if (ctx->options->ignore_cdp) {
-            printf("Ignored CRL distribution point: %s\n", url);
-        } else {
-            printf("CRL distribution point: %s\n", url);
-            crl = x509_crl_get(ctx, url);
-        }
-        OPENSSL_free(url);
-        if (!crl && !ctx->options->crlfile) {
-            printf("Use the \"-CRLfile\" option to add one or more CRLs in PEM format.\n");
-            goto out;
-        }
-    }
-    if (p7->d.sign->crl || crl) {
-        crls = x509_crl_list_get(p7, crl);
-        if (!crls) {
-            printf("Failed to use CRL distribution point\n");
-            goto out;
-        }
-    }
-    if (ctx->options->crlfile || crls) {
-        STACK_OF(X509) *chain = p7->d.sign->cert;
-        int crlok = verify_crl(ctx->options->cafile, ctx->options->crlfile,
-            crls, signer, chain);
-        sk_X509_CRL_pop_free(crls, X509_CRL_free);
-        printf("Signature CRL verification: %s\n", crlok ? "ok" : "failed");
-        if (!crlok)
-            goto out;
+    if (! ctx->options->ignore_crl) {
+      /* verify a Certificate Revocation List */
+      url = clrdp_url_get_x509(signer);
+      if (url) {
+          if (ctx->options->ignore_cdp) {
+              printf("Ignored CRL distribution point: %s\n", url);
+          } else {
+              printf("CRL distribution point: %s\n", url);
+              crl = x509_crl_get(ctx, url);
+          }
+          OPENSSL_free(url);
+          if (!crl && !ctx->options->crlfile) {
+              printf("Use the \"-CRLfile\" option to add one or more CRLs in PEM format.\n");
+              goto out;
+          }
+      }
+      if (p7->d.sign->crl || crl) {
+          crls = x509_crl_list_get(p7, crl);
+          if (!crls) {
+              printf("Failed to use CRL distribution point\n");
+              goto out;
+          }
+      }
+      if (ctx->options->crlfile || crls) {
+          STACK_OF(X509) *chain = p7->d.sign->cert;
+          int crlok = verify_crl(ctx->options->cafile, ctx->options->crlfile,
+              crls, signer, chain);
+          sk_X509_CRL_pop_free(crls, X509_CRL_free);
+          printf("Signature CRL verification: %s\n", crlok ? "ok" : "failed");
+          if (!crlok)
+              goto out;
+      }
     }
     /* check extended key usage flag XKU_CODE_SIGN */
     if (!(X509_get_extended_key_usage(signer) & XKU_CODE_SIGN)) {
@@ -3451,6 +3455,7 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -index <index> ]\n", "");
         printf("%12s[ -ignore-timestamp ]\n", "");
         printf("%12s[ -ignore-cdp ]\n", "");
+        printf("%12s[ -ignore-crl ]\n", "");
         printf("%12s[ -time <unix-time> ]\n", "");
         printf("%12s[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n", "");
         printf("%12s[ -verbose ]\n\n", "");
@@ -3513,6 +3518,7 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_time[] = {"attach-signature", "sign", "verify", NULL};
     const char *cmds_ignore_timestamp[] = {"verify", NULL};
     const char *cmds_ignore_cdp[] = {"verify", NULL};
+    const char *cmds_ignore_crl[] = {"verify", NULL};
     const char *cmds_t[] = {"add", "sign", NULL};
     const char *cmds_ts[] = {"add", "sign", NULL};
     const char *cmds_CAfileHTTPS[] = {"add", "sign", "verify", NULL};
@@ -3655,7 +3661,9 @@ static void help_for(const char *argv0, const char *cmd)
     if (on_list(cmd, cmds_ignore_timestamp))
         printf("%-24s= disable verification of the Timestamp Server signature\n", "-ignore-timestamp");
     if (on_list(cmd, cmds_ignore_cdp))
-        printf("%-24s= disable CRL Distribution Points online verification\n", "-ignore-cdp");
+        printf("%-24s= disable CRL Distribution Points detection from the file\n", "-ignore-cdp");
+    if (on_list(cmd, cmds_ignore_crl))
+        printf("%-24s= disable CRL online verification\n", "-ignore-crl");
     if (on_list(cmd, cmds_t)) {
         printf("%-24s= specifies that the digital signature will be timestamped\n", "-t");
         printf("%26sby the Time-Stamp Authority (TSA) indicated by the URL\n", "");
@@ -4567,6 +4575,8 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
             options->ignore_timestamp = 1;
         } else if ((cmd == CMD_VERIFY) && !strcmp(*argv, "-ignore-cdp")) {
             options->ignore_cdp = 1;
+        } else if ((cmd == CMD_VERIFY) && !strcmp(*argv, "-ignore-crl")) {
+            options->ignore_crl = 1;
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_VERIFY) && !strcmp(*argv, "-verbose")) {
             options->verbose = 1;
         } else if ((cmd == CMD_SIGN || cmd == CMD_EXTRACT_DATA || cmd == CMD_ADD || cmd == CMD_ATTACH)
