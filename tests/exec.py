@@ -5,7 +5,7 @@ import sys
 import subprocess
 
 
-def parameter(value):
+def parse(value):
     """Read parameter from file."""
     prefix = 'FILE '
     if value.startswith(prefix):
@@ -16,15 +16,16 @@ def parameter(value):
 
 def main() -> None:
     """Run osslsigncode with its options."""
-    try:
-        print(sys.argv)
-        params = map(parameter, sys.argv[1:])
-        proc = subprocess.run(params, check=True)
-        sys.exit(proc.returncode)
-    except subprocess.CalledProcessError as err:
-        print("Error during command execution:", err)
-    except Exception as err: # pylint: disable=broad-except
-        print("Error: {}".format(err))
+    if len(sys.argv) > 1:
+        try:
+            params = map(parse, sys.argv[1:])
+            proc = subprocess.run(params, check=True)
+            sys.exit(proc.returncode)
+        except Exception as err: # pylint: disable=broad-except
+            # all exceptions are critical
+            print(err, file=sys.stderr)
+    else:
+        print("Usage:\n\t{} COMMAND [ARG]...'".format(sys.argv[0]), file=sys.stderr)
     sys.exit(1)
 
 
