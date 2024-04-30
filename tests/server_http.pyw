@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 """Windows: Implementation of a HTTP server"""
 
+import argparse
 import os
 import subprocess
 import sys
@@ -9,8 +10,11 @@ from urllib.parse import urlparse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 try:
     from make_certificates import MakeTestCertificates
-except ModuleNotFoundError:
-    print("Python3 cryptography module is not installed")
+except ModuleNotFoundError as ierr:
+    print("Module not installed: ".format(ierr))
+    sys.exit(1)
+except ImportError as ierr:
+    print("Module not found: ".format(ierr))
     sys.exit(1)
 
 RESULT_PATH = os.getcwd()
@@ -99,9 +103,9 @@ class HttpServerThread():
         self.server = None
         self.server_thread = None
 
-    def start_server(self) -> (int):
+    def start_server(self, port) -> (int):
         """Starting HTTP server on 127.0.0.1 and a random available port for binding"""
-        self.server = ThreadingHTTPServer(('127.0.0.1', 19254), RequestHandler)
+        self.server = ThreadingHTTPServer(('127.0.0.1', port), RequestHandler)
         self.server_thread = threading.Thread(target=self.server.serve_forever)
         self.server_thread.start()
         hostname, port = self.server.server_address[:2]
@@ -112,12 +116,20 @@ class HttpServerThread():
 def main() -> None:
     """Start HTTP server"""
     ret = 0
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="port number"
+    )
+    args = parser.parse_args()
     try:
         log_path = os.path.join(LOGS_PATH, "./server.log")
         sys.stdout = open(log_path, "w")
         sys.stderr = open(log_path, "a")
         server = HttpServerThread()
-        port = server.start_server()
+        port = server.start_server(args.port)
         with open(URL_LOG, mode="w") as file:
             file.write("127.0.0.1:{}".format(port))
         MakeTestCertificates(port)

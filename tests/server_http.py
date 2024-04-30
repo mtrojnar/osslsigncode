@@ -11,8 +11,11 @@ from http.server import SimpleHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 try:
     from make_certificates import MakeTestCertificates
-except ModuleNotFoundError:
-    print("Python3 cryptography module is not installed")
+except ModuleNotFoundError as ierr:
+    print("Module not installed: ".format(ierr))
+    sys.exit(1)
+except ImportError as ierr:
+    print("Module not found: ".format(ierr))
     sys.exit(1)
 
 RESULT_PATH = os.getcwd()
