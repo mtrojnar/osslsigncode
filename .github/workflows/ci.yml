@@ -152,11 +152,20 @@ jobs:
         --build ${{github.workspace}}/build
         --config ${{env.BUILD_TYPE}}
 
+    - name: Show python version (Linux)
+      working-directory: ${{github.workspace}}/build
+      if: runner.os == 'Linux'
+      run: |
+        python --version
+        python -c "import sys; print(sys.executable)"
+        python -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
+
     - name: Show python version (macOS)
       working-directory: ${{github.workspace}}/build
       if: runner.os == 'macOS'
       run: |
         python3.8 --version
+        python3.8 -c "import sys; print(sys.executable)"
         python3.8 -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
 
     - name: Show python version (Windows)
@@ -164,6 +173,7 @@ jobs:
       if: runner.os == 'Windows'
       run: |
         python.exe --version
+        python.exe -c "import sys; print(sys.executable)"
         python.exe -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
 
     - name: List files (Linux/macOS)
