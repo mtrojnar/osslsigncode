@@ -256,6 +256,7 @@ typedef struct {
     char *p11engine;
     char *p11module;
     char *p11cert;
+    int login;
 #endif /* OPENSSL_NO_ENGINE */
     int askpass;
     char *readpass;

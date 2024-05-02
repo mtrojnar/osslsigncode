@@ -3369,7 +3369,7 @@ static void usage(const char *argv0, const char *cmd)
     if (on_list(cmd, cmds_sign)) {
         printf("%1s[ sign ] ( -pkcs12 <pkcs12file>\n", "");
         printf("%13s | ( -certs <certfile> | -spc <certfile> ) -key <keyfile>\n", "");
-        printf("%13s | [ -pkcs11engine <engine> ] -pkcs11module <module>\n", "");
+        printf("%13s | [ -pkcs11engine <engine> ] [ -login ] -pkcs11module <module>\n", "");
         printf("%15s ( -pkcs11cert <pkcs11 cert id> | -certs <certfile> ) -key <pkcs11 key id> )\n", "");
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
         printf("%12s[ -nolegacy ]\n", "");
@@ -3506,6 +3506,7 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_pkcs11cert[] = {"sign", NULL};
     const char *cmds_pkcs11engine[] = {"sign", NULL};
     const char *cmds_pkcs11module[] = {"sign", NULL};
+    const char *cmds_login[] = {"sign", NULL};
     const char *cmds_pkcs12[] = {"sign", NULL};
     const char *cmds_readpass[] = {"sign", NULL};
     const char *cmds_require_leaf_hash[] = {"attach-signature", "verify", NULL};
@@ -3640,6 +3641,8 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%-24s= PKCS#11 engine\n", "-pkcs11engine");
     if (on_list(cmd, cmds_pkcs11module))
         printf("%-24s= PKCS#11 module\n", "-pkcs11module");
+    if (on_list(cmd, cmds_login))
+        printf("%-24s= force login to the token\n", "-login");
     if (on_list(cmd, cmds_pkcs12))
         printf("%-24s= PKCS#12 container with the certificate and the private key\n", "-pkcs12");
     if (on_list(cmd, cmds_readpass))
@@ -4108,6 +4111,11 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
         ENGINE_free(engine);
         return 0; /* FAILED */
     }
+    if (options->login && !ENGINE_ctrl_cmd_string(engine, "FORCE_LOGIN", 0, 0)) {
+        printf("Failed to force a login to the pkcs11 engine\n");
+        ENGINE_free(engine);
+        return 0; /* FAILED */
+    }
     /*
      * ENGINE_init() returned a functional reference, so free the structural
      * reference from ENGINE_by_id().
@@ -4450,6 +4458,8 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->p11module = *(++argv);
+        } else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-login")) {
+            options->login = 1;
 #endif /* OPENSSL_NO_ENGINE */
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
         } else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-nolegacy")) {
