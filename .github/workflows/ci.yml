@@ -105,7 +105,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y libssl-dev libcurl4-openssl-dev python3-cryptography
+        sudo apt-get install -y libssl-dev zlib1g-dev python3-cryptography
 
     - name: Install brew dependencies (macOS)
       if: runner.os == 'macOS'

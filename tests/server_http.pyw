@@ -2,6 +2,7 @@
 """Windows: Implementation of a HTTP server"""
 
 import argparse
+import contextlib
 import os
 import subprocess
 import sys
@@ -11,10 +12,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 try:
     from make_certificates import MakeTestCertificates
 except ModuleNotFoundError as ierr:
-    print("Module not installed: ".format(ierr))
     sys.exit(1)
 except ImportError as ierr:
-    print("Module not found: ".format(ierr))
     sys.exit(1)
 
 RESULT_PATH = os.getcwd()
@@ -115,6 +114,7 @@ class HttpServerThread():
 
 def main() -> None:
     """Start HTTP server"""
+
     ret = 0
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -125,9 +125,6 @@ def main() -> None:
     )
     args = parser.parse_args()
     try:
-        log_path = os.path.join(LOGS_PATH, "./server.log")
-        sys.stdout = open(log_path, "w")
-        sys.stderr = open(log_path, "a")
         server = HttpServerThread()
         port = server.start_server(args.port)
         with open(URL_LOG, mode="w") as file:
@@ -141,7 +138,10 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()
+    log_path = os.path.join(LOGS_PATH, "./server.log")
+    with open(log_path, mode='w', encoding='utf-8') as log:
+        with contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
+            main()
 
 
 # pylint: disable=pointless-string-statement

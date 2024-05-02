@@ -48,11 +48,15 @@ if(Python3_FOUND)
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_http.py"
                 DESTINATION "${TEST_DIR}/")
             set(SERVER_HTTP "${TEST_DIR}/server_http.py")
+            set(Python3w_EXECUTABLE ${Python3_EXECUTABLE})
         else(UNIX)
             file(COPY
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_http.pyw"
                 DESTINATION "${TEST_DIR}/")
             set(SERVER_HTTP "${TEST_DIR}/server_http.pyw")
+            get_filename_component(PYTHON_DIRECTORY ${Python3_EXECUTABLE} DIRECTORY)
+			set(Python3w_EXECUTABLE "${PYTHON_DIRECTORY}/pythonw.exe")
+			message(STATUS "Python3w_EXECUTABLE ${Python3w_EXECUTABLE}")
         endif(UNIX)
 
         if(EXISTS "${LOGS}/url.log")
@@ -95,7 +99,7 @@ if(Python3_FOUND AND NOT cryptography_error)
         "--version")
 
     add_test(NAME "start_server"
-        COMMAND ${Python3_EXECUTABLE} ${SERVER_HTTP})
+        COMMAND ${Python3w_EXECUTABLE} ${SERVER_HTTP})
 
     add_test(NAME "calc_leafhash"
         COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/calc_leafhash.py")
