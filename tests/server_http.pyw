@@ -10,6 +10,7 @@ import threading
 from urllib.parse import urlparse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 try:
+    import cryptography
     from make_certificates import MakeTestCertificates
 except ModuleNotFoundError as ierr:
     sys.exit(1)
@@ -32,6 +33,10 @@ OPENSSL_TS = ["openssl", "ts",
     "-passin", "pass:passme",
     "-queryfile", REQUEST,
     "-out", RESPONS]
+
+
+class UnsupportedVersion(Exception):
+    """Unsupported version"""
 
 
 class RequestHandler(SimpleHTTPRequestHandler):
@@ -138,6 +143,13 @@ def main() -> None:
 
 
 if __name__ == '__main__':
+    try:
+        version = tuple(int(num) for num in cryptography.__version__.split('.'))
+        if version < (37, 0, 2):
+            raise UnsupportedVersion("Cryptography version is less than 37.0.2")
+    except UnsupportedVersion:
+        sys.exit(1)
+
     log_path = os.path.join(LOGS_PATH, "./server.log")
     with open(log_path, mode='w', encoding='utf-8') as log:
         with contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
