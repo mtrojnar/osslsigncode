@@ -13,7 +13,7 @@ if(Python3_FOUND)
         RESULT_VARIABLE cryptography_error)
 
     if(NOT cryptography_error)
-        message(STATUS "Using Python3 cryptography version ${cryptography_output}")
+        message(STATUS "Using python3-cryptography version ${cryptography_output}")
         option(STOP_SERVER "Stop HTTP server after tests" ON)
 
         # Remove http proxy configuration that may change behavior
