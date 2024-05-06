@@ -154,7 +154,7 @@ def main() -> None:
 if __name__ == '__main__':
     try:
         version = tuple(int(num) for num in cryptography.__version__.split('.'))
-        if version < (38, 0, 2):
+        if version < (37, 0, 2):
             raise UnsupportedVersion("Cryptography version is less than 37.0.2")
     except UnsupportedVersion as ferr:
         print(ferr)
