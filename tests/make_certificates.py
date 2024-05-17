@@ -2,7 +2,6 @@
 """Make test certificates"""
 
 import os
-import binascii
 import datetime
 import cryptography
 from cryptography import x509
@@ -554,7 +553,6 @@ class MakeTestCertificates():
         """Make test certificates"""
 
         try:
-            self.clear_catalog()
             root_ca = MakeCertificates(self.port)
             root_ca.make_certs()
             tsa_ca = MakeTSACertificates(self.port)
@@ -565,23 +563,6 @@ class MakeTestCertificates():
         except Exception as err: # pylint: disable=broad-except
             with open(self.logs, mode="a", encoding="utf-8") as file:
                 file.write("Error: {}".format(err))
-
-    def clear_catalog(self) -> None:
-        """"Clear a test certificates catalog."""
-
-        if os.path.exists(CERTS_PATH):
-            #Remove old test certificates
-            for root, _, files in os.walk(CERTS_PATH):
-                for file in files:
-                    os.remove(os.path.join(root, file))
-        else:
-            os.mkdir(CERTS_PATH)
-
-        # Generate 16 random bytes and convert to hex
-        random_hex = binascii.b2a_hex(os.urandom(16)).decode()
-        serial = os.path.join(CERTS_PATH, "./tsa-serial")
-        with open(serial, mode="w", encoding="utf-8") as file:
-            file.write(random_hex)
 
 
 # pylint: disable=pointless-string-statement

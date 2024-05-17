@@ -43,7 +43,7 @@ if(Python3_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/conf"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/client_http.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/make_certificates.py"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/calc_leafhash.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/start_server.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/exec.py"
             DESTINATION "${TEST_DIR}/")
 
@@ -59,8 +59,7 @@ if(Python3_FOUND)
                 DESTINATION "${TEST_DIR}/")
             set(SERVER_HTTP "${TEST_DIR}/server_http.pyw")
             get_filename_component(PYTHON_DIRECTORY ${Python3_EXECUTABLE} DIRECTORY)
-			set(Python3w_EXECUTABLE "${PYTHON_DIRECTORY}/pythonw.exe")
-			message(STATUS "Python3w_EXECUTABLE ${Python3w_EXECUTABLE}")
+            set(Python3w_EXECUTABLE "${PYTHON_DIRECTORY}/pythonw.exe")
         endif(UNIX)
 
         if(EXISTS "${LOGS}/url.log")
@@ -103,18 +102,12 @@ if(Python3_FOUND AND NOT cryptography_error)
         "--version")
 
     add_test(NAME "start_server"
-        COMMAND ${Python3w_EXECUTABLE} ${SERVER_HTTP})
+        COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/start_server.py"
+        "--exe" ${Python3w_EXECUTABLE}
+        "--script" ${SERVER_HTTP})
     set_tests_properties("start_server" PROPERTIES
-        SKIP_RETURN_CODE 1
         TIMEOUT 60)
-
-    add_test(NAME "calc_leafhash"
-        COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/calc_leafhash.py")
-    set_tests_properties("calc_leafhash" PROPERTIES
-        DEPENDS "start_server"
-        TIMEOUT 60)
-
-    set(ALL_TESTS "version" "start_server" "calc_leafhash")
+    set(ALL_TESTS "version" "start_server")
 
 ### Sign ###
 
@@ -136,7 +129,7 @@ if(Python3_FOUND AND NOT cryptography_error)
             "-in" "${FILES}/unsigned.${ext}"
             "-out" "${FILES}/signed.${ext}")
         set_tests_properties("signed_${ext}" PROPERTIES
-            DEPENDS "calc_leafhash")
+            DEPENDS "start_server")
         list(APPEND ALL_TESTS "signed_${ext}")
     endforeach(ext ${extensions_all})
 
@@ -158,7 +151,7 @@ if(Python3_FOUND AND NOT cryptography_error)
             "-in" "${FILES}/unsigned.${ext}"
             "-out" "${FILES}/revoked.${ext}")
         set_tests_properties("revoked_${ext}" PROPERTIES
-            DEPENDS "calc_leafhash")
+            DEPENDS "start_server")
         list(APPEND ALL_TESTS "revoked_${ext}")
     endforeach(ext ${extensions_all})
 
@@ -365,7 +358,7 @@ if(Python3_FOUND AND NOT cryptography_error)
 
         foreach(data_format ${formats})
             set_tests_properties("data_${ext}_${data_format}" PROPERTIES
-                DEPENDS "calc_leafhash")
+                DEPENDS "start_server")
             list(APPEND ALL_TESTS "data_${ext}_${data_format}")
         endforeach(data_format ${formats})
 
@@ -463,7 +456,7 @@ if(Python3_FOUND AND NOT cryptography_error)
                     "-out" "${FILES}/ts_${cert}.${ext}")
                 set_tests_properties("sign_ts_${cert}_${ext}" PROPERTIES
                     ENVIRONMENT "HTTP_PROXY=;http_proxy="
-                    DEPENDS "calc_leafhash")
+                    DEPENDS "start_server")
                 list(APPEND ALL_TESTS "sign_ts_${cert}_${ext}")
             endforeach(cert ${pem_certs})
         endforeach(ext ${extensions_all})

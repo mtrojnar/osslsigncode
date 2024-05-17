@@ -6,10 +6,12 @@ import sys
 try:
     import cryptography
     print(cryptography.__version__, end="")
-except ModuleNotFoundError:
-    print("Python3-cryptography module is not installed", end="")
+except ModuleNotFoundError as ierr:
+    print("Module not installed: {}".format(ierr))
     sys.exit(1)
-
+except ImportError as ierr:
+    print("Module not found: {}".format(ierr))
+    sys.exit(1)
 
 class UnsupportedVersion(Exception):
     """Unsupported version"""

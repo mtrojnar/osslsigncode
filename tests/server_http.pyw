@@ -2,19 +2,13 @@
 """Windows: Implementation of a HTTP server"""
 
 import argparse
-import contextlib
 import os
 import subprocess
 import sys
 import threading
 from urllib.parse import urlparse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-try:
-    from make_certificates import MakeTestCertificates
-except ModuleNotFoundError as ierr:
-    sys.exit(1)
-except ImportError as ierr:
-    sys.exit(1)
+from make_certificates import MakeTestCertificates
 
 RESULT_PATH = os.getcwd()
 FILES_PATH = os.path.join(RESULT_PATH, "./Testing/files/")
@@ -24,6 +18,7 @@ LOGS_PATH = os.path.join(RESULT_PATH, "./Testing/logs/")
 REQUEST = os.path.join(FILES_PATH, "./jreq.tsq")
 RESPONS = os.path.join(FILES_PATH, "./jresp.tsr")
 OPENSSL_CONF = os.path.join(CONF_PATH, "./openssl_tsa.cnf")
+SERVER_LOG = os.path.join(LOGS_PATH, "./server.log")
 URL_LOG = os.path.join(LOGS_PATH, "./url.log")
 
 
@@ -125,6 +120,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     try:
+        sys.stdout = open(SERVER_LOG, "w")
+        sys.stderr = open(SERVER_LOG, "a")
         server = HttpServerThread()
         port = server.start_server(args.port)
         with open(URL_LOG, mode="w") as file:
@@ -138,10 +135,7 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    log_path = os.path.join(LOGS_PATH, "./server.log")
-    with open(log_path, mode='w', encoding='utf-8') as log:
-        with contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
-            main()
+    main()
 
 
 # pylint: disable=pointless-string-statement
