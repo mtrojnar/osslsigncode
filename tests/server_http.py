@@ -9,7 +9,7 @@ import threading
 from urllib.parse import urlparse
 from http.server import SimpleHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
-from make_certificates import MakeTestCertificates
+from make_certificates import CertificateMaker
 
 RESULT_PATH = os.getcwd()
 FILES_PATH = os.path.join(RESULT_PATH, "./Testing/files/")
@@ -19,6 +19,7 @@ LOGS_PATH = os.path.join(RESULT_PATH, "./Testing/logs/")
 REQUEST = os.path.join(FILES_PATH, "./jreq.tsq")
 RESPONS = os.path.join(FILES_PATH, "./jresp.tsr")
 OPENSSL_CONF = os.path.join(CONF_PATH, "./openssl_tsa.cnf")
+SERVER_LOG = os.path.join(LOGS_PATH, "./server.log")
 URL_LOG = os.path.join(LOGS_PATH, "./url.log")
 
 OPENSSL_TS = ["openssl", "ts",
@@ -128,7 +129,8 @@ def main() -> None:
         port = server.start_server(args.port)
         with open(URL_LOG, mode="w", encoding="utf-8") as file:
             file.write("127.0.0.1:{}".format(port))
-        MakeTestCertificates(port)
+        tests = CertificateMaker(port, SERVER_LOG)
+        tests.make_certs()
     except OSError as err:
         print("OSError: {}".format(err))
         ret = err.errno
@@ -144,8 +146,7 @@ if __name__ == '__main__':
         fpid = os.fork()
         if fpid > 0:
             sys.exit(0)
-        log_path = os.path.join(LOGS_PATH, "./server.log")
-        with open(log_path, mode='w', encoding='utf-8') as log:
+        with open(SERVER_LOG, mode='w', encoding='utf-8') as log:
             os.dup2(log.fileno(), sys.stdout.fileno())
             os.dup2(log.fileno(), sys.stderr.fileno())
     except OSError as ferr:

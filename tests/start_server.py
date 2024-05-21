@@ -71,6 +71,7 @@ def main() -> None:
     args = parser.parse_args()
     try:
         clear_catalog(CERTS_PATH)
+        #pylint: disable=consider-using-with
         subprocess.Popen([str(args.exe), str(args.script)])
 
         cert_log = os.path.join(CERTS_PATH, "./cert.log")

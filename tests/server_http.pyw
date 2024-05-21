@@ -8,7 +8,7 @@ import sys
 import threading
 from urllib.parse import urlparse
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from make_certificates import MakeTestCertificates
+from make_certificates import CertificateMaker
 
 RESULT_PATH = os.getcwd()
 FILES_PATH = os.path.join(RESULT_PATH, "./Testing/files/")
@@ -126,7 +126,8 @@ def main() -> None:
         port = server.start_server(args.port)
         with open(URL_LOG, mode="w") as file:
             file.write("127.0.0.1:{}".format(port))
-        MakeTestCertificates(port)
+        tests = CertificateMaker(port, SERVER_LOG)
+        tests.make_certs()
     except OSError as err:
         print("OSError: {}".format(err))
         ret = err.errno
