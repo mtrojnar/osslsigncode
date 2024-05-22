@@ -3,31 +3,32 @@
 ### Building osslsigncode source with MSYS2 MinGW 64-bit and MSYS2 packages:
 
 1) Download and install MSYS2 from https://msys2.github.io/ and follow installation instructions.
-   Once up and running install mingw-w64-x86_64-gcc and mingw-w64-x86_64-openssl packages.
+   Once up and running install the following packages:
 ```
-  pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-openssl
+  pacman -S make mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-openssl mingw-w64-x86_64-python-cryptography
 ```
    mingw-w64-x86_64-zlib package is installed with dependencies.
 
 2) Run "MSYS2 MinGW 64-bit" and build 64-bit Windows executables.
 ```
   cd osslsigncode-folder
-  x86_64-w64-mingw32-gcc *.c -o osslsigncode.exe \
-    -lcrypto -lssl -lws2_32 -lz \
-    -D 'PACKAGE_STRING="osslsigncode x.y"' \
-    -D 'PACKAGE_BUGREPORT="Your.Email@example.com"'
+  mkdir build && cd build && cmake -S .. -DCMAKE_BUILD_TYPE=Release -G "MSYS Makefiles"
+  cmake --build . --verbose
 ```
 
-3) Run "Command prompt" and include "c:\msys64\mingw64\bin" folder as part of the path.
+3) Make tests.
+```
+  ctest
+```
+
+4) Run "Command prompt" and include "c:\msys64\mingw64\bin" folder as part of the path.
 ```
   path=%path%;c:\msys64\mingw64\bin
-  cd osslsigncode-folder
   osslsigncode.exe -v
   osslsigncode 2.8, using:
         OpenSSL 3.2.0 23 Nov 2023 (Library: OpenSSL 3.2.0 23 Nov 2023)
-  Default -CAfile location: /etc/ssl/certs/ca-certificates.crt
+  No default -CAfile location detected
 ```
-
 
 ### Building OpenSSL and osslsigncode sources with MSYS2 MinGW 64-bit:
 
@@ -43,27 +44,28 @@
   cd openssl-(version)
   ./config --prefix='C:/OpenSSL' --openssldir='C:/OpenSSL'
   make && make install
-
-3) Build 64-bit Windows executables.
 ```
-  cd osslsigncode-folder
-  x86_64-w64-mingw32-gcc *.c -o osslsigncode.exe \
-    -L "C:/OpenSSL/lib/" -lcrypto -lssl -lws2_32 -lz \
-    -I "C:/OpenSSL/include/" \
-    -D 'PACKAGE_STRING="osslsigncode x.y"' \
-    -D 'PACKAGE_BUGREPORT="Your.Email@example.com"'
+
+3) Configure a CMake project.
+```
+  mkdir build && cd build && cmake -S .. -DCMAKE_BUILD_TYPE=Release -G "MSYS Makefiles" -DCMAKE_PREFIX_PATH="C:\OpenSSL"
 ```
 
 4) Run "Command prompt" and copy required libraries.
 ```
   cd osslsigncode-folder
-  copy C:\OpenSSL\bin\libssl-1_1-x64.dll
-  copy C:\OpenSSL\bin\libcrypto-1_1-x64.dll
+  copy C:\OpenSSL\bin\libssl-3-x64.dll
+  copy C:\OpenSSL\bin\libcrypto-3-x64.dll
+```
 
-  osslsigncode.exe -v
-  osslsigncode 2.8, using:
-        OpenSSL 3.2.0 23 Nov 2023 (Library: OpenSSL 3.2.0 23 Nov 2023)
-  Default -CAfile location: /etc/ssl/certs/ca-certificates.crt
+5) Build 64-bit Windows executables.
+```
+  cmake --build . --verbose
+```
+
+6) Make tests.
+```
+  ctest
 ```
 
 ### Building OpenSSL and osslsigncode sources with Microsoft Visual Studio:
