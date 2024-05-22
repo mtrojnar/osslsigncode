@@ -2520,7 +2520,7 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
     printf("Message digest algorithm: %s\n",
         (md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2sn(md_nid));
 
-    /* Unauthenticated attributes */
+    /* Authenticated attributes */
     auth_attr = PKCS7_get_signed_attributes(si); /* cont[0] */
     printf("\nAuthenticated attributes:\n");
     for (i=0; i<X509at_get_attr_count(auth_attr); i++) {

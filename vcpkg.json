@@ -3,11 +3,7 @@
     "version-string": "2.4",
     "dependencies": [
         "openssl",
-        "curl",
-        {
-            "name": "python3",
-            "platform": "!(windows & static) & !osx"
-        }
+        "zlib"
     ],
     "builtin-baseline": "9edb1b8e590cc086563301d735cae4b6e732d2d2"
 }

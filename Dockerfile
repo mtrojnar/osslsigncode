@@ -2,7 +2,7 @@
 FROM alpine:latest AS builder
 
 # Install build dependencies
-RUN apk add --no-cache build-base cmake openssl-dev curl-dev
+RUN apk add --no-cache build-base cmake openssl-dev zlib-dev
 
 # Copy osslsigncode source code into the image
 COPY . /source
@@ -23,7 +23,7 @@ FROM alpine:latest
 COPY --from=builder /usr/local/bin/osslsigncode /usr/local/bin/osslsigncode
 
 # Install necessary runtime libraries (latest version)
-RUN apk add --no-cache libcrypto3 libcurl
+RUN apk add --no-cache libcrypto3
 
 # Set working directory
 WORKDIR /workdir

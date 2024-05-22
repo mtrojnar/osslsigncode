@@ -15,6 +15,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - id: ubuntu-24.04
+            triplet: x64-linux
+            compiler: gcc
+            os: ubuntu-24.04
+            generator: Unix Makefiles
+            vcpkg_root:
           - id: ubuntu-22.04
             triplet: x64-linux
             compiler: gcc
@@ -105,7 +111,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y libssl-dev libcurl4-openssl-dev faketime
+        sudo apt-get install -y libssl-dev zlib1g-dev python3-cryptography
 
     - name: Install brew dependencies (macOS)
       if: runner.os == 'macOS'
@@ -124,6 +130,20 @@ jobs:
       with:
         cmake-version: '3.17.0'
 
+    - name: Install python3 cryptography module (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        python3.8 -m ensurepip
+        python3.8 -m pip install --upgrade pip
+        python3.8 -m pip install cryptography
+
+    - name: Install python3 cryptography module (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        C:/hostedtoolcache/windows/Python/3.12.3/x64/python3.exe -m ensurepip
+        C:/hostedtoolcache/windows/Python/3.12.3/x64/python.exe -m pip install --upgrade pip
+        C:/hostedtoolcache/windows/Python/3.12.3/x64/python.exe -m pip install cryptography
+
     - name: Configure CMake
       run: cmake
         -G "${{matrix.generator}}"
@@ -138,24 +158,13 @@ jobs:
         --build ${{github.workspace}}/build
         --config ${{env.BUILD_TYPE}}
 
-    - name: Start HTTP server (macOS)
+    - name: Show python version (macOS)
       working-directory: ${{github.workspace}}/build
       if: runner.os == 'macOS'
       run: |
         python3.8 --version
-        python3.8 ./Testing/server_http.py --port 19254
-        while test ! -s ./Testing/logs/port.log; do sleep 1; done
-
-    - name: Start HTTP server (Windows)
-      working-directory: ${{github.workspace}}\build
-      if: runner.os == 'Windows'
-      run: |
-        python.exe --version
-        $Args = '.\Testing\server_http.pyw --port 19254'
-        $File = '.\Testing\logs\port.log'
-        Start-Process -FilePath pythonw.exe -ArgumentList $Args
-        while(-not(Test-Path -Path $File -PathType Leaf) -or [String]::IsNullOrWhiteSpace((Get-Content $File))) {Start-Sleep -Seconds 1}
-        Get-Content '.\Testing\logs\server.log'
+        python3.8 -c "import sys; print(sys.executable)"
+        python3.8 -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
 
     - name: List files (Linux/macOS)
       if: runner.os != 'Windows'

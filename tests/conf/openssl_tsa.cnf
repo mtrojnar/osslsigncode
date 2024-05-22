@@ -44,3 +44,4 @@ ordering                        = yes
 tsa_name                        = yes
 ess_cert_id_chain               = yes
 ess_cert_id_alg                 = sha256
+crypto_device                   = builtin

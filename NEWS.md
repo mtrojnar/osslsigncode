@@ -4,6 +4,7 @@
 
 - added a 64 bit long pseudo-random NONCE in the TSA request
 - used native HTTP client with OpenSSL 3.0 or later, removed libcurl dependency
+- improved testing
 
 ### 2.8 (2024.03.03)
 
