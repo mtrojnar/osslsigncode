@@ -2323,6 +2323,12 @@ static ZIP_FILE *zipSortCentralDirectory(ZIP_FILE *zip)
     }
     sk_ZIP_CENTRAL_DIRECTORY_ENTRY_sort(chain);
     zip->centralDirectoryHead = entry = sk_ZIP_CENTRAL_DIRECTORY_ENTRY_value(chain, 0);
+    if (!entry) {
+        printf("Failed to get sorted central directory entry\n");
+        sk_ZIP_CENTRAL_DIRECTORY_ENTRY_free(chain);
+        freeZip(zip);
+        return NULL;
+    }
     for (i=1; i<sk_ZIP_CENTRAL_DIRECTORY_ENTRY_num(chain); i++) {
         entry->next = sk_ZIP_CENTRAL_DIRECTORY_ENTRY_value(chain, i);
         entry = entry->next;
