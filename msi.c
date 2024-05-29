@@ -731,6 +731,8 @@ static MSI_CTX *msi_ctx_get(char *indata, uint32_t filesize)
     if (!msi_dirent_new(msi, root, NULL, &(dirent))) {
         printf("Failed to parse MSI_DIRENT struct\n");
         msi_file_free(msi);
+        if (dirent)
+            msi_dirent_free(dirent);
         return NULL; /* FAILED */
     }
     msi_ctx = OPENSSL_zalloc(sizeof(MSI_CTX));
