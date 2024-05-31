@@ -996,6 +996,7 @@ static int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char 
 /* Parse MSI_FILE_HDR struct */
 static MSI_FILE_HDR *parse_header(char *data)
 {
+    uint32_t sectorSize;
     MSI_FILE_HDR *header = (MSI_FILE_HDR *)OPENSSL_malloc(HEADER_SIZE);
 
     /* initialise 512 bytes */
@@ -1038,6 +1039,7 @@ static MSI_FILE_HDR *parse_header(char *data)
         OPENSSL_free(header);
         return NULL; /* FAILED */
     }
+    sectorSize = 1 << header->sectorShift;
     /* Number of Directory Sectors field contains the count of the number
      * of directory sectors in the compound file.
      * If Major Version is 3, the Number of Directory Sectors MUST be zero. */
@@ -1048,6 +1050,11 @@ static MSI_FILE_HDR *parse_header(char *data)
         return NULL; /* FAILED */
     }
     header->numFATSector = GET_UINT32_LE(data + HEADER_FAT_SECTORS_NUM);
+    if ((uint64_t)header->numFATSector * sectorSize >= SIZE_16M) {
+        printf("Unsupported Number of FAT Sectors: 0x%08X\n", header->numFATSector);
+        OPENSSL_free(header);
+        return NULL; /* FAILED */
+    }
     header->firstDirectorySectorLocation = GET_UINT32_LE(data + HEADER_DIR_SECTOR_LOC);
     header->transactionSignatureNumber = GET_UINT32_LE(data + HEADER_TRANSACTION);
     /* Mini Stream Cutoff Size field MUST be set to 0x00001000.
@@ -1063,8 +1070,18 @@ static MSI_FILE_HDR *parse_header(char *data)
     }
     header->firstMiniFATSectorLocation = GET_UINT32_LE(data + HEADER_MINI_FAT_SECTOR_LOC);
     header->numMiniFATSector = GET_UINT32_LE(data + HEADER_MINI_FAT_SECTORS_NUM);
+    if ((uint64_t)header->numMiniFATSector * sectorSize >= SIZE_16M) {
+        printf("Unsupported Number of Mini FAT Sectors: 0x%08X\n", header->numMiniFATSector);
+        OPENSSL_free(header);
+        return NULL; /* FAILED */
+    }
     header->firstDIFATSectorLocation = GET_UINT32_LE(data + HEADER_DIFAT_SECTOR_LOC);
     header->numDIFATSector = GET_UINT32_LE(data + HEADER_DIFAT_SECTORS_NUM);
+    if ((uint64_t)header->numDIFATSector * sectorSize >= SIZE_16M) {
+        printf("Unsupported Number of DIFAT Sectors: 0x%08X\n", header->numDIFATSector);
+        OPENSSL_free(header);
+        return NULL; /* FAILED */
+    }
     memcpy(header->headerDIFAT, data + HEADER_DIFAT, sizeof header->headerDIFAT);
     return header;
 }
