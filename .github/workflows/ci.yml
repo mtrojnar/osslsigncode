@@ -149,6 +149,7 @@ jobs:
         -G "${{matrix.generator}}"
         -S ${{github.workspace}}
         -B ${{github.workspace}}/build
+        -DCMAKE_OSX_ARCHITECTURES=arm64
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
         -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
         -DVCPKG_TARGET_TRIPLET=${{matrix.triplet}}
