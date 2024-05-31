@@ -616,12 +616,12 @@ static int appx_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     entry = zipGetCDEntryByName(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME);
     if (!entry) {
         printf("Not a valid .appx file: content types file missing\n");
-        return 1; /* FAILED */
+        return 0; /* FAILED */
     }
     if (!appx_append_ct_signature_entry(ctx->appx_ctx->zip, entry)) {
-        return 1; /* FAILED */
+        return 0; /* FAILED */
     }
-    return 0; /* OK */
+    return 1; /* OK */
 }
 
 /*

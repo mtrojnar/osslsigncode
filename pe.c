@@ -374,9 +374,9 @@ static int pe_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     }
     if (!pe_modify_header(ctx, hash, outdata)) {
         printf("Unable to modify file header\n");
-        return 1; /* FAILED */
+        return 0; /* FAILED */
     }
-    return 0; /* OK */
+    return 1; /* OK */
 }
 
 /*
