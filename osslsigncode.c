@@ -4878,7 +4878,9 @@ int main(int argc, char **argv)
             DO_EXIT_0("Unable to extract existing signature\n");
         }
         if (ctx->format->process_data) {
-            ctx->format->process_data(ctx, hash, outdata);
+            if (!ctx->format->process_data(ctx, hash, outdata)) {
+                DO_EXIT_0("Unable to read input file\n");
+            }
         }
     } else if (options.cmd == CMD_ATTACH) {
         if (options.nest) {
@@ -4904,7 +4906,9 @@ int main(int argc, char **argv)
             DO_EXIT_0("Unable to extract valid signature\n");
         }
         if (ctx->format->process_data) {
-            ctx->format->process_data(ctx, hash, outdata);
+            if (!ctx->format->process_data(ctx, hash, outdata)) {
+                DO_EXIT_0("Unable to read input file\n");
+            }
         }
     } else if (options.cmd == CMD_SIGN) {
         if (options.nest) {
@@ -4924,7 +4928,9 @@ int main(int argc, char **argv)
             }
         }
         if (ctx->format->process_data) {
-            ctx->format->process_data(ctx, hash, outdata);
+            if (!ctx->format->process_data(ctx, hash, outdata)) {
+                DO_EXIT_0("Unable to read input file\n");
+            }
         }
         if (ctx->format->pkcs7_signature_new) {
             /* Create a new PKCS#7 signature */

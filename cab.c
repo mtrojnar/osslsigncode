@@ -396,7 +396,7 @@ static PKCS7 *cab_pkcs7_extract_to_nest(FILE_FORMAT_CTX *ctx)
  */
 static int cab_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
-    size_t i, written, len;
+    size_t idx, written, len;
     uint32_t tmp;
     uint16_t nfolders, flags;
     char *buf;
@@ -441,29 +441,39 @@ static int cab_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
      * u2 iCabinet - number of this cabinet file in a set: 34-35
      */
     BIO_write(outdata, ctx->options->indata + 32, 4);
-    i = cab_write_optional_names(outdata, ctx->options->indata, 60, flags);
+    idx = cab_write_optional_names(outdata, ctx->options->indata, 60, flags);
+    if (idx >= ctx->cab_ctx->fileend) {
+        printf("Corrupt CAB file - too short\n");
+        OPENSSL_free(buf);
+        return 0; /* FAILED */
+    }
     /*
      * (u8 * cFolders) CFFOLDER - structure contains information about
      * one of the folders or partial folders stored in this cabinet file
      */
     nfolders = GET_UINT16_LE(ctx->options->indata + 26);
+    if (nfolders * 8 >= ctx->cab_ctx->fileend - idx) {
+        printf("Corrupt cFolders value: 0x%08X\n", nfolders);
+        OPENSSL_free(buf);
+        return 0; /* FAILED */
+    }
     while (nfolders) {
-        tmp = GET_UINT32_LE(ctx->options->indata + i);
+        tmp = GET_UINT32_LE(ctx->options->indata + idx);
         tmp -= 24;
         PUT_UINT32_LE(tmp, buf);
         BIO_write(outdata, buf, 4);
-        BIO_write(outdata, ctx->options->indata + i + 4, 4);
-        i+=8;
+        BIO_write(outdata, ctx->options->indata + idx + 4, 4);
+        idx += 8;
         nfolders--;
     }
     OPENSSL_free(buf);
     /* Write what's left - the compressed data bytes */
-    len = ctx->cab_ctx->fileend - ctx->cab_ctx->siglen - i;
+    len = ctx->cab_ctx->fileend - ctx->cab_ctx->siglen - idx;
     while (len > 0) {
-        if (!BIO_write_ex(outdata, ctx->options->indata + i, len, &written))
+        if (!BIO_write_ex(outdata, ctx->options->indata + idx, len, &written))
             return 1; /* FAILED */
         len -= written;
-        i += written;
+        idx += written;
     }
     return 0; /* OK */
 }
@@ -480,12 +490,12 @@ static int cab_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     /* Strip current signature and modify header */
     if (ctx->cab_ctx->header_size == 20) {
         if (!cab_modify_header(ctx, hash, outdata))
-            return 1; /* FAILED */
+            return 0; /* FAILED */
     } else {
         if (!cab_add_header(ctx, hash, outdata))
-            return 1; /* FAILED */
+            return 0; /* FAILED */
     }
-    return 0; /* OK */
+    return 1; /* OK */
 }
 
 /*
@@ -802,7 +812,7 @@ static size_t cab_write_optional_names(BIO *outdata, char *indata, size_t i, uin
  */
 static int cab_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
-    size_t i, written, len;
+    size_t idx, written, len;
     uint16_t nfolders, flags;
     u_char buf[] = {0x00, 0x00};
 
@@ -840,24 +850,32 @@ static int cab_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     /* u4 abReserve: 56-59 */
     BIO_write(hash, ctx->options->indata + 56, 4);
 
-    i = cab_write_optional_names(outdata, ctx->options->indata, 60, flags);
+    idx = cab_write_optional_names(outdata, ctx->options->indata, 60, flags);
+    if (idx >= ctx->cab_ctx->fileend) {
+        printf("Corrupt CAB file - too short\n");
+        return 0; /* FAILED */
+    }
     /*
      * (u8 * cFolders) CFFOLDER - structure contains information about
      * one of the folders or partial folders stored in this cabinet file
      */
     nfolders = GET_UINT16_LE(ctx->options->indata + 26);
+    if (nfolders * 8 >= ctx->cab_ctx->fileend - idx) {
+        printf("Corrupt cFolders value: 0x%08X\n", nfolders);
+        return 0; /* FAILED */
+    }
     while (nfolders) {
-        BIO_write(hash, ctx->options->indata + i, 8);
-        i += 8;
+        BIO_write(hash, ctx->options->indata + idx, 8);
+        idx += 8;
         nfolders--;
     }
     /* Write what's left - the compressed data bytes */
-    len = ctx->cab_ctx->sigpos - i;
+    len = ctx->cab_ctx->sigpos - idx;
     while (len > 0) {
-        if (!BIO_write_ex(hash, ctx->options->indata + i, len, &written))
+        if (!BIO_write_ex(hash, ctx->options->indata + idx, len, &written))
             return 0; /* FAILED */
         len -= written;
-        i += written;
+        idx += written;
     }
     return 1; /* OK */
 }
@@ -871,7 +889,7 @@ static int cab_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
  */
 static int cab_add_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
-    size_t i, written, len;
+    size_t idx, written, len;
     uint32_t tmp;
     uint16_t nfolders, flags;
     u_char cabsigned[] = {
@@ -916,29 +934,39 @@ static int cab_add_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     BIO_write(outdata, cabsigned, 20);
     BIO_write(hash, cabsigned+20, 4);
 
-    i = cab_write_optional_names(outdata, ctx->options->indata, 36, flags);
+    idx = cab_write_optional_names(outdata, ctx->options->indata, 36, flags);
+    if (idx >= ctx->cab_ctx->fileend) {
+        printf("Corrupt CAB file - too short\n");
+        OPENSSL_free(buf);
+        return 0; /* FAILED */
+    }
     /*
      * (u8 * cFolders) CFFOLDER - structure contains information about
      * one of the folders or partial folders stored in this cabinet file
      */
     nfolders = GET_UINT16_LE(ctx->options->indata + 26);
+    if (nfolders * 8 >= ctx->cab_ctx->fileend - idx) {
+        printf("Corrupt cFolders value: 0x%08X\n", nfolders);
+        OPENSSL_free(buf);
+        return 0; /* FAILED */
+    }
     while (nfolders) {
-        tmp = GET_UINT32_LE(ctx->options->indata + i);
+        tmp = GET_UINT32_LE(ctx->options->indata + idx);
         tmp += 24;
         PUT_UINT32_LE(tmp, buf);
         BIO_write(hash, buf, 4);
-        BIO_write(hash, ctx->options->indata + i + 4, 4);
-        i += 8;
+        BIO_write(hash, ctx->options->indata + idx + 4, 4);
+        idx += 8;
         nfolders--;
     }
     OPENSSL_free(buf);
     /* Write what's left - the compressed data bytes */
-    len = ctx->cab_ctx->fileend - i;
+    len = ctx->cab_ctx->fileend - idx;
     while (len > 0) {
-        if (!BIO_write_ex(hash, ctx->options->indata + i, len, &written))
+        if (!BIO_write_ex(hash, ctx->options->indata + idx, len, &written))
             return 0; /* FAILED */
         len -= written;
-        i += written;
+        idx += written;
     }
     return 1; /* OK */
 }

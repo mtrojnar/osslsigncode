@@ -455,10 +455,10 @@ static int script_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         ctx->script_ctx->fileend = ctx->script_ctx->sigpos;
     }
     if (!script_write_bio(outdata, ctx->options->indata, ctx->script_ctx->fileend))
-        return 1; /* FAILED */
+        return 0; /* FAILED */
     if (!script_digest_convert(hash, ctx, ctx->script_ctx->fileend))
-        return 1; /* FAILED */
-    return 0; /* OK */
+        return 0; /* FAILED */
+    return 1; /* OK */
 }
 
 /*

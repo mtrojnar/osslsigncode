@@ -595,9 +595,9 @@ static int msi_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 
     hash = msi_digest_calc_bio(ctx, hash);
     if (!hash) {
-        return 1; /* FAILED */
+        return 0; /* FAILED */
     }
-    return 0; /* OK */
+    return 1; /* OK */
 }
 
 /*
