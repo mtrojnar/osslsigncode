@@ -166,10 +166,15 @@ static PKCS7 *cat_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
         PKCS7_free(p7);
         return NULL; /* FAILED */
     }
+    if (!ctx->cat_ctx->p7 || !ctx->cat_ctx->p7->d.sign || !ctx->cat_ctx->p7->d.sign->contents) {
+        printf("Failed to get content\n");
+        PKCS7_free(p7);
+        return NULL; /* FAILED */
+    }
     if (!cat_sign_ms_ctl_content(p7, ctx->cat_ctx->p7->d.sign->contents)) {
         printf("Failed to set signed content\n");
         PKCS7_free(p7);
-        return 0; /* FAILED */
+        return NULL; /* FAILED */
     }
     return p7; /* OK */
 }
