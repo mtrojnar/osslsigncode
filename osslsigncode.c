@@ -2117,7 +2117,7 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
     X509 *signer;
     X509_CRL *crl = NULL;
     STACK_OF(X509_CRL) *crls = NULL;
-    char *url;
+    char *url = NULL;
     int verok = 0;
 
     store = X509_STORE_new();
@@ -2164,7 +2164,11 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
     CMS_SignerInfo_get0_algs(cmssi, NULL, &signer, NULL, NULL);
 
     /* verify a Certificate Revocation List */
-    url = clrdp_url_get_x509(signer);
+    if (!ctx->options->ignore_crl) {
+        url = clrdp_url_get_x509(signer);
+    } else {
+        printf("CRL online verification disabled\n");
+    }
     if (url) {
         if (ctx->options->ignore_cdp) {
             printf("Ignored TSA's CRL distribution point: %s\n", url);
@@ -2249,7 +2253,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
     STACK_OF(X509_CRL) *crls = NULL;
     BIO *bio = NULL;
     int verok = 0;
-    char *url;
+    char *url = NULL;
     PKCS7 *contents = p7->d.sign->contents;
 
     store = X509_STORE_new();
@@ -2326,7 +2330,11 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
     BIO_free(bio);
 
     /* verify a Certificate Revocation List */
-    url = clrdp_url_get_x509(signer);
+    if (!ctx->options->ignore_crl) {
+        url = clrdp_url_get_x509(signer);
+    } else {
+        printf("CRL online verification disabled\n");
+    }
     if (url) {
         if (ctx->options->ignore_cdp) {
             printf("Ignored CRL distribution point: %s\n", url);
@@ -3451,6 +3459,7 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -index <index> ]\n", "");
         printf("%12s[ -ignore-timestamp ]\n", "");
         printf("%12s[ -ignore-cdp ]\n", "");
+        printf("%12s[ -ignore-crl ]\n", "");
         printf("%12s[ -time <unix-time> ]\n", "");
         printf("%12s[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n", "");
         printf("%12s[ -verbose ]\n\n", "");
@@ -3514,6 +3523,7 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_time[] = {"attach-signature", "sign", "verify", NULL};
     const char *cmds_ignore_timestamp[] = {"verify", NULL};
     const char *cmds_ignore_cdp[] = {"verify", NULL};
+    const char *cmds_ignore_crl[] = {"verify", NULL};
     const char *cmds_t[] = {"add", "sign", NULL};
     const char *cmds_ts[] = {"add", "sign", NULL};
     const char *cmds_CAfileHTTPS[] = {"add", "sign", "verify", NULL};
@@ -3658,7 +3668,9 @@ static void help_for(const char *argv0, const char *cmd)
     if (on_list(cmd, cmds_ignore_timestamp))
         printf("%-24s= disable verification of the Timestamp Server signature\n", "-ignore-timestamp");
     if (on_list(cmd, cmds_ignore_cdp))
-        printf("%-24s= disable CRL Distribution Points online verification\n", "-ignore-cdp");
+        printf("%-24s= disable fetching CRL Distribution Points\n", "-ignore-cdp");
+    if (on_list(cmd, cmds_ignore_crl))
+        printf("%-24s= disable fetching and verifying CRL Distribution Points\n", "-ignore-crl");
     if (on_list(cmd, cmds_t)) {
         printf("%-24s= specifies that the digital signature will be timestamped\n", "-t");
         printf("%26sby the Time-Stamp Authority (TSA) indicated by the URL\n", "");
@@ -4577,6 +4589,8 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
             options->ignore_timestamp = 1;
         } else if ((cmd == CMD_VERIFY) && !strcmp(*argv, "-ignore-cdp")) {
             options->ignore_cdp = 1;
+        } else if ((cmd == CMD_VERIFY) && !strcmp(*argv, "-ignore-crl")) {
+            options->ignore_crl = 1;
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_VERIFY) && !strcmp(*argv, "-verbose")) {
             options->verbose = 1;
         } else if ((cmd == CMD_SIGN || cmd == CMD_EXTRACT_DATA || cmd == CMD_ADD || cmd == CMD_ATTACH)
