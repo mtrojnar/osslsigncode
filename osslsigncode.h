@@ -278,6 +278,7 @@ typedef struct {
     int index;
     int ignore_timestamp;
     int ignore_cdp;
+    int ignore_crl;
     int verbose;
     int add_msi_dse;
     char *catalog;

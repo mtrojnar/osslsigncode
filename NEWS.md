@@ -4,6 +4,8 @@
 
 - added a 64 bit long pseudo-random NONCE in the TSA request
 - used native HTTP client with OpenSSL 3.0 or later, removed libcurl dependency
+- added the "-ignore-crl" option to disable fetching and verifying
+  CRL Distribution Points
 - improved testing
 
 ### 2.8 (2024.03.03)
