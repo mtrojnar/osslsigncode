@@ -285,6 +285,11 @@ static int cat_sign_ms_ctl_content(PKCS7 *p7, PKCS7 *contents)
     u_char *content;
     int seqhdrlen, content_length;
 
+    if (!contents->d.other || !contents->d.other->value.sequence
+          || !contents->d.other->value.sequence->data) {
+        printf("Failed to get content value\n");
+        return 0; /* FAILED */
+    }
     seqhdrlen = asn1_simple_hdr_len(contents->d.other->value.sequence->data,
         contents->d.other->value.sequence->length);
     content = contents->d.other->value.sequence->data + seqhdrlen;
