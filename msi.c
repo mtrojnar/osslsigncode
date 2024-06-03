@@ -1510,34 +1510,49 @@ static void ministream_append(MSI_OUT *out, char *buf, uint32_t len)
     out->miniStreamLen += len;
 }
 
-static void minifat_append(MSI_OUT *out, char *buf, uint32_t len)
+static int minifat_append(MSI_OUT *out, char *buf, uint32_t len)
 {
     if (out->minifatLen == (uint64_t)out->minifatMemallocCount * out->sectorSize) {
-        out->minifatMemallocCount += 1;
+        out->minifatMemallocCount++;
+        if ((uint64_t)out->minifatMemallocCount * out->sectorSize >= SIZE_16M) {
+            printf("Failed to append MiniFAT sector\n");
+            return 0; /* FAILED */
+        }
         out->minifat = OPENSSL_realloc(out->minifat, (size_t)(out->minifatMemallocCount * out->sectorSize));
     }
     memcpy(out->minifat + out->minifatLen, buf, (size_t)len);
     out->minifatLen += len;
+    return 1; /* OK */
 }
 
-static void fat_append(MSI_OUT *out, char *buf, uint32_t len)
+static int fat_append(MSI_OUT *out, char *buf, uint32_t len)
 {
     if (out->fatLen == (uint64_t)out->fatMemallocCount * out->sectorSize) {
-        out->fatMemallocCount += 1;
+        out->fatMemallocCount++;
+        if ((uint64_t)out->fatMemallocCount * out->sectorSize >= SIZE_16M) {
+            printf("Failed to append FAT sector\n");
+            return 0; /* FAILED */
+        }
         out->fat = OPENSSL_realloc(out->fat, (size_t)(out->fatMemallocCount * out->sectorSize));
     }
     memcpy(out->fat + out->fatLen, buf, (size_t)len);
     out->fatLen += len;
+    return 1; /* OK */
 }
 
-static void difat_append(MSI_OUT *out, char *buf, uint32_t len)
+static int difat_append(MSI_OUT *out, char *buf, uint32_t len)
 {
     if (out->difatLen == (uint64_t)out->difatMemallocCount * out->sectorSize) {
-        out->difatMemallocCount += 1;
+        out->difatMemallocCount++;
+        if ((uint64_t)out->difatMemallocCount * out->sectorSize >= SIZE_16M) {
+            printf("Failed to append DIFAT sector\n");
+            return 0; /* FAILED */
+        }
         out->difat = OPENSSL_realloc(out->difat, (size_t)(out->difatMemallocCount * out->sectorSize));
     }
     memcpy(out->difat + out->difatLen, buf, (size_t)len);
     out->difatLen += len;
+    return 1; /* OK */
 }
 
 static int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen)
@@ -1689,14 +1704,20 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
                     ministream_append(out, buf, remain);
                 }
                 while (inlen > msi->m_minisectorSize) {
-                    out->miniSectorNum += 1;
+                    out->miniSectorNum++;
                     PUT_UINT32_LE(out->miniSectorNum, buf);
-                    minifat_append(out, buf, 4);
+                    if (!minifat_append(out, buf, 4)) {
+                        OPENSSL_free(indata);
+                        return 0; /* FAILED */
+                    }
                     inlen -= msi->m_minisectorSize;
                 }
                 PUT_UINT32_LE(ENDOFCHAIN, buf);
-                minifat_append(out, buf, 4);
-                out->miniSectorNum += 1;
+                if (!minifat_append(out, buf, 4)) {
+                    OPENSSL_free(indata);
+                    return 0; /* FAILED */
+                }
+                out->miniSectorNum++;
             } else {
                 /* set the first sector location if this is a stream object */
                 child->entry->startSectorLocation = out->sectorNum;
@@ -1710,14 +1731,20 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
                 }
                 /* set a sector chain in the FAT */
                 while (inlen > out->sectorSize) {
-                    out->sectorNum += 1;
+                    out->sectorNum++;
                     PUT_UINT32_LE(out->sectorNum, buf);
-                    fat_append(out, buf, 4);
+                    if (!fat_append(out, buf, 4)) {
+                        OPENSSL_free(indata);
+                        return 0; /* FAILED */
+                    }
                     inlen -= out->sectorSize;
                 }
                 PUT_UINT32_LE(ENDOFCHAIN, buf);
-                fat_append(out, buf, 4);
-                out->sectorNum += 1;
+                if (!fat_append(out, buf, 4)) {
+                    OPENSSL_free(indata);
+                    return 0; /* FAILED */
+                }
+                out->sectorNum++;
             }
             OPENSSL_free(indata);
         }
@@ -1725,7 +1752,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
     return 1; /* OK */
 }
 
-static void ministream_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
+static int ministream_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
 {
     char buf[MAX_SECTOR_SIZE];
     uint32_t i, remain;
@@ -1745,16 +1772,20 @@ static void ministream_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
     /* set a sector chain in the FAT */
     for (i=1; i<ministreamSectorsCount; i++) {
         PUT_UINT32_LE(out->sectorNum + i, buf);
-        fat_append(out, buf, 4);
+        if (!fat_append(out, buf, 4)) {
+            return 0; /* FAILED */
+        }
     }
     /* mark the end of the mini stream data */
     PUT_UINT32_LE(ENDOFCHAIN, buf);
-    fat_append(out, buf, 4);
-
+    if (!fat_append(out, buf, 4)) {
+        return 0; /* FAILED */
+    }
     out->sectorNum += ministreamSectorsCount;
+    return 1; /* OK */
 }
 
-static void minifat_save(BIO *outdata, MSI_OUT *out)
+static int minifat_save(BIO *outdata, MSI_OUT *out)
 {
     char buf[MAX_SECTOR_SIZE];
     uint32_t i, remain;
@@ -1763,7 +1794,7 @@ static void minifat_save(BIO *outdata, MSI_OUT *out)
     if (out->minifatLen == 0) {
         PUT_UINT32_LE(ENDOFCHAIN, buf);
         memcpy(out->header + HEADER_MINI_FAT_SECTOR_LOC, buf, 4);
-        return;
+        return 1; /* OK */
     }
     PUT_UINT32_LE(out->sectorNum, buf);
     memcpy(out->header + HEADER_MINI_FAT_SECTOR_LOC, buf, 4);
@@ -1783,13 +1814,17 @@ static void minifat_save(BIO *outdata, MSI_OUT *out)
     out->minifatSectorsCount = (out->minifatLen + out->sectorSize - 1) / out->sectorSize;
     for (i=1; i<out->minifatSectorsCount; i++) {
         PUT_UINT32_LE(out->sectorNum + i, buf);
-        fat_append(out, buf, 4);
+        if (!fat_append(out, buf, 4)) {
+            return 0; /* FAILED */
+        }
     }
     /* mark the end of the mini FAT chain */
     PUT_UINT32_LE(ENDOFCHAIN, buf);
-    fat_append(out, buf, 4);
-
+    if (!fat_append(out, buf, 4)) {
+        return 0; /* FAILED */
+    }
     out->sectorNum += out->minifatSectorsCount;
+    return 1; /* OK */
 }
 
 static char *msi_dirent_get(MSI_ENTRY *entry)
@@ -1895,7 +1930,7 @@ static int dirents_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out, uint32_t
     return count;
 }
 
-static void dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
+static int dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
 {
     char buf[MAX_SECTOR_SIZE];
     char *unused_entry;
@@ -1926,13 +1961,17 @@ static void dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
     out->dirtreeSectorsCount = (out->dirtreeLen + out->sectorSize - 1) / out->sectorSize;
     for (i=1; i<out->dirtreeSectorsCount; i++) {
         PUT_UINT32_LE(out->sectorNum + i, buf);
-        fat_append(out, buf, 4);
+        if (!fat_append(out, buf, 4)) {
+            return 0; /* FAILED */
+        }
     }
     /* mark the end of the directory chain */
     PUT_UINT32_LE(ENDOFCHAIN, buf);
-    fat_append(out, buf, 4);
-
+    if (!fat_append(out, buf, 4)) {
+        return 0; /* FAILED */
+    }
     out->sectorNum += out->dirtreeSectorsCount;
+    return 1; /* OK */
 }
 
 static int fat_save(BIO *outdata, MSI_OUT *out)
@@ -1987,7 +2026,9 @@ static int fat_save(BIO *outdata, MSI_OUT *out)
                 PUT_UINT32_LE(out->sectorNum + 1, buf + out->sectorSize - 4);
             }
 
-            difat_append(out, buf, out->sectorSize);
+            if (!difat_append(out, buf, out->sectorSize)) {
+                return 0; /* FAILED */
+            }
             out->sectorNum++;
         }
     }
@@ -1995,20 +2036,26 @@ static int fat_save(BIO *outdata, MSI_OUT *out)
     /* mark FAT sectors in the FAT chain */
     PUT_UINT32_LE(FATSECT, buf);
     for (i=0; i<out->fatSectorsCount; i++) {
-        fat_append(out, buf, 4);
+        if (!fat_append(out, buf, 4)) {
+            return 0; /* FAILED */
+        }
     }
 
     /* mark DIFAT sectors in the FAT chain */
     PUT_UINT32_LE(DIFSECT, buf);
     for (i = 0; i < difatSectors; i++) {
-        fat_append(out, buf, 4);
+        if (!fat_append(out, buf, 4)) {
+            return 0; /* FAILED */
+        }
     }
 
     /* empty unallocated free sectors in the last FAT sector */
     if (out->fatLen % out->sectorSize > 0) {
         remain = out->sectorSize - out->fatLen % out->sectorSize;
         memset(buf, (int)FREESECT, (size_t)remain);
-        fat_append(out, buf, remain);
+        if (!fat_append(out, buf, remain)) {
+            return 0; /* FAILED */
+        }
     }
 
     BIO_write(outdata, out->fat, (int)out->fatLen);
@@ -2139,9 +2186,15 @@ static int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint
     if (!stream_handle(msi, dirent, p_msi, len_msi, p_msiex, len_msiex, outdata, &out, 1)) {
         goto out; /* FAILED */
     }
-    ministream_save(dirent, outdata, &out);
-    minifat_save(outdata, &out);
-    dirtree_save(dirent, outdata, &out);
+    if (!ministream_save(dirent, outdata, &out)) {
+        goto out; /* FAILED */
+    }
+    if (!minifat_save(outdata, &out)) {
+        goto out; /* FAILED */
+    }
+    if (!dirtree_save(dirent, outdata, &out)) {
+        goto out; /* FAILED */
+    }
     if (!fat_save(outdata, &out)) {
         goto out; /* FAILED */
     }
