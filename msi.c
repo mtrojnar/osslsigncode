@@ -1499,15 +1499,20 @@ out:
     return ret;
 }
 
-static void ministream_append(MSI_OUT *out, char *buf, uint32_t len)
+static int ministream_append(MSI_OUT *out, char *buf, uint32_t len)
 {
     uint32_t needSectors = (len + out->sectorSize - 1) / out->sectorSize;
     if (out->miniStreamLen + len >= (uint64_t)out->ministreamsMemallocCount * out->sectorSize) {
         out->ministreamsMemallocCount += needSectors;
         out->ministream = OPENSSL_realloc(out->ministream, (size_t)(out->ministreamsMemallocCount * out->sectorSize));
+        if (!out->ministream) {
+            printf("Memory allocation failure\n");
+            return 0; /* FAILED */
+        }
     }
     memcpy(out->ministream + out->miniStreamLen, buf, (size_t)len);
     out->miniStreamLen += len;
+    return 1; /* OK */
 }
 
 static int minifat_append(MSI_OUT *out, char *buf, uint32_t len)
@@ -1519,6 +1524,10 @@ static int minifat_append(MSI_OUT *out, char *buf, uint32_t len)
             return 0; /* FAILED */
         }
         out->minifat = OPENSSL_realloc(out->minifat, (size_t)(out->minifatMemallocCount * out->sectorSize));
+        if (!out->minifat) {
+            printf("Memory allocation failure\n");
+            return 0; /* FAILED */
+        }
     }
     memcpy(out->minifat + out->minifatLen, buf, (size_t)len);
     out->minifatLen += len;
@@ -1534,6 +1543,10 @@ static int fat_append(MSI_OUT *out, char *buf, uint32_t len)
             return 0; /* FAILED */
         }
         out->fat = OPENSSL_realloc(out->fat, (size_t)(out->fatMemallocCount * out->sectorSize));
+        if (!out->fat) {
+            printf("Memory allocation failure\n");
+            return 0; /* FAILED */
+        }
     }
     memcpy(out->fat + out->fatLen, buf, (size_t)len);
     out->fatLen += len;
@@ -1549,6 +1562,10 @@ static int difat_append(MSI_OUT *out, char *buf, uint32_t len)
             return 0; /* FAILED */
         }
         out->difat = OPENSSL_realloc(out->difat, (size_t)(out->difatMemallocCount * out->sectorSize));
+        if (!out->difat) {
+            printf("Memory allocation failure\n");
+            return 0; /* FAILED */
+        }
     }
     memcpy(out->difat + out->difatLen, buf, (size_t)len);
     out->difatLen += len;
@@ -1696,12 +1713,18 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
             if (inlen < MINI_STREAM_CUTOFF_SIZE) {
                 /* set the index into the mini FAT to track the chain of sectors through the mini stream */
                 child->entry->startSectorLocation = out->miniSectorNum;
-                ministream_append(out, indata, inlen);
+                if (!ministream_append(out, indata, inlen)) {
+                    OPENSSL_free(indata);
+                    return 0; /* FAILED */
+                }
                 /* fill to the end with known data, such as all zeroes */
                 if (inlen % msi->m_minisectorSize > 0) {
                     uint32_t remain = msi->m_minisectorSize - inlen % msi->m_minisectorSize;
                     memset(buf, 0, (size_t)remain);
-                    ministream_append(out, buf, remain);
+                    if (!ministream_append(out, buf, remain)) {
+                        OPENSSL_free(indata);
+                        return 0; /* FAILED */
+                    }
                 }
                 while (inlen > msi->m_minisectorSize) {
                     out->miniSectorNum++;
