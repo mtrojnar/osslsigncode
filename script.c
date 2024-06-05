@@ -243,7 +243,7 @@ static u_char *script_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     BIO *hash = BIO_new(BIO_f_md());
 
     if (!BIO_set_md(hash, md)) {
-        printf("Unable to set the message digest of BIO\n");
+        fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(hash);
         return NULL; /* FAILED */
     }
@@ -286,7 +286,7 @@ static int script_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         }
     }
     if (mdtype == -1) {
-        printf("Failed to extract current message digest\n\n");
+        fprintf(stderr, "Failed to extract current message digest\n\n");
         return 0; /* FAILED */
     }
     md = EVP_get_digestbynid(mdtype);
@@ -299,7 +299,7 @@ static int script_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
     BIO_free_all(bhash);
 
     if (!compare_digests(mdbuf, cmdbuf, mdtype)) {
-        printf("Signature verification: failed\n\n");
+        fprintf(stderr, "Signature verification: failed\n\n");
         OPENSSL_free(cmdbuf);
         return 0; /* FAILED */
     }
@@ -346,7 +346,7 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     /* allocate memory for cleaned Base64 */
     clean_base64 = OPENSSL_malloc(base64_len);
     if (!clean_base64) {
-        printf("Malloc failed\n");
+        fprintf(stderr, "Malloc failed\n");
         goto cleanup;
     }
 
@@ -355,7 +355,7 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
         /* find the opening tag */
         for(;;) {
             if (ptr + open_tag_len >= base64_data + base64_len) {
-                printf("Signature line too long\n");
+                fprintf(stderr, "Signature line too long\n");
                 goto cleanup;
             }
             if (!memcmp(ptr, open_tag, (size_t)open_tag_len)) {
@@ -375,7 +375,7 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
         /* copy until the closing tag */
         for(;;) {
             if (ptr + close_tag_len >= base64_data + base64_len) {
-                printf("Signature line too long\n");
+                fprintf(stderr, "Signature line too long\n");
                 goto cleanup;
             }
             if (close_tag_len) {
@@ -473,21 +473,21 @@ static PKCS7 *script_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
     PKCS7 *p7 = pkcs7_create(ctx);
 
     if (!p7) {
-        printf("Creating a new signature failed\n");
+        fprintf(stderr, "Creating a new signature failed\n");
         return NULL; /* FAILED */
     }
     if (!add_indirect_data_object(p7)) {
-        printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
+        fprintf(stderr, "Adding SPC_INDIRECT_DATA_OBJID failed\n");
         PKCS7_free(p7);
         return NULL; /* FAILED */
     }
     content = spc_indirect_data_content_get(hash, ctx);
     if (!content) {
-        printf("Failed to get spcIndirectDataContent\n");
+        fprintf(stderr, "Failed to get spcIndirectDataContent\n");
         return NULL; /* FAILED */
     }
     if (!sign_spc_indirect_data_content(p7, content)) {
-        printf("Failed to set signed content\n");
+        fprintf(stderr, "Failed to set signed content\n");
         PKCS7_free(p7);
         ASN1_OCTET_STRING_free(content);
         return NULL; /* FAILED */
@@ -784,13 +784,13 @@ static BIO *script_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
         fileend = ctx->script_ctx->fileend;
 
     if (!BIO_set_md(hash, md)) {
-        printf("Unable to set the message digest of BIO\n");
+        fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(hash);
         return NULL; /* FAILED */
     }
     BIO_push(hash, BIO_new(BIO_s_null()));
     if (!script_digest_convert(hash, ctx, fileend)) {
-        printf("Unable calc a message digest value\n");
+        fprintf(stderr, "Unable calc a message digest value\n");
         BIO_free_all(hash);
         return NULL; /* FAILED */
     }
@@ -852,12 +852,12 @@ static int script_write_bio(BIO *bio, char *indata, size_t len)
 static int script_check_file(FILE_FORMAT_CTX *ctx)
 {
     if (!ctx) {
-        printf("Init error\n\n");
+        fprintf(stderr, "Init error\n");
         return 0; /* FAILED */
     }
     if (ctx->script_ctx->sigpos == 0
         || ctx->script_ctx->sigpos > ctx->script_ctx->fileend) {
-        printf("No signature found\n\n");
+        fprintf(stderr, "No signature found\n");
         return 0; /* FAILED */
     }
 

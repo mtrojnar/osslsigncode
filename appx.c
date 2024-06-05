@@ -442,7 +442,7 @@ static PKCS7 *appx_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP
     /* Create and append a new signature content types entry */
     entry = zipGetCDEntryByName(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME);
     if (!entry) {
-        printf("Not a valid .appx file: content types file missing\n");
+        fprintf(stderr, "Not a valid .appx file: content types file missing\n");
         return NULL; /* FAILED */
     }
     if (!appx_append_ct_signature_entry(ctx->appx_ctx->zip, entry)) {
@@ -483,7 +483,7 @@ static int appx_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         if (idc) {
             BIO *hashes;
             if (!appx_extract_hashes(ctx, idc)) {
-                printf("Failed to extract hashes from the signature\n");
+                fprintf(stderr, "Failed to extract hashes from the signature\n");
                 SpcIndirectDataContent_free(idc);
                 return 0; /* FAILED */
             }
@@ -494,7 +494,7 @@ static int appx_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
             }
             BIO_free_all(hashes);
             if (!appx_compare_hashes(ctx)) {
-                printf("Signature hash verification failed\n");
+                fprintf(stderr, "Signature hash verification failed\n");
                 SpcIndirectDataContent_free(idc);
                 return 0; /* FAILED */
             }
@@ -518,7 +518,7 @@ static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 
     /* Check if the signature exists */
     if (!zipEntryExist(ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME)) {
-        printf("%s does not exist\n", APP_SIGNATURE_FILENAME);
+        fprintf(stderr, "%s does not exist\n", APP_SIGNATURE_FILENAME);
         return NULL; /* FAILED */
     }
     dataSize = zipReadFileDataByName(&data, ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME);
@@ -527,7 +527,7 @@ static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     }
     /* P7X format is just 0x504B4358 (PKCX) followed by PKCS#7 data in the DER format */
     if (memcmp(data, PKCX_SIGNATURE, 4)) {
-        printf("Invalid PKCX header\n");
+        fprintf(stderr, "Invalid PKCX header\n");
         OPENSSL_free(data);
         return NULL; /* FAILED */
     }
@@ -556,7 +556,7 @@ static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     (void)hash;
 
     if (!entry) {
-        printf("Not a valid .appx file: content types file missing\n");
+        fprintf(stderr, "Not a valid .appx file: content types file missing\n");
         return 1; /* FAILED */
     }
     /* read signature data */
@@ -566,17 +566,17 @@ static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     }
     OPENSSL_free(data);
     if (!appx_remove_ct_signature_entry(zip, entry)) {
-        printf("Failed to remove signature entry\n");
+        fprintf(stderr, "Failed to remove signature entry\n");
         return 1; /* FAILED */
     }
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
         if (noEntries == zip->centralDirectoryRecordCount) {
-            printf("Warning: Corrupted central directory structure\n");
+            fprintf(stderr, "Corrupted central directory structure\n");
             return 1; /* FAILED */
         }
         noEntries++;
         if (!entry->fileName || (entry->fileNameLen == 0)) {
-            printf("Warning: Corrupted file name\n");
+            fprintf(stderr, "Corrupted file name\n");
             return 1; /* FAILED */
         }
         if (strcmp(entry->fileName, APP_SIGNATURE_FILENAME)) {
@@ -587,11 +587,11 @@ static int appx_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         }
     }
     if (!get_current_position(outdata, &cdOffset)) {
-        printf("Unable to get offset\n");
+        fprintf(stderr, "Unable to get offset\n");
         return 1; /* FAILED */
     }
     if (!appx_write_central_directory(outdata, zip, 1, cdOffset)) {
-        printf("Unable to write central directory\n");
+        fprintf(stderr, "Unable to write central directory\n");
         return 1; /* FAILED */
     }
     return 0; /* OK */
@@ -615,7 +615,7 @@ static int appx_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     /* Create and append a new signature content types entry */
     entry = zipGetCDEntryByName(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME);
     if (!entry) {
-        printf("Not a valid .appx file: content types file missing\n");
+        fprintf(stderr, "Not a valid .appx file: content types file missing\n");
         return 0; /* FAILED */
     }
     if (!appx_append_ct_signature_entry(ctx->appx_ctx->zip, entry)) {
@@ -646,12 +646,12 @@ static PKCS7 *appx_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
     }
     p7 = pkcs7_create(ctx);
     if (!p7) {
-        printf("Creating a new signature failed\n");
+        fprintf(stderr, "Creating a new signature failed\n");
         BIO_free_all(hashes);
         return NULL; /* FAILED */
     }
     if (!add_indirect_data_object(p7)) {
-        printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
+        fprintf(stderr, "Adding SPC_INDIRECT_DATA_OBJID failed\n");
         PKCS7_free(p7);
         BIO_free_all(hashes);
         return NULL; /* FAILED */
@@ -659,12 +659,12 @@ static PKCS7 *appx_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
     content = spc_indirect_data_content_get(hashes, ctx);
     BIO_free_all(hashes);
     if (!content) {
-        printf("Failed to get spcIndirectDataContent\n");
+        fprintf(stderr, "Failed to get spcIndirectDataContent\n");
         PKCS7_free(p7);
         return NULL; /* FAILED */
     }
     if (!sign_spc_indirect_data_content(p7, content)) {
-        printf("Failed to set signed content\n");
+        fprintf(stderr, "Failed to set signed content\n");
         PKCS7_free(p7);
         ASN1_OCTET_STRING_free(content);
         return NULL; /* FAILED */
@@ -692,13 +692,13 @@ static int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 
     for (entry = zip->centralDirectoryHead; entry != NULL;) {
         if (noEntries >= zip->centralDirectoryRecordCount) {
-            printf("Warning: Corrupted central directory structure\n");
+            fprintf(stderr, "Corrupted central directory structure\n");
             return 1; /* FAILED */
         }
         noEntries++;
         last = entry;
         if (!entry->fileName || (entry->fileNameLen == 0)) {
-            printf("Warning: Corrupted file name\n");
+            fprintf(stderr, "Corrupted file name\n");
             return 1; /* FAILED */
         }
         if (strcmp(entry->fileName, APP_SIGNATURE_FILENAME)) {
@@ -738,17 +738,17 @@ static int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     len += 4;
     if (!zipAppendSignatureFile(outdata, zip, blob, (uint64_t)len)) {
         OPENSSL_free(blob);
-        printf("Failed to append zip file\n");
+        fprintf(stderr, "Failed to append zip file\n");
         return 1; /* FAILED */
     }
     OPENSSL_free(der);
     OPENSSL_free(blob);
     if (!get_current_position(outdata, &cdOffset)) {
-        printf("Unable to get offset\n");
+        fprintf(stderr, "Unable to get offset\n");
         return 1; /* FAILED */
     }
     if (!appx_write_central_directory(outdata, zip, 0, cdOffset)) {
-        printf("Unable to write central directory\n");
+        fprintf(stderr, "Unable to write central directory\n");
         return 1; /* FAILED */
     }
     return 0; /* OK */
@@ -811,11 +811,11 @@ static BIO *appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
 
     if (!ctx->appx_ctx->calculatedBMHash || !ctx->appx_ctx->calculatedCTHash
         || !ctx->appx_ctx->calculatedCDHash || !ctx->appx_ctx->calculatedDataHash) {
-        printf("One or more hashes calculation failed\n");
+        fprintf(stderr, "One or more hashes calculation failed\n");
         return NULL; /* FAILED */
     }
     if (zipEntryExist(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME) && !ctx->appx_ctx->calculatedCIHash) {
-        printf("Code integrity file exists, but CI hash calculation failed\n");
+        fprintf(stderr, "Code integrity file exists, but CI hash calculation failed\n");
         return NULL; /* FAILED */
     }
     return appx_hash_blob_get(ctx);
@@ -879,13 +879,13 @@ static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD
     BIO *bhash = BIO_new(BIO_f_md());
 
     if (!BIO_set_md(bhash, md)) {
-        printf("Unable to set the message digest of BIO\n");
+        fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return NULL; /* FAILED */
     }
     BIO_push(bhash, BIO_new(BIO_s_null()));
     if (!appx_write_central_directory(bhash, zip, 1, cdOffset)) {
-        printf("Unable to write central directory\n");
+        fprintf(stderr, "Unable to write central directory\n");
         BIO_free_all(bhash);
         return NULL; /* FAILED */
     }
@@ -913,11 +913,11 @@ static int appx_write_central_directory(BIO *bio, ZIP_FILE *zip, int removeSigna
         /* the signature file is considered non existent for hashing purposes */
         uint64_t sizeOnDisk = 0;
         if (noEntries > zip->centralDirectoryRecordCount) {
-            printf("Warning: Corrupted central directory structure\n");
+            fprintf(stderr, "Corrupted central directory structure\n");
             return 0; /* FAILED */
         }
         if (!entry->fileName || (entry->fileNameLen == 0)) {
-            printf("Warning: Corrupted file name\n");
+            fprintf(stderr, "Corrupted file name\n");
             return 0; /* FAILED */
         }
         if (removeSignature && !strcmp(entry->fileName, APP_SIGNATURE_FILENAME)) {
@@ -1006,7 +1006,7 @@ static uint8_t *appx_calc_zip_data_hash(uint64_t *cdOffset, ZIP_FILE *zip, const
     uint64_t noEntries = 0;
 
     if (!BIO_set_md(bhash, md)) {
-        printf("Unable to set the message digest of BIO\n");
+        fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return NULL; /* FAILED */
     }
@@ -1016,13 +1016,13 @@ static uint8_t *appx_calc_zip_data_hash(uint64_t *cdOffset, ZIP_FILE *zip, const
         /* the signature file is considered not existent for hashing purposes */
         uint64_t sizeOnDisk = 0;
         if (noEntries >= zip->centralDirectoryRecordCount) {
-            printf("Warning: Corrupted central directory structure\n");
+            fprintf(stderr, "Corrupted central directory structure\n");
             BIO_free_all(bhash);
             return NULL; /* FAILED */
         }
         noEntries++;
         if (!entry->fileName || (entry->fileNameLen == 0)) {
-            printf("Warning: Corrupted file name\n");
+            fprintf(stderr, "Corrupted file name\n");
             BIO_free_all(bhash);
             return NULL; /* FAILED */
         }
@@ -1030,7 +1030,7 @@ static uint8_t *appx_calc_zip_data_hash(uint64_t *cdOffset, ZIP_FILE *zip, const
             continue;
         }
         if (!zipRewriteData(zip, entry, bhash, &sizeOnDisk)) {
-            printf("Rewrite data error\n");
+            fprintf(stderr, "Rewrite data error\n");
             BIO_free_all(bhash);
             return NULL; /* FAILED */
         }
@@ -1060,7 +1060,7 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
     long d = ASN1_INTEGER_get(si->d);
     long e = ASN1_INTEGER_get(si->e);
     long f = ASN1_INTEGER_get(si->f);
-    BIO *stdbio = BIO_new_fp(stdout, BIO_NOCLOSE);
+    BIO *stdbio = BIO_new_fp(stderr, BIO_NOCLOSE);
     printf("a: 0x%lX b: 0x%lX c: 0x%lX d: 0x%lX e: 0x%lX f: 0x%lX\n", a, b, c, d, e, f);
     printf("string: ");
     ASN1_STRING_print_ex(stdbio, si->string, ASN1_STRFLGS_RFC2253);
@@ -1075,11 +1075,11 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
 
     /* we are expecting at least 4 hashes + 4 byte header */
     if (length < 4 * mdlen + 4) {
-        printf("Hash too short\n");
+        fprintf(stderr, "Hash too short\n");
         return 0; /* FAILED */
     }
     if (memcmp(data, APPX_SIGNATURE, 4)) {
-        printf("Hash signature does not match\n");
+        fprintf(stderr, "Hash signature does not match\n");
         return 0; /* FAILED */
     }
     while (pos + mdlen + 4 <= length) {
@@ -1099,29 +1099,29 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
             ctx->appx_ctx->existingCIHash = OPENSSL_malloc((size_t)mdlen);
             memcpy(ctx->appx_ctx->existingCIHash, data + pos + 4, (size_t)mdlen);
         } else {
-            printf("Invalid hash signature\n");
+            fprintf(stderr, "Invalid hash signature\n");
             return 0; /* FAILED */
         }
         pos += mdlen + 4;
     }
     if (!ctx->appx_ctx->existingDataHash) {
-        printf("File hash missing\n");
+        fprintf(stderr, "File hash missing\n");
         return 0; /* FAILED */
     }
     if (!ctx->appx_ctx->existingCDHash) {
-        printf("Central directory hash missing\n");
+        fprintf(stderr, "Central directory hash missing\n");
         return 0; /* FAILED */
     }
     if (!ctx->appx_ctx->existingBMHash) {
-        printf("Block map hash missing\n");
+        fprintf(stderr, "Block map hash missing\n");
         return 0; /* FAILED */
     }
     if (!ctx->appx_ctx->existingCTHash) {
-        printf("Content types hash missing\n");
+        fprintf(stderr, "Content types hash missing\n");
         return 0; /* FAILED */
     }
     if (zipEntryExist(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME) && !ctx->appx_ctx->existingCIHash) {
-        printf("Code integrity hash missing\n");
+        fprintf(stderr, "Code integrity hash missing\n");
         return 0; /* FAILED */
     }
     return 1; /* OK */
@@ -1142,7 +1142,7 @@ static int appx_compare_hashes(FILE_FORMAT_CTX *ctx)
             return 0; /* FAILED */
         }
     } else {
-        printf("Block map hash missing\n");
+        fprintf(stderr, "Block map hash missing\n");
         return 0; /* FAILED */
     }
     if (ctx->appx_ctx->calculatedCTHash && ctx->appx_ctx->existingCTHash) {
@@ -1151,7 +1151,7 @@ static int appx_compare_hashes(FILE_FORMAT_CTX *ctx)
             return 0; /* FAILED */
         }
     } else {
-        printf("Content Types hash missing\n");
+        fprintf(stderr, "Content Types hash missing\n");
         return 0; /* FAILED */
     }
     if (ctx->appx_ctx->calculatedDataHash && ctx->appx_ctx->existingDataHash) {
@@ -1160,7 +1160,7 @@ static int appx_compare_hashes(FILE_FORMAT_CTX *ctx)
             return 0; /* FAILED */
         }
     } else {
-        printf("Central Directory hash missing\n");
+        fprintf(stderr, "Central Directory hash missing\n");
         return 0; /* FAILED */
     }
     if (ctx->appx_ctx->calculatedCDHash && ctx->appx_ctx->existingCDHash) {
@@ -1169,7 +1169,7 @@ static int appx_compare_hashes(FILE_FORMAT_CTX *ctx)
             return 0; /* FAILED */
         }
     } else {
-        printf("Central Directory hash missing\n");
+        fprintf(stderr, "Central Directory hash missing\n");
         return 0; /* FAILED */
     }
     if (ctx->appx_ctx->calculatedCIHash && ctx->appx_ctx->existingCIHash) {
@@ -1180,7 +1180,7 @@ static int appx_compare_hashes(FILE_FORMAT_CTX *ctx)
     } else if (!ctx->appx_ctx->calculatedCIHash && !ctx->appx_ctx->existingCIHash) {
         /* this is fine, CI file is optional -> if it is missing we expect both hashes to be non existent */
     } else {
-        printf("Code Integrity hash missing\n");
+        fprintf(stderr, "Code Integrity hash missing\n");
         return 0; /* FAILED */
     }
     return 1; /* OK */
@@ -1205,7 +1205,7 @@ static int appx_remove_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
     }
     cpos = strstr((const char *)data, SIGNATURE_CONTENT_TYPES_ENTRY);
     if (!cpos) {
-        printf("Did not find existing signature entry in %s\n", entry->fileName);
+        printf("Warning: Did not find existing signature entry in %s\n", entry->fileName);
         OPENSSL_free(data);
         return 1; /* do not treat as en error */
     }
@@ -1243,7 +1243,7 @@ static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
     }
     cpos = strstr((const char *)data, SIGNATURE_CONTENT_TYPES_CLOSING_TAG);
     if (!cpos) {
-        printf("%s parsing error\n", entry->fileName);
+        fprintf(stderr, "%s parsing error\n", entry->fileName);
         OPENSSL_free(data);
         return 0; /* FAILED */
     }
@@ -1275,24 +1275,24 @@ static const EVP_MD *appx_get_md(ZIP_FILE *zip)
 
     dataSize = zipReadFileDataByName(&data, zip, BLOCK_MAP_FILENAME);
     if (dataSize <= 0) {
-        printf("Could not read: %s\n", BLOCK_MAP_FILENAME);
+        fprintf(stderr, "Could not read: %s\n", BLOCK_MAP_FILENAME);
         return NULL; /* FAILED */
     }
     start = strstr((const char *)data, HASH_METHOD_TAG);
     if (!start) {
-        printf("Parse error: tag: %s not found in %s\n", HASH_METHOD_TAG, BLOCK_MAP_FILENAME);
+        fprintf(stderr, "Parse error: tag: %s not found in %s\n", HASH_METHOD_TAG, BLOCK_MAP_FILENAME);
         OPENSSL_free(data);
         return NULL; /* FAILED */
     }
     start += strlen(HASH_METHOD_TAG);
     if ((uint8_t *)start >= data + dataSize) {
-        printf("Parse error: data too short in %s\n", BLOCK_MAP_FILENAME);
+        fprintf(stderr, "Parse error: data too short in %s\n", BLOCK_MAP_FILENAME);
         OPENSSL_free(data);
         return NULL; /* FAILED */
     }
     end = strstr((const char *)start, ">");
     if (!end) {
-        printf("Parse error: end of tag not found in %s\n", BLOCK_MAP_FILENAME);
+        fprintf(stderr, "Parse error: end of tag not found in %s\n", BLOCK_MAP_FILENAME);
         OPENSSL_free(data);
         return NULL; /* FAILED */
     }
@@ -1306,7 +1306,7 @@ static const EVP_MD *appx_get_md(ZIP_FILE *zip)
         }
     }
     if (!valueStart || !valueEnd || valueEnd <= valueStart) {
-        printf("Parse error: value parse error in %s\n", BLOCK_MAP_FILENAME);
+        fprintf(stderr, "Parse error: value parse error in %s\n", BLOCK_MAP_FILENAME);
         OPENSSL_free(data);
         return NULL; /* FAILED */
     }
@@ -1321,7 +1321,7 @@ static const EVP_MD *appx_get_md(ZIP_FILE *zip)
         printf("Hash method is SHA512\n");
         md = EVP_sha512();
     } else {
-        printf("Unsupported hash method\n");
+        fprintf(stderr, "Unsupported hash method\n");
         OPENSSL_free(data);
         return NULL; /* FAILED */
     }
@@ -1342,12 +1342,12 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipGetCDEntryByName(ZIP_FILE *zip, const cha
 
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
         if (noEntries >= zip->centralDirectoryRecordCount) {
-            printf("Warning: Corrupted central directory structure\n");
+            fprintf(stderr, "Corrupted central directory structure\n");
             return NULL; /* FAILED */
         }
         noEntries++;
         if (!entry->fileName || (entry->fileNameLen == 0)) {
-            printf("Warning: Corrupted file name\n");
+            fprintf(stderr, "Corrupted file name\n");
             return NULL; /* FAILED */
         }
         if (!strcmp(entry->fileName, name)) {
@@ -1454,7 +1454,7 @@ static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64
     dataToWrite = OPENSSL_malloc(dataSize);
     ret = zipDeflate(dataToWrite, &size, data, dataSize);
     if (ret != Z_OK) {
-        printf("Zip deflate failed: %d\n", ret);
+        fprintf(stderr, "Zip deflate failed: %d\n", ret);
         OPENSSL_free(dataToWrite);
         return 0; /* FAILED */
     }
@@ -1492,7 +1492,7 @@ static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64
     header.extraFieldLen = 0;
 
     if (!get_current_position(bio, &offset)) {
-        printf("Unable to get offset\n");
+        fprintf(stderr, "Unable to get offset\n");
         OPENSSL_free(dataToWrite);
         return 0; /* FAILED */
     }
@@ -1577,7 +1577,7 @@ static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data
     size = dataSize;
     ret = zipDeflate(entry->overrideData->data, &size, data, dataSize);
     if (ret != Z_OK) {
-        printf("Zip deflate failed: %d\n", ret);
+        fprintf(stderr, "Zip deflate failed: %d\n", ret);
         return 0; /* FAILED */
     }
     entry->overrideData->compressedSize = size;
@@ -1599,7 +1599,7 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
 
     memset(&header, 0, sizeof(header));
     if (entry->offsetOfLocalHeader >= (uint64_t)zip->fileSize) {
-        printf("Corrupted relative offset of local header : 0x%08" PRIX64 "\n", entry->offsetOfLocalHeader);
+        fprintf(stderr, "Corrupted relative offset of local header : 0x%08" PRIX64 "\n", entry->offsetOfLocalHeader);
         return 0; /* FAILED */
     }
     if (fseeko(zip->file, (int64_t)entry->offsetOfLocalHeader, SEEK_SET) < 0) {
@@ -1620,7 +1620,7 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
             return 0; /* FAILED */
         }
         if (entry->compressedSize > (uint64_t)zip->fileSize - entry->offsetOfLocalHeader) {
-            printf("Corrupted compressedSize : 0x%08" PRIX64 "\n", entry->compressedSize);
+            fprintf(stderr, "Corrupted compressedSize : 0x%08" PRIX64 "\n", entry->compressedSize);
             return 0; /* FAILED */
         }
         if (fseeko(zip->file, (int64_t)entry->compressedSize, SEEK_CUR) < 0) {
@@ -1724,12 +1724,12 @@ static int zipEntryExist(ZIP_FILE *zip, const char *name)
 
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
         if (noEntries >= zip->centralDirectoryRecordCount) {
-            printf("Warning: Corrupted central directory structure\n");
+            fprintf(stderr, "Corrupted central directory structure\n");
             return 0; /* FAILED */
         }
         noEntries++;
         if (!entry->fileName || (entry->fileNameLen == 0)) {
-            printf("Warning: Corrupted file name\n");
+            fprintf(stderr, "Corrupted file name\n");
             return 0; /* FAILED */
         }
         if (!strcmp(entry->fileName, name)) {
@@ -1759,7 +1759,7 @@ static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *
     }
     bhash = BIO_new(BIO_f_md());
     if (!BIO_set_md(bhash, md)) {
-        printf("Unable to set the message digest of BIO\n");
+        fprintf(stderr, "Unable to set the message digest of BIO\n");
         OPENSSL_free(data);
         BIO_free_all(bhash);
         return NULL; /* FAILED */
@@ -1792,12 +1792,12 @@ static size_t zipReadFileDataByName(uint8_t **pData, ZIP_FILE *zip, const char *
 
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
         if (noEntries >= zip->centralDirectoryRecordCount) {
-            printf("Warning: Corrupted central directory structure\n");
+            fprintf(stderr, "Corrupted central directory structure\n");
             return 0; /* FAILED */
         }
         noEntries++;
         if (!entry->fileName || (entry->fileNameLen == 0)) {
-            printf("Warning: Corrupted file name\n");
+            fprintf(stderr, "Corrupted file name\n");
             return 0; /* FAILED */
         }
         if (!strcmp(entry->fileName, name)) {
@@ -1823,7 +1823,7 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
     size_t size, dataSize = 0;
 
     if (entry->offsetOfLocalHeader >= (uint64_t)zip->fileSize) {
-        printf("Corrupted relative offset of local header : 0x%08" PRIX64 "\n", entry->offsetOfLocalHeader);
+        fprintf(stderr, "Corrupted relative offset of local header : 0x%08" PRIX64 "\n", entry->offsetOfLocalHeader);
         return 0; /* FAILED */
     }
     if (fseeko(file, (int64_t)entry->offsetOfLocalHeader, SEEK_SET) < 0) {
@@ -1847,7 +1847,7 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
             || header.compressedSize != compressedSize
             || header.uncompressedSize != uncompressedSize
             || header.compression != entry->compression) {
-            printf("Local header does not match central directory entry\n");
+            fprintf(stderr, "Local header does not match central directory entry\n");
             return 0; /* FAILED */
         }
         /* we don't really need those */
@@ -1855,7 +1855,7 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
         OPENSSL_free(header.extraField);
 
         if (compressedSize > (uint64_t)zip->fileSize - entry->offsetOfLocalHeader) {
-            printf("Corrupted compressedSize : 0x%08" PRIX64 "\n", entry->compressedSize);
+            fprintf(stderr, "Corrupted compressedSize : 0x%08" PRIX64 "\n", entry->compressedSize);
             return 0; /* FAILED */
         }
         compressedData = OPENSSL_zalloc(compressedSize + 1);
@@ -1883,7 +1883,7 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
         OPENSSL_free(compressedData);
 
         if (ret != Z_OK) {
-            printf("Data decompresssion failed, zlib error: %d\n", ret);
+            fprintf(stderr, "Data decompresssion failed, zlib error: %d\n", ret);
             OPENSSL_free(uncompressedData);
             return 0; /* FAILED */
         } else {
@@ -1895,7 +1895,7 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
             dataSize = destLen;
         }
     } else {
-        printf("Unsupported compression mode: %d\n", entry->compression);
+        fprintf(stderr, "Unsupported compression mode: %d\n", entry->compression);
         OPENSSL_free(compressedData);
         return 0; /* FAILED */
     }
@@ -1920,7 +1920,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
         return 0; /* FAILED */
     }
     if (memcmp(signature, PKZIP_LH_SIGNATURE, 4)) {
-        printf("The input file is not a valid zip file - local header signature does not match\n");
+        fprintf(stderr, "The input file is not a valid zip file - local header signature does not match\n");
         return 0; /* FAILED */
     }
     /* version needed to extract (2 bytes) */
@@ -1972,7 +1972,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
             return 0; /* FAILED */
         }
         if (compressedSize > (uint64_t)(zip->fileSize - offset)) {
-            printf("Corrupted compressedSize : 0x%08" PRIX64 "\n", compressedSize);
+            fprintf(stderr, "Corrupted compressedSize : 0x%08" PRIX64 "\n", compressedSize);
             return 0; /* FAILED */
         }
         if (fseeko(file, (int64_t)compressedSize, SEEK_CUR) < 0) {
@@ -1983,7 +1983,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
             return 0; /* FAILED */
         }
         if (memcmp(signature, PKZIP_DATA_DESCRIPTOR_SIGNATURE, 4)) {
-            printf("The input file is not a valid zip file - flags indicate data descriptor, but data descriptor signature does not match\n");
+            fprintf(stderr, "The input file is not a valid zip file - flags indicate data descriptor, but data descriptor signature does not match\n");
             OPENSSL_free(header->fileName);
             OPENSSL_free(header->extraField);
             return 0; /* FAILED */
@@ -2007,7 +2007,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
             uint16_t op = bufferGetU16(header->extraField, &pos);
 
             if (op != ZIP64_HEADER) {
-                printf("Expected zip64 header in local header extra field, got : 0x%X\n", op);
+                fprintf(stderr, "Expected zip64 header in local header extra field, got : 0x%X\n", op);
                 OPENSSL_free(header->fileName);
                 OPENSSL_free(header->extraField);
                 header->fileName = NULL;
@@ -2020,7 +2020,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
                     header->uncompressedSize = bufferGetU64(header->extraField, &pos);
                     header->uncompressedSizeInZip64 = 1;
                 } else {
-                    printf("Invalid zip64 local header entry\n");
+                    fprintf(stderr, "Invalid zip64 local header entry\n");
                     OPENSSL_free(header->fileName);
                     OPENSSL_free(header->extraField);
                     header->fileName = NULL;
@@ -2033,7 +2033,7 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
                     header->compressedSize = bufferGetU64(header->extraField, &pos);
                     header->compressedSizeInZip64 = 1;
                 } else {
-                    printf("Invalid zip64 local header entry\n");
+                    fprintf(stderr, "Invalid zip64 local header entry\n");
                     OPENSSL_free(header->fileName);
                     OPENSSL_free(header->extraField);
                     header->fileName = NULL;
@@ -2212,7 +2212,7 @@ static ZIP_FILE *openZip(const char *filename)
             return NULL; /* FAILED */
         }
         if (zip->locator.eocdOffset >= (uint64_t)zip->fileSize) {
-            printf("Corrupted end of central directory locator offset : 0x%08" PRIX64 "\n", zip->locator.eocdOffset);
+            fprintf(stderr, "Corrupted end of central directory locator offset : 0x%08" PRIX64 "\n", zip->locator.eocdOffset);
             freeZip(zip);
             return 0; /* FAILED */
         }
@@ -2241,13 +2241,13 @@ static ZIP_FILE *openZip(const char *filename)
         zip->centralDirectorySize = zip->eocdr.centralDirectorySize;
         zip->centralDirectoryRecordCount = (uint64_t)zip->eocdr.totalEntries;
         if (zip->centralDirectoryRecordCount > UINT16_MAX) {
-            printf("Corrupted total number of entries in the central directory : 0x%08" PRIX64 "\n", zip->centralDirectoryRecordCount);
+            fprintf(stderr, "Corrupted total number of entries in the central directory : 0x%08" PRIX64 "\n", zip->centralDirectoryRecordCount);
             freeZip(zip);
             return NULL; /* FAILED */
         }
     }
     if (zip->centralDirectoryOffset >= (uint64_t)zip->fileSize) {
-        printf("Corrupted central directory offset : 0x%08" PRIX64 "\n", zip->centralDirectoryOffset);
+        fprintf(stderr, "Corrupted central directory offset : 0x%08" PRIX64 "\n", zip->centralDirectoryOffset);
         freeZip(zip);
         return NULL; /* FAILED */
     }
@@ -2308,26 +2308,26 @@ static ZIP_FILE *zipSortCentralDirectory(ZIP_FILE *zip)
 
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
         if (noEntries >= zip->centralDirectoryRecordCount) {
-            printf("Corrupted central directory structure\n");
+            fprintf(stderr, "Corrupted central directory structure\n");
             sk_ZIP_CENTRAL_DIRECTORY_ENTRY_free(chain);
             freeZip(zip);
-            return NULL;
+            return NULL; /* FAILED */
         }
         noEntries++;
         if (!sk_ZIP_CENTRAL_DIRECTORY_ENTRY_push(chain, entry)) {
-            printf("Failed to add central directory entry\n");
+            fprintf(stderr, "Failed to add central directory entry\n");
             sk_ZIP_CENTRAL_DIRECTORY_ENTRY_free(chain);
             freeZip(zip);
-            return NULL;
+            return NULL; /* FAILED */
         }
     }
     sk_ZIP_CENTRAL_DIRECTORY_ENTRY_sort(chain);
     zip->centralDirectoryHead = entry = sk_ZIP_CENTRAL_DIRECTORY_ENTRY_value(chain, 0);
     if (!entry) {
-        printf("Failed to get sorted central directory entry\n");
+        fprintf(stderr, "Failed to get sorted central directory entry\n");
         sk_ZIP_CENTRAL_DIRECTORY_ENTRY_free(chain);
         freeZip(zip);
-        return NULL;
+        return NULL; /* FAILED */
     }
     for (i=1; i<sk_ZIP_CENTRAL_DIRECTORY_ENTRY_num(chain); i++) {
         entry->next = sk_ZIP_CENTRAL_DIRECTORY_ENTRY_value(chain, i);
@@ -2384,7 +2384,7 @@ static int zipReadCentralDirectory(ZIP_FILE *zip, FILE *file)
         } else if (!zip->centralDirectoryHead) {
             zip->centralDirectoryHead = entry;
         } else {
-            printf("Corrupted central directory structure\n");
+            fprintf(stderr, "Corrupted central directory structure\n");
             OPENSSL_free(entry);
             return 0; /* FAILED */
         }
@@ -2408,7 +2408,7 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
         return NULL; /* FAILED */
     }
     if (memcmp(signature, PKZIP_CD_SIGNATURE, 4)) {
-        printf("The input file is not a valid zip file - could not find Central Directory record\n");
+        fprintf(stderr, "The input file is not a valid zip file - could not find Central Directory record\n");
         return NULL; /* FAILED */
     }
     entry = OPENSSL_zalloc(sizeof(ZIP_CENTRAL_DIRECTORY_ENTRY));
@@ -2487,7 +2487,7 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
             uint16_t header = bufferGetU16(entry->extraField, &pos);
 
             if (header != ZIP64_HEADER) {
-                printf("Expected zip64 header in central directory extra field, got : 0x%X\n", header);
+                fprintf(stderr, "Expected zip64 header in central directory extra field, got : 0x%X\n", header);
                 freeZipCentralDirectoryEntry(entry);
                 return NULL; /* FAILED */
             }
@@ -2497,7 +2497,7 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
                     entry->uncompressedSize = bufferGetU64(entry->extraField, &pos);
                     entry->uncompressedSizeInZip64 = 1;
                 } else {
-                    printf("Invalid zip64 central directory entry\n");
+                    fprintf(stderr, "Invalid zip64 central directory entry\n");
                     freeZipCentralDirectoryEntry(entry);
                     return NULL; /* FAILED */
                 }
@@ -2507,7 +2507,7 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
                     entry->compressedSize = bufferGetU64(entry->extraField, &pos);
                     entry->compressedSizeInZip64 = 1;
                 } else {
-                    printf("Invalid zip64 central directory entry\n");
+                    fprintf(stderr, "Invalid zip64 central directory entry\n");
                     freeZipCentralDirectoryEntry(entry);
                     return NULL; /* FAILED */
                 }
@@ -2517,7 +2517,7 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
                     entry->offsetOfLocalHeader = bufferGetU64(entry->extraField, &pos);
                     entry->offsetInZip64 = 1;
                 } else {
-                    printf("Invalid zip64 central directory entry\n");
+                    fprintf(stderr, "Invalid zip64 central directory entry\n");
                     freeZipCentralDirectoryEntry(entry);
                     return NULL; /* FAILED */
                 }
@@ -2527,7 +2527,7 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
                     entry->diskNoStart = bufferGetU32(entry->extraField, &pos);
                     entry->diskNoInZip64 = 1;
                 } else {
-                    printf("Invalid zip64 central directory entry\n");
+                    fprintf(stderr, "Invalid zip64 central directory entry\n");
                     freeZipCentralDirectoryEntry(entry);
                     return NULL; /* FAILED */
                 }
@@ -2604,7 +2604,7 @@ static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
         eocdr->centralDirectoryDiskNumber != eocdr->diskNumber ||
         eocdr->diskEntries != eocdr->totalEntries)
     {
-        printf("The input file is a multipart archive - not supported\n");
+        fprintf(stderr, "The input file is a multipart archive - not supported\n");
         return 0; /* FAILED */
     }
 #endif
@@ -2640,7 +2640,7 @@ static int readZip64EOCDLocator(ZIP64_EOCD_LOCATOR *locator, FILE *file)
         return 0; /* FAILED */
     }
     if (memcmp(signature, PKZIP64_EOCD_LOCATOR_SIGNATURE, 4)) {
-        printf("The input file is not a valid zip file - could not find zip64 EOCD locator\n");
+        fprintf(stderr, "The input file is not a valid zip file - could not find zip64 EOCD locator\n");
         return 0; /* FAILED */
     }
     locator->diskWithEOCD = fileGetU32(file);
@@ -2669,7 +2669,7 @@ static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
         return 0; /* FAILED */
     }
     if (memcmp(signature, PKZIP64_EOCDR_SIGNATURE, 4)) {
-        printf("The input file is not a valid zip file - could not find zip64 End of Central Directory record\n");
+        fprintf(stderr, "The input file is not a valid zip file - could not find zip64 End of Central Directory record\n");
         return 0; /* FAILED */
     }
     /* size of zip64 end of central directory record (8 bytes) */
@@ -2694,7 +2694,7 @@ static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
     /* zip64 extensible data sector (comment) */
     eocdr->commentLen = eocdr->eocdrSize - 44;
     if (eocdr->commentLen > UINT16_MAX) {
-        printf("Corrupted file comment length : 0x%08" PRIX64 "\n", eocdr->commentLen);
+        fprintf(stderr, "Corrupted file comment length : 0x%08" PRIX64 "\n", eocdr->commentLen);
         return 0; /* FAILED */
     }
     if (eocdr->commentLen > 0) {
@@ -2707,7 +2707,7 @@ static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
     if (eocdr->diskWithCentralDirectory > 1 || eocdr->diskNumber > 1 ||
         eocdr->diskWithCentralDirectory != eocdr->diskNumber ||
         eocdr->totalEntries != eocdr->diskEntries) {
-        printf("The input file is a multipart archive - not supported\n");
+        fprintf(stderr, "The input file is a multipart archive - not supported\n");
         return 0; /* FAILED */
     }
     return 1; /* OK */

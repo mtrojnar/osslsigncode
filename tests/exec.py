@@ -2,7 +2,7 @@
 """Implementation of a single ctest script."""
 
 import sys
-import subprocess
+from subprocess import Popen, PIPE
 
 
 def parse(value):
@@ -19,7 +19,11 @@ def main() -> None:
     if len(sys.argv) > 1:
         try:
             params = map(parse, sys.argv[1:])
-            proc = subprocess.run(params, check=True)
+            proc = Popen(params, stdout=PIPE, stderr=PIPE, text=True)
+            stdout, stderr = proc.communicate()
+            print(stdout, file=sys.stderr)
+            if stderr:
+                print("Error:\n" + "-" * 58 + "\n" + stderr, file=sys.stderr)
             sys.exit(proc.returncode)
         except Exception as err: # pylint: disable=broad-except
             # all exceptions are critical

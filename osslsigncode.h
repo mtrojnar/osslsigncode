@@ -221,9 +221,9 @@
  */
 #define FLAG_RESERVE_PRESENT 0x0004
 
-#define DO_EXIT_0(x) { printf(x); goto err_cleanup; }
-#define DO_EXIT_1(x, y) { printf(x, y); goto err_cleanup; }
-#define DO_EXIT_2(x, y, z) { printf(x, y, z); goto err_cleanup; }
+#define DO_EXIT_0(x) { fprintf(stderr, x); goto err_cleanup; }
+#define DO_EXIT_1(x, y) { fprintf(stderr, x, y); goto err_cleanup; }
+#define DO_EXIT_2(x, y, z) { fprintf(stderr, x, y, z); goto err_cleanup; }
 
 /* Default policy if request did not specify it. */
 #define TSA_POLICY1 "1.2.3.4.1"

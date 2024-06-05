@@ -350,11 +350,11 @@ static PKCS7 *msi_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_
     (void)md;
 
     if (ctx->options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ctx, hash)) {
-        printf("Unable to calc MsiDigitalSignatureEx\n");
+        fprintf(stderr, "Unable to calc MsiDigitalSignatureEx\n");
         return NULL; /* FAILED */
     }
     if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1)) {
-        printf("Unable to msi_handle_dir()\n");
+        fprintf(stderr, "Unable to msi_handle_dir()\n");
         return NULL; /* FAILED */
     }
     content = spc_indirect_data_content_get(hash, ctx);
@@ -374,13 +374,13 @@ static u_char *msi_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     BIO *bhash = BIO_new(BIO_f_md());
 
     if (!BIO_set_md(bhash, md)) {
-        printf("Unable to set the message digest of BIO\n");
+        fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return NULL;  /* FAILED */
     }
     BIO_push(bhash, BIO_new(BIO_s_null()));
     if (!bio_hash_data(bhash, ctx->options->indata, 0, ctx->msi_ctx->fileend)) {
-        printf("Unable to calculate digest\n");
+        fprintf(stderr, "Unable to calculate digest\n");
         BIO_free_all(bhash);
         return NULL;  /* FAILED */
     }
@@ -420,14 +420,14 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         }
     }
     if (mdtype == -1) {
-        printf("Failed to extract current message digest\n\n");
+        fprintf(stderr, "Failed to extract current message digest\n\n");
         return 0; /* FAILED */
     }
     printf("Message digest algorithm         : %s\n", OBJ_nid2sn(mdtype));
     md = EVP_get_digestbynid(mdtype);
     hash = BIO_new(BIO_f_md());
     if (!BIO_set_md(hash, md)) {
-        printf("Unable to set the message digest of BIO\n");
+        fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(hash);
         return 0; /* FAILED */
     }
@@ -435,13 +435,13 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
     if (ctx->msi_ctx->p_msiex) {
         BIO *prehash = BIO_new(BIO_f_md());
         if (EVP_MD_size(md) != (int)ctx->msi_ctx->len_msiex) {
-            printf("Incorrect MsiDigitalSignatureEx stream data length\n\n");
+            fprintf(stderr, "Incorrect MsiDigitalSignatureEx stream data length\n\n");
             BIO_free_all(hash);
             BIO_free_all(prehash);
             return 0; /* FAILED */
         }
         if (!BIO_set_md(prehash, md)) {
-            printf("Unable to set the message digest of BIO\n");
+            fprintf(stderr, "Unable to set the message digest of BIO\n");
             BIO_free_all(hash);
             BIO_free_all(prehash);
             return 0; /* FAILED */
@@ -451,7 +451,7 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         print_hash("Current MsiDigitalSignatureEx    ", "", (u_char *)ctx->msi_ctx->p_msiex,
             (int)ctx->msi_ctx->len_msiex);
         if (!msi_prehash_dir(ctx->msi_ctx->dirent, prehash, 1)) {
-            printf("Failed to calculate pre-hash used for MsiDigitalSignatureEx\n\n");
+            fprintf(stderr, "Failed to calculate pre-hash used for MsiDigitalSignatureEx\n\n");
             BIO_free_all(hash);
             BIO_free_all(prehash);
             return 0; /* FAILED */
@@ -463,7 +463,7 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
     }
 
     if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1)) {
-        printf("Failed to calculate DigitalSignature\n\n");
+        fprintf(stderr, "Failed to calculate DigitalSignature\n\n");
         BIO_free_all(hash);
         return 0; /* FAILED */
     }
@@ -474,12 +474,12 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
     print_hash("Calculated DigitalSignature      ", mdok ? "" : "    MISMATCH!!!\n",
         cmdbuf, EVP_MD_size(md));
     if (!mdok) {
-        printf("Signature verification: failed\n\n");
+        fprintf(stderr, "Signature verification: failed\n\n");
         return 0; /* FAILED */
     }
     cdigest = msi_digest_calc(ctx, md);
     if (!cdigest) {
-        printf("Failed to calculate simple message digest\n\n");
+        fprintf(stderr, "Failed to calculate simple message digest\n\n");
         return 0; /* FAILED */
     }
     mdlen = EVP_MD_size(EVP_get_digestbynid(mdtype));
@@ -504,12 +504,12 @@ static PKCS7 *msi_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     ds = msi_signatures_get(ctx->msi_ctx->dirent, NULL);
 
     if (!ds) {
-        printf("MSI file has no signature\n");
+        fprintf(stderr, "MSI file has no signature\n");
         return NULL; /* FAILED */
     }
     p7 = msi_pkcs7_get_digital_signature(ctx, ds);
     if (!p7) {
-        printf("Unable to extract existing signature\n");
+        fprintf(stderr, "Unable to extract existing signature\n");
         return NULL; /* FAILED */
     }
     return p7;
@@ -531,12 +531,12 @@ static PKCS7 *msi_pkcs7_extract_to_nest(FILE_FORMAT_CTX *ctx)
     }
     ds = msi_signatures_get(ctx->msi_ctx->dirent, &dse);
     if (!ds) {
-        printf("MSI file has no signature\n");
+        fprintf(stderr, "MSI file has no signature\n");
         return NULL; /* FAILED */
     }
     p7 = msi_pkcs7_get_digital_signature(ctx, ds);
     if (!p7) {
-        printf("Unable to extract existing signature\n");
+        fprintf(stderr, "Unable to extract existing signature\n");
         return NULL; /* FAILED */
     }
     /* perform a sanity check for the MsiDigitalSignatureEx section */
@@ -575,7 +575,7 @@ static int msi_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     }
     if (!msi_file_write(ctx->msi_ctx->msi, ctx->msi_ctx->dirent,
             NULL, 0, NULL, 0, outdata)) {
-        printf("Saving the msi file failed\n");
+        fprintf(stderr, "Saving the msi file failed\n");
         return 1; /* FAILED */
     }
     return 0; /* OK */
@@ -612,21 +612,21 @@ static PKCS7 *msi_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
     PKCS7 *p7 = pkcs7_create(ctx);
 
     if (!p7) {
-        printf("Creating a new signature failed\n");
+        fprintf(stderr, "Creating a new signature failed\n");
         return NULL; /* FAILED */
     }
     if (!add_indirect_data_object(p7)) {
-        printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
+        fprintf(stderr, "Adding SPC_INDIRECT_DATA_OBJID failed\n");
         PKCS7_free(p7);
         return NULL; /* FAILED */
     }
     content = spc_indirect_data_content_get(hash, ctx);
     if (!content) {
-        printf("Failed to get spcIndirectDataContent\n");
+        fprintf(stderr, "Failed to get spcIndirectDataContent\n");
         return NULL; /* FAILED */
     }
     if (!sign_spc_indirect_data_content(p7, content)) {
-        printf("Failed to set signed content\n");
+        fprintf(stderr, "Failed to set signed content\n");
         PKCS7_free(p7);
         ASN1_OCTET_STRING_free(content);
         return NULL; /* FAILED */
@@ -649,7 +649,7 @@ static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 
     if (((len = i2d_PKCS7(p7, NULL)) <= 0)
         || (p = OPENSSL_malloc((size_t)len)) == NULL) {
-        printf("i2d_PKCS memory allocation failed: %d\n", len);
+        fprintf(stderr, "i2d_PKCS memory allocation failed: %d\n", len);
         return 1; /* FAILED */
     }
     i2d_PKCS7(p7, &p);
@@ -657,7 +657,7 @@ static int msi_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 
     if (!msi_file_write(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, p, (uint32_t)len,
         ctx->msi_ctx->p_msiex, ctx->msi_ctx->len_msiex, outdata)) {
-        printf("Saving the msi file failed\n");
+        fprintf(stderr, "Saving the msi file failed\n");
         OPENSSL_free(p);
         return 1; /* FAILED */
     }
@@ -719,17 +719,17 @@ static MSI_CTX *msi_ctx_get(char *indata, uint32_t filesize)
 
     msi = msi_file_new(indata, filesize);
     if (!msi) {
-        printf("Failed to parse MSI_FILE struct\n");
+        fprintf(stderr, "Failed to parse MSI_FILE struct\n");
         return NULL; /* FAILED */
     }
     root = msi_root_entry_get(msi);
     if (!root) {
-        printf("Failed to get file entry\n");
+        fprintf(stderr, "Failed to get file entry\n");
         msi_file_free(msi);
         return NULL; /* FAILED */
     }
     if (!msi_dirent_new(msi, root, NULL, &(dirent))) {
-        printf("Failed to parse MSI_DIRENT struct\n");
+        fprintf(stderr, "Failed to parse MSI_DIRENT struct\n");
         msi_file_free(msi);
         if (dirent)
             msi_dirent_free(dirent);
@@ -750,12 +750,12 @@ static PKCS7 *msi_pkcs7_get_digital_signature(FILE_FORMAT_CTX *ctx, MSI_ENTRY *d
     uint32_t len = GET_UINT32_LE(ds->size);
 
     if (len == 0 || len >= MAXREGSECT) {
-        printf("Corrupted DigitalSignature stream length 0x%08X\n", len);
+        fprintf(stderr, "Corrupted DigitalSignature stream length 0x%08X\n", len);
         return NULL; /* FAILED */
     }
     p = OPENSSL_malloc((size_t)len);
     if (!msi_file_read(ctx->msi_ctx->msi, ds, 0, p, len)) {
-        printf("DigitalSignature stream data error\n");
+        fprintf(stderr, "DigitalSignature stream data error\n");
         OPENSSL_free(p);
         return NULL;
     }
@@ -763,7 +763,7 @@ static PKCS7 *msi_pkcs7_get_digital_signature(FILE_FORMAT_CTX *ctx, MSI_ENTRY *d
     p7 = d2i_PKCS7(NULL, &blob, len);
     OPENSSL_free(p);
     if (!p7) {
-        printf("Failed to extract PKCS7 data\n");
+        fprintf(stderr, "Failed to extract PKCS7 data\n");
         return NULL;
     }
     return p7;
@@ -774,7 +774,7 @@ static const u_char *sector_offset_to_address(MSI_FILE *msi, uint32_t sector, ui
 {
     if (sector >= MAXREGSECT || offset >= msi->m_sectorSize
         || (msi->m_bufferLen - offset) / msi->m_sectorSize <= sector) {
-        printf("Corrupted file\n");
+        fprintf(stderr, "Corrupted file\n");
         return NULL; /* FAILED */
     }
     return msi->m_buffer + (sector + 1) * msi->m_sectorSize + offset;
@@ -795,19 +795,19 @@ static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber)
             fatSectorNumber -= entriesPerSector;
             address = sector_offset_to_address(msi, difatSectorLocation, msi->m_sectorSize - 4);
             if (!address) {
-                printf("Failed to get a next sector address\n");
+                fprintf(stderr, "Failed to get a next sector address\n");
                 return NOSTREAM; /* FAILED */
             }
             difatSectorLocation = GET_UINT32_LE(address);
         }
         address = sector_offset_to_address(msi, difatSectorLocation, fatSectorNumber * 4);
         if (!address) {
-            printf("Failed to get a next sector address\n");
+            fprintf(stderr, "Failed to get a next sector address\n");
             return NOSTREAM; /* FAILED */
         }
         fatSectorLocation = GET_UINT32_LE(address);
         if (fatSectorLocation == 0 || fatSectorLocation >= FREESECT) {
-            printf("Get corrupted sector location 0x%08X\n", fatSectorLocation);
+            fprintf(stderr, "Get corrupted sector location 0x%08X\n", fatSectorLocation);
             return NOSTREAM; /* FAILED */
         }
         return fatSectorLocation;
@@ -823,17 +823,17 @@ static uint32_t get_next_sector(MSI_FILE *msi, uint32_t sector)
     uint32_t fatSectorNumber = sector / entriesPerSector;
     uint32_t fatSectorLocation = get_fat_sector_location(msi, fatSectorNumber);
     if (fatSectorLocation == NOSTREAM) {
-        printf("Failed to get a fat sector location\n");
+        fprintf(stderr, "Failed to get a fat sector location\n");
         return NOSTREAM; /* FAILED */
     }
     address = sector_offset_to_address(msi, fatSectorLocation, sector % entriesPerSector * 4);
     if (!address) {
-        printf("Failed to get a next sector address\n");
+        fprintf(stderr, "Failed to get a next sector address\n");
         return NOSTREAM; /* FAILED */
     }
     nextSectorLocation = GET_UINT32_LE(address);
     if (nextSectorLocation == 0 || nextSectorLocation >= FREESECT) {
-        printf("Get corrupted sector location 0x%08X\n", nextSectorLocation);
+        fprintf(stderr, "Get corrupted sector location 0x%08X\n", nextSectorLocation);
         return NOSTREAM; /* FAILED */
     }
     return nextSectorLocation;
@@ -846,7 +846,7 @@ static int locate_final_sector(MSI_FILE *msi, uint32_t sector, uint32_t offset, 
         offset -= msi->m_sectorSize;
         sector = get_next_sector(msi, sector);
         if (sector == NOSTREAM) {
-            printf("Failed to get a next sector\n");
+            fprintf(stderr, "Failed to get a next sector\n");
             return 0; /* FAILED */
         }
     }
@@ -860,11 +860,11 @@ static const u_char *mini_sector_offset_to_address(MSI_FILE *msi, uint32_t secto
 {
     if (sector >= MAXREGSECT || offset >= msi->m_minisectorSize ||
             (msi->m_bufferLen - offset) / msi->m_minisectorSize <= sector) {
-        printf("Corrupted file\n");
+        fprintf(stderr, "Corrupted file\n");
         return NULL; /* FAILED */
     }
     if (!locate_final_sector(msi, msi->m_miniStreamStartSector, sector * msi->m_minisectorSize + offset, &sector, &offset)) {
-        printf("Failed to locate a final sector\n");
+        fprintf(stderr, "Failed to locate a final sector\n");
         return NULL; /* FAILED */
     }
     return sector_offset_to_address(msi, sector, offset);
@@ -877,7 +877,7 @@ static const u_char *mini_sector_offset_to_address(MSI_FILE *msi, uint32_t secto
 static int read_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *buffer, uint32_t len)
 {
     if (!locate_final_sector(msi, sector, offset, &sector, &offset)) {
-        printf("Failed to locate a final sector\n");
+        fprintf(stderr, "Failed to locate a final sector\n");
         return 0; /* FAILED */
     }
     while (len > 0) {
@@ -885,12 +885,12 @@ static int read_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *bu
         uint32_t copylen;
         address = sector_offset_to_address(msi, sector, offset);
         if (!address) {
-            printf("Failed to get a next sector address\n");
+            fprintf(stderr, "Failed to get a next sector address\n");
             return 0; /* FAILED */
         }
         copylen = MIN(len, msi->m_sectorSize - offset);
         if (msi->m_buffer + msi->m_bufferLen < address + copylen) {
-            printf("Corrupted file\n");
+            fprintf(stderr, "Corrupted file\n");
             return 0; /* FAILED */
         }
         memcpy(buffer, address, copylen);
@@ -898,7 +898,7 @@ static int read_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *bu
         len -= copylen;
         sector = get_next_sector(msi, sector);
         if (sector == 0) {
-            printf("Failed to get a next sector\n");
+            fprintf(stderr, "Failed to get a next sector\n");
             return 0; /* FAILED */
         }
         offset = 0;
@@ -913,17 +913,17 @@ static uint32_t get_next_mini_sector(MSI_FILE *msi, uint32_t miniSector)
     const u_char *address;
 
     if (!locate_final_sector(msi, msi->m_hdr->firstMiniFATSectorLocation, miniSector * 4, &sector, &offset)) {
-        printf("Failed to locate a final sector\n");
+        fprintf(stderr, "Failed to locate a final sector\n");
         return NOSTREAM; /* FAILED */
     }
     address = sector_offset_to_address(msi, sector, offset);
     if (!address) {
-        printf("Failed to get a next mini sector address\n");
+        fprintf(stderr, "Failed to get a next mini sector address\n");
         return NOSTREAM; /* FAILED */
     }
     nextMiniSectorLocation = GET_UINT32_LE(address);
     if (nextMiniSectorLocation == 0 || nextMiniSectorLocation >= FREESECT) {
-        printf("Get corrupted sector location 0x%08X\n", nextMiniSectorLocation);
+        fprintf(stderr, "Get corrupted sector location 0x%08X\n", nextMiniSectorLocation);
         return NOSTREAM; /* FAILED */
     }
     return nextMiniSectorLocation;
@@ -935,7 +935,7 @@ static int locate_final_mini_sector(MSI_FILE *msi, uint32_t sector, uint32_t off
         offset -= msi->m_minisectorSize;
         sector = get_next_mini_sector(msi, sector);
         if (sector == NOSTREAM) {
-            printf("Failed to get a next mini sector\n");
+            fprintf(stderr, "Failed to get a next mini sector\n");
             return 0; /* FAILED */
         }
     }
@@ -948,7 +948,7 @@ static int locate_final_mini_sector(MSI_FILE *msi, uint32_t sector, uint32_t off
 static int read_mini_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *buffer, uint32_t len)
 {
     if (!locate_final_mini_sector(msi, sector, offset, &sector, &offset)) {
-        printf("Failed to locate a final mini sector\n");
+        fprintf(stderr, "Failed to locate a final mini sector\n");
         return 0; /* FAILED */
     }
     while (len > 0) {
@@ -956,12 +956,12 @@ static int read_mini_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, cha
         uint32_t copylen;
         address = mini_sector_offset_to_address(msi, sector, offset);
         if (!address) {
-            printf("Failed to get a next mini sector address\n");
+            fprintf(stderr, "Failed to get a next mini sector address\n");
             return 0; /* FAILED */
         }
         copylen = MIN(len, msi->m_minisectorSize - offset);
         if (msi->m_buffer + msi->m_bufferLen < address + copylen) {
-            printf("Corrupted file\n");
+            fprintf(stderr, "Corrupted file\n");
             return 0; /* FAILED */
         }
         memcpy(buffer, address, copylen);
@@ -969,7 +969,7 @@ static int read_mini_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, cha
         len -= copylen;
         sector = get_next_mini_sector(msi, sector);
         if (sector == NOSTREAM) {
-            printf("Failed to get a next mini sector\n");
+            fprintf(stderr, "Failed to get a next mini sector\n");
             return 0; /* FAILED */
         }
         offset = 0;
@@ -1004,20 +1004,20 @@ static MSI_FILE_HDR *parse_header(char *data)
     memcpy(header->signature, data + HEADER_SIGNATURE, sizeof header->signature);
     /* Minor Version field SHOULD be set to 0x003E. */
     header->minorVersion = GET_UINT16_LE(data + HEADER_MINOR_VER);
-    if (header->minorVersion !=0x003E ) {
+    if (header->minorVersion !=0x003E) {
         printf("Warning: Minor Version field SHOULD be 0x003E, but is: 0x%04X\n", header->minorVersion);
     }
     /* Major Version field MUST be set to either 0x0003 (version 3) or 0x0004 (version 4). */
     header->majorVersion = GET_UINT16_LE(data + HEADER_MAJOR_VER);
     if (header->majorVersion != 0x0003 && header->majorVersion != 0x0004) {
-        printf("Unknown Major Version: 0x%04X\n", header->majorVersion);
+        fprintf(stderr, "Unknown Major Version: 0x%04X\n", header->majorVersion);
         OPENSSL_free(header);
         return NULL; /* FAILED */
     }
     /* Byte Order field MUST be set to 0xFFFE, specifies little-endian byte order. */
     header->byteOrder = GET_UINT16_LE(data + HEADER_BYTE_ORDER);
     if (header->byteOrder != 0xFFFE) {
-        printf("Unknown Byte Order: 0x%04X\n", header->byteOrder);
+        fprintf(stderr, "Unknown Byte Order: 0x%04X\n", header->byteOrder);
         OPENSSL_free(header);
         return NULL; /* FAILED */
     }
@@ -1026,7 +1026,7 @@ static MSI_FILE_HDR *parse_header(char *data)
     header->sectorShift = GET_UINT16_LE(data + HEADER_SECTOR_SHIFT);
     if ((header->majorVersion == 0x0003 && header->sectorShift != 0x0009) ||
             (header->majorVersion == 0x0004 && header->sectorShift != 0x000C)) {
-        printf("Unknown Sector Shift: 0x%04X\n", header->sectorShift);
+        fprintf(stderr, "Unknown Sector Shift: 0x%04X\n", header->sectorShift);
         OPENSSL_free(header);
         return NULL; /* FAILED */
     }
@@ -1035,7 +1035,7 @@ static MSI_FILE_HDR *parse_header(char *data)
      * The sector size of the Mini Stream MUST be 64 bytes. */
     header->miniSectorShift = GET_UINT16_LE(data + HEADER_MINI_SECTOR_SHIFT);
     if (header->miniSectorShift != 0x0006) {
-        printf("Unknown Mini Sector Shift: 0x%04X\n", header->miniSectorShift);
+        fprintf(stderr, "Unknown Mini Sector Shift: 0x%04X\n", header->miniSectorShift);
         OPENSSL_free(header);
         return NULL; /* FAILED */
     }
@@ -1045,13 +1045,13 @@ static MSI_FILE_HDR *parse_header(char *data)
      * If Major Version is 3, the Number of Directory Sectors MUST be zero. */
     header->numDirectorySector = GET_UINT32_LE(data + HEADER_DIR_SECTORS_NUM);
     if (header->majorVersion == 0x0003 && header->numDirectorySector != 0x00000000) {
-        printf("Unsupported Number of Directory Sectors: 0x%08X\n", header->numDirectorySector);
+        fprintf(stderr, "Unsupported Number of Directory Sectors: 0x%08X\n", header->numDirectorySector);
         OPENSSL_free(header);
         return NULL; /* FAILED */
     }
     header->numFATSector = GET_UINT32_LE(data + HEADER_FAT_SECTORS_NUM);
     if ((uint64_t)header->numFATSector * sectorSize >= SIZE_16M) {
-        printf("Unsupported Number of FAT Sectors: 0x%08X\n", header->numFATSector);
+        fprintf(stderr, "Unsupported Number of FAT Sectors: 0x%08X\n", header->numFATSector);
         OPENSSL_free(header);
         return NULL; /* FAILED */
     }
@@ -1064,21 +1064,21 @@ static MSI_FILE_HDR *parse_header(char *data)
      * must be allocated as normal sectors from the FAT. */
     header->miniStreamCutoffSize = GET_UINT32_LE(data + HEADER_MINI_STREAM_CUTOFF);
     if (header->miniStreamCutoffSize != 0x00001000) {
-        printf("Unsupported Mini Stream Cutoff Size: 0x%08X\n", header->miniStreamCutoffSize);
+        fprintf(stderr, "Unsupported Mini Stream Cutoff Size: 0x%08X\n", header->miniStreamCutoffSize);
         OPENSSL_free(header);
         return NULL; /* FAILED */
     }
     header->firstMiniFATSectorLocation = GET_UINT32_LE(data + HEADER_MINI_FAT_SECTOR_LOC);
     header->numMiniFATSector = GET_UINT32_LE(data + HEADER_MINI_FAT_SECTORS_NUM);
     if ((uint64_t)header->numMiniFATSector * sectorSize >= SIZE_16M) {
-        printf("Unsupported Number of Mini FAT Sectors: 0x%08X\n", header->numMiniFATSector);
+        fprintf(stderr, "Unsupported Number of Mini FAT Sectors: 0x%08X\n", header->numMiniFATSector);
         OPENSSL_free(header);
         return NULL; /* FAILED */
     }
     header->firstDIFATSectorLocation = GET_UINT32_LE(data + HEADER_DIFAT_SECTOR_LOC);
     header->numDIFATSector = GET_UINT32_LE(data + HEADER_DIFAT_SECTORS_NUM);
     if ((uint64_t)header->numDIFATSector * sectorSize >= SIZE_16M) {
-        printf("Unsupported Number of DIFAT Sectors: 0x%08X\n", header->numDIFATSector);
+        fprintf(stderr, "Unsupported Number of DIFAT Sectors: 0x%08X\n", header->numDIFATSector);
         OPENSSL_free(header);
         return NULL; /* FAILED */
     }
@@ -1097,7 +1097,7 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int is_root)
     entry->nameLen = GET_UINT16_LE(data + DIRENT_NAME_LEN);
     /* This length MUST NOT exceed 64, the maximum size of the Directory Entry Name field */
     if (entry->nameLen == 0 || entry->nameLen > 64) {
-        printf("Corrupted Directory Entry Name Length\n");
+        fprintf(stderr, "Corrupted Directory Entry Name Length\n");
         OPENSSL_free(entry);
         return NULL; /* FAILED */
     }
@@ -1106,7 +1106,7 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int is_root)
      * string "Root Entry" in Unicode UTF-16. */
     if (is_root && (entry->nameLen != sizeof msi_root_entry
         || memcmp(entry->name, msi_root_entry, entry->nameLen))) {
-        printf("Corrupted Root Directory Entry's Name\n");
+        fprintf(stderr, "Corrupted Root Directory Entry's Name\n");
         OPENSSL_free(entry);
         return NULL; /* FAILED */
     }
@@ -1121,7 +1121,7 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int is_root)
     /* The Creation Time field in the root storage directory entry MUST be all zeroes
        but the Modified Time field in the root storage directory entry MAY be all zeroes */
     if (is_root && memcmp(entry->creationTime, msi_zeroes, 8)) {
-        printf("Corrupted Root Directory Entry's Creation Time\n");
+        fprintf(stderr, "Corrupted Root Directory Entry's Creation Time\n");
         OPENSSL_free(entry);
         return NULL; /* FAILED */
     }
@@ -1133,7 +1133,7 @@ static MSI_ENTRY *parse_entry(MSI_FILE *msi, const u_char *data, int is_root)
     inlen = GET_UINT32_LE(entry->size);
     if ((msi->m_sectorSize == 0x0200 && inlen > 0x80000000)
         || (msi->m_bufferLen <= inlen)) {
-        printf("Corrupted Stream Size 0x%08X\n", inlen);
+        fprintf(stderr, "Corrupted Stream Size 0x%08X\n", inlen);
         OPENSSL_free(entry);
         return NULL; /* FAILED */
     }
@@ -1153,27 +1153,27 @@ static MSI_ENTRY *get_entry(MSI_FILE *msi, uint32_t entryID, int is_root)
 
     /* Corrupted file */
     if (!is_root && entryID == 0) {
-        printf("Corrupted entryID\n");
+        fprintf(stderr, "Corrupted entryID\n");
         return NULL; /* FAILED */
     }
     if (msi->m_bufferLen / sizeof(MSI_ENTRY) <= entryID) {
-        printf("Invalid argument entryID\n");
+        fprintf(stderr, "Invalid argument entryID\n");
         return NULL; /* FAILED */
     }
     /* The first entry in the first sector of the directory chain is known as
        the root directory entry so it can not contain the directory stream */
     if (msi->m_hdr->firstDirectorySectorLocation == 0 && entryID == 0) {
-        printf("Corrupted First Directory Sector Location\n");
+        fprintf(stderr, "Corrupted First Directory Sector Location\n");
         return NULL; /* FAILED */
     }
     if (!locate_final_sector(msi, msi->m_hdr->firstDirectorySectorLocation,
             entryID * sizeof(MSI_ENTRY), &sector, &offset)) {
-        printf("Failed to locate a final sector\n");
+        fprintf(stderr, "Failed to locate a final sector\n");
         return NULL; /* FAILED */
     }
     address = sector_offset_to_address(msi, sector, offset);
     if (!address) {
-        printf("Failed to get a final address\n");
+        fprintf(stderr, "Failed to get a final address\n");
         return NULL; /* FAILED */
     }
     return parse_entry(msi, address, is_root);
@@ -1200,12 +1200,12 @@ static MSI_FILE *msi_file_new(char *buffer, uint32_t len)
     MSI_FILE_HDR *header;
 
     if (buffer == NULL || len == 0) {
-        printf("Invalid argument\n");
+        fprintf(stderr, "Invalid argument\n");
         return NULL; /* FAILED */
     }
     header = parse_header(buffer);
     if (!header) {
-        printf("Failed to parse MSI_FILE_HDR struct\n");
+        fprintf(stderr, "Failed to parse MSI_FILE_HDR struct\n");
         return NULL; /* FAILED */
     }
     msi = (MSI_FILE *)OPENSSL_malloc(sizeof(MSI_FILE));
@@ -1218,20 +1218,20 @@ static MSI_FILE *msi_file_new(char *buffer, uint32_t len)
 
     if (msi->m_bufferLen < sizeof *(msi->m_hdr) ||
             memcmp(msi->m_hdr->signature, msi_magic, sizeof msi_magic)) {
-        printf("Wrong file format\n");
+        fprintf(stderr, "Wrong file format\n");
         msi_file_free(msi);
         return NULL; /* FAILED */
     }
 
     /* The file must contains at least 3 sectors */
     if (msi->m_bufferLen < msi->m_sectorSize * 3) {
-        printf("The file must contains at least 3 sectors\n");
+        fprintf(stderr, "The file must contains at least 3 sectors\n");
         msi_file_free(msi);
         return NULL; /* FAILED */
     }
     root = msi_root_entry_get(msi);
     if (!root) {
-        printf("Failed to get msi root entry\n");
+        fprintf(stderr, "Failed to get msi root entry\n");
         msi_file_free(msi);
         return NULL; /* FAILED */
     }
@@ -1251,13 +1251,13 @@ static int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, M
         return 1; /* OK */
     }
     if (entry->nameLen == 0 || entry->nameLen > 64) {
-        printf("Corrupted Directory Entry Name Length\n");
+        fprintf(stderr, "Corrupted Directory Entry Name Length\n");
         return 0; /* FAILED */
     }
     /* detect cycles in previously visited entries (parents, siblings) */
     if (!ret) { /* initialized (non-root entry) */
         if (!memcmp(entry, tortoise->entry, sizeof(MSI_ENTRY))) {
-            printf("MSI_ENTRY cycle detected at level %d\n", cnt);
+            fprintf(stderr, "MSI_ENTRY cycle detected at level %d\n", cnt);
             OPENSSL_free(entry);
             return 0; /* FAILED */
         }
@@ -1284,7 +1284,7 @@ static int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, M
     }
 
     if (parent && !sk_MSI_DIRENT_push(parent->children, dirent)) {
-        printf("Failed to insert MSI_DIRENT\n");
+        fprintf(stderr, "Failed to insert MSI_DIRENT\n");
         return 0; /* FAILED */
     }
 
@@ -1294,7 +1294,7 @@ static int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, M
     if (!recurse_entry(msi, entry->leftSiblingID, parent)
         || !recurse_entry(msi, entry->rightSiblingID, parent)
         || !recurse_entry(msi, entry->childID, dirent)) {
-        printf("Failed to add a sibling or a child to the tree\n");
+        fprintf(stderr, "Failed to add a sibling or a child to the tree\n");
         return 0; /* FAILED */
     }
 
@@ -1313,7 +1313,7 @@ static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent)
 
     node = get_entry(msi, entryID, FALSE);
     if (!node) {
-        printf("Corrupted ID: 0x%08X\n", entryID);
+        fprintf(stderr, "Corrupted ID: 0x%08X\n", entryID);
         return 0; /* FAILED */
     }
 
@@ -1478,7 +1478,7 @@ static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_roo
             }
             indata = (char *)OPENSSL_malloc(inlen);
             if (!msi_file_read(msi, child->entry, 0, indata, inlen)) {
-                printf("Failed to read stream data\n");
+                fprintf(stderr, "Failed to read stream data\n");
                 OPENSSL_free(indata);
                 goto out;
             }
@@ -1487,7 +1487,7 @@ static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_roo
         }
         if (child->type == DIR_STORAGE) {
             if (!msi_hash_dir(msi, child, hash, 0)) {
-                printf("Failed to hash a MSI storage\n");
+                fprintf(stderr, "Failed to hash a MSI storage\n");
                 goto out;
             }
         }
@@ -1506,7 +1506,7 @@ static int ministream_append(MSI_OUT *out, char *buf, uint32_t len)
         out->ministreamsMemallocCount += needSectors;
         out->ministream = OPENSSL_realloc(out->ministream, (size_t)(out->ministreamsMemallocCount * out->sectorSize));
         if (!out->ministream) {
-            printf("Memory allocation failure\n");
+            fprintf(stderr, "Memory allocation failure\n");
             return 0; /* FAILED */
         }
     }
@@ -1520,12 +1520,12 @@ static int minifat_append(MSI_OUT *out, char *buf, uint32_t len)
     if (out->minifatLen == (uint64_t)out->minifatMemallocCount * out->sectorSize) {
         out->minifatMemallocCount++;
         if ((uint64_t)out->minifatMemallocCount * out->sectorSize >= SIZE_16M) {
-            printf("Failed to append MiniFAT sector\n");
+            fprintf(stderr, "Failed to append MiniFAT sector\n");
             return 0; /* FAILED */
         }
         out->minifat = OPENSSL_realloc(out->minifat, (size_t)(out->minifatMemallocCount * out->sectorSize));
         if (!out->minifat) {
-            printf("Memory allocation failure\n");
+            fprintf(stderr, "Memory allocation failure\n");
             return 0; /* FAILED */
         }
     }
@@ -1539,12 +1539,12 @@ static int fat_append(MSI_OUT *out, char *buf, uint32_t len)
     if (out->fatLen == (uint64_t)out->fatMemallocCount * out->sectorSize) {
         out->fatMemallocCount++;
         if ((uint64_t)out->fatMemallocCount * out->sectorSize >= SIZE_16M) {
-            printf("Failed to append FAT sector\n");
+            fprintf(stderr, "Failed to append FAT sector\n");
             return 0; /* FAILED */
         }
         out->fat = OPENSSL_realloc(out->fat, (size_t)(out->fatMemallocCount * out->sectorSize));
         if (!out->fat) {
-            printf("Memory allocation failure\n");
+            fprintf(stderr, "Memory allocation failure\n");
             return 0; /* FAILED */
         }
     }
@@ -1558,12 +1558,12 @@ static int difat_append(MSI_OUT *out, char *buf, uint32_t len)
     if (out->difatLen == (uint64_t)out->difatMemallocCount * out->sectorSize) {
         out->difatMemallocCount++;
         if ((uint64_t)out->difatMemallocCount * out->sectorSize >= SIZE_16M) {
-            printf("Failed to append DIFAT sector\n");
+            fprintf(stderr, "Failed to append DIFAT sector\n");
             return 0; /* FAILED */
         }
         out->difat = OPENSSL_realloc(out->difat, (size_t)(out->difatMemallocCount * out->sectorSize));
         if (!out->difat) {
-            printf("Memory allocation failure\n");
+            fprintf(stderr, "Memory allocation failure\n");
             return 0; /* FAILED */
         }
     }
@@ -1582,7 +1582,7 @@ static int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t na
             continue;
         }
         if (child->type != DIR_STREAM) {
-            printf("Can't delete or replace storages\n");
+            fprintf(stderr, "Can't delete or replace storages\n");
             return 0; /* FAILED */
         }
         sk_MSI_DIRENT_delete(dirent->children, i);
@@ -1680,7 +1680,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
 
     if (dirent->type == DIR_ROOT) {
         if (len_msi > 0 && !signature_insert(dirent, len_msiex)) {
-            printf("Insert new signature failed\n");
+            fprintf(stderr, "Insert new signature failed\n");
             return 0; /* FAILED */
         }
         out->ministreamsMemallocCount = (GET_UINT32_LE(dirent->entry->size) + out->sectorSize - 1)/out->sectorSize;
@@ -1697,7 +1697,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
             char *indata = NULL;
             uint32_t inlen = GET_UINT32_LE(child->entry->size);
             if (inlen >= MAXREGSECT) {
-                printf("Corrupted stream length 0x%08X\n", inlen);
+                fprintf(stderr, "Corrupted stream length 0x%08X\n", inlen);
                 return 0; /* FAILED */
             }
             /* DigitalSignature or MsiDigitalSignatureEx: inlen == 0 */
@@ -2239,11 +2239,11 @@ out:
 static BIO *msi_digest_calc_bio(FILE_FORMAT_CTX *ctx, BIO *hash)
 {
     if (ctx->options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ctx, hash)) {
-        printf("Unable to calc MsiDigitalSignatureEx\n");
+        fprintf(stderr, "Unable to calc MsiDigitalSignatureEx\n");
         return NULL; /* FAILED */
     }
     if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1)) {
-        printf("Unable to msi_handle_dir()\n");
+        fprintf(stderr, "Unable to msi_handle_dir()\n");
         return NULL; /* FAILED */
     }
     return hash;
@@ -2296,14 +2296,14 @@ static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash)
     BIO *prehash = BIO_new(BIO_f_md());
 
     if (!BIO_set_md(prehash, ctx->options->md)) {
-        printf("Unable to set the message digest of BIO\n");
+        fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(prehash);
         return 0; /* FAILED */
     }
     BIO_push(prehash, BIO_new(BIO_s_null()));
 
     if (!msi_prehash_dir(ctx->msi_ctx->dirent, prehash, 1)) {
-        printf("Unable to calculate MSI pre-hash ('metadata') hash\n");
+        fprintf(stderr, "Unable to calculate MSI pre-hash ('metadata') hash\n");
         return 0; /* FAILED */
     }
     if (ctx->msi_ctx->p_msiex) {
@@ -2335,23 +2335,23 @@ static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse,
 
         alg = sk_X509_ALGOR_value(p7->d.sign->md_algs, 0);
         X509_ALGOR_get0(&aoid, NULL, NULL, alg);
-        printf("Message digest algorithm found : %s\n", OBJ_nid2sn(OBJ_obj2nid(aoid)));
-        printf("It is not possible to add a nested signature of a different MD type to the MSI file "
+        fprintf(stderr, "Message digest algorithm found : %s\n", OBJ_nid2sn(OBJ_obj2nid(aoid)));
+        fprintf(stderr, "It is not possible to add a nested signature of a different MD type to the MSI file "
             "without invalidating the initial signature, as the file contains MsiDigitalSignatureEx.\n"
             "The file should be signed again, rather than adding a nested signature.\n");
-            return 0; /* FAILED */
+        return 0; /* FAILED */
     }
     if (!dse && ctx->options->add_msi_dse) {
-        printf("It is not possible to add a nested signature using the -add-msi-dse parameter "
+        fprintf(stderr, "It is not possible to add a nested signature using the -add-msi-dse parameter "
             "without invalidating the initial signature, as the file does not contain MsiDigitalSignatureEx.\n"
             "The file should be signed again, rather than adding a nested signature.\n");
-            return 0; /* FAILED */
+        return 0; /* FAILED */
     }
     if (dse && !ctx->options->add_msi_dse) {
-        printf("It is not possible to add a signature without using the -add-msi-dse parameter, "
+        fprintf(stderr, "It is not possible to add a signature without using the -add-msi-dse parameter, "
             "as doing so would invalidate the initial signature due to the presence of MsiDigitalSignatureEx.\n"
             "In this case, consider using the -add-msi-dse option.\n");
-            return 0; /* FAILED */
+        return 0; /* FAILED */
     }
     return 1; /* OK */
 }
@@ -2378,22 +2378,22 @@ static int msi_check_file(FILE_FORMAT_CTX *ctx)
     MSI_ENTRY *ds, *dse = NULL;
 
     if (!ctx) {
-        printf("Init error\n\n");
+        fprintf(stderr, "Init error\n");
         return 0; /* FAILED */
     }
     ds = msi_signatures_get(ctx->msi_ctx->dirent, &dse);
     if (!ds) {
-        printf("MSI file has no signature\n\n");
+        fprintf(stderr, "MSI file has no signature\n");
         return 0; /* FAILED */
     }
     inlen = GET_UINT32_LE(ds->size);
     if (inlen == 0 || inlen >= MAXREGSECT) {
-        printf("Corrupted DigitalSignature stream length 0x%08X\n", inlen);
+        fprintf(stderr, "Corrupted DigitalSignature stream length 0x%08X\n", inlen);
         return 0; /* FAILED */
     }
     indata = OPENSSL_malloc((size_t)inlen);
     if (!msi_file_read(ctx->msi_ctx->msi, ds, 0, indata, inlen)) {
-        printf("DigitalSignature stream data error\n\n");
+        fprintf(stderr, "DigitalSignature stream data error\n\n");
         OPENSSL_free(indata);
         return 0; /* FAILED */
     }
@@ -2402,7 +2402,7 @@ static int msi_check_file(FILE_FORMAT_CTX *ctx)
     } else {
         ctx->msi_ctx->len_msiex = GET_UINT32_LE(dse->size);
         if (ctx->msi_ctx->len_msiex == 0 || ctx->msi_ctx->len_msiex >= MAXREGSECT) {
-            printf("Corrupted MsiDigitalSignatureEx stream length 0x%08X\n",
+            fprintf(stderr, "Corrupted MsiDigitalSignatureEx stream length 0x%08X\n",
                 ctx->msi_ctx->len_msiex);
             OPENSSL_free(indata);
             return 0; /* FAILED */
@@ -2410,7 +2410,7 @@ static int msi_check_file(FILE_FORMAT_CTX *ctx)
         ctx->msi_ctx->p_msiex = OPENSSL_malloc((size_t)ctx->msi_ctx->len_msiex);
         if (!msi_file_read(ctx->msi_ctx->msi, dse, 0, (char *)ctx->msi_ctx->p_msiex,
                 ctx->msi_ctx->len_msiex)) {
-            printf("MsiDigitalSignatureEx stream data error\n\n");
+            fprintf(stderr, "MsiDigitalSignatureEx stream data error\n\n");
             OPENSSL_free(indata);
             return 0; /* FAILED */
         }

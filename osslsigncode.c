@@ -281,7 +281,7 @@ static BIO *bio_encode_rfc3161_request(PKCS7 *p7, const EVP_MD *md)
 
     bhash = BIO_new(BIO_f_md());
     if (!BIO_set_md(bhash, md)) {
-        printf("Unable to set the message digest of BIO\n");
+        fprintf(stderr, "Unable to set the message digest of BIO\n");
         goto out;
     }
     BIO_push(bhash, BIO_new(BIO_s_null()));
@@ -347,11 +347,11 @@ static ASN1_INTEGER *create_nonce(int bits)
     int i;
 
     if (len > (int)sizeof(buf)) {
-        printf("Invalid nonce size\n");
+        fprintf(stderr, "Invalid nonce size\n");
         return NULL;
     }
     if (RAND_bytes(buf, len) <= 0) {
-        printf("Random nonce generation failed\n");
+        fprintf(stderr, "Random nonce generation failed\n");
         return NULL;
     }
     /* Find the first non-zero byte and creating ASN1_INTEGER object. */
@@ -359,7 +359,7 @@ static ASN1_INTEGER *create_nonce(int bits)
     }
     nonce = ASN1_INTEGER_new();
     if (!nonce) {
-        printf("Could not create nonce\n");
+        fprintf(stderr, "Could not create nonce\n");
         return NULL;
     }
     OPENSSL_free(nonce->data);
@@ -441,10 +441,10 @@ static int attach_rfc3161_response(PKCS7 *p7, TS_RESP *response, int verbose)
     if (ASN1_INTEGER_get(TS_STATUS_INFO_get0_status(status)) != 0) {
         if (verbose) {
             const STACK_OF(ASN1_UTF8STRING) *reasons = TS_STATUS_INFO_get0_text(status);
-            printf("Timestamping failed: status %ld\n", ASN1_INTEGER_get(TS_STATUS_INFO_get0_status(status)));
+            fprintf(stderr, "Timestamping failed: status %ld\n", ASN1_INTEGER_get(TS_STATUS_INFO_get0_status(status)));
             for (i = 0; i < sk_ASN1_UTF8STRING_num(reasons); i++) {
                 ASN1_UTF8STRING *reason = sk_ASN1_UTF8STRING_value(reasons, i);
-                printf("%s\n", ASN1_STRING_get0_data(reason));
+                fprintf(stderr, "%s\n", ASN1_STRING_get0_data(reason));
             }
         }
         return 1; /* FAILED */
@@ -452,8 +452,8 @@ static int attach_rfc3161_response(PKCS7 *p7, TS_RESP *response, int verbose)
     token = TS_RESP_get_token(response);
     if (((len = i2d_PKCS7(token, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
         if (verbose) {
-            printf("Failed to convert pkcs7: %d\n", len);
-            ERR_print_errors_fp(stdout);
+            fprintf(stderr, "Failed to convert pkcs7: %d\n", len);
+            ERR_print_errors_fp(stderr);
         }
         return 1; /* FAILED */
     }
@@ -501,8 +501,8 @@ static int attach_authenticode_response(PKCS7 *p7, PKCS7 *resp, int verbose)
     }
     if (((len = i2d_PKCS7_SIGNER_INFO(info, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
         if (verbose) {
-            printf("Failed to convert signer info: %d\n", len);
-            ERR_print_errors_fp(stdout);
+            fprintf(stderr, "Failed to convert signer info: %d\n", len);
+            ERR_print_errors_fp(stderr);
         }
         PKCS7_free(resp);
         return 1; /* FAILED */
@@ -596,24 +596,24 @@ static BIO *bio_get_http_curl(long *http_code, char *url, BIO *req, char *proxy,
     if (proxy) {
         res = curl_easy_setopt(curl, CURLOPT_PROXY, proxy);
         if (res != CURLE_OK) {
-            printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+            fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(res), url);
         }
         if (!strncmp("http:", proxy, 5)) {
             res = curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_HTTP);
             if (res != CURLE_OK) {
-                printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+                fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(res), url);
             }
         }
         if (!strncmp("socks:", proxy, 6)) {
             res = curl_easy_setopt(curl, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5);
             if (res != CURLE_OK) {
-                printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+                fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(res), url);
             }
         }
     }
     res = curl_easy_setopt(curl, CURLOPT_URL, url);
     if (res != CURLE_OK) {
-        printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+        fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(res), url);
     }
     /*
      * ask libcurl to show us the verbose output
@@ -622,7 +622,7 @@ static BIO *bio_get_http_curl(long *http_code, char *url, BIO *req, char *proxy,
     if (noverifypeer) {
         res = curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, FALSE);
         if (res != CURLE_OK) {
-            printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+            fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(res), url);
         }
     }
     if (req) { /* POST */
@@ -639,31 +639,31 @@ static BIO *bio_get_http_curl(long *http_code, char *url, BIO *req, char *proxy,
         slist = curl_slist_append(slist, "Cache-Control: no-cache");
         res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
         if (res != CURLE_OK) {
-            printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+            fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(res), url);
         }
         len = BIO_get_mem_data(req, &p);
         res = curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, len);
         if (res != CURLE_OK) {
-            printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+            fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(res), url);
         }
         res = curl_easy_setopt(curl, CURLOPT_POSTFIELDS, (char*)p);
         if (res != CURLE_OK) {
-            printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+            fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(res), url);
         }
         res = curl_easy_setopt(curl, CURLOPT_POST, 1);
         if (res != CURLE_OK) {
-            printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+            fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(res), url);
         }
     }
     bin = BIO_new(BIO_s_mem());
     BIO_set_mem_eof_return(bin, 0);
     res = curl_easy_setopt(curl, CURLOPT_WRITEDATA, bin);
     if (res != CURLE_OK) {
-        printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+        fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(res), url);
     }
     res = curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write);
     if (res != CURLE_OK) {
-        printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+        fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(res), url);
     }
     /* Perform the request */
     res = curl_easy_perform(curl);
@@ -672,7 +672,7 @@ static BIO *bio_get_http_curl(long *http_code, char *url, BIO *req, char *proxy,
     if (res != CURLE_OK) {
         BIO_free_all(bin);
         if (verbose)
-            printf("CURL failure: %s %s\n", curl_easy_strerror(res), url);
+            fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(res), url);
         curl_easy_cleanup(curl);
         return NULL; /* FAILED */
     } else {
@@ -750,7 +750,7 @@ static int verify_callback(int ok, X509_STORE_CTX *ctx)
             }
             return 1;
         } else {
-            printf("\tError: %s\n", X509_verify_cert_error_string(error));
+            printf("\tError: %s\n\n", X509_verify_cert_error_string(error));
         }
     }
     return ok;
@@ -806,7 +806,7 @@ static BIO *socket_bio_read(BIO *s_bio, OSSL_HTTP_REQ_CTX *rctx, int use_ssl)
                 ok = 1;
                 retry = 0; /* use_ssl EOF */
             } else {
-                printf("\nHTTP failure: error %ld: %s\n", err, ERR_reason_error_string(err));
+                fprintf(stderr, "\nHTTP failure: error %ld: %s\n", err, ERR_reason_error_string(err));
                 retry = 0; /* FAILED */
             }
         }
@@ -952,7 +952,7 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
         if (resp && req && !rfc3161)
             check_authenticode_timestamp(&resp);
     } else {
-        printf("\nHTTP failure: Failed to get data from %s\n", url);
+        fprintf(stderr, "\nHTTP failure: Failed to get data from %s\n", url);
     }
 
     return resp;
@@ -993,7 +993,7 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
 #ifndef ENABLE_CURL
     (void)url;
     (void)rfc3161;
-    printf("Could NOT find CURL\n");
+    fprintf(stderr, "Could NOT find CURL\n");
     BIO_free_all(req);
     return NULL; /* FAILED */
 #else /* ENABLE_CURL */
@@ -1034,13 +1034,13 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
 #if OPENSSL_VERSION_NUMBER<0x30000000L
 #ifdef ENABLE_CURL
             if (http_code != -1)
-                printf("Failed to convert timestamp reply from %s; "
+                fprintf(stderr, "Failed to convert timestamp reply from %s; "
                 "HTTP status %ld\n", url, http_code);
             else
 #endif /* ENABLE_CURL */
 #endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
-                printf("Failed to convert timestamp reply from %s\n", url);
-            ERR_print_errors_fp(stdout);
+                fprintf(stderr, "Failed to convert timestamp reply from %s\n", url);
+            ERR_print_errors_fp(stderr);
         }
         BIO_free_all(resp);
     }
@@ -1092,7 +1092,7 @@ static ASN1_INTEGER *serial_cb(TS_RESP_CTX *resp_ctx, void *data)
     (void)data;
 
     if (RAND_bytes((unsigned char *)&buf, sizeof buf) <= 0) {
-        printf("RAND_bytes failed\n");
+        fprintf(stderr, "RAND_bytes failed\n");
         goto out;
     }
     serial = ASN1_INTEGER_new();
@@ -1192,7 +1192,7 @@ static TS_RESP *get_rfc3161_response(FILE_FORMAT_CTX *ctx, X509 *signer_cert,
     /* generate RFC3161 response with embedded TS_TST_INFO structure */
     response = TS_RESP_create_response(resp_ctx, bout);
     if (!response) {
-        printf("Failed to create RFC3161 response\n");
+        fprintf(stderr, "Failed to create RFC3161 response\n");
     }
 
 out:
@@ -1241,7 +1241,7 @@ static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 
     btmp = BIO_new_file(ctx->options->tsa_certfile, "rb");
     if (!btmp) {
-        printf("Failed to read Time-Stamp Authority certificate file: %s\n", ctx->options->tsa_certfile);
+        fprintf(stderr, "Failed to read Time-Stamp Authority certificate file: %s\n", ctx->options->tsa_certfile);
         return 0; /* FAILED */
     }
     /* .pem certificate file */
@@ -1249,13 +1249,13 @@ static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
     BIO_free(btmp);
     btmp = BIO_new_file(ctx->options->tsa_keyfile, "rb");
     if (!btmp) {
-        printf("Failed to read private key file: %s\n", ctx->options->tsa_keyfile);
+        fprintf(stderr, "Failed to read private key file: %s\n", ctx->options->tsa_keyfile);
         return 0; /* FAILED */
     }
     signer_key = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL);
     BIO_free(btmp);
     if(!chain || !signer_key) {
-        printf("Failed to load Time-Stamp Authority crypto parameters\n");
+        fprintf(stderr, "Failed to load Time-Stamp Authority crypto parameters\n");
         return 0; /* FAILED */
     }
     /* find the signer's certificate located somewhere in the whole certificate chain */
@@ -1267,7 +1267,7 @@ static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
         }
     }
     if(!signer_cert) {
-        printf("Failed to checking the consistency of a TSA private key with a public key in any X509 certificate\n");
+        fprintf(stderr, "Failed to checking the consistency of a TSA private key with a public key in any X509 certificate\n");
         goto out;
     }
 
@@ -1277,18 +1277,18 @@ static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 
     /* check X509_PURPOSE_TIMESTAMP_SIGN certificate purpose */
     if (X509_check_purpose(signer_cert, X509_PURPOSE_TIMESTAMP_SIGN, 0) != 1) {
-        printf("Unsupported TSA signer's certificate purpose X509_PURPOSE_TIMESTAMP_SIGN\n");
+        fprintf(stderr, "Unsupported TSA signer's certificate purpose X509_PURPOSE_TIMESTAMP_SIGN\n");
         goto out;
     }
     /* check extended key usage flag XKU_TIMESTAMP */
     if (!(X509_get_extended_key_usage(signer_cert) & XKU_TIMESTAMP)) {
-        printf("Unsupported Signer's certificate purpose XKU_TIMESTAMP\n");
+        fprintf(stderr, "Unsupported Signer's certificate purpose XKU_TIMESTAMP\n");
         goto out;
     }
     /* encode timestamp request */
     bout = bio_encode_rfc3161_request(p7, ctx->options->md);
     if (!bout) {
-        printf("Failed to encode timestamp request\n");
+        fprintf(stderr, "Failed to encode timestamp request\n");
         goto out;
     }
 
@@ -1298,11 +1298,11 @@ static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
     if (response) {
         res = attach_rfc3161_response(p7, response, ctx->options->verbose);
         if (res) {
-            printf("Failed to convert timestamp reply\n");
-            ERR_print_errors_fp(stdout);
+            fprintf(stderr, "Failed to convert timestamp reply\n");
+            ERR_print_errors_fp(stderr);
         }
     } else {
-        printf("Failed to obtain RFC3161 response\n");
+        fprintf(stderr, "Failed to obtain RFC3161 response\n");
     }
 out:
     sk_X509_pop_free(chain, X509_free);
@@ -1330,7 +1330,7 @@ static int add_unauthenticated_blob(PKCS7 *p7)
 
     signer_info = PKCS7_get_signer_info(p7);
     if (!signer_info) {
-        printf("Failed to obtain PKCS#7 signer info list\n");
+        fprintf(stderr, "Failed to obtain PKCS#7 signer info list\n");
         return 0; /* FAILED */
     }
     si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
@@ -1359,21 +1359,21 @@ static int add_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 {
     /* add counter-signature/timestamp */
     if (ctx->options->nturl && !add_timestamp_authenticode(p7, ctx)) {
-        printf("%s\n%s\n", "Authenticode timestamping failed",
+        fprintf(stderr, "%s\n%s\n", "Authenticode timestamping failed",
             "Use the \"-ts\" option to add the RFC3161 Time-Stamp Authority or choose another one Authenticode Time-Stamp Authority");
         return 1; /* FAILED */
     }
     if (ctx->options->ntsurl && !add_timestamp_rfc3161(p7, ctx)) {
-        printf("%s\n%s\n", "RFC 3161 timestamping failed",
+        fprintf(stderr, "%s\n%s\n", "RFC 3161 timestamping failed",
             "Use the \"-t\" option to add the Authenticode Time-Stamp Authority or choose another one RFC3161 Time-Stamp Authority");
         return 1; /* FAILED */
     }
     if (ctx->options->tsa_certfile && ctx->options->tsa_keyfile && add_timestamp_builtin(p7, ctx)) {
-        printf("Built-in timestamping failed\n");
+        fprintf(stderr, "Built-in timestamping failed\n");
         return 1; /* FAILED */
     }
     if (ctx->options->addBlob && !add_unauthenticated_blob(p7)) {
-        printf("Adding unauthenticated blob failed\n");
+        fprintf(stderr, "Adding unauthenticated blob failed\n");
         return 1; /* FAILED */
     }
     return 0; /* OK */
@@ -1401,12 +1401,12 @@ static int add_nested_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx, int in
     }
     signer_info = PKCS7_get_signer_info(p7);
     if (!signer_info) {
-        printf("Failed to obtain PKCS#7 signer info list\n");
+        fprintf(stderr, "Failed to obtain PKCS#7 signer info list\n");
         return 1; /* FAILED */
     }
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si) {
-        printf("Failed to obtain PKCS#7 signer info value\n");
+        fprintf(stderr, "Failed to obtain PKCS#7 signer info value\n");
         return 1; /* FAILED */
     }
     unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
@@ -1424,7 +1424,7 @@ static int add_nested_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx, int in
     }
     signatures = signature_list_create(p7_tmp);
     if (!signatures) {
-        printf("Failed to create signature list\n\n");
+        fprintf(stderr, "Failed to create signature list\n\n");
         return 1; /* FAILED */
     }
     /* append all nested signature to the primary signature */
@@ -1433,13 +1433,13 @@ static int add_nested_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx, int in
         if (i == index) {
             printf("Use the signature at index %d\n", i);
             if (add_timestamp_and_blob(sig, ctx)) {
-                printf("Unable to set unauthenticated attributes\n");
+                fprintf(stderr, "Unable to set unauthenticated attributes\n");
                 sk_PKCS7_pop_free(signatures, PKCS7_free);
                 return 1; /* FAILED */
             }
         }
         if (!cursig_set_nested(p7, sig)) {
-            printf("Unable to append the nested signature to the current signature\n");
+            fprintf(stderr, "Unable to append the nested signature to the current signature\n");
             sk_PKCS7_pop_free(signatures, PKCS7_free);
             return 1; /* FAILED */
         }
@@ -1758,7 +1758,7 @@ static int verify_ca_callback(int ok, X509_STORE_CTX *ctx)
             printf("\tError: Certificate not found in local repository: %s\n",
                 X509_verify_cert_error_string(error));
         } else {
-            printf("\tError: %s\n", X509_verify_cert_error_string(error));
+            printf("\tError: %s\n\n", X509_verify_cert_error_string(error));
         }
     }
     return ok;
@@ -1783,7 +1783,7 @@ static int verify_crl_callback(int ok, X509_STORE_CTX *ctx)
                 X509_verify_cert_error_string(error));
         }
          else {
-            printf("\tError: %s\n", X509_verify_cert_error_string(error));
+            printf("\tError: %s\n\n", X509_verify_cert_error_string(error));
         }
     }
     return ok;
@@ -1803,7 +1803,7 @@ static int x509_store_load_file(X509_STORE *store, char *cafile)
     if (!lookup || !cafile)
         return 0; /* FAILED */
     if (!X509_LOOKUP_load_file(lookup, cafile, X509_FILETYPE_PEM)) {
-        printf("\nError: no certificate found\n");
+        fprintf(stderr, "\nError: no certificate found\n");
         return 0; /* FAILED */
     }
     param = X509_STORE_get0_param(store);
@@ -1833,11 +1833,11 @@ static int x509_store_load_crlfile(X509_STORE *store, char *cafile, char *crlfil
     if (!lookup)
         return 0; /* FAILED */
     if (!X509_LOOKUP_load_file(lookup, cafile, X509_FILETYPE_PEM)) {
-        printf("\nError: no certificate found\n");
+        fprintf(stderr, "\nError: no certificate found\n");
         return 0; /* FAILED */
     }
     if (crlfile && !X509_load_crl_file(lookup, crlfile, X509_FILETYPE_PEM)) {
-        printf("\nError: no CRL found in %s\n", crlfile);
+        fprintf(stderr, "\nError: no CRL found in %s\n", crlfile);
         return 0; /* FAILED */
     }
     param = X509_STORE_get0_param(store);
@@ -1890,7 +1890,7 @@ static int verify_crl(char *cafile, char *crlfile, STACK_OF(X509_CRL) *crls,
     printf("\nCertificate Revocation List verified using:\n");
     if (X509_verify_cert(ctx) <= 0) {
         int error = X509_STORE_CTX_get_error(ctx);
-        printf("\nX509_verify_cert: certificate verify error: %s\n",
+        fprintf(stderr, "X509_verify_cert: certificate verify error: %s\n",
                 X509_verify_cert_error_string(error));
         goto out;
     }
@@ -1898,7 +1898,7 @@ static int verify_crl(char *cafile, char *crlfile, STACK_OF(X509_CRL) *crls,
 
 out:
     if (!verok)
-        ERR_print_errors_fp(stdout);
+        ERR_print_errors_fp(stderr);
     /* NULL is a valid parameter value for X509_STORE_free() and X509_STORE_CTX_free() */
     X509_STORE_free(store);
     X509_STORE_CTX_free(ctx);
@@ -1959,7 +1959,7 @@ static X509_CRL *x509_crl_get(FILE_FORMAT_CTX *ctx, char *url)
 
 #if OPENSSL_VERSION_NUMBER<0x30000000L
 #ifndef ENABLE_CURL
-    printf("Could NOT find CURL\n");
+    fprintf(stderr, "Could NOT find CURL\n");
     return NULL; /* FAILED */
 #else /* ENABLE_CURL */
     long http_code = -1;
@@ -1971,7 +1971,7 @@ static X509_CRL *x509_crl_get(FILE_FORMAT_CTX *ctx, char *url)
         ctx->options->noverifypeer ? NULL : ctx->options->https_crlfile);
 #endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
     if (!bio) {
-        printf("Warning: Faild to get CRL from %s\n\n", url);
+        fprintf(stderr, "Faild to get CRL from %s\n\n", url);
         return NULL; /* FAILED */
     }
     crl = d2i_X509_CRL_bio(bio, NULL);  /* DER format */
@@ -1981,7 +1981,7 @@ static X509_CRL *x509_crl_get(FILE_FORMAT_CTX *ctx, char *url)
     }
     BIO_free_all(bio);
     if (!crl) {
-         printf("Warning: Faild to decode CRL from %s\n\n", url);
+         fprintf(stderr, "Faild to decode CRL from %s\n\n", url);
          return NULL; /* FAILED */
     }
     return crl; /* OK */
@@ -2069,7 +2069,7 @@ static int verify_timestamp_token(PKCS7 *p7, CMS_ContentInfo *timestamp)
             /* compute a hash from the encrypted message digest value of the file */
             bhash = BIO_new(BIO_f_md());
             if (!BIO_set_md(bhash, md)) {
-                printf("Unable to set the message digest of BIO\n");
+                fprintf(stderr, "Unable to set the message digest of BIO\n");
                 BIO_free_all(bhash);
                 TS_TST_INFO_free(token);
                 return 0; /* FAILED */
@@ -2134,7 +2134,7 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
          * So verify timestamp against the time of its creation.
          */
         if (!x509_store_set_time(store, time)) {
-            printf("Failed to set store time\n");
+            fprintf(stderr, "Failed to set store time\n");
             X509_STORE_free(store);
             goto out;
         }
@@ -2149,7 +2149,7 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
     if (!CMS_verify(timestamp, NULL, store, 0, NULL, 0)) {
         STACK_OF(X509) *cms_certs;
 
-        printf("\nCMS_verify error\n");
+        printf("CMS_verify error\n");
         X509_STORE_free(store);
         printf("\nFailed timestamp certificate chain retrieved from the signature:\n");
         cms_certs = CMS_get1_certs(timestamp);
@@ -2185,7 +2185,7 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
     if (p7->d.sign->crl || crl) {
         crls = x509_crl_list_get(p7, crl);
         if (!crls) {
-            printf("Failed to use CRL distribution point\n");
+            fprintf(stderr, "Failed to use CRL distribution point\n");
             goto out;
         }
     }
@@ -2203,7 +2203,7 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
     }
     /* check extended key usage flag XKU_TIMESTAMP */
     if (!(X509_get_extended_key_usage(signer) & XKU_TIMESTAMP)) {
-        printf("Unsupported Signer's certificate purpose XKU_TIMESTAMP\n");
+        fprintf(stderr, "Unsupported Signer's certificate purpose XKU_TIMESTAMP\n");
         goto out;
     }
     /* verify the hash provided from the trusted timestamp */
@@ -2213,7 +2213,7 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
     verok = 1; /* OK */
 out:
     if (!verok)
-        ERR_print_errors_fp(stdout);
+        ERR_print_errors_fp(stderr);
     return verok;
 }
 
@@ -2261,7 +2261,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
         goto out;
 
     if (!x509_store_load_file(store, ctx->options->cafile)) {
-        printf("Failed to add store lookup file\n");
+        fprintf(stderr, "Failed to add store lookup file\n");
         X509_STORE_free(store);
         goto out;
     }
@@ -2269,7 +2269,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
         printf("Signature verification time: ");
         print_time_t(time);
         if (!x509_store_set_time(store, time)) {
-            printf("Failed to set signature time\n");
+            fprintf(stderr, "Failed to set signature time\n");
             X509_STORE_free(store);
             goto out;
         }
@@ -2277,7 +2277,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
         printf("Signature verification time: ");
         print_time_t(ctx->options->time);
         if (!x509_store_set_time(store, ctx->options->time)) {
-            printf("Failed to set verifying time\n");
+            fprintf(stderr, "Failed to set verifying time\n");
             X509_STORE_free(store);
             goto out;
         }
@@ -2295,7 +2295,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
             inf = ASN1_get_object(&data, &len, &tag, &class,
                 contents->d.other->value.sequence->length);
             if (inf != V_ASN1_CONSTRUCTED || tag != V_ASN1_SEQUENCE) {
-                printf("Corrupted data content\n");
+                fprintf(stderr, "Corrupted data content\n");
                 X509_STORE_free(store);
                 goto out;
             }
@@ -2306,7 +2306,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
                 contents->d.other->value.sequence->length);
         }
     } else {
-        printf("Corrupted data content\n");
+        fprintf(stderr, "Corrupted data content\n");
         X509_STORE_free(store);
         goto out;
     }
@@ -2319,10 +2319,10 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
      * https://github.com/openssl/openssl/pull/22575
      */
     if (!PKCS7_verify(p7, NULL, store, bio, NULL, 0)) {
-        printf("\nPKCS7_verify error\n");
+        printf("PKCS7_verify error\n");
         X509_STORE_free(store);
         BIO_free(bio);
-        printf("\nFailed signing certificate chain retrieved from the signature:\n");
+        printf("Failed signing certificate chain retrieved from the signature:\n");
         print_certs_chain(p7->d.sign->cert);
         goto out;
     }
@@ -2351,7 +2351,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
     if (p7->d.sign->crl || crl) {
         crls = x509_crl_list_get(p7, crl);
         if (!crls) {
-            printf("Failed to use CRL distribution point\n");
+            fprintf(stderr, "Failed to use CRL distribution point\n");
             goto out;
         }
     }
@@ -2366,14 +2366,14 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
     }
     /* check extended key usage flag XKU_CODE_SIGN */
     if (!(X509_get_extended_key_usage(signer) & XKU_CODE_SIGN)) {
-        printf("Unsupported Signer's certificate purpose XKU_CODE_SIGN\n");
+        fprintf(stderr, "Unsupported Signer's certificate purpose XKU_CODE_SIGN\n");
         goto out;
     }
 
     verok = 1; /* OK */
 out:
     if (!verok)
-        ERR_print_errors_fp(stdout);
+        ERR_print_errors_fp(stderr);
     return verok;
 }
 
@@ -2395,20 +2395,20 @@ static int verify_leaf_hash(X509 *cert, const char *leafhash)
     char *mdid = OPENSSL_strdup(leafhash);
     char *hash = strchr(mdid, ':');
     if (hash == NULL) {
-        printf("\nUnable to parse -require-leaf-hash parameter: %s\n", leafhash);
+        fprintf(stderr, "\nUnable to parse -require-leaf-hash parameter: %s\n", leafhash);
         OPENSSL_free(mdid);
         return 0; /* FAILED */
     }
     *hash++ = '\0';
     md = EVP_get_digestbyname(mdid);
     if (md == NULL) {
-        printf("\nUnable to lookup digest by name '%s'\n", mdid);
+        fprintf(stderr, "\nUnable to lookup digest by name '%s'\n", mdid);
         OPENSSL_free(mdid);
         return 0; /* FAILED */
     }
     mdbuf = OPENSSL_hexstr2buf(hash, &mdlen);
     if (mdlen != EVP_MD_size(md)) {
-        printf("\nHash length mismatch: '%s' digest must be %d bytes long (got %ld bytes)\n",
+        fprintf(stderr, "\nHash length mismatch: '%s' digest must be %d bytes long (got %ld bytes)\n",
             mdid, EVP_MD_size(md), mdlen);
         OPENSSL_free(mdid);
         OPENSSL_free(mdbuf);
@@ -2419,7 +2419,7 @@ static int verify_leaf_hash(X509 *cert, const char *leafhash)
     /* compute the leaf certificate hash */
     bhash = BIO_new(BIO_f_md());
     if (!BIO_set_md(bhash, md)) {
-        printf("Unable to set the message digest of BIO\n");
+        fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         OPENSSL_free(mdbuf);
         return 0; /* FAILED */
@@ -2642,8 +2642,8 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
             data = ASN1_STRING_get0_data(value);
             countersi = d2i_PKCS7_SIGNER_INFO(NULL, &data, ASN1_STRING_length(value));
             if (countersi == NULL) {
-                printf("Error: Authenticode Timestamp could not be decoded correctly\n");
-                ERR_print_errors_fp(stdout);
+                printf("Warning: Authenticode Timestamp could not be decoded correctly\n");
+                ERR_print_errors_fp(stderr);
                 continue;
             }
             time = time_t_get_si_time(countersi);
@@ -2652,14 +2652,16 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
                 if (cms) {
                     if (!print_cms_timestamp(cms, time)) {
                         CMS_ContentInfo_free(cms);
-                        return INVALID_TIME; /* FAILED */
+                        printf("Warning: Authenticode Timestamp could not be decoded correctly\n");
+                        ERR_print_errors_fp(stderr);
+                        continue;
                     }
                     *timestamp = cms;
                 } else {
-                    printf("Error: Corrupt Authenticode Timestamp embedded content\n");
+                    printf("Warning: Corrupt Authenticode Timestamp embedded content\n");
                 }
             } else {
-                printf("Error: PKCS9_TIMESTAMP_SIGNING_TIME attribute not found\n");
+                printf("Warning: PKCS9_TIMESTAMP_SIGNING_TIME attribute not found\n");
                 PKCS7_SIGNER_INFO_free(countersi);
             }
         } else if (!strcmp(object_txt, SPC_RFC3161_OBJID)) {
@@ -2672,27 +2674,29 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
             data = ASN1_STRING_get0_data(value);
             cms = d2i_CMS_ContentInfo(NULL, &data, ASN1_STRING_length(value));
             if (cms == NULL) {
-                printf("Error: RFC3161 Timestamp could not be decoded correctly\n");
-                ERR_print_errors_fp(stdout);
+                printf("Warning: RFC3161 Timestamp could not be decoded correctly\n");
+                ERR_print_errors_fp(stderr);
                 continue;
             }
             time = time_t_get_cms_time(cms);
             if (time != INVALID_TIME) {
                 if (!print_cms_timestamp(cms, time)) {
                     CMS_ContentInfo_free(cms);
-                    return INVALID_TIME; /* FAILED */
+                    printf("Warning: RFC3161 Timestamp could not be decoded correctly\n");
+                    ERR_print_errors_fp(stderr);
+                    continue;
                 }
                 *timestamp = cms;
             } else {
-                printf("Error: Corrupt RFC3161 Timestamp embedded content\n");
+                printf("Warning: Corrupt RFC3161 Timestamp embedded content\n");
                 CMS_ContentInfo_free(cms);
-                ERR_print_errors_fp(stdout);
+                ERR_print_errors_fp(stderr);
             }
         } else if (!strcmp(object_txt, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
             /* Unauthenticated Data Blob - Policy OID: 1.3.6.1.4.1.42921.1.2.1 */
             ASN1_STRING *blob = X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTF8STRING, NULL);
             if (blob == NULL) {
-                printf("Error: Unauthenticated Data Blob could not be decoded correctly\n");
+                printf("Warning: Unauthenticated Data Blob could not be decoded correctly\n");
                 continue;
             }
             if (verbose) {
@@ -2854,7 +2858,7 @@ static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
     }
     /* Convert PKCS7 into CMS_ContentInfo */
     if (((len = i2d_PKCS7(p7, NULL)) <= 0) || (p = OPENSSL_malloc((size_t)len)) == NULL) {
-        printf("Failed to convert pkcs7: %d\n", len);
+        fprintf(stderr, "Failed to convert pkcs7: %d\n", len);
         goto out;
     }
     len = i2d_PKCS7(p7, &p);
@@ -2865,7 +2869,7 @@ static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
 
 out:
     if (!cms)
-        ERR_print_errors_fp(stdout);
+        ERR_print_errors_fp(stderr);
     PKCS7_free(p7);
     return cms;
 }
@@ -2891,7 +2895,7 @@ static int verify_content_member_digest(FILE_FORMAT_CTX *ctx, ASN1_TYPE *content
     data = ASN1_STRING_get0_data(value);
     idc = d2i_SpcIndirectDataContent(NULL, &data, ASN1_STRING_length(value));
     if (!idc) {
-        printf("Failed to extract SpcIndirectDataContent data\n");
+        fprintf(stderr, "Failed to extract SpcIndirectDataContent data\n");
         return 1; /* FAILED */
     }
     if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
@@ -2900,19 +2904,19 @@ static int verify_content_member_digest(FILE_FORMAT_CTX *ctx, ASN1_TYPE *content
         memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
     }
     if (mdtype == -1) {
-        printf("Failed to extract current message digest\n\n");
+        fprintf(stderr, "Failed to extract current message digest\n\n");
         SpcIndirectDataContent_free(idc);
         return 1; /* FAILED */
     }
     if (!ctx->format->digest_calc) {
-        printf("Unsupported method: digest_calc\n");
+        fprintf(stderr, "Unsupported method: digest_calc\n");
         SpcIndirectDataContent_free(idc);
         return 1; /* FAILED */
     }
     md = EVP_get_digestbynid(mdtype);
     cmdbuf = ctx->format->digest_calc(ctx, md);
     if (!cmdbuf) {
-        printf("Failed to compute a message digest value\n\n");
+        fprintf(stderr, "Failed to compute a message digest value\n\n");
         SpcIndirectDataContent_free(idc);
         return 1; /* FAILED */
     }
@@ -2951,7 +2955,7 @@ static int verify_content(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 
     ctlc = ms_ctl_content_get(p7);
     if (!ctlc) {
-        printf("Failed to extract MS_CTL_OBJID data\n");
+        fprintf(stderr, "Failed to extract MS_CTL_OBJID data\n");
         return 1; /* FAILED */
     }
     for (i = 0; i < sk_CatalogInfo_num(ctlc->header_attributes); i++) {
@@ -2985,7 +2989,7 @@ static int verify_content(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         }
     }
     MsCtlContent_free(ctlc);
-    ERR_print_errors_fp(stdout);
+    ERR_print_errors_fp(stderr);
     return 1; /* FAILED */
 }
 
@@ -3004,7 +3008,7 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 
     signers = PKCS7_get0_signers(p7, NULL, 0);
     if (!signers || sk_X509_num(signers) != 1) {
-        printf("PKCS7_get0_signers error\n");
+        fprintf(stderr, "PKCS7_get0_signers error\n");
         return 1; /* FAILED */
     }
     signer = sk_X509_value(signers, 0);
@@ -3069,24 +3073,24 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
         FILE_FORMAT_CTX *cat_ctx;
 
         if (!ctx->format->is_detaching_supported || !ctx->format->is_detaching_supported()) {
-            printf("This format does not support detached PKCS#7 signature\n");
+            fprintf(stderr, "This format does not support detached PKCS#7 signature\n");
             return 1; /* FAILED */
         }
         printf("Checking the specified catalog file\n\n");
         cat_options = OPENSSL_memdup(options, sizeof(GLOBAL_OPTIONS));
         if (!cat_options) {
-            printf("OPENSSL_memdup error.\n");
-            return 1; /* Failed */
+            fprintf(stderr, "OPENSSL_memdup error.\n");
+            return 1; /* FAILED */
         }
         cat_options->infile = options->catalog;
         cat_options->cmd = CMD_EXTRACT;
         cat_ctx = file_format_cat.ctx_new(cat_options, NULL, NULL);
         if (!cat_ctx) {
-            printf("CAT file initialization error\n");
-            return 1; /* Failed */
+            fprintf(stderr, "CAT file initialization error\n");
+            return 1; /* FAILED */
         }
         if (!cat_ctx->format->pkcs7_extract) {
-            printf("Unsupported command: extract-signature\n");
+            fprintf(stderr, "Unsupported command: extract-signature\n");
             return 1; /* FAILED */
         }
         p7 = cat_ctx->format->pkcs7_extract(cat_ctx);
@@ -3094,18 +3098,18 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
         OPENSSL_free(cat_options);
     } else {
         if (!ctx->format->pkcs7_extract) {
-            printf("Unsupported command: extract-signature\n");
+            fprintf(stderr, "Unsupported command: extract-signature\n");
             return 1; /* FAILED */
         }
         p7 = ctx->format->pkcs7_extract(ctx);
     }
     if (!p7) {
-        printf("Unable to extract existing signature\n");
+        fprintf(stderr, "Unable to extract existing signature\n");
         return 1; /* FAILED */
     }
     signatures = signature_list_create(p7);
     if (!signatures) {
-        printf("Failed to create signature list\n\n");
+        fprintf(stderr, "Failed to create signature list\n\n");
         sk_PKCS7_pop_free(signatures, PKCS7_free);
         return 1; /* FAILED */
     }
@@ -3131,14 +3135,14 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
             }
             verified++;
         } else {
-            printf("Unsupported method: verify_digests\n");
+            fprintf(stderr, "Unsupported method: verify_digests\n");
             return 1; /* FAILED */
         }
     }
     printf("Number of verified signatures: %d\n", verified);
     sk_PKCS7_pop_free(signatures, PKCS7_free);
     if (ret)
-        ERR_print_errors_fp(stdout);
+        ERR_print_errors_fp(stderr);
     return ret;
 }
 
@@ -3155,17 +3159,17 @@ static STACK_OF(PKCS7) *signature_list_create(PKCS7 *p7)
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
 
     if (!signer_info) {
-        printf("Failed to obtain PKCS#7 signer info list\n");
+        fprintf(stderr, "Failed to obtain PKCS#7 signer info list\n");
         return 0; /* FAILED */
     }
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si) {
-        printf("Failed to obtain PKCS#7 signer info value\n");
+        fprintf(stderr, "Failed to obtain PKCS#7 signer info value\n");
         return 0; /* FAILED */
     }
     signatures = sk_PKCS7_new(PKCS7_compare);
     if (!signatures) {
-        printf("Failed to create new signature list\n");
+        fprintf(stderr, "Failed to create new signature list\n");
         return 0; /* FAILED */
     }
     /* Unauthenticated attributes */
@@ -3190,7 +3194,7 @@ static STACK_OF(PKCS7) *signature_list_create(PKCS7 *p7)
                     data = ASN1_STRING_get0_data(value);
                     nested = d2i_PKCS7(NULL, &data, ASN1_STRING_length(value));
                     if (nested && !sk_PKCS7_push(signatures, nested)) {
-                        printf("Failed to add nested signature\n");
+                        fprintf(stderr, "Failed to add nested signature\n");
                         PKCS7_free(nested);
                         sk_PKCS7_pop_free(signatures, PKCS7_free);
                         return NULL; /* FAILED */
@@ -3274,7 +3278,7 @@ static PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
     }
     indata = map_file(ctx->options->sigfile, filesize);
     if (!indata) {
-        printf("Failed to open file: %s\n", ctx->options->sigfile);
+        fprintf(stderr, "Failed to open file: %s\n", ctx->options->sigfile);
         return NULL; /* FAILED */
     }
     p7 = pkcs7_read_data(indata, filesize);
@@ -3293,8 +3297,8 @@ static int check_attached_data(GLOBAL_OPTIONS *options)
 
     tmp_options = OPENSSL_memdup(options, sizeof(GLOBAL_OPTIONS));
     if (!tmp_options) {
-        printf("OPENSSL_memdup error.\n");
-        return 1; /* Failed */
+        fprintf(stderr, "OPENSSL_memdup error.\n");
+        return 1; /* FAILED */
     }
     tmp_options->infile = options->outfile;
     tmp_options->cmd = CMD_VERIFY;
@@ -3311,15 +3315,15 @@ static int check_attached_data(GLOBAL_OPTIONS *options)
     if (!ctx)
         ctx = file_format_cat.ctx_new(tmp_options, NULL, NULL);
     if (!ctx) {
-        printf("Corrupt attached signature\n");
+        fprintf(stderr, "Corrupt attached signature\n");
         OPENSSL_free(tmp_options);
-        return 1; /* Failed */
+        return 1; /* FAILED */
     }
     if (verify_signed_file(ctx, tmp_options)) {
-        printf("Signature mismatch\n");
+        fprintf(stderr, "Signature mismatch\n");
         ctx->format->ctx_cleanup(ctx);
         OPENSSL_free(tmp_options);
-        return 1; /* Failed */
+        return 1; /* FAILED */
     }
     ctx->format->ctx_cleanup(ctx);
     OPENSSL_free(tmp_options);
@@ -3720,15 +3724,15 @@ static char *getpassword(const char *prompt)
     nfl.c_lflag |= ECHONL;
 
     if (tcsetattr(fileno(stdin), TCSANOW, &nfl) != 0) {
-        printf("Failed to set terminal attributes\n");
-        return NULL;
+        fprintf(stderr, "Failed to set terminal attributes\n");
+        return NULL; /* FAILED */
     }
     p = fgets(passbuf, sizeof passbuf, stdin);
     if (tcsetattr(fileno(stdin), TCSANOW, &ofl) != 0)
-        printf("Failed to restore terminal attributes\n");
+        printf("Warning: Failed to restore terminal attributes\n");
     if (!p) {
-        printf("Failed to read password\n");
-        return NULL;
+        fprintf(stderr, "Failed to read password\n");
+        return NULL; /* FAILED */
     }
     passbuf[strlen(passbuf)-1] = 0x00;
     pass = OPENSSL_strdup(passbuf);
@@ -3820,16 +3824,16 @@ static int read_pkcs12file(GLOBAL_OPTIONS *options)
 
     btmp = BIO_new_file(options->pkcs12file, "rb");
     if (!btmp) {
-        printf("Failed to read PKCS#12 file: %s\n", options->pkcs12file);
+        fprintf(stderr, "Failed to read PKCS#12 file: %s\n", options->pkcs12file);
         return 0; /* FAILED */
     }
     p12 = d2i_PKCS12_bio(btmp, NULL);
     if (!p12) {
-        printf("Failed to extract PKCS#12 data: %s\n", options->pkcs12file);
+        fprintf(stderr, "Failed to extract PKCS#12 data: %s\n", options->pkcs12file);
         goto out; /* FAILED */
     }
     if (!PKCS12_parse(p12, options->pass ? options->pass : "", &options->pkey, &options->cert, &options->certs)) {
-        printf("Failed to parse PKCS#12 file: %s (Wrong password?)\n", options->pkcs12file);
+        fprintf(stderr, "Failed to parse PKCS#12 file: %s (Wrong password?)\n", options->pkcs12file);
         PKCS12_free(p12);
         goto out; /* FAILED */
     }
@@ -3879,7 +3883,7 @@ static int read_certfile(GLOBAL_OPTIONS *options)
 
     btmp = BIO_new_file(options->certfile, "rb");
     if (!btmp) {
-        printf("Failed to read certificate file: %s\n", options->certfile);
+        fprintf(stderr, "Failed to read certificate file: %s\n", options->certfile);
         return 0; /* FAILED */
     }
     /* .pem certificate file */
@@ -3917,7 +3921,7 @@ static int read_certfile(GLOBAL_OPTIONS *options)
     ret = 1; /* OK */
 out:
     if (ret == 0)
-        printf("No certificate found\n");
+        fprintf(stderr, "No certificate found\n");
     BIO_free(btmp);
     return ret;
 }
@@ -3934,12 +3938,12 @@ static int read_xcertfile(GLOBAL_OPTIONS *options)
 
     btmp = BIO_new_file(options->xcertfile, "rb");
     if (!btmp) {
-        printf("Failed to read cross certificates file: %s\n", options->xcertfile);
+        fprintf(stderr, "Failed to read cross certificates file: %s\n", options->xcertfile);
         return 0; /* FAILED */
     }
     options->xcerts = X509_chain_read_certs(btmp, NULL);
     if (!options->xcerts) {
-        printf("Failed to read cross certificates file: %s\n", options->xcertfile);
+        fprintf(stderr, "Failed to read cross certificates file: %s\n", options->xcertfile);
         goto out; /* FAILED */
     }
 
@@ -3961,7 +3965,7 @@ static int read_keyfile(GLOBAL_OPTIONS *options)
 
     btmp = BIO_new_file(options->keyfile, "rb");
     if (!btmp) {
-        printf("Failed to read private key file: %s\n", options->keyfile);
+        fprintf(stderr, "Failed to read private key file: %s\n", options->keyfile);
         return 0; /* FAILED */
     }
     if (((options->pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
@@ -3969,7 +3973,7 @@ static int read_keyfile(GLOBAL_OPTIONS *options)
             (options->pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, options->pass ? options->pass : NULL)) == NULL &&
             (BIO_seek(btmp, 0) == 0) &&
             (options->pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL)) {
-        printf("Failed to decode private key file: %s (Wrong password?)\n", options->keyfile);
+        fprintf(stderr, "Failed to decode private key file: %s (Wrong password?)\n", options->keyfile);
         goto out; /* FAILED */
     }
     ret = 1; /* OK */
@@ -4023,7 +4027,7 @@ static int read_pvk_key(GLOBAL_OPTIONS *options)
 
     btmp = BIO_new_file(options->pvkfile, "rb");
     if (!btmp) {
-        printf("Failed to read private key file: %s\n", options->pvkfile);
+        fprintf(stderr, "Failed to read private key file: %s\n", options->pvkfile);
         return 0; /* FAILED */
     }
     options->pkey = b2i_PVK_bio(btmp, NULL, options->pass ? options->pass : NULL);
@@ -4033,7 +4037,7 @@ static int read_pvk_key(GLOBAL_OPTIONS *options)
     }
     BIO_free(btmp);
     if (!options->pkey) {
-        printf("Failed to decode private key file: %s\n", options->pvkfile);
+        fprintf(stderr, "Failed to decode private key file: %s\n", options->pvkfile);
         return 0; /* FAILED */
     }
     return 1; /* OK */
@@ -4053,7 +4057,7 @@ static ENGINE *engine_dynamic(GLOBAL_OPTIONS *options)
 
     engine = ENGINE_by_id("dynamic");
     if (!engine) {
-        printf("Failed to load 'dynamic' engine\n");
+        fprintf(stderr, "Failed to load 'dynamic' engine\n");
         return NULL; /* FAILED */
     }
     if (options->p11engine) { /* strip directory and extension */
@@ -4077,7 +4081,7 @@ static ENGINE *engine_dynamic(GLOBAL_OPTIONS *options)
             || !ENGINE_ctrl_cmd_string(engine, "ID", id, 0)
             || !ENGINE_ctrl_cmd_string(engine, "LIST_ADD", "1", 0)
             || !ENGINE_ctrl_cmd_string(engine, "LOAD", NULL, 0)) {
-        printf("Failed to set 'dynamic' engine\n");
+        fprintf(stderr, "Failed to set 'dynamic' engine\n");
         ENGINE_free(engine);
         engine = NULL; /* FAILED */
     }
@@ -4094,7 +4098,7 @@ static ENGINE *engine_pkcs11(void)
 {
     ENGINE *engine = ENGINE_by_id("pkcs11");
     if (!engine) {
-        printf("Failed to find and load 'pkcs11' engine\n");
+        fprintf(stderr, "Failed to find and load 'pkcs11' engine\n");
         return NULL; /* FAILED */
     }
     return engine; /* OK */
@@ -4109,22 +4113,22 @@ static ENGINE *engine_pkcs11(void)
 static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
 {
     if (options->p11module && !ENGINE_ctrl_cmd_string(engine, "MODULE_PATH", options->p11module, 0)) {
-        printf("Failed to set pkcs11 engine MODULE_PATH to '%s'\n", options->p11module);
+        fprintf(stderr, "Failed to set pkcs11 engine MODULE_PATH to '%s'\n", options->p11module);
         ENGINE_free(engine);
         return 0; /* FAILED */
     }
     if (options->pass != NULL && !ENGINE_ctrl_cmd_string(engine, "PIN", options->pass, 0)) {
-        printf("Failed to set pkcs11 PIN\n");
+        fprintf(stderr, "Failed to set pkcs11 PIN\n");
         ENGINE_free(engine);
         return 0; /* FAILED */
     }
     if (!ENGINE_init(engine)) {
-        printf("Failed to initialize pkcs11 engine\n");
+        fprintf(stderr, "Failed to initialize pkcs11 engine\n");
         ENGINE_free(engine);
         return 0; /* FAILED */
     }
     if (options->login && !ENGINE_ctrl_cmd_string(engine, "FORCE_LOGIN", 0, 0)) {
-        printf("Failed to force a login to the pkcs11 engine\n");
+        fprintf(stderr, "Failed to force a login to the pkcs11 engine\n");
         ENGINE_free(engine);
         return 0; /* FAILED */
     }
@@ -4144,7 +4148,7 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
         parms.cert = NULL;
         ENGINE_ctrl_cmd(engine, "LOAD_CERT_CTRL", 0, &parms, NULL, 1);
         if (!parms.cert) {
-            printf("Failed to load certificate %s\n", options->p11cert);
+            fprintf(stderr, "Failed to load certificate %s\n", options->p11cert);
             ENGINE_finish(engine);
             return 0; /* FAILED */
         } else
@@ -4155,7 +4159,7 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
     /* Free the functional reference from ENGINE_init */
     ENGINE_finish(engine);
     if (!options->pkey) {
-        printf("Failed to load private key %s\n", options->keyfile);
+        fprintf(stderr, "Failed to load private key %s\n", options->keyfile);
         return 0; /* FAILED */
     }
     return 1; /* OK */
@@ -4325,7 +4329,7 @@ static int provider_load(OSSL_LIB_CTX *libctx, const char *pname)
 {
     OSSL_PROVIDER *prov= OSSL_PROVIDER_load(libctx, pname);
     if (prov == NULL) {
-        printf("Unable to load provider: %s\n", pname);
+        fprintf(stderr, "Unable to load provider: %s\n", pname);
         return 0; /* FAILED */
     }
     if (providers == NULL) {
@@ -4734,7 +4738,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
         }
     }
     if (cmd != CMD_VERIFY && file_exists(options->outfile)) {
-        printf("Overwriting an existing file is not supported.\n");
+        fprintf(stderr, "Overwriting an existing file is not supported.\n");
         return 0; /* FAILED */
     }
     if (argc > 0 ||
@@ -4749,7 +4753,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
 #endif /* OPENSSL_NO_ENGINE */
             options->pkcs12file))) {
         if (failarg)
-            printf("Unknown option: %s\n", failarg);
+            fprintf(stderr, "Unknown option: %s\n", failarg);
         usage(argv0, "all");
         return 0; /* FAILED */
     }
@@ -5030,7 +5034,7 @@ err_cleanup:
     providers_cleanup();
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
     if (ret)
-        ERR_print_errors_fp(stdout);
+        ERR_print_errors_fp(stderr);
     if (options.cmd == CMD_HELP)
         ret = 0; /* OK */
     else
