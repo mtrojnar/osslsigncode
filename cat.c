@@ -82,7 +82,7 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
     uint32_t filesize;
 
     if (options->cmd == CMD_REMOVE || options->cmd==CMD_ATTACH || options->cmd == CMD_EXTRACT_DATA) {
-        printf("Unsupported command\n");
+        fprintf(stderr, "Unsupported command\n");
         return NULL; /* FAILED */
     }
     filesize = get_file_size(options->infile);
@@ -158,21 +158,21 @@ static PKCS7 *cat_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
 
     p7 = pkcs7_create(ctx);
     if (!p7) {
-        printf("Creating a new signature failed\n");
+        fprintf(stderr, "Creating a new signature failed\n");
         return NULL; /* FAILED */
     }
     if (!cat_add_ms_ctl_object(p7)) {
-        printf("Adding MS_CTL_OBJID failed\n");
+        fprintf(stderr, "Adding MS_CTL_OBJID failed\n");
         PKCS7_free(p7);
         return NULL; /* FAILED */
     }
     if (!ctx->cat_ctx->p7 || !ctx->cat_ctx->p7->d.sign || !ctx->cat_ctx->p7->d.sign->contents) {
-        printf("Failed to get content\n");
+        fprintf(stderr, "Failed to get content\n");
         PKCS7_free(p7);
         return NULL; /* FAILED */
     }
     if (!cat_sign_ms_ctl_content(p7, ctx->cat_ctx->p7->d.sign->contents)) {
-        printf("Failed to set signed content\n");
+        fprintf(stderr, "Failed to set signed content\n");
         PKCS7_free(p7);
         return NULL; /* FAILED */
     }
@@ -287,7 +287,7 @@ static int cat_sign_ms_ctl_content(PKCS7 *p7, PKCS7 *contents)
 
     if (!contents->d.other || !contents->d.other->value.sequence
           || !contents->d.other->value.sequence->data) {
-        printf("Failed to get content value\n");
+        fprintf(stderr, "Failed to get content value\n");
         return 0; /* FAILED */
     }
     seqhdrlen = asn1_simple_hdr_len(contents->d.other->value.sequence->data,
@@ -296,11 +296,11 @@ static int cat_sign_ms_ctl_content(PKCS7 *p7, PKCS7 *contents)
     content_length = contents->d.other->value.sequence->length - seqhdrlen;
 
     if (!pkcs7_sign_content(p7, content, content_length)) {
-        printf("Failed to sign content\n");
+        fprintf(stderr, "Failed to sign content\n");
         return 0; /* FAILED */
     }
     if (!PKCS7_set_content(p7, PKCS7_dup(contents))) {
-        printf("PKCS7_set_content failed\n");
+        fprintf(stderr, "PKCS7_set_content failed\n");
         return 0; /* FAILED */
     }
     return 1; /* OK */
@@ -318,7 +318,7 @@ static int cat_list_content(PKCS7 *p7)
 
     ctlc = ms_ctl_content_get(p7);
     if (!ctlc) {
-        printf("Failed to extract MS_CTL_OBJID data\n");
+        fprintf(stderr, "Failed to extract MS_CTL_OBJID data\n");
         return 1; /* FAILED */
     }
     printf("\nCatalog members:\n");
@@ -353,7 +353,7 @@ static int cat_list_content(PKCS7 *p7)
             printf("\n");
     }
     MsCtlContent_free(ctlc);
-    ERR_print_errors_fp(stdout);
+    ERR_print_errors_fp(stderr);
     return 0; /* OK */
 }
 
@@ -382,7 +382,7 @@ static int cat_print_content_member_digest(ASN1_TYPE *content)
     }
     SpcIndirectDataContent_free(idc);
     if (mdtype == -1) {
-        printf("Failed to extract current message digest\n\n");
+        fprintf(stderr, "Failed to extract current message digest\n\n");
         return 0; /* FAILED */
     }
     printf("\tHash algorithm: %s\n", OBJ_nid2sn(mdtype));
@@ -461,17 +461,17 @@ static int cat_check_file(FILE_FORMAT_CTX *ctx)
     PKCS7_SIGNER_INFO *si;
 
     if (!ctx) {
-        printf("Init error\n\n");
+        fprintf(stderr, "Init error\n");
         return 0; /* FAILED */
     }
     signer_info = PKCS7_get_signer_info(ctx->cat_ctx->p7);
     if (!signer_info) {
-        printf("Failed catalog file\n\n");
+        fprintf(stderr, "Failed catalog file\n");
         return 0; /* FAILED */
     }
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si) {
-        printf("No signature found\n\n");
+        fprintf(stderr, "No signature found\n");
         return 0; /* FAILED */
     }
     if (ctx->options->verbose) {

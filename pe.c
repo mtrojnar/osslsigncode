@@ -251,7 +251,7 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
         if (idc) {
             if (!pe_page_hash_get(&ph, &phlen, &phtype, idc->data)) {
-                printf("Failed to extract a page hash\n\n");
+                fprintf(stderr, "Failed to extract a page hash\n\n");
                 SpcIndirectDataContent_free(idc);
                 return 0; /* FAILED */
             }
@@ -263,25 +263,25 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         }
     }
     if (mdtype == -1) {
-        printf("Failed to extract current message digest\n\n");
+        fprintf(stderr, "Failed to extract current message digest\n\n");
         OPENSSL_free(ph);
         return 0; /* FAILED */
     }
     md = EVP_get_digestbynid(mdtype);
     cmdbuf = pe_digest_calc(ctx, md);
     if (!cmdbuf) {
-        printf("Failed to calculate message digest\n\n");
+        fprintf(stderr, "Failed to calculate message digest\n\n");
         OPENSSL_free(ph);
         return 0; /* FAILED */
     }
     if (!compare_digests(mdbuf, cmdbuf, mdtype)) {
-        printf("Signature verification: failed\n\n");
+        fprintf(stderr, "Signature verification: failed\n\n");
         OPENSSL_free(ph);
         OPENSSL_free(cmdbuf);
         return 0; /* FAILED */
     }
     if (!pe_verify_page_hash(ctx, ph, phlen, phtype)) {
-        printf("Signature verification: failed\n\n");
+        fprintf(stderr, "Signature verification: failed\n\n");
         OPENSSL_free(ph);
         OPENSSL_free(cmdbuf);
         return 0; /* FAILED */
@@ -303,11 +303,11 @@ static int pe_verify_indirect_data(FILE_FORMAT_CTX *ctx, SpcAttributeTypeAndOpti
     u_char *ph = NULL;
 
     if (!pe_page_hash_get(&ph, &phlen, &phtype, obj)) {
-        printf("Failed to extract a page hash\n\n");
+        fprintf(stderr, "Failed to extract a page hash\n\n");
         return 0; /* FAILED */
     }
     if (!pe_verify_page_hash(ctx, ph, phlen, phtype)) {
-        printf("Page hash verification: failed\n\n");
+        fprintf(stderr, "Page hash verification: failed\n\n");
         OPENSSL_free(ph);
         return 0; /* FAILED */
     }
@@ -353,7 +353,7 @@ static int pe_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     /* Strip current signature */
     ctx->pe_ctx->fileend = ctx->pe_ctx->sigpos;
     if (!pe_modify_header(ctx, hash, outdata)) {
-        printf("Unable to modify file header\n");
+        fprintf(stderr, "Unable to modify file header\n");
         return 1; /* FAILED */
     }
     return 0; /* OK */
@@ -373,7 +373,7 @@ static int pe_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
         ctx->pe_ctx->fileend = ctx->pe_ctx->sigpos;
     }
     if (!pe_modify_header(ctx, hash, outdata)) {
-        printf("Unable to modify file header\n");
+        fprintf(stderr, "Unable to modify file header\n");
         return 0; /* FAILED */
     }
     return 1; /* OK */
@@ -391,21 +391,21 @@ static PKCS7 *pe_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
     PKCS7 *p7 = pkcs7_create(ctx);
 
     if (!p7) {
-        printf("Creating a new signature failed\n");
+        fprintf(stderr, "Creating a new signature failed\n");
         return NULL; /* FAILED */
     }
     if (!add_indirect_data_object(p7)) {
-        printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
+        fprintf(stderr, "Adding SPC_INDIRECT_DATA_OBJID failed\n");
         PKCS7_free(p7);
         return NULL; /* FAILED */
     }
     content = spc_indirect_data_content_get(hash, ctx);
     if (!content) {
-        printf("Failed to get spcIndirectDataContent\n");
+        fprintf(stderr, "Failed to get spcIndirectDataContent\n");
         return NULL; /* FAILED */
     }
     if (!sign_spc_indirect_data_content(p7, content)) {
-        printf("Failed to set signed content\n");
+        fprintf(stderr, "Failed to set signed content\n");
         PKCS7_free(p7);
         ASN1_OCTET_STRING_free(content);
         return NULL; /* FAILED */
@@ -435,7 +435,7 @@ static int pe_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 
     if (((len = i2d_PKCS7(p7, NULL)) <= 0)
         || (p = OPENSSL_malloc((size_t)len)) == NULL) {
-        printf("i2d_PKCS memory allocation failed: %d\n", len);
+        fprintf(stderr, "i2d_PKCS memory allocation failed: %d\n", len);
         return 1; /* FAILED */
     }
     i2d_PKCS7(p7, &p);
@@ -540,7 +540,7 @@ static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize)
     uint16_t magic;
 
     if (filesize < 64) {
-        printf("Corrupt DOS file - too short\n");
+        fprintf(stderr, "Corrupt DOS file - too short\n");
         return NULL; /* FAILED */
     }
     /* SizeOfHeaders field specifies the combined size of an MS-DOS stub, PE header,
@@ -549,15 +549,15 @@ static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize)
      * because of a bug when checking section names for compatibility purposes */
     header_size = GET_UINT32_LE(indata + 60);
     if (header_size < 44 || header_size > filesize) {
-        printf("Unexpected SizeOfHeaders field: 0x%08X\n", header_size);
+        fprintf(stderr, "Unexpected SizeOfHeaders field: 0x%08X\n", header_size);
         return NULL; /* FAILED */
     }
     if (filesize < header_size + 176) {
-        printf("Corrupt PE file - too short\n");
+        fprintf(stderr, "Corrupt PE file - too short\n");
         return NULL; /* FAILED */
     }
     if (memcmp(indata + header_size, "PE\0\0", 4)) {
-        printf("Unrecognized DOS file type\n");
+        fprintf(stderr, "Unrecognized DOS file type\n");
         return NULL; /* FAILED */
     }
     /* Magic field identifies the state of the image file. The most common number is
@@ -570,7 +570,7 @@ static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize)
     } else if (magic == 0x10b) {
         pe32plus = 0;
     } else {
-        printf("Corrupt PE file - found unknown magic %04X\n", magic);
+        fprintf(stderr, "Corrupt PE file - found unknown magic %04X\n", magic);
         return NULL; /* FAILED */
     }
     /* The image file checksum */
@@ -579,7 +579,7 @@ static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize)
      * in the remainder of the optional header. Each describes a location and size. */
     nrvas = GET_UINT32_LE(indata + header_size + 116 + pe32plus * 16);
     if (nrvas < 5) {
-        printf("Can not handle PE files without certificate table resource\n");
+        fprintf(stderr, "Can not handle PE files without certificate table resource\n");
         return NULL; /* FAILED */
     }
     /* Certificate Table field specifies the attribute certificate table address (4 bytes) and size (4 bytes) */
@@ -589,7 +589,7 @@ static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize)
        that signature should be last part of file */
     if ((sigpos != 0 || siglen != 0) &&
             (sigpos == 0 || siglen == 0 || sigpos >= filesize || sigpos + siglen != filesize)) {
-        printf("Ignoring PE signature not at the end of the file\n");
+        printf("Warning: Ignoring PE signature not at the end of the file\n");
         sigpos = 0;
         siglen = 0;
     }
@@ -617,7 +617,7 @@ static PKCS7 *pe_pkcs7_get_file(char *indata, PE_CTX *pe_ctx)
     uint32_t pos = 0;
 
     if (pe_ctx->siglen == 0 || pe_ctx->siglen > pe_ctx->fileend) {
-        printf("Corrupted signature length: 0x%08X\n", pe_ctx->siglen);
+        fprintf(stderr, "Corrupted signature length: 0x%08X\n", pe_ctx->siglen);
         return NULL; /* FAILED */
     }
     while (pos < pe_ctx->siglen) {
@@ -780,7 +780,7 @@ static BIO *pe_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     BIO *bhash = BIO_new(BIO_f_md());
 
     if (!BIO_set_md(bhash, md)) {
-        printf("Unable to set the message digest of BIO\n");
+        fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return 0; /* FAILED */
     }
@@ -805,7 +805,7 @@ static BIO *pe_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     }
     idx += (uint32_t)written + 8;
     if (!bio_hash_data(bhash, ctx->options->indata, idx, fileend)) {
-        printf("Unable to calculate digest\n");
+        fprintf(stderr, "Unable to calculate digest\n");
         BIO_free_all(bhash);
         return 0;  /* FAILED */
     }
@@ -918,7 +918,7 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
      * which immediately follows the headers, can be up to 65535 under Vista and later */
     nsections = GET_UINT16_LE(ctx->options->indata + ctx->pe_ctx->header_size + 6);
     if (nsections == 0) {
-        printf("Corrupted number of sections: 0x%08X\n", nsections);
+        fprintf(stderr, "Corrupted number of sections: 0x%08X\n", nsections);
         return NULL; /* FAILED */
     }
     /* FileAlignment is the alignment factor (in bytes) that is used to align
@@ -926,7 +926,7 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
      * of 2 between 512 and 64 K, inclusive. The default is 512. */
     alignment = GET_UINT32_LE(ctx->options->indata + ctx->pe_ctx->header_size + 60);
     if (alignment < 512 || alignment > UINT16_MAX) {
-        printf("Corrupted file alignment factor: 0x%08X\n", alignment);
+        fprintf(stderr, "Corrupted file alignment factor: 0x%08X\n", alignment);
         return NULL; /* FAILED */
     }
     /* SectionAlignment is the alignment (in bytes) of sections when they are
@@ -936,14 +936,14 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
      * https://devblogs.microsoft.com/oldnewthing/20210510-00/?p=105200 */
     pagesize = GET_UINT32_LE(ctx->options->indata + ctx->pe_ctx->header_size + 56);
     if (pagesize == 0 || pagesize < alignment || pagesize > 4194304) {
-        printf("Corrupted page size: 0x%08X\n", pagesize);
+        fprintf(stderr, "Corrupted page size: 0x%08X\n", pagesize);
         return NULL; /* FAILED */
     }
     /* SizeOfHeaders is the combined size of an MS-DOS stub, PE header,
      * and section headers rounded up to a multiple of FileAlignment. */
     hdrsize = GET_UINT32_LE(ctx->options->indata + ctx->pe_ctx->header_size + 84);
     if (hdrsize < ctx->pe_ctx->header_size || hdrsize > UINT32_MAX) {
-        printf("Corrupted headers size: 0x%08X\n", hdrsize);
+        fprintf(stderr, "Corrupted headers size: 0x%08X\n", hdrsize);
         return NULL; /* FAILED */
     }
     /* SizeOfOptionalHeader is the size of the optional header, which is
@@ -951,7 +951,7 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
      * and can't be bigger than the file */
     opthdr_size = GET_UINT16_LE(ctx->options->indata + ctx->pe_ctx->header_size + 20);
     if (opthdr_size == 0 || opthdr_size > ctx->pe_ctx->fileend) {
-        printf("Corrupted optional header size: 0x%08X\n", opthdr_size);
+        fprintf(stderr, "Corrupted optional header size: 0x%08X\n", opthdr_size);
         return NULL; /* FAILED */
     }
     pphlen = 4 + EVP_MD_size(md);
@@ -959,7 +959,7 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
 
     bhash = BIO_new(BIO_f_md());
     if (!BIO_set_md(bhash, md)) {
-        printf("Unable to set the message digest of BIO\n");
+        fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return NULL;  /* FAILED */
     }
@@ -1006,7 +1006,7 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
             PUT_UINT32_LE(ro + l, res + pi*pphlen);
             bhash = BIO_new(BIO_f_md());
             if (!BIO_set_md(bhash, md)) {
-                printf("Unable to set the message digest of BIO\n");
+                fprintf(stderr, "Unable to set the message digest of BIO\n");
                 BIO_free_all(bhash);
                 OPENSSL_free(zeroes);
                 OPENSSL_free(res);
@@ -1099,7 +1099,7 @@ static SpcLink *pe_page_hash_link_get(FILE_FORMAT_CTX *ctx, int phtype)
 
     ph = pe_page_hash_calc(&phlen, ctx, phtype);
     if (!ph) {
-        printf("Failed to calculate page hash\n");
+        fprintf(stderr, "Failed to calculate page hash\n");
         return NULL; /* FAILED */
     }
     if (ctx->options->verbose)
@@ -1170,20 +1170,20 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx)
     uint32_t real_pe_checksum, sum = 0;
 
     if (!ctx) {
-        printf("Init error\n\n");
+        fprintf(stderr, "Init error\n");
         return 0; /* FAILED */
     }
     real_pe_checksum = pe_calc_realchecksum(ctx);
     if (ctx->pe_ctx->pe_checksum == real_pe_checksum) {
-        printf("PE checksum   : %08X\n\n", real_pe_checksum);
+        printf("PE checksum   : %08X\n", real_pe_checksum);
     } else {
         printf("Current PE checksum   : %08X\n", ctx->pe_ctx->pe_checksum);
         printf("Calculated PE checksum: %08X\n", real_pe_checksum);
-        printf("Warning: invalid PE checksum\n\n");
+        printf("Warning: invalid PE checksum\n");
     }
     if (ctx->pe_ctx->sigpos == 0 || ctx->pe_ctx->siglen == 0
         || ctx->pe_ctx->sigpos > ctx->pe_ctx->fileend) {
-        printf("No signature found\n\n");
+        fprintf(stderr, "No signature found\n");
         return 0; /* FAILED */
     }
     /*
@@ -1193,9 +1193,9 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx)
     while (sum < ctx->pe_ctx->siglen) {
         uint32_t len = GET_UINT32_LE(ctx->options->indata + ctx->pe_ctx->sigpos + sum);
         if (ctx->pe_ctx->siglen - len > 8) {
-            printf("Corrupted attribute certificate table\n");
-            printf("Attribute certificate table size  : %08X\n", ctx->pe_ctx->siglen);
-            printf("Attribute certificate entry length: %08X\n\n", len);
+            fprintf(stderr, "Corrupted attribute certificate table\n");
+            fprintf(stderr, "Attribute certificate table size  : %08X\n", ctx->pe_ctx->siglen);
+            fprintf(stderr, "Attribute certificate entry length: %08X\n\n", len);
             return 0; /* FAILED */
         }
         /* quadword align data */
@@ -1203,9 +1203,9 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx)
         sum += len;
     }
     if (sum != ctx->pe_ctx->siglen) {
-        printf("Corrupted attribute certificate table\n");
-        printf("Attribute certificate table size  : %08X\n", ctx->pe_ctx->siglen);
-        printf("Sum of the rounded dwLength values: %08X\n\n", sum);
+        fprintf(stderr, "Corrupted attribute certificate table\n");
+        fprintf(stderr, "Attribute certificate table size  : %08X\n", ctx->pe_ctx->siglen);
+        fprintf(stderr, "Sum of the rounded dwLength values: %08X\n\n", sum);
         return 0; /* FAILED */
     }
     return 1; /* OK */

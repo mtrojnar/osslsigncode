@@ -37,16 +37,16 @@ uint32_t get_file_size(const char *infile)
     ret = stat(infile, &st);
 #endif
     if (ret) {
-        printf("Failed to open file: %s\n", infile);
+        fprintf(stderr, "Failed to open file: %s\n", infile);
         return 0;
     }
 
     if (st.st_size < 4) {
-        printf("Unrecognized file type - file is too short: %s\n", infile);
+        fprintf(stderr, "Unrecognized file type - file is too short: %s\n", infile);
         return 0;
     }
     if (st.st_size > UINT32_MAX) {
-        printf("Unsupported file - too large: %s\n", infile);
+        fprintf(stderr, "Unsupported file - too large: %s\n", infile);
         return 0;
     }
     return (uint32_t)st.st_size;
@@ -86,7 +86,7 @@ char *map_file(const char *infile, const size_t size)
     }
     close(fd);
 #else
-    printf("No file mapping function\n");
+    fprintf(stderr, "No file mapping function\n");
     return NULL;
 #endif /* HAVE_SYS_MMAN_H */
 #endif /* WIN32 */
@@ -152,7 +152,7 @@ int data_write_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
         ret = !i2d_PKCS7_bio(outdata, p7);
     }
     if (ret) {
-        printf("Unable to write pkcs7 object\n");
+        fprintf(stderr, "Unable to write pkcs7 object\n");
     }
     return ret;
 }
@@ -193,9 +193,9 @@ PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx)
             }
         }
         if (si == NULL) {
-            printf("Failed to checking the consistency of a private key: %s\n",
+            fprintf(stderr, "Failed to checking the consistency of a private key: %s\n",
                 ctx->options->keyfile);
-            printf("          with a public key in any X509 certificate: %s\n\n",
+            fprintf(stderr, "          with a public key in any X509 certificate: %s\n\n",
                 ctx->options->certfile);
             return NULL; /* FAILED */
         }
@@ -208,7 +208,7 @@ PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx)
     }
     if ((ctx->options->desc || ctx->options->url) &&
             !pkcs7_signer_info_add_spc_sp_opus_info(si, ctx)) {
-        printf("Couldn't allocate memory for opus info\n");
+        fprintf(stderr, "Couldn't allocate memory for opus info\n");
         return NULL; /* FAILED */
     }
     if ((ctx->options->nested_number >= 0) &&
@@ -218,7 +218,7 @@ PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx)
     /* create X509 chain sorted in ascending order by their DER encoding */
     chain = X509_chain_get_sorted(ctx, signer);
     if (chain == NULL) {
-        printf("Failed to create a sorted certificate chain\n");
+        fprintf(stderr, "Failed to create a sorted certificate chain\n");
         return NULL; /* FAILED */
     }
     /* add sorted certificate chain */
@@ -278,11 +278,12 @@ int sign_spc_indirect_data_content(PKCS7 *p7, ASN1_OCTET_STRING *content)
     inf = ASN1_get_object(&p, &plen, &tag, &class, len);
     if (inf != V_ASN1_CONSTRUCTED || tag != V_ASN1_SEQUENCE
         || !pkcs7_sign_content(p7, p, (int)plen)) {
-        printf("Failed to sign spcIndirectDataContent\n");
+        fprintf(stderr, "Failed to sign spcIndirectDataContent\n");
         return 0; /* FAILED */
     }
     td7 = PKCS7_new();
     if (!td7) {
+        fprintf(stderr, "PKCS7_new failed\n");
         return 0; /* FAILED */
     }
     td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
@@ -291,7 +292,7 @@ int sign_spc_indirect_data_content(PKCS7 *p7, ASN1_OCTET_STRING *content)
     td7->d.other->value.sequence = ASN1_STRING_new();
     ASN1_STRING_set(td7->d.other->value.sequence, data, len);
     if (!PKCS7_set_content(p7, td7)) {
-        printf("PKCS7_set_content failed\n");
+        fprintf(stderr, "PKCS7_set_content failed\n");
         PKCS7_free(td7);
         return 0; /* FAILED */
     }
@@ -388,13 +389,13 @@ int pkcs7_sign_content(PKCS7 *p7, const u_char *data, int len)
     BIO *p7bio;
 
     if ((p7bio = PKCS7_dataInit(p7, NULL)) == NULL) {
-        printf("PKCS7_dataInit failed\n");
+        fprintf(stderr, "PKCS7_dataInit failed\n");
         return 0; /* FAILED */
     }
     BIO_write(p7bio, data, len);
     (void)BIO_flush(p7bio);
     if (!PKCS7_dataFinal(p7, p7bio)) {
-        printf("PKCS7_dataFinal failed\n");
+        fprintf(stderr, "PKCS7_dataFinal failed\n");
         BIO_free_all(p7bio);
         return 0; /* FAILED */
     }
@@ -488,7 +489,7 @@ MsCtlContent *ms_ctl_content_get(PKCS7 *p7)
     const u_char *data;
 
     if (!is_content_type(p7, MS_CTL_OBJID)) {
-        printf("Failed to find MS_CTL_OBJID\n");
+        fprintf(stderr, "Failed to find MS_CTL_OBJID\n");
         return NULL; /* FAILED */
     }
     value = p7->d.sign->contents->d.other->value.sequence;

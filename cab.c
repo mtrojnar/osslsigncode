@@ -206,7 +206,7 @@ static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     BIO *bhash = BIO_new(BIO_f_md());
 
     if (!BIO_set_md(bhash, md)) {
-        printf("Unable to set the message digest of BIO\n");
+        fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return 0;  /* FAILED */
     }
@@ -296,7 +296,7 @@ static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
             nfolders--;
         }
         if (idx != coffFiles) {
-            printf("Corrupt coffFiles value: 0x%08X\n", coffFiles);
+            fprintf(stderr, "Corrupt coffFiles value: 0x%08X\n", coffFiles);
             BIO_free_all(bhash);
             return 0;  /* FAILED */
         }
@@ -307,7 +307,7 @@ static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     }
     /* (variable) ab - the compressed data bytes */
     if (!bio_hash_data(bhash, ctx->options->indata, idx, fileend)) {
-        printf("Unable to calculate digest\n");
+        fprintf(stderr, "Unable to calculate digest\n");
         BIO_free_all(bhash);
         return 0;  /* FAILED */
     }
@@ -343,17 +343,17 @@ static int cab_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         }
     }
     if (mdtype == -1) {
-        printf("Failed to extract current message digest\n\n");
+        fprintf(stderr, "Failed to extract current message digest\n\n");
         return 0; /* FAILED */
     }
     md = EVP_get_digestbynid(mdtype);
     cmdbuf = cab_digest_calc(ctx, md);
     if (!cmdbuf) {
-        printf("Failed to calculate message digest\n\n");
+        fprintf(stderr, "Failed to calculate message digest\n\n");
         return 0; /* FAILED */
     }
     if (!compare_digests(mdbuf, cmdbuf, mdtype)) {
-        printf("Signature verification: failed\n\n");
+        fprintf(stderr, "Signature verification: failed\n\n");
         OPENSSL_free(cmdbuf);
         return 0; /* FAILED */
     }
@@ -443,7 +443,7 @@ static int cab_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     BIO_write(outdata, ctx->options->indata + 32, 4);
     idx = cab_write_optional_names(outdata, ctx->options->indata, 60, flags);
     if (idx >= ctx->cab_ctx->fileend) {
-        printf("Corrupt CAB file - too short\n");
+        fprintf(stderr, "Corrupt CAB file - too short\n");
         OPENSSL_free(buf);
         return 0; /* FAILED */
     }
@@ -453,7 +453,7 @@ static int cab_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
      */
     nfolders = GET_UINT16_LE(ctx->options->indata + 26);
     if (nfolders * 8 >= ctx->cab_ctx->fileend - idx) {
-        printf("Corrupt cFolders value: 0x%08X\n", nfolders);
+        fprintf(stderr, "Corrupt cFolders value: 0x%08X\n", nfolders);
         OPENSSL_free(buf);
         return 0; /* FAILED */
     }
@@ -510,26 +510,26 @@ static PKCS7 *cab_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
     PKCS7 *p7 = pkcs7_create(ctx);
 
     if (!p7) {
-        printf("Creating a new signature failed\n");
+        fprintf(stderr, "Creating a new signature failed\n");
         return NULL; /* FAILED */
     }
     if (ctx->options->jp >= 0 && !cab_add_jp_attribute(p7, ctx->options->jp)) {
-        printf("Adding jp attribute failed\n");
+        fprintf(stderr, "Adding jp attribute failed\n");
         PKCS7_free(p7);
         return NULL; /* FAILED */
     }
     if (!add_indirect_data_object(p7)) {
-        printf("Adding SPC_INDIRECT_DATA_OBJID failed\n");
+        fprintf(stderr, "Adding SPC_INDIRECT_DATA_OBJID failed\n");
         PKCS7_free(p7);
         return NULL; /* FAILED */
     }
     content = spc_indirect_data_content_get(hash, ctx);
     if (!content) {
-        printf("Failed to get spcIndirectDataContent\n");
+        fprintf(stderr, "Failed to get spcIndirectDataContent\n");
         return NULL; /* FAILED */
     }
     if (!sign_spc_indirect_data_content(p7, content)) {
-        printf("Failed to set signed content\n");
+        fprintf(stderr, "Failed to set signed content\n");
         PKCS7_free(p7);
         ASN1_OCTET_STRING_free(content);
         return NULL; /* FAILED */
@@ -556,7 +556,7 @@ static int cab_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 
     if (((len = i2d_PKCS7(p7, NULL)) <= 0)
         || (p = OPENSSL_malloc((size_t)len)) == NULL) {
-        printf("i2d_PKCS memory allocation failed: %d\n", len);
+        fprintf(stderr, "i2d_PKCS memory allocation failed: %d\n", len);
         return 1; /* FAILED */
     }
     i2d_PKCS7(p7, &p);
@@ -653,19 +653,19 @@ static CAB_CTX *cab_ctx_get(char *indata, uint32_t filesize)
     uint16_t flags;
 
     if (filesize < 44) {
-        printf("CAB file is too short\n");
+        fprintf(stderr, "CAB file is too short\n");
         return NULL; /* FAILED */
     }
     reserved = GET_UINT32_LE(indata + 4);
     if (reserved) {
-        printf("Reserved1: 0x%08X\n", reserved);
+        fprintf(stderr, "Reserved1: 0x%08X\n", reserved);
         return NULL; /* FAILED */
     }
     /* flags specify bit-mapped values that indicate the presence of optional data */
     flags = GET_UINT16_LE(indata + 30);
     if (flags & FLAG_PREV_CABINET) {
         /* FLAG_NEXT_CABINET works */
-        printf("Multivolume cabinet file is unsupported: flags 0x%04X\n", flags);
+        fprintf(stderr, "Multivolume cabinet file is unsupported: flags 0x%04X\n", flags);
         return NULL; /* FAILED */
     }
     if (flags & FLAG_RESERVE_PRESENT) {
@@ -675,12 +675,12 @@ static CAB_CTX *cab_ctx_get(char *indata, uint32_t filesize)
         */
         header_size = GET_UINT32_LE(indata + 36);
         if (header_size != 20) {
-            printf("Additional header size: 0x%08X\n", header_size);
+            fprintf(stderr, "Additional header size: 0x%08X\n", header_size);
             return NULL; /* FAILED */
         }
         reserved = GET_UINT32_LE(indata + 40);
         if (reserved != 0x00100000) {
-            printf("abReserved: 0x%08X\n", reserved);
+            fprintf(stderr, "abReserved: 0x%08X\n", reserved);
             return NULL; /* FAILED */
         }
         /*
@@ -695,13 +695,13 @@ static CAB_CTX *cab_ctx_get(char *indata, uint32_t filesize)
         sigpos = GET_UINT32_LE(indata + 44);
         siglen = GET_UINT32_LE(indata + 48);
         if ((sigpos < filesize && sigpos + siglen != filesize) || (sigpos >= filesize)) {
-            printf("Additional data offset:\t%u bytes\nAdditional data size:\t%u bytes\n",
+            fprintf(stderr, "Additional data offset:\t%u bytes\nAdditional data size:\t%u bytes\n",
                 sigpos, siglen);
-            printf("File size:\t\t%u bytes\n", filesize);
+            fprintf(stderr, "File size:\t\t%u bytes\n", filesize);
             return NULL; /* FAILED */
         }
         if ((sigpos > 0 && siglen == 0) || (sigpos == 0 && siglen > 0)) {
-            printf("Corrupt signature\n");
+            fprintf(stderr, "Corrupt signature\n");
             return NULL; /* FAILED */
         }
     }
@@ -852,7 +852,7 @@ static int cab_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 
     idx = cab_write_optional_names(outdata, ctx->options->indata, 60, flags);
     if (idx >= ctx->cab_ctx->fileend) {
-        printf("Corrupt CAB file - too short\n");
+        fprintf(stderr, "Corrupt CAB file - too short\n");
         return 0; /* FAILED */
     }
     /*
@@ -861,7 +861,7 @@ static int cab_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
      */
     nfolders = GET_UINT16_LE(ctx->options->indata + 26);
     if (nfolders * 8 >= ctx->cab_ctx->fileend - idx) {
-        printf("Corrupt cFolders value: 0x%08X\n", nfolders);
+        fprintf(stderr, "Corrupt cFolders value: 0x%08X\n", nfolders);
         return 0; /* FAILED */
     }
     while (nfolders) {
@@ -936,7 +936,7 @@ static int cab_add_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 
     idx = cab_write_optional_names(outdata, ctx->options->indata, 36, flags);
     if (idx >= ctx->cab_ctx->fileend) {
-        printf("Corrupt CAB file - too short\n");
+        fprintf(stderr, "Corrupt CAB file - too short\n");
         OPENSSL_free(buf);
         return 0; /* FAILED */
     }
@@ -946,7 +946,7 @@ static int cab_add_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
      */
     nfolders = GET_UINT16_LE(ctx->options->indata + 26);
     if (nfolders * 8 >= ctx->cab_ctx->fileend - idx) {
-        printf("Corrupt cFolders value: 0x%08X\n", nfolders);
+        fprintf(stderr, "Corrupt cFolders value: 0x%08X\n", nfolders);
         OPENSSL_free(buf);
         return 0; /* FAILED */
     }
@@ -979,16 +979,16 @@ static int cab_add_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 static int cab_check_file(FILE_FORMAT_CTX *ctx)
 {
     if (!ctx) {
-        printf("Init error\n\n");
+        fprintf(stderr, "Init error\n");
         return 0; /* FAILED */
     }
     if (ctx->cab_ctx->header_size != 20) {
-        printf("No signature found\n\n");
+        fprintf(stderr, "No signature found\n");
         return 0; /* FAILED */
     }
     if (ctx->cab_ctx->sigpos == 0 || ctx->cab_ctx->siglen == 0
         || ctx->cab_ctx->sigpos > ctx->cab_ctx->fileend) {
-        printf("No signature found\n\n");
+        fprintf(stderr, "No signature found\n");
         return 0; /* FAILED */
     }
     return 1; /* OK */
