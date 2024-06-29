@@ -1,5 +1,7 @@
 # osslsigncode change log
 
+### 2.10 (unreleased)
+
 ### 2.9 (2024.06.29)
 
 - added a 64 bit long pseudo-random NONCE in the TSA request
