@@ -1,13 +1,21 @@
 # osslsigncode change log
 
-### 2.9 (unreleased)
+### 2.9 (2024.06.29)
 
 - added a 64 bit long pseudo-random NONCE in the TSA request
-- used native HTTP client with OpenSSL 3.0 or later, removed libcurl dependency
+- missing NID_pkcs9_signingTime is no longer an error
+- added support for PEM-encoded CRLs
+- fixed the APPX central directory sorting order
+- added a special "-" file name to read the passphrase from stdin
+  (by Steve McIntyre)
+- used native HTTP client with OpenSSL 3.x, removing libcurl dependency
+- added '-login' option to force a login to PKCS11 engines
+  (by Brad Hughes)
 - added the "-ignore-crl" option to disable fetching and verifying
   CRL Distribution Points
 - changed error output to stderr instead of stdout
-- improved testing
+- various testing framework improvements
+- various memory corruption fixes
 
 ### 2.8 (2024.03.03)
 
