@@ -138,12 +138,29 @@ jobs:
         python3.8 -m pip install --upgrade pip
         python3.8 -m pip install cryptography
 
+    - name: Find the latest version of Python (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        $pythonVersions = Get-ChildItem -Path "C:/hostedtoolcache/windows/Python/" -Directory | Where-Object { $_.Name -match '\d+\.\d+\.\d+' } | Sort-Object { [Version]($_.Name) } -Descending
+        if ($pythonVersions.Count -gt 0) {
+            $latestPythonVersion = $pythonVersions[0].Name
+            $pythonPath = "C:/hostedtoolcache/windows/Python/$latestPythonVersion/x64"
+            Write-Output "Latest Python version found: $latestPythonVersion"
+            Write-Output "Python directory path: $pythonPath"
+            $env:Path = "$pythonPath;" + $env:Path
+            Write-Output "Updated PATH environment variable:"
+            Write-Output $env:Path
+        } else {
+            Write-Error "No Python versions found in C:/hostedtoolcache/windows/Python/"
+            exit 1
+        }
+
     - name: Install python3 cryptography module (Windows)
       if: runner.os == 'Windows'
       run: |
-        C:/hostedtoolcache/windows/Python/3.12.3/x64/python3.exe -m ensurepip
-        C:/hostedtoolcache/windows/Python/3.12.3/x64/python.exe -m pip install --upgrade pip
-        C:/hostedtoolcache/windows/Python/3.12.3/x64/python.exe -m pip install cryptography
+        python.exe -m ensurepip
+        python.exe -m pip install --upgrade pip
+        python.exe -m pip install cryptography
 
     - name: Configure CMake
       run: cmake
