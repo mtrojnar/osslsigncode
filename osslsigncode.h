@@ -274,6 +274,7 @@ typedef struct {
     char *proxy;
     int noverifypeer;
     int addBlob;
+    const char *blob_file;
     int nest;
     int index;
     int ignore_timestamp;
