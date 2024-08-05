@@ -60,6 +60,7 @@
 
 #include "osslsigncode.h"
 #include "helpers.h"
+#include <cstdint>
 
 /*
  * $ echo -n 3006030200013000 | xxd -r -p | openssl asn1parse -i -inform der
@@ -1361,20 +1362,26 @@ static int add_unauthenticated_blob(PKCS7 *p7, const char *blob_file)
         if (fseek(f, 0, SEEK_SET))
             goto fail;
 
+        // Windows doesn't like lengths above 2^32
+        if (file_len > UINT32_MAX) {
+            fprintf(stderr, "Blob is too big");
+            goto fail;
+        }
+
         // Ensure blob gets added to end of file
-        uint64_t blob_len = file_len;
+        uint32_t blob_len = file_len;
         if (blob_len < 1024) {
             blob_len = 1024;
         }
 
-        len = 2 + sizeof file_len + blob_len;
+        len = 2 + sizeof blob_len + blob_len;
 
         if ((p = OPENSSL_zalloc(len)) == NULL)
             goto fail;
 
         p[0] = '\x0c';
-        p[1] = 0x80 + sizeof file_len;
-        uint64_t blob_len_swapped = __builtin_bswap64(blob_len);
+        p[1] = 0x80 + sizeof blob_len;
+        uint32_t blob_len_swapped = __builtin_bswap32(blob_len);
         memcpy(p + 2, &blob_len_swapped, sizeof blob_len_swapped);
         size_t n = fread(p + 2 + sizeof file_len, 1, file_len, f);
         if (n != file_len) {
