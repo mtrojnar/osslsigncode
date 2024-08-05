@@ -60,7 +60,7 @@
 
 #include "osslsigncode.h"
 #include "helpers.h"
-#include <cstdint>
+#include <stdint.h>
 
 /*
  * $ echo -n 3006030200013000 | xxd -r -p | openssl asn1parse -i -inform der
