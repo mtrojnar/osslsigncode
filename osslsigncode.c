@@ -1383,7 +1383,7 @@ static int add_unauthenticated_blob(PKCS7 *p7, const char *blob_file)
         p[1] = 0x80 + sizeof blob_len;
         uint32_t blob_len_swapped = __builtin_bswap32(blob_len);
         memcpy(p + 2, &blob_len_swapped, sizeof blob_len_swapped);
-        size_t n = fread(p + 2 + sizeof file_len, 1, file_len, f);
+        size_t n = fread(p + 2 + sizeof blob_len, 1, file_len, f);
         if (n != file_len) {
             goto fail;
         }
