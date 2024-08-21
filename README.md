@@ -142,6 +142,29 @@ An example of using osslsigncode with SoftHSM:
     -in yourapp.exe -out yourapp-signed.exe
 ```
 
+You can use a certificate and key stored in the Windows Certificate Store with
+the CNG engine. For more information, refer to
+
+  https://www.stunnel.org/cng-engine.html
+
+A non-commercial edition of CNG engine is available for testing, personal,
+educational, or research purposes.
+
+To use the CNG engine with osslsigncode, ensure that the `cng.dll` library is
+placed in the same directory as the `osslsigncode.exe` executable.
+
+Below is an example of how to use osslsigncode with the CNG engine:
+```
+  osslsigncode sign \
+    -pkcs11engine cng \
+    -pkcs11cert osslsigncode_cert \
+    -key osslsigncode_cert \
+    -engineCtrl store_flags:0 \
+    -engineCtrl store_name:MY \
+    -engineCtrl PIN:yourpass \
+    -in yourapp.exe -out yourapp-signed.exe
+```
+
 You can check that the signed file is correct by right-clicking
 on it in Windows and choose Properties --> Digital Signatures,
 and then choose the signature from the list, and click on

@@ -206,6 +206,14 @@ ASN1_SEQUENCE(MsCtlContent) = {
 
 IMPLEMENT_ASN1_FUNCTIONS(MsCtlContent)
 
+
+ASN1_SEQUENCE(EngineControl) = {
+    ASN1_SIMPLE(EngineControl, cmd, ASN1_OCTET_STRING),
+    ASN1_SIMPLE(EngineControl, param, ASN1_OCTET_STRING)
+} ASN1_SEQUENCE_END(EngineControl)
+
+IMPLEMENT_ASN1_FUNCTIONS(EngineControl)
+
 /* Prototypes */
 static ASN1_INTEGER *create_nonce(int bits);
 static char *clrdp_url_get_x509(X509 *cert);
@@ -224,6 +232,7 @@ static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b);
 static PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
 static void print_cert(X509 *cert, int i);
 static int x509_store_load_crlfile(X509_STORE *store, char *cafile, char *crlfile);
+static void engine_control_set(GLOBAL_OPTIONS *options, const char *arg);
 
 
 /*
@@ -3356,6 +3365,7 @@ static void free_options(GLOBAL_OPTIONS *options)
     options->xcerts = NULL;
     sk_X509_CRL_pop_free(options->crls, X509_CRL_free);
     options->crls = NULL;
+    sk_EngineControl_pop_free(options->engine_ctrls, EngineControl_free);
 }
 
 /*
@@ -3382,6 +3392,7 @@ static void usage(const char *argv0, const char *cmd)
         printf("%1s[ sign ] ( -pkcs12 <pkcs12file>\n", "");
         printf("%13s | ( -certs <certfile> | -spc <certfile> ) -key <keyfile>\n", "");
         printf("%13s | [ -pkcs11engine <engine> ] [ -login ] -pkcs11module <module>\n", "");
+        printf("%13s | [ -engineCtrl <command[:parameter]> ]\n", "");
         printf("%15s ( -pkcs11cert <pkcs11 cert id> | -certs <certfile> ) -key <pkcs11 key id> )\n", "");
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
         printf("%12s[ -nolegacy ]\n", "");
@@ -3519,6 +3530,7 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_pkcs11cert[] = {"sign", NULL};
     const char *cmds_pkcs11engine[] = {"sign", NULL};
     const char *cmds_pkcs11module[] = {"sign", NULL};
+    const char *cmds_engineCtrl[] = {"sign", NULL};
     const char *cmds_login[] = {"sign", NULL};
     const char *cmds_pkcs12[] = {"sign", NULL};
     const char *cmds_readpass[] = {"sign", NULL};
@@ -3655,6 +3667,8 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%-24s= PKCS#11 engine\n", "-pkcs11engine");
     if (on_list(cmd, cmds_pkcs11module))
         printf("%-24s= PKCS#11 module\n", "-pkcs11module");
+    if (on_list(cmd, cmds_engineCtrl))
+        printf("%-24s= control hardware engine\n", "-engineCtrl");
     if (on_list(cmd, cmds_login))
         printf("%-24s= force login to the token\n", "-login");
     if (on_list(cmd, cmds_pkcs12))
@@ -4112,6 +4126,8 @@ static ENGINE *engine_pkcs11(void)
  */
 static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
 {
+    int i;
+
     if (options->p11module && !ENGINE_ctrl_cmd_string(engine, "MODULE_PATH", options->p11module, 0)) {
         fprintf(stderr, "Failed to set pkcs11 engine MODULE_PATH to '%s'\n", options->p11module);
         ENGINE_free(engine);
@@ -4131,6 +4147,20 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
         fprintf(stderr, "Failed to force a login to the pkcs11 engine\n");
         ENGINE_free(engine);
         return 0; /* FAILED */
+    }
+    for (i = 0; i < sk_EngineControl_num(options->engine_ctrls); i++) {
+        EngineControl *engine_ctrl = sk_EngineControl_value(options->engine_ctrls, i);
+        const u_char *cmd = ASN1_STRING_get0_data(engine_ctrl->cmd);
+        const u_char *param = ASN1_STRING_get0_data(engine_ctrl->param);
+
+        if (param)
+            printf("Executing engine control command %s:%s\n", cmd, param);
+        else
+            printf("Executing engine control command %s\n", cmd);
+
+        if(!ENGINE_ctrl_cmd_string(engine, (const char *)cmd, (const char *)param, 0)) {
+            fprintf(stderr, "Failed to execute the engine control command\n");
+        }
     }
     /*
      * ENGINE_init() returned a functional reference, so free the structural
@@ -4401,6 +4431,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
 /* Use legacy PKCS#12 container with RC2-40-CBC private key and certificate encryption algorithm */
     options->legacy = 1;
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
+    options->engine_ctrls = sk_EngineControl_new_null();
 
     if (cmd == CMD_HELP) {
         return 0; /* FAILED */
@@ -4475,6 +4506,12 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->p11module = *(++argv);
+        } else if (!strcmp(*argv, "-engineCtrl")) {
+            if (--argc < 1) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            engine_control_set(options, *(++argv));
         } else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-login")) {
             options->login = 1;
 #endif /* OPENSSL_NO_ENGINE */
@@ -4770,6 +4807,19 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
     }
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
     return 1; /* OK */
+}
+
+static void engine_control_set(GLOBAL_OPTIONS *options, const char *arg)
+{
+    EngineControl *engine_ctrl = EngineControl_new();
+    char *tmp_str=strchr(arg, ':');
+
+    if(tmp_str) {
+        *tmp_str++='\0';
+        ASN1_STRING_set(engine_ctrl->param, tmp_str, (int)strlen(tmp_str));
+    }
+    ASN1_STRING_set(engine_ctrl->cmd, arg, (int)strlen(arg));
+    sk_EngineControl_push(options->engine_ctrls, engine_ctrl);
 }
 
 int main(int argc, char **argv)
