@@ -4192,7 +4192,6 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
         fprintf(stderr, "Failed to load private key %s\n", options->keyfile);
         return 0; /* FAILED */
     }
-    ERR_clear_error();
     return 1; /* OK */
 }
 #endif /* OPENSSL_NO_ENGINE */
