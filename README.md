@@ -143,7 +143,7 @@ An example of using osslsigncode with SoftHSM:
 ```
 
 You can use a certificate and key stored in the Windows Certificate Store with
-the CNG engine. For more information, refer to
+the CNG engine version 1.1 or later. For more information, refer to
 
   https://www.stunnel.org/cng-engine.html
 
