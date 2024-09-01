@@ -10,6 +10,8 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+import cryptography.hazmat.primitives.serialization.pkcs12
+
 RESULT_PATH = os.getcwd()
 CERTS_PATH = os.path.join(RESULT_PATH, "./Testing/certs/")
 
