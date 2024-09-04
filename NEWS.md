@@ -2,6 +2,9 @@
 
 ### 2.10 (unreleased)
 
+- improved unauthenticated blob support (thanks to Asger Hautop Drewsen)
+- added the '-blobFile' option to specify a file containing the blob content
+
 ### 2.9 (2024.06.29)
 
 - added a 64 bit long pseudo-random NONCE in the TSA request
