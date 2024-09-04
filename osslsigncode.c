@@ -1312,40 +1312,117 @@ out:
 }
 
 /*
- * If successful the unauthenticated blob will be written into
- * the PKCS7 SignerInfo structure as an unauthenticated attribute - cont[1]:
- * p7->d.sign->signer_info->unauth_attr
+ * Add an unauthenticated blob as an unauthenticated attribute - cont[1]
+ * to the PKCS7 SignerInfo structure: p7->d.sign->signer_info->unauth_attr
  * [in, out] p7: new PKCS#7 signature
+ * [in] blob_file: optional, path to the file containing the blob
  * [returns] 0 on error or 1 on success
  */
-static int add_unauthenticated_blob(PKCS7 *p7)
+static int add_unauthenticated_blob(PKCS7 *p7, const char *blob_file)
 {
+    u_char *p = NULL, *buffer = NULL;
+    int blob_len, len;
+    ASN1_UTF8STRING *value;
     PKCS7_SIGNER_INFO *si;
-    STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
-    u_char *p = NULL;
-    int len = 1024+4;
-    /* Length data for ASN1 attribute plus prefix */
-    const char prefix[] = "\x0c\x82\x04\x00---BEGIN_BLOB---";
-    const char postfix[] = "---END_BLOB---";
+    STACK_OF(PKCS7_SIGNER_INFO) *signer_info = PKCS7_get_signer_info(p7);
 
-    signer_info = PKCS7_get_signer_info(p7);
     if (!signer_info) {
         fprintf(stderr, "Failed to obtain PKCS#7 signer info list\n");
         return 0; /* FAILED */
     }
     si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
-    if (!si)
+    if (!si) {
+        fprintf(stderr, "Failed to obtain signer info from PKCS#7 structure\n");
         return 0; /* FAILED */
-    if ((p = OPENSSL_malloc((size_t)len)) == NULL)
+    }
+    if (blob_file == NULL) {
+        /* Generate a placeholder blob */
+        const char prefix[] = "---BEGIN_BLOB---";
+        const char postfix[] = "---END_BLOB---";
+        size_t prefix_len = strlen(prefix);
+        size_t postfix_len = strlen(postfix);
+
+        blob_len = (int)(prefix_len + 1024 + postfix_len);
+        buffer = OPENSSL_zalloc((size_t)blob_len);
+        if (!buffer) {
+            fprintf(stderr, "Memory allocation failed\n");
+            return 0; /* FAILED */
+        }
+        memcpy(buffer, prefix, sizeof prefix);
+        memcpy(buffer + prefix_len + 1024, postfix, postfix_len);
+    } else {
+        /* Copy blob content from the specified file */
+        int64_t file_size;
+        size_t size;
+        FILE *file = fopen(blob_file, "rb");
+
+        if (!file) {
+            fprintf(stderr, "Failed to open blob file: %s\n", blob_file);
+            return 0; /* FAILED */
+        }
+        if (fseeko(file, 0, SEEK_END) < 0
+                || (file_size = ftello(file)) < 0
+                || fseeko(file, 0, SEEK_SET) < 0) {
+            fprintf(stderr, "Failed to seek in blob file: %s\n", blob_file);
+            fclose(file);
+            return 0; /* FAILED */
+        }
+        /* New unauthenticated attribute creation: X509_ATTRIBUTE_create_by_NID()
+         * or X509_ATTRIBUTE_set1_data() function accepts data of up to INT_MAX
+         * length, as the 'len' parameter is an 'int' */
+        if (file_size > INT_MAX) {
+            fprintf(stderr, "Blob file is too large: %s\n", blob_file);
+            fclose(file);
+            return 0; /* FAILED */
+        }
+        blob_len = (int)file_size;
+        if (blob_len < 1024) {
+            /* Ensure minimum size for the blob */
+            blob_len = 1024;
+        }
+        buffer = OPENSSL_zalloc((size_t)blob_len);
+        if (!buffer) {
+            fprintf(stderr, "Memory allocation failed\n");
+            fclose(file);
+            return 0; /* FAILED */
+        }
+        size = fread(buffer, 1, (size_t)file_size, file);
+        fclose(file);
+        if (size != (size_t)file_size) {
+            OPENSSL_free(buffer);
+            return 0; /* FAILED */
+        }
+    }
+    value = ASN1_UTF8STRING_new();
+    if (!value) {
+        fprintf(stderr, "Failed to create ASN1_UTF8STRING object\n");
+        OPENSSL_free(buffer);
+        return 0;
+    }
+    if (!ASN1_STRING_set(value, buffer, blob_len)) {
+        fprintf(stderr, "Failed to set ASN1_UTF8STRING value\n");
+        ASN1_UTF8STRING_free(value);
+        OPENSSL_free(buffer);
+        return 0;
+    }
+    OPENSSL_free(buffer);
+    len = i2d_ASN1_UTF8STRING(value, NULL);
+    p = OPENSSL_malloc((size_t)len);
+    if (!p) {
+        fprintf(stderr, "Memory allocation failed\n");
+        ASN1_UTF8STRING_free(value);
         return 0; /* FAILED */
-    memset(p, 0, (size_t)len);
-    memcpy(p, prefix, sizeof prefix);
-    memcpy(p + len - sizeof postfix, postfix, sizeof postfix);
+    }
+    len = i2d_ASN1_UTF8STRING(value, &p);
+    p -= len;
     if (!X509_attribute_chain_append_object(&(si->unauth_attr), p, len, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
+        fprintf(stderr, "Failed to append unauthenticated blob to signer info\n");
         OPENSSL_free(p);
-        return 1; /* FAILED */
+        ASN1_UTF8STRING_free(value);
+        return 0; /* FAILED */
     }
     OPENSSL_free(p);
+    ASN1_UTF8STRING_free(value);
     return 1; /* OK */
 }
 
@@ -1372,7 +1449,7 @@ static int add_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
         fprintf(stderr, "Built-in timestamping failed\n");
         return 1; /* FAILED */
     }
-    if (ctx->options->addBlob && !add_unauthenticated_blob(p7)) {
+    if (ctx->options->addBlob && !add_unauthenticated_blob(p7, ctx->options->blob_file)) {
         fprintf(stderr, "Adding unauthenticated blob failed\n");
         return 1; /* FAILED */
     }
@@ -3403,7 +3480,7 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -HTTPS-CAfile <infile> ]\n", "");
         printf("%12s[ -HTTPS-CRLfile <infile> ]\n", "");
         printf("%12s[ -time <unix-time> ]\n", "");
-        printf("%12s[ -addUnauthenticatedBlob ]\n", "");
+        printf("%12s[ -addUnauthenticatedBlob [ -blobFile <blobfile> ] ]\n", "");
         printf("%12s[ -nest ]\n", "");
         printf("%12s[ -verbose ]\n", "");
         printf("%12s[ -add-msi-dse ]\n", "");
@@ -3418,7 +3495,7 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -in ] <infile> [ -out ] <datafile>\n\n", "");
     }
     if (on_list(cmd, cmds_add)) {
-        printf("%1sadd [-addUnauthenticatedBlob]\n", "");
+        printf("%1sadd [ -addUnauthenticatedBlob [ -blobFile <blobfile> ] ]\n", "");
         printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
         printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
         printf("%12s[ -TSA-certs <TSA-certfile> ] [ -TSA-key <TSA-keyfile> ]\n", "");
@@ -3593,11 +3670,13 @@ static void help_for(const char *argv0, const char *cmd)
         printf("Options:\n");
     }
     if (on_list(cmd, cmds_ac))
-    printf("%-24s= additional certificates to be added to the signature block\n", "-ac");
+        printf("%-24s= additional certificates to be added to the signature block\n", "-ac");
     if (on_list(cmd, cmds_add_msi_dse))
         printf("%-24s= sign a MSI file with the add-msi-dse option\n", "-add-msi-dse");
-    if (on_list(cmd, cmds_addUnauthenticatedBlob))
+    if (on_list(cmd, cmds_addUnauthenticatedBlob)) {
         printf("%-24s= add an unauthenticated blob to the PE/MSI file\n", "-addUnauthenticatedBlob");
+        printf("%-24s= copy blob content from the specified file\n", "-blobFile");
+    }
 #ifdef PROVIDE_ASKPASS
     if (on_list(cmd, cmds_askpass))
         printf("%-24s= ask for the private key password\n", "-askpass");
@@ -4576,6 +4655,16 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
             options->noverifypeer = 1;
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-addUnauthenticatedBlob")) {
             options->addBlob = 1;
+        } else if (options->addBlob && !strcmp(*argv, "-blobFile")) {
+            if (--argc < 1) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            options->blob_file = *(++argv);
+            if (!file_exists(options->blob_file)) {
+                fprintf(stderr, "File does not exist: %s\n", options->blob_file);
+                return 0; /* FAILED */
+            }
         } else if ((cmd == CMD_SIGN || cmd == CMD_ATTACH) && !strcmp(*argv, "-nest")) {
             options->nest = 1;
         } else if ((cmd == CMD_ADD || cmd == CMD_VERIFY) && !strcmp(*argv, "-index")) {
