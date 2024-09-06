@@ -29,11 +29,6 @@
 #endif /* _MSC_VER */
 #endif /* PRIX64 */
 
-#if defined(_MSC_VER)
-#define fseeko _fseeki64
-#define ftello _ftelli64
-#endif /* _MSC_VER */
-
 #define EOCDR_SIZE 22
 #define ZIP64_EOCD_LOCATOR_SIZE 20
 #define ZIP64_HEADER 0x01

@@ -219,6 +219,7 @@ if(Python3_FOUND AND NOT cryptography_error)
         add_test(NAME "added_${ext}"
             COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "add"
             "-addUnauthenticatedBlob"
+            "-blobFile" "${FILES}/unsigned.exe"
             "-add-msi-dse" "-h" "sha512"
             "-in" "${FILES}/signed.${ext}"
             "-out" "${FILES}/added.${ext}")

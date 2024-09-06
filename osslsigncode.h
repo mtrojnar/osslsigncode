@@ -90,7 +90,9 @@
 #ifdef _MSC_VER
 /* not WIN32, because strcasecmp exists in MinGW */
 #define strcasecmp _stricmp
-#endif
+#define fseeko _fseeki64
+#define ftello _ftelli64
+#endif /* _MSC_VER */
 
 #ifdef WIN32
 #define remove_file(filename) _unlink(filename)
@@ -282,6 +284,7 @@ typedef struct {
     char *proxy;
     int noverifypeer;
     int addBlob;
+    const char *blob_file;
     int nest;
     int index;
     int ignore_timestamp;
