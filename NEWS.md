@@ -2,6 +2,8 @@
 
 ### 2.10 (unreleased)
 
+- added compatiblity with the CNG engine version 1.1 or later
+- added the "-engineCtrl" option to control hardware and CNG engines
 - improved unauthenticated blob support (thanks to Asger Hautop Drewsen)
 - added the '-blobFile' option to specify a file containing the blob content
 

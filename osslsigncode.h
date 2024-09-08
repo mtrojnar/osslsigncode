@@ -245,6 +245,14 @@ typedef enum {
 typedef unsigned char u_char;
 
 typedef struct {
+    ASN1_OCTET_STRING *cmd;
+    ASN1_OCTET_STRING *param;
+} EngineControl;
+
+DECLARE_ASN1_FUNCTIONS(EngineControl)
+DEFINE_STACK_OF(EngineControl)
+
+typedef struct {
     char *infile;
     char *outfile;
     char *sigfile;
@@ -307,6 +315,7 @@ typedef struct {
     char *tsa_keyfile;
     time_t tsa_time;
     int nested_number;
+    STACK_OF(EngineControl) *engine_ctrls;
 } GLOBAL_OPTIONS;
 
 /*
