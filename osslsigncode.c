@@ -533,6 +533,8 @@ static int attach_authenticode_response(PKCS7 *p7, PKCS7 *resp, int verbose)
     return 0; /* OK */
 }
 
+#if defined(ENABLE_CURL) || OPENSSL_VERSION_NUMBER >= 0x30000000L
+
 static void print_proxy(char *proxy)
 {
     if (proxy) {
@@ -552,6 +554,8 @@ static void print_proxy(char *proxy)
             printf ("Using environmental HTTPS proxy: %s\n", https_proxy);
     }
 }
+
+#endif /* ENABLE_CURL || OPENSSL_VERSION_NUMBER < 0x30000000L */
 
 #if OPENSSL_VERSION_NUMBER<0x30000000L
 #ifdef ENABLE_CURL
@@ -1004,7 +1008,7 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
     (void)rfc3161;
     fprintf(stderr, "Could NOT find CURL\n");
     BIO_free_all(req);
-    return NULL; /* FAILED */
+    return 1; /* FAILED */
 #else /* ENABLE_CURL */
     if (rfc3161) {
         resp = bio_get_http_curl(&http_code, url, req, ctx->options->proxy,
@@ -2045,6 +2049,7 @@ static X509_CRL *x509_crl_get(FILE_FORMAT_CTX *ctx, char *url)
 
 #if OPENSSL_VERSION_NUMBER<0x30000000L
 #ifndef ENABLE_CURL
+    (void)ctx;
     fprintf(stderr, "Could NOT find CURL\n");
     return NULL; /* FAILED */
 #else /* ENABLE_CURL */
