@@ -114,10 +114,12 @@ jobs:
         sudo apt-get remove needrestart || echo Ignored
         sudo apt-get install -y libssl-dev zlib1g-dev python3-cryptography
 
-    - name: Install brew dependencies (macOS)
+    - name: Set up Python virtual environment (macOS)
       if: runner.os == 'macOS'
       run: |
-        brew install python@3.8
+        python -m venv venv
+        echo "VIRTUAL_ENV=${{github.workspace}}/venv" >> $GITHUB_ENV
+        echo "${{github.workspace}}/venv/bin" >> $GITHUB_PATH
 
     - name: Install Xcode (macOS)
       if: runner.os == 'macOS'
@@ -134,9 +136,8 @@ jobs:
     - name: Install python3 cryptography module (macOS)
       if: runner.os == 'macOS'
       run: |
-        python3.8 -m ensurepip
-        python3.8 -m pip install --upgrade pip
-        python3.8 -m pip install cryptography
+        pip install --upgrade pip
+        pip install cryptography
 
     - name: Find the latest version of Python (Windows)
       if: runner.os == 'Windows'
@@ -181,9 +182,9 @@ jobs:
       working-directory: ${{github.workspace}}/build
       if: runner.os == 'macOS'
       run: |
-        python3.8 --version
-        python3.8 -c "import sys; print(sys.executable)"
-        python3.8 -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
+        python --version
+        python -c "import sys; print(sys.executable)"
+        python -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
 
     - name: List files (Linux/macOS)
       if: runner.os != 'Windows'
