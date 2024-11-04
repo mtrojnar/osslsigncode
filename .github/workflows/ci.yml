@@ -34,7 +34,7 @@ jobs:
             generator: Unix Makefiles
             vcpkg_root:
           - id: macOS
-            triplet: x64-osx
+            triplet: arm64-osx
             compiler: clang
             os: macOS-latest
             generator: Unix Makefiles
@@ -114,10 +114,17 @@ jobs:
         sudo apt-get remove needrestart || echo Ignored
         sudo apt-get install -y libssl-dev zlib1g-dev python3-cryptography
 
+    - name: Set up Python (macOS)
+      if: runner.os == 'macOS'
+      uses: actions/setup-python@v4
+      with:
+          python-version: '3.13'
+          architecture: 'arm64'
+
     - name: Set up Python virtual environment (macOS)
       if: runner.os == 'macOS'
       run: |
-        python -m venv venv
+        python -m venv --system-site-packages --copies venv
         echo "VIRTUAL_ENV=${{github.workspace}}/venv" >> $GITHUB_ENV
         echo "${{github.workspace}}/venv/bin" >> $GITHUB_PATH
 
@@ -131,13 +138,24 @@ jobs:
       if: runner.os == 'macOS'
       uses: jwlawson/actions-setup-cmake@v2.0
       with:
-        cmake-version: '3.17.0'
+        cmake-version: '3.20.0'
 
     - name: Install python3 cryptography module (macOS)
       if: runner.os == 'macOS'
       run: |
-        pip install --upgrade pip
-        pip install cryptography
+        source venv/bin/activate
+        python -m pip install --upgrade pip
+        ARCHFLAGS="-arch arm64" python -m pip install --no-binary :all: cryptography
+        python -c "import sys; print(sys.executable)"
+        python --version
+        python -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
+
+    - name: Install python3 cryptography module (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        python.exe -m ensurepip
+        python.exe -m pip install --upgrade pip
+        python.exe -m pip install cryptography
 
     - name: Find the latest version of Python (Windows)
       if: runner.os == 'Windows'
@@ -156,19 +174,25 @@ jobs:
             exit 1
         }
 
-    - name: Install python3 cryptography module (Windows)
-      if: runner.os == 'Windows'
+    - name: Configure CMake (macOS)
+      if: runner.os == 'macOS'
       run: |
-        python.exe -m ensurepip
-        python.exe -m pip install --upgrade pip
-        python.exe -m pip install cryptography
+        source venv/bin/activate
+        cmake \
+          -G "${{ matrix.generator }}" \
+          -S "${{ github.workspace }}" \
+          -B "${{ github.workspace }}/build" \
+          -DCMAKE_OSX_ARCHITECTURES=arm64 \
+          -DCMAKE_BUILD_TYPE="${{ env.BUILD_TYPE }}" \
+          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/dist" \
+          -DPython3_EXECUTABLE="${{ github.workspace }}/venv/bin/python"
 
-    - name: Configure CMake
+    - name: Configure CMake (non-macOS)
+      if: runner.os != 'macOS'
       run: cmake
         -G "${{matrix.generator}}"
         -S ${{github.workspace}}
         -B ${{github.workspace}}/build
-        -DCMAKE_OSX_ARCHITECTURES=arm64
         -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
         -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
         -DVCPKG_TARGET_TRIPLET=${{matrix.triplet}}
@@ -178,14 +202,6 @@ jobs:
         --build ${{github.workspace}}/build
         --config ${{env.BUILD_TYPE}}
 
-    - name: Show python version (macOS)
-      working-directory: ${{github.workspace}}/build
-      if: runner.os == 'macOS'
-      run: |
-        python --version
-        python -c "import sys; print(sys.executable)"
-        python -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
-
     - name: List files (Linux/macOS)
       if: runner.os != 'Windows'
       run: find .. -ls
@@ -194,7 +210,15 @@ jobs:
       if: runner.os == 'Windows'
       run: Get-ChildItem -Recurse -Name ..
 
-    - name: Test
+    - name: Test (macOS)
+      if: runner.os == 'macOS'
+      working-directory: ${{github.workspace}}/build
+      run:  |
+        source ../venv/bin/activate
+        ctest -C ${{env.BUILD_TYPE}}
+
+    - name: Test (non-macOS)
+      if: runner.os != 'macOS'
       working-directory: ${{github.workspace}}/build
       run: ctest -C ${{env.BUILD_TYPE}}
 
