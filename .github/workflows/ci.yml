@@ -141,7 +141,7 @@ jobs:
       run: |
         source venv/bin/activate
         python -m pip install --upgrade pip
-        python -m pip install --no-binary :all: cryptography
+        python -m pip install --upgrade cryptography
         python -c "import sys; print(sys.executable)"
         python --version
         python -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
@@ -151,7 +151,7 @@ jobs:
       run: |
         source venv/bin/activate
         python -m pip install --upgrade pip
-        ARCHFLAGS="-arch arm64" python -m pip install --no-binary :all: cryptography
+        ARCHFLAGS="-arch arm64" python -m pip install --upgrade cryptography
         python -c "import sys; print(sys.executable)"
         python --version
         python -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
