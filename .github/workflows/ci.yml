@@ -177,8 +177,7 @@ jobs:
           -B "${{ github.workspace }}/build" \
           -DCMAKE_OSX_ARCHITECTURES=arm64 \
           -DCMAKE_BUILD_TYPE="${{ env.BUILD_TYPE }}" \
-          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/dist" \
-          -DPython3_EXECUTABLE="${{ github.workspace }}/venv/bin/python"
+          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/dist"
 
     - name: Configure CMake (Windows)
       if: runner.os == 'Windows'
@@ -188,10 +187,8 @@ jobs:
           -G "${{ matrix.generator }}" `
           -S "${{ github.workspace }}" `
           -B "${{ github.workspace }}/build" `
-          -DCMAKE_OSX_ARCHITECTURES=arm64 `
           -DCMAKE_BUILD_TYPE="${{ env.BUILD_TYPE }}" `
-          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/dist" `
-          -DPython3_EXECUTABLE="${{ github.workspace }}\venv\Scripts\python.exe"
+          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/dist"
 
     - name: Build
       run: cmake
