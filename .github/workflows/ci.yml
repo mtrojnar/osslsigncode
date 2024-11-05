@@ -156,6 +156,9 @@ jobs:
         python.exe -m ensurepip
         python.exe -m pip install --upgrade pip
         python.exe -m pip install cryptography
+        python.exe -c "import sys; print(sys.executable)"
+        python.exe --version
+        python.exe -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
 
     - name: Find the latest version of Python (Windows)
       if: runner.os == 'Windows'
