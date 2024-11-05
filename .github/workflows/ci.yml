@@ -167,27 +167,27 @@ jobs:
         python.exe -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
 
     - name: Configure CMake (Linux/macOS)
-      if: runner.os  != 'Windows'
+      if: runner.os != 'Windows'
       run: |
         source venv/bin/activate
         cmake \
-          -G "${{ matrix.generator }}" \
-          -S "${{ github.workspace }}" \
-          -B "${{ github.workspace }}/build" \
+          -G "${{matrix.generator}}" \
+          -S "${{github.workspace}}" \
+          -B "${{github.workspace}}/build" \
           -DCMAKE_OSX_ARCHITECTURES=arm64 \
-          -DCMAKE_BUILD_TYPE="${{ env.BUILD_TYPE }}" \
-          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/dist"
+          -DCMAKE_BUILD_TYPE="${{env.BUILD_TYPE}}" \
+          -DCMAKE_INSTALL_PREFIX="${{github.workspace}}/dist"
 
     - name: Configure CMake (Windows)
       if: runner.os == 'Windows'
       run: |
         .\venv\Scripts\Activate.ps1
         cmake `
-          -G "${{ matrix.generator }}" `
-          -S "${{ github.workspace }}" `
-          -B "${{ github.workspace }}/build" `
-          -DCMAKE_BUILD_TYPE="${{ env.BUILD_TYPE }}" `
-          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/dist"
+          -G "${{matrix.generator}}" `
+          -S "${{github.workspace}}" `
+          -B "${{github.workspace}}/build" `
+          -DCMAKE_BUILD_TYPE="${{env.BUILD_TYPE}}" `
+          -DCMAKE_INSTALL_PREFIX="${{github.workspace}}/dist"
 
     - name: Build
       run: cmake
@@ -205,14 +205,14 @@ jobs:
     - name: Test (Linux/macOS)
       if: runner.os != 'Windows'
       working-directory: ${{github.workspace}}/build
-      run:  |
+      run: |
         source ../venv/bin/activate
         ctest -C ${{env.BUILD_TYPE}}
 
     - name: Test (Windows)
       if: runner.os == 'Windows'
       working-directory: ${{github.workspace}}/build
-      run:  |
+      run: |
         ..\venv\Scripts\Activate.ps1
         ctest -C ${{env.BUILD_TYPE}}
 
