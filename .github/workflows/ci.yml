@@ -133,8 +133,6 @@ jobs:
     - name: Setup the oldest supported version of cmake (macOS)
       if: runner.os == 'macOS'
       uses: jwlawson/actions-setup-cmake@v2.0
-      with:
-        cmake-version: '3.20.0'
 
     - name: Install python3 cryptography module (Linux)
       if: runner.os == 'Linux'
