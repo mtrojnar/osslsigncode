@@ -150,32 +150,24 @@ jobs:
         python --version
         python -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
 
+    - name: Set up Python virtual environment (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        python.exe -m venv --system-site-packages --copies venv
+        echo "VIRTUAL_ENV=${{github.workspace}}\venv" >> $GITHUB_ENV
+        echo "${{github.workspace}}\venv\Scripts" >> $GITHUB_PATH
+
+
     - name: Install python3 cryptography module (Windows)
       if: runner.os == 'Windows'
       run: |
+        .\venv\Scripts\Activate.ps1
         python.exe -m ensurepip
         python.exe -m pip install --upgrade pip
         python.exe -m pip install cryptography
         python.exe -c "import sys; print(sys.executable)"
         python.exe --version
         python.exe -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
-
-    - name: Find the latest version of Python (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        $pythonVersions = Get-ChildItem -Path "C:/hostedtoolcache/windows/Python/" -Directory | Where-Object { $_.Name -match '\d+\.\d+\.\d+' } | Sort-Object { [Version]($_.Name) } -Descending
-        if ($pythonVersions.Count -gt 0) {
-            $latestPythonVersion = $pythonVersions[0].Name
-            $pythonPath = "C:/hostedtoolcache/windows/Python/$latestPythonVersion/x64"
-            Write-Output "Latest Python version found: $latestPythonVersion"
-            Write-Output "Python directory path: $pythonPath"
-            $env:Path = "$pythonPath;" + $env:Path
-            Write-Output "Updated PATH environment variable:"
-            Write-Output $env:Path
-        } else {
-            Write-Error "No Python versions found in C:/hostedtoolcache/windows/Python/"
-            exit 1
-        }
 
     - name: Configure CMake (macOS)
       if: runner.os == 'macOS'
@@ -190,8 +182,21 @@ jobs:
           -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/dist" \
           -DPython3_EXECUTABLE="${{ github.workspace }}/venv/bin/python"
 
-    - name: Configure CMake (non-macOS)
-      if: runner.os != 'macOS'
+    - name: Configure CMake (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        .\venv\Scripts\Activate.ps1
+        cmake `
+          -G "${{ matrix.generator }}" `
+          -S "${{ github.workspace }}" `
+          -B "${{ github.workspace }}/build" `
+          -DCMAKE_OSX_ARCHITECTURES=arm64 `
+          -DCMAKE_BUILD_TYPE="${{ env.BUILD_TYPE }}" `
+          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/dist" `
+          -DPython3_EXECUTABLE="${{ github.workspace }}\venv\Scripts\python.exe"
+
+    - name: Configure CMake (Linux)
+      if: runner.os == 'Linux'
       run: cmake
         -G "${{matrix.generator}}"
         -S ${{github.workspace}}
@@ -220,8 +225,15 @@ jobs:
         source ../venv/bin/activate
         ctest -C ${{env.BUILD_TYPE}}
 
-    - name: Test (non-macOS)
-      if: runner.os != 'macOS'
+    - name: Test (Windows)
+      if: runner.os == 'Windows'
+      working-directory: ${{github.workspace}}/build
+      run:  |
+        ..\venv\Scripts\Activate.ps1
+        ctest -C ${{env.BUILD_TYPE}}
+
+    - name: Test (Linux)
+      if: runner.os == 'Linux'
       working-directory: ${{github.workspace}}/build
       run: ctest -C ${{env.BUILD_TYPE}}
 
