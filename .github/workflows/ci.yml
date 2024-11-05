@@ -112,7 +112,6 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get remove needrestart || echo Ignored
-        sudo apt-get install -y libssl-dev zlib1g-dev python3-cryptography
 
     - name: Set up Python (macOS)
       if: runner.os == 'macOS'
@@ -121,10 +120,15 @@ jobs:
           python-version: '3.13'
           architecture: 'arm64'
 
-    - name: Set up Python virtual environment (macOS)
-      if: runner.os == 'macOS'
+    - name: Set up Python virtual environment (Linux/macOS)
+      if: runner.os != 'Windows'
       run: |
         python -m venv --system-site-packages --copies venv
+
+    - name: Set up Python virtual environment (Windows)
+      if: runner.os == 'Windows'
+      run: |
+        python.exe -m venv --system-site-packages --copies venv
 
     - name: Install Xcode (macOS)
       if: runner.os == 'macOS'
@@ -138,6 +142,16 @@ jobs:
       with:
         cmake-version: '3.20.0'
 
+    - name: Install python3 cryptography module (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        source venv/bin/activate
+        python -m pip install --upgrade pip
+        python -m pip install --no-binary :all: cryptography
+        python -c "import sys; print(sys.executable)"
+        python --version
+        python -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
+
     - name: Install python3 cryptography module (macOS)
       if: runner.os == 'macOS'
       run: |
@@ -147,11 +161,6 @@ jobs:
         python -c "import sys; print(sys.executable)"
         python --version
         python -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
-
-    - name: Set up Python virtual environment (Windows)
-      if: runner.os == 'Windows'
-      run: |
-        python.exe -m venv --system-site-packages --copies venv
 
     - name: Install python3 cryptography module (Windows)
       if: runner.os == 'Windows'
@@ -164,8 +173,8 @@ jobs:
         python.exe --version
         python.exe -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
 
-    - name: Configure CMake (macOS)
-      if: runner.os == 'macOS'
+    - name: Configure CMake (Linux/macOS)
+      if: runner.os  != 'Windows'
       run: |
         source venv/bin/activate
         cmake \
@@ -190,16 +199,6 @@ jobs:
           -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/dist" `
           -DPython3_EXECUTABLE="${{ github.workspace }}\venv\Scripts\python.exe"
 
-    - name: Configure CMake (Linux)
-      if: runner.os == 'Linux'
-      run: cmake
-        -G "${{matrix.generator}}"
-        -S ${{github.workspace}}
-        -B ${{github.workspace}}/build
-        -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
-        -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/dist
-        -DVCPKG_TARGET_TRIPLET=${{matrix.triplet}}
-
     - name: Build
       run: cmake
         --build ${{github.workspace}}/build
@@ -213,8 +212,8 @@ jobs:
       if: runner.os == 'Windows'
       run: Get-ChildItem -Recurse -Name ..
 
-    - name: Test (macOS)
-      if: runner.os == 'macOS'
+    - name: Test (Linux/macOS)
+      if: runner.os != 'Windows'
       working-directory: ${{github.workspace}}/build
       run:  |
         source ../venv/bin/activate
@@ -226,11 +225,6 @@ jobs:
       run:  |
         ..\venv\Scripts\Activate.ps1
         ctest -C ${{env.BUILD_TYPE}}
-
-    - name: Test (Linux)
-      if: runner.os == 'Linux'
-      working-directory: ${{github.workspace}}/build
-      run: ctest -C ${{env.BUILD_TYPE}}
 
     - name: Upload the errors
       uses: actions/upload-artifact@v4
