@@ -461,7 +461,7 @@ void print_hash(const char *descript1, const char *descript2, const u_char *mdbu
 }
 
 /*
- * [in] p7: new PKCS#7 signature
+ * [in] p7: PKCS#7 signature
  * [in] objid: Microsoft OID Authenticode
  * [returns] 0 on error or 1 on success
  */
