@@ -55,8 +55,8 @@ FILE_FORMAT file_format_cat = {
 
 /* Prototypes */
 static CAT_CTX *cat_ctx_get(char *indata, uint32_t filesize);
-static int cat_add_ms_ctl_object(PKCS7 *p7);
-static int cat_sign_ms_ctl_content(PKCS7 *p7, PKCS7 *contents);
+static int cat_add_content_type(PKCS7 *p7, PKCS7 *cursig);
+static int cat_sign_content(PKCS7 *p7, PKCS7 *contents);
 static int cat_list_content(PKCS7 *p7);
 static int cat_print_content_member_digest(ASN1_TYPE *content);
 static int cat_print_content_member_name(ASN1_TYPE *content);
@@ -161,17 +161,17 @@ static PKCS7 *cat_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
         fprintf(stderr, "Creating a new signature failed\n");
         return NULL; /* FAILED */
     }
-    if (!cat_add_ms_ctl_object(p7)) {
-        fprintf(stderr, "Adding MS_CTL_OBJID failed\n");
-        PKCS7_free(p7);
-        return NULL; /* FAILED */
-    }
     if (!ctx->cat_ctx->p7 || !ctx->cat_ctx->p7->d.sign || !ctx->cat_ctx->p7->d.sign->contents) {
         fprintf(stderr, "Failed to get content\n");
         PKCS7_free(p7);
         return NULL; /* FAILED */
     }
-    if (!cat_sign_ms_ctl_content(p7, ctx->cat_ctx->p7->d.sign->contents)) {
+    if (!cat_add_content_type(p7, ctx->cat_ctx->p7)) {
+        fprintf(stderr, "Adding content type failed\n");
+        PKCS7_free(p7);
+        return NULL; /* FAILED */
+    }
+    if (!cat_sign_content(p7, ctx->cat_ctx->p7->d.sign->contents)) {
         fprintf(stderr, "Failed to set signed content\n");
         PKCS7_free(p7);
         return NULL; /* FAILED */
@@ -251,15 +251,30 @@ static CAT_CTX *cat_ctx_get(char *indata, uint32_t filesize)
 }
 
 /*
- * Add "1.3.6.1.4.1.311.10.1" MS_CTL_OBJID signed attribute
+ * Add a content type OID to the PKCS#7 signature structure.
+ * The content type can be:
+ * - "1.3.6.1.4.1.311.10.1" (MS_CTL_OBJID) for Certificate Trust Lists (CTL),
+ * - "1.3.6.1.4.1.311.2.1.4" (SPC_INDIRECT_DATA_OBJID) for Authenticode data.
  * [in, out] p7: new PKCS#7 signature
+ * [in] cursig: current PKCS#7 signature to determine content type
  * [returns] 0 on error or 1 on success
  */
-static int cat_add_ms_ctl_object(PKCS7 *p7)
+static int cat_add_content_type(PKCS7 *p7, PKCS7 *cursig)
 {
+    const char *content_type;
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
     PKCS7_SIGNER_INFO *si;
 
+    if (is_content_type(cursig, SPC_INDIRECT_DATA_OBJID)) {
+        /* Authenticode content */
+        content_type = SPC_INDIRECT_DATA_OBJID;
+    } else if (is_content_type(cursig, MS_CTL_OBJID)) {
+        /* Certificate Trust List (CTL) */
+        content_type = MS_CTL_OBJID;
+    } else {
+        fprintf(stderr, "Unsupported content type\n");
+        return 0; /* FAILED */
+    }
     signer_info = PKCS7_get_signer_info(p7);
     if (!signer_info)
         return 0; /* FAILED */
@@ -267,7 +282,7 @@ static int cat_add_ms_ctl_object(PKCS7 *p7)
     if (!si)
         return 0; /* FAILED */
     if (!PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
-        V_ASN1_OBJECT, OBJ_txt2obj(MS_CTL_OBJID, 1)))
+        V_ASN1_OBJECT, OBJ_txt2obj(content_type, 1)))
         return 0; /* FAILED */
     return 1; /* OK */
 }
@@ -280,7 +295,7 @@ static int cat_add_ms_ctl_object(PKCS7 *p7)
  * [in] contents: Certificate Trust List (CTL)
  * [returns] 0 on error or 1 on success
  */
-static int cat_sign_ms_ctl_content(PKCS7 *p7, PKCS7 *contents)
+static int cat_sign_content(PKCS7 *p7, PKCS7 *contents)
 {
     u_char *content;
     int seqhdrlen, content_length;
