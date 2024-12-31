@@ -2799,6 +2799,15 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
             }
         }
     }
+
+    /* Signature */
+    if (verbose) {
+        md_nid = OBJ_obj2nid(si->digest_enc_alg->algorithm);
+        printf("\nDigest encryption algorithm: %s\n",
+            (md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2sn(md_nid));
+        print_hash("Signature", "", ASN1_STRING_get0_data(si->enc_digest), ASN1_STRING_length(si->enc_digest));
+    }
+
     return time;
 }
 
