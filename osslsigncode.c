@@ -207,12 +207,23 @@ ASN1_SEQUENCE(MsCtlContent) = {
 IMPLEMENT_ASN1_FUNCTIONS(MsCtlContent)
 
 
+#ifndef OPENSSL_NO_ENGINE
 ASN1_SEQUENCE(EngineControl) = {
     ASN1_SIMPLE(EngineControl, cmd, ASN1_OCTET_STRING),
     ASN1_SIMPLE(EngineControl, param, ASN1_OCTET_STRING)
 } ASN1_SEQUENCE_END(EngineControl)
 
 IMPLEMENT_ASN1_FUNCTIONS(EngineControl)
+#endif /* OPENSSL_NO_ENGINE */
+
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+DEFINE_STACK_OF(OSSL_PROVIDER)
+static STACK_OF(OSSL_PROVIDER) *providers = NULL;
+
+static void provider_free(OSSL_PROVIDER *prov);
+static void providers_cleanup(void);
+static int provider_load(const char *pname);
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 
 /* Prototypes */
 static ASN1_INTEGER *create_nonce(int bits);
@@ -232,7 +243,10 @@ static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b);
 static PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
 static void print_cert(X509 *cert, int i);
 static int x509_store_load_crlfile(X509_STORE *store, char *cafile, char *crlfile);
+static void load_objects_from_store(const char *url, char *pass, EVP_PKEY **pkey, STACK_OF(X509) *certs, STACK_OF(X509_CRL) *crls);
+#ifndef OPENSSL_NO_ENGINE
 static void engine_control_set(GLOBAL_OPTIONS *options, const char *arg);
+#endif /* OPENSSL_NO_ENGINE */
 
 
 /*
@@ -3443,12 +3457,14 @@ static void free_options(GLOBAL_OPTIONS *options)
     OPENSSL_free(options->https_crlfile);
     OPENSSL_free(options->tsa_cafile);
     OPENSSL_free(options->tsa_crlfile);
+    if (options->pass) {
+        /* reset password */
+        memset(options->pass, 0, strlen(options->pass));
+        OPENSSL_free(options->pass);
+    }
     /* If key is NULL nothing is done */
     EVP_PKEY_free(options->pkey);
     options->pkey = NULL;
-    /* If X509 structure is NULL nothing is done */
-    X509_free(options->cert);
-    options->cert = NULL;
     /* Free up all elements of sk structure and sk itself */
     sk_X509_pop_free(options->certs, X509_free);
     options->certs = NULL;
@@ -3456,7 +3472,9 @@ static void free_options(GLOBAL_OPTIONS *options)
     options->xcerts = NULL;
     sk_X509_CRL_pop_free(options->crls, X509_CRL_free);
     options->crls = NULL;
+#ifndef OPENSSL_NO_ENGINE
     sk_EngineControl_pop_free(options->engine_ctrls, EngineControl_free);
+#endif /* OPENSSL_NO_ENGINE */
 }
 
 /*
@@ -3480,11 +3498,22 @@ static void usage(const char *argv0, const char *cmd)
         printf("%1s[ --help ]\n\n", "");
     }
     if (on_list(cmd, cmds_sign)) {
-        printf("%1s[ sign ] ( -pkcs12 <pkcs12file>\n", "");
-        printf("%13s | ( -certs <certfile> | -spc <certfile> ) -key <keyfile>\n", "");
-        printf("%13s | [ -pkcs11engine <engine> ] [ -login ] -pkcs11module <module>\n", "");
-        printf("%13s | [ -engineCtrl <command[:parameter]> ]\n", "");
-        printf("%15s ( -pkcs11cert <pkcs11 cert id> | -certs <certfile> ) -key <pkcs11 key id> )\n", "");
+        printf("%1s[ sign ] -pkcs12 <pkcs12file> | ( [ -certs <certfile> | -spc <certfile> ]\n", "");
+#if !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L
+        printf("%12s( -key <keyfile> | ( -key <pkcs11 key URI> -pkcs11module <module> [ -pkcs11cert <pkcs11 cert URI> ] )\n", "");
+#else /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
+        printf("%12s-key <keyfile> )\n", "");
+#endif /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+        printf("%12s[ -provider <provider> | ", "");
+#else /* OPENSSL_VERSION_NUMBER>=0x30000000L */
+#ifndef OPENSSL_NO_ENGINE
+        printf("%12s[ ", "");
+#endif /* OPENSSL_NO_ENGINE */
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
+#ifndef OPENSSL_NO_ENGINE
+        printf("%s( -engine <engine> [ -login ] [ -engineCtrl <command[:parameter]> ] ) ] ) )\n", "");
+#endif /* OPENSSL_NO_ENGINE */
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
         printf("%12s[ -nolegacy ]\n", "");
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
@@ -3618,11 +3647,18 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_pass[] = {"sign", NULL};
     const char *cmds_pem[] = {"sign", "extract-data", "extract-signature", NULL};
     const char *cmds_ph[] = {"sign", "extract-data", NULL};
+#if !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L
     const char *cmds_pkcs11cert[] = {"sign", NULL};
-    const char *cmds_pkcs11engine[] = {"sign", NULL};
     const char *cmds_pkcs11module[] = {"sign", NULL};
+#endif /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+    const char *cmds_provider[] = {"sign", NULL};
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
+#ifndef OPENSSL_NO_ENGINE
+    const char *cmds_engine[] = {"sign", NULL};
     const char *cmds_engineCtrl[] = {"sign", NULL};
     const char *cmds_login[] = {"sign", NULL};
+#endif /* OPENSSL_NO_ENGINE */
     const char *cmds_pkcs12[] = {"sign", NULL};
     const char *cmds_readpass[] = {"sign", NULL};
     const char *cmds_require_leaf_hash[] = {"attach-signature", "verify", NULL};
@@ -3754,16 +3790,24 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%-24s= PKCS#7 output data format PEM to use (default: DER)\n", "-pem");
     if (on_list(cmd, cmds_ph))
         printf("%-24s= generate page hashes for executable files\n", "-ph");
+#if !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L
     if (on_list(cmd, cmds_pkcs11cert))
         printf("%-24s= PKCS#11 URI identifies a certificate in the token\n", "-pkcs11cert");
-    if (on_list(cmd, cmds_pkcs11engine))
-        printf("%-24s= PKCS#11 engine\n", "-pkcs11engine");
     if (on_list(cmd, cmds_pkcs11module))
         printf("%-24s= PKCS#11 module\n", "-pkcs11module");
+#endif /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+    if (on_list(cmd, cmds_provider))
+        printf("%-24s= PKCS#11 provider\n", "-provider");
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
+#ifndef OPENSSL_NO_ENGINE
+    if (on_list(cmd, cmds_engine))
+        printf("%-24s= PKCS#11 engine\n", "-engine");
     if (on_list(cmd, cmds_engineCtrl))
-        printf("%-24s= control hardware engine\n", "-engineCtrl");
+        printf("%-24s= control parameters for the PKCS#11 engine\n", "-engineCtrl");
     if (on_list(cmd, cmds_login))
-        printf("%-24s= force login to the token\n", "-login");
+        printf("%-24s= force login to the token for the PKCS#11 engine only\n", "-login");
+#endif /* OPENSSL_NO_ENGINE */
     if (on_list(cmd, cmds_pkcs12))
         printf("%-24s= PKCS#12 container with the certificate and the private key\n", "-pkcs12");
     if (on_list(cmd, cmds_readpass))
@@ -3916,55 +3960,21 @@ static int read_password(GLOBAL_OPTIONS *options)
 }
 
 /*
- * Parse a PKCS#12 container with certificates and a private key.
- * If successful the private key will be written to options->pkey,
- * the corresponding certificate to options->cert
- * and any additional certificates to options->certs.
- * [in, out] options: structure holds the input data
- * [returns] 0 on error or 1 on success
- */
-static int read_pkcs12file(GLOBAL_OPTIONS *options)
-{
-    BIO *btmp;
-    PKCS12 *p12;
-    int ret = 0;
-
-    btmp = BIO_new_file(options->pkcs12file, "rb");
-    if (!btmp) {
-        fprintf(stderr, "Failed to read PKCS#12 file: %s\n", options->pkcs12file);
-        return 0; /* FAILED */
-    }
-    p12 = d2i_PKCS12_bio(btmp, NULL);
-    if (!p12) {
-        fprintf(stderr, "Failed to extract PKCS#12 data: %s\n", options->pkcs12file);
-        goto out; /* FAILED */
-    }
-    if (!PKCS12_parse(p12, options->pass ? options->pass : "", &options->pkey, &options->cert, &options->certs)) {
-        fprintf(stderr, "Failed to parse PKCS#12 file: %s (Wrong password?)\n", options->pkcs12file);
-        PKCS12_free(p12);
-        goto out; /* FAILED */
-    }
-    PKCS12_free(p12);
-    ret = 1; /* OK */
-out:
-    BIO_free(btmp);
-    return ret;
-}
-
-/*
  * Obtain a copy of the whole X509_CRL chain
  * [in] chain: STACK_OF(X509_CRL) structure
  * [returns] pointer to STACK_OF(X509_CRL) structure
  */
 static STACK_OF(X509_CRL) *X509_CRL_chain_up_ref(STACK_OF(X509_CRL) *chain)
 {
-    STACK_OF(X509_CRL) *ret;
     int i;
-    ret = sk_X509_CRL_dup(chain);
+    STACK_OF(X509_CRL) *ret = sk_X509_CRL_dup(chain);
+
     if (ret == NULL)
         return NULL;
+
     for (i = 0; i < sk_X509_CRL_num(ret); i++) {
         X509_CRL *x = sk_X509_CRL_value(ret, i);
+
         if (!X509_CRL_up_ref(x))
             goto err;
     }
@@ -3976,177 +3986,67 @@ err:
     return NULL;
 }
 
+#if OPENSSL_VERSION_NUMBER<0x1010108f
 /*
- * Load certificates from a file.
+ * Load the private key from a file in DER format.
+ * Workaround for OpenSSL 1.1.1g and older
+ * [in, out] options: structure holds the input data
+ * [returns] 0 on error or 1 on success
+ */
+static int read_der_keyfile(GLOBAL_OPTIONS *options)
+{
+    BIO *btmp = BIO_new_file(options->keyfile, "rb");
+
+    if (!btmp) {
+        fprintf(stderr, "Failed to read private key file: %s\n", options->keyfile);
+        return 0; /* FAILED */
+    }
+    options->pkey = d2i_PrivateKey_bio(btmp, NULL);
+    BIO_free(btmp);
+    if (!options->pkey) {
+        fprintf(stderr, "Failed to decode private key file: %s\n", options->keyfile);
+        return 0; /* FAILED */
+    }
+    return 1; /* OK */
+}
+#endif /* OPENSSL_VERSION_NUMBER<0x1010108f */
+
+/*
+ * Load certificates from .spc or .p7b certificate file (PKCS#7 structure)
  * If successful all certificates will be written to options->certs
  * and optional CRLs will be written to options->crls.
  * [in, out] options: structure holds the input data
  * [returns] 0 on error or 1 on success
  */
-static int read_certfile(GLOBAL_OPTIONS *options)
+static int read_pkcs7_certfile(GLOBAL_OPTIONS *options)
 {
-    BIO *btmp;
-    int ret = 0;
+    PKCS7 *p7;
+    BIO *btmp = BIO_new_file(options->certfile, "rb");
 
-    btmp = BIO_new_file(options->certfile, "rb");
     if (!btmp) {
-        fprintf(stderr, "Failed to read certificate file: %s\n", options->certfile);
+        fprintf(stderr, "Failed to read certificate from: %s\n",
+#if !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER >= 0x30000000L
+                options->certfile ? options->certfile : options->p11cert);
+#else
+                options->certfile);
+#endif
         return 0; /* FAILED */
     }
-    /* .pem certificate file */
-    options->certs = X509_chain_read_certs(btmp, NULL);
-
-    /* .der certificate file */
-    if (!options->certs) {
-        X509 *x = NULL;
-        (void)BIO_seek(btmp, 0);
-        if (d2i_X509_bio(btmp, &x)) {
-            options->certs = sk_X509_new_null();
-            if (!sk_X509_push(options->certs, x)) {
-                X509_free(x);
-                goto out; /* FAILED */
-            }
-            printf("Warning: The certificate file contains a single x509 certificate\n");
-        }
-    }
-
-    /* .spc or .p7b certificate file (PKCS#7 structure) */
-    if (!options->certs) {
-        PKCS7 *p7;
-        (void)BIO_seek(btmp, 0);
-        p7 = d2i_PKCS7_bio(btmp, NULL);
-        if (!p7)
-            goto out; /* FAILED */
-        options->certs = X509_chain_up_ref(p7->d.sign->cert);
-
-        /* additional CRLs may be supplied as part of a PKCS#7 signed data structure */
-        if (p7->d.sign->crl)
-            options->crls = X509_CRL_chain_up_ref(p7->d.sign->crl);
-        PKCS7_free(p7);
-    }
-
-    ret = 1; /* OK */
-out:
-    if (ret == 0)
+    p7 = d2i_PKCS7_bio(btmp, NULL);
+    if (!p7) {
         fprintf(stderr, "No certificate found\n");
-    BIO_free(btmp);
-    return ret;
-}
-
-/*
- * Load additional (cross) certificates from a .pem file
- * [in, out] options: structure holds the input data
- * [returns] 0 on error or 1 on success
- */
-static int read_xcertfile(GLOBAL_OPTIONS *options)
-{
-    BIO *btmp;
-    int ret = 0;
-
-    btmp = BIO_new_file(options->xcertfile, "rb");
-    if (!btmp) {
-        fprintf(stderr, "Failed to read cross certificates file: %s\n", options->xcertfile);
+        BIO_free(btmp);
         return 0; /* FAILED */
     }
-    options->xcerts = X509_chain_read_certs(btmp, NULL);
-    if (!options->xcerts) {
-        fprintf(stderr, "Failed to read cross certificates file: %s\n", options->xcertfile);
-        goto out; /* FAILED */
+    sk_X509_pop_free(options->certs, X509_free);
+    options->certs = X509_chain_up_ref(p7->d.sign->cert);
+    if (p7->d.sign->crl) {
+        printf("Loading Certificate Revocation List: %s\n", options->certfile);
+        sk_X509_CRL_pop_free(options->crls, X509_CRL_free);
+        options->crls = X509_CRL_chain_up_ref(p7->d.sign->crl);
     }
-
-    ret = 1; /* OK */
-out:
+    PKCS7_free(p7);
     BIO_free(btmp);
-    return ret;
-}
-
-/*
- * Load the private key from a file
- * [in, out] options: structure holds the input data
- * [returns] 0 on error or 1 on success
- */
-static int read_keyfile(GLOBAL_OPTIONS *options)
-{
-    BIO *btmp;
-    int ret = 0;
-
-    btmp = BIO_new_file(options->keyfile, "rb");
-    if (!btmp) {
-        fprintf(stderr, "Failed to read private key file: %s\n", options->keyfile);
-        return 0; /* FAILED */
-    }
-    if (((options->pkey = d2i_PrivateKey_bio(btmp, NULL)) == NULL &&
-            (BIO_seek(btmp, 0) == 0) &&
-            (options->pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, options->pass ? options->pass : NULL)) == NULL &&
-            (BIO_seek(btmp, 0) == 0) &&
-            (options->pkey = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL)) == NULL)) {
-        fprintf(stderr, "Failed to decode private key file: %s (Wrong password?)\n", options->keyfile);
-        goto out; /* FAILED */
-    }
-    ret = 1; /* OK */
-out:
-    BIO_free(btmp);
-    return ret;
-}
-
-/*
- * Decode Microsoft Private Key (PVK) file.
- * PVK is a proprietary Microsoft format that stores a cryptographic private key.
- * PVK files are often password-protected.
- * A PVK file may have an associated .spc (PKCS7) certificate file.
- * [in, out] options: structure holds the input data
- * [returns] PVK file
- */
-static char *find_pvk_key(GLOBAL_OPTIONS *options)
-{
-    u_char magic[4];
-    /* Microsoft Private Key format Header Hexdump */
-    const u_char pvkhdr[4] = {0x1e, 0xf1, 0xb5, 0xb0};
-    char *pvkfile = NULL;
-    BIO *btmp;
-
-    if (!options->keyfile
-#ifndef OPENSSL_NO_ENGINE
-            || options->p11module
-#endif /* OPENSSL_NO_ENGINE */
-            )
-        return NULL; /* FAILED */
-    btmp = BIO_new_file(options->keyfile, "rb");
-    if (!btmp)
-        return NULL; /* FAILED */
-    magic[0] = 0x00;
-    BIO_read(btmp, magic, 4);
-    if (!memcmp(magic, pvkhdr, 4)) {
-        pvkfile = options->keyfile;
-        options->keyfile = NULL;
-    }
-    BIO_free(btmp);
-    return pvkfile;
-}
-
-/*
- * [in, out] options: structure holds the input data
- * [returns] 0 on error or 1 on success
- */
-static int read_pvk_key(GLOBAL_OPTIONS *options)
-{
-    BIO *btmp;
-
-    btmp = BIO_new_file(options->pvkfile, "rb");
-    if (!btmp) {
-        fprintf(stderr, "Failed to read private key file: %s\n", options->pvkfile);
-        return 0; /* FAILED */
-    }
-    options->pkey = b2i_PVK_bio(btmp, NULL, options->pass ? options->pass : NULL);
-    if (!options->pkey && options->askpass) {
-        (void)BIO_seek(btmp, 0);
-        options->pkey = b2i_PVK_bio(btmp, NULL, NULL);
-    }
-    BIO_free(btmp);
-    if (!options->pkey) {
-        fprintf(stderr, "Failed to decode private key file: %s\n", options->pvkfile);
-        return 0; /* FAILED */
-    }
     return 1; /* OK */
 }
 
@@ -4275,7 +4175,7 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
             ENGINE_finish(engine);
             return 0; /* FAILED */
         } else
-            options->cert = parms.cert;
+            sk_X509_push(options->certs, parms.cert);
     }
 
     options->pkey = ENGINE_load_private_key(engine, options->keyfile, NULL, NULL);
@@ -4287,65 +4187,92 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
     }
     return 1; /* OK */
 }
+
+static int engine_load(GLOBAL_OPTIONS *options)
+{
+    ENGINE *engine;
+
+    if (options->p11engine)
+        engine = engine_dynamic(options);
+    else
+        engine = engine_pkcs11();
+    if (!engine)
+        return 0; /* FAILED */
+    printf("Engine \"%s\" set.\n", ENGINE_get_id(engine));
+
+    /* Load the private key and the signer certificate from the security token */
+    if (!read_token(options, engine))
+        return 0; /* FAILED */
+    return 1; /* OK */
+}
+
 #endif /* OPENSSL_NO_ENGINE */
 
 /*
+ * Support for security token and various certificate and key file formats:
+ * PEM / DER / SPC / P7B / PVK
+ * .spc and .p7b files contain a PKCS#7 certificate structure;
+ * .pvk is a Microsoft-specific binary format for RSA and DSA private keys,
+ * it may be passphrase-protected and can have an associated .spc file.
  * [in, out] options: structure holds the input data
  * [returns] 0 on error or 1 on success
  */
 static int read_crypto_params(GLOBAL_OPTIONS *options)
 {
-    int ret = 0;
+    options->certs = sk_X509_new_null();
+    options->xcerts = sk_X509_new_null();
+    options->crls = sk_X509_CRL_new_null();
 
-    /* Microsoft Private Key format support */
-    options->pvkfile = find_pvk_key(options);
-    if (options->pvkfile) {
-        if (!read_certfile(options) || !read_pvk_key(options))
-            goto out; /* FAILED */
+    /* Try to use PKCS#12 container with certificates and the private key ('-pkcs12' option) */
+    if (options->pkcs12file) {
+        load_objects_from_store(options->pkcs12file, options->pass, &options->pkey, options->certs, options->crls);
 
-    /* PKCS#12 container with certificates and the private key ("-pkcs12" option) */
-    } else if (options->pkcs12file) {
-        if (!read_pkcs12file(options))
-            goto out; /* FAILED */
-
+#if !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L
+    /* Security token */
 #ifndef OPENSSL_NO_ENGINE
-    /* PKCS11 engine and module support */
-    } else if ((options->p11engine) || (options->p11module)) {
-        ENGINE *engine;
-
-        if (options->p11engine)
-            engine = engine_dynamic(options);
-        else
-            engine = engine_pkcs11();
-        if (!engine)
-            goto out; /* FAILED */
-        printf("Engine \"%s\" set.\n", ENGINE_get_id(engine));
-
-        /* Load the private key and the signer certificate from the security token */
-        if (!read_token(options, engine))
-            goto out; /* FAILED */
-
-        /* Load the signer certificate and the whole certificate chain from a file */
-        if (options->certfile && !read_certfile(options))
-            goto out; /* FAILED */
-
-    /* PEM / DER / SPC file format support */
-    } else if (!read_certfile(options) || !read_keyfile(options))
-        goto out; /* FAILED */
+    /* PKCS#11 'dynamic' engine */
+    } else if (options->p11engine && !engine_load(options)) {
+            goto out;
 #endif /* OPENSSL_NO_ENGINE */
-
-    /* Load additional (cross) certificates ("-ac" option) */
-    if (options->xcertfile && !read_xcertfile(options))
-        goto out; /* FAILED */
-
-    ret = 1; /* OK */
-out:
-    /* reset password */
-    if (options->pass) {
-        memset(options->pass, 0, strlen(options->pass));
-        OPENSSL_free(options->pass);
+    } else if (options->p11module) {
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+        /* Try to load PKCS#11 provider first */
+        if ((options->provider && provider_load(options->provider)) || provider_load("pkcs11prov")) {
+            load_objects_from_store(options->keyfile, options->pass, &options->pkey, NULL, NULL);
+            load_objects_from_store(options->p11cert, options->pass, NULL, options->certs, NULL);
+        } else
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
+#ifndef OPENSSL_NO_ENGINE
+        /* try to find and load libp11 'pkcs11' engine */
+        if (!engine_load(options)) {
+            goto out;
+#endif /* OPENSSL_NO_ENGINE */
+        }
+#endif /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
+    } else {
+        /* Load the the private key ('-key' option) */
+        load_objects_from_store(options->keyfile, options->pass, &options->pkey, NULL, NULL);
     }
-    return ret;
+#if OPENSSL_VERSION_NUMBER<0x1010108f
+    /* Workaround for OpenSSL 1.1.1g and older, where the store API does not
+     * support loading private key in DER format. */
+    if (!options->pkey && !read_der_keyfile(options)) {
+        goto out;
+    }
+#endif /* OPENSSL_VERSION_NUMBER<0x1010108f */
+
+    /* Load additional (cross) certificates ('-ac' option) */
+    load_objects_from_store(options->xcertfile, options->pass, NULL, options->xcerts, NULL);
+
+    /* Load the certificate chain ('-certs' option) */
+    load_objects_from_store(options->certfile, options->pass, NULL, options->certs, NULL);
+
+    /* OpenSSL store API does not support PKCS#7 format */
+    if (sk_X509_num(options->certs) == 0 && !read_pkcs7_certfile(options)) {
+        goto out;
+    }
+out:
+    return (options->pkey && sk_X509_num(options->certs) > 0) ? 1 : 0;
 }
 
 /*
@@ -4372,6 +4299,83 @@ static char *get_cafile(void)
     }
 #endif /* WIN32 */
     return NULL;
+}
+
+static int ui_read(UI *ui, UI_STRING *uis)
+{
+    char *pass = (char *)UI_get0_user_data(ui);
+    int (*reader)(UI *ui, UI_STRING *uis) = NULL;
+
+    if (pass) {
+        UI_set_result(ui, uis, pass);
+        return 1;
+    }
+    if (!UI_OpenSSL()) {
+        return 0;
+    }
+    reader = UI_method_get_reader(UI_OpenSSL());
+    if (reader != NULL) {
+        return reader(ui, uis);
+    }
+    /* Default to the empty password if we've got nothing better */
+    UI_set_result(ui, uis, "");
+    return 1;
+}
+
+static UI_METHOD *ui_osslsigncode(void) {
+    static UI_METHOD *ui_method=NULL;
+
+    if (ui_method) /* already initialized */
+        return ui_method;
+    ui_method = UI_create_method("osslsigncode UI");
+    if (!ui_method) {
+        return NULL;
+    }
+    UI_method_set_opener(ui_method, UI_method_get_opener(UI_OpenSSL()));
+    UI_method_set_writer(ui_method, UI_method_get_writer(UI_OpenSSL()));
+    UI_method_set_reader(ui_method, ui_read);
+    UI_method_set_closer(ui_method, UI_method_get_closer(UI_OpenSSL()));
+    return ui_method;
+}
+
+ /* store_type == 0 means here multiple types of credentials are to be loaded */
+static void load_objects_from_store(const char *url, char *pass, EVP_PKEY **pkey, STACK_OF(X509) *certs, STACK_OF(X509_CRL) *crls) {
+    OSSL_STORE_CTX *store_ctx;
+    int type;
+
+    if (!url)
+        return;
+
+    store_ctx = OSSL_STORE_open(url, ui_osslsigncode(), pass, NULL, NULL);
+    if (!store_ctx)
+        return;
+
+    while (!OSSL_STORE_eof(store_ctx)) {
+        OSSL_STORE_INFO *object = OSSL_STORE_load(store_ctx);
+
+        if (!object)
+            continue;
+
+        type = OSSL_STORE_INFO_get_type(object);
+        switch (type) {
+        case OSSL_STORE_INFO_PKEY:
+            if (pkey)
+                *pkey = OSSL_STORE_INFO_get1_PKEY(object);
+            break;
+        case OSSL_STORE_INFO_CERT:
+            if (certs)
+                sk_X509_push(certs, OSSL_STORE_INFO_get1_CERT(object));
+            break;
+        case OSSL_STORE_INFO_CRL:
+            if (crls)
+                sk_X509_CRL_push(crls, OSSL_STORE_INFO_get1_CRL(object));
+            break;
+        default:
+            break; /* skip any other type */
+        }
+        OSSL_STORE_INFO_free(object);
+    }
+    OSSL_STORE_close(store_ctx);
 }
 
 static void print_version(void)
@@ -4434,9 +4438,6 @@ static cmd_type_t get_command(char **argv)
 }
 
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
-DEFINE_STACK_OF(OSSL_PROVIDER)
-static STACK_OF(OSSL_PROVIDER) *providers = NULL;
-
 static void provider_free(OSSL_PROVIDER *prov)
 {
     OSSL_PROVIDER_unload(prov);
@@ -4446,11 +4447,12 @@ static void providers_cleanup(void)
 {
     sk_OSSL_PROVIDER_pop_free(providers, provider_free);
     providers = NULL;
+    UI_destroy_method(ui_osslsigncode());
 }
 
-static int provider_load(OSSL_LIB_CTX *libctx, const char *pname)
+static int provider_load(const char *pname)
 {
-    OSSL_PROVIDER *prov= OSSL_PROVIDER_load(libctx, pname);
+    OSSL_PROVIDER *prov= OSSL_PROVIDER_load(NULL, pname);
     if (prov == NULL) {
         fprintf(stderr, "Unable to load provider: %s\n", pname);
         return 0; /* FAILED */
@@ -4469,10 +4471,10 @@ static int use_legacy(void)
 {
     /* load the legacy provider if not loaded already */
     if (!OSSL_PROVIDER_available(NULL, "legacy")) {
-        if (!provider_load(NULL, "legacy"))
+        if (!provider_load("legacy"))
             return 0; /* FAILED */
         /* load the default provider explicitly */
-        if (!provider_load(NULL, "default"))
+        if (!provider_load("default"))
             return 0; /* FAILED */
     }
     return 1; /* OK */
@@ -4523,7 +4525,9 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
 /* Use legacy PKCS#12 container with RC2-40-CBC private key and certificate encryption algorithm */
     options->legacy = 1;
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
+#ifndef OPENSSL_NO_ENGINE
     options->engine_ctrls = sk_EngineControl_new_null();
+#endif /* OPENSSL_NO_ENGINE */
 
     if (cmd == CMD_HELP) {
         return 0; /* FAILED */
@@ -4579,25 +4583,35 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
         } else if ((cmd == CMD_SIGN || cmd == CMD_EXTRACT || cmd == CMD_EXTRACT_DATA)
                 && !strcmp(*argv, "-pem")) {
             options->output_pkcs7 = 1;
-#ifndef OPENSSL_NO_ENGINE
+#if !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L
         } else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11cert")) {
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
             options->p11cert = *(++argv);
-        } else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11engine")) {
-            if (--argc < 1) {
-                usage(argv0, "all");
-                return 0; /* FAILED */
-            }
-            options->p11engine = *(++argv);
         } else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-pkcs11module")) {
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
             options->p11module = *(++argv);
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+#ifdef USE_WIN32
+            if (_putenv_s("PKCS11_MODULE_PATH", options->p11module))
+#else
+            if (setenv("PKCS11_MODULE_PATH", options->p11module, 1))
+#endif
+                return 0; /* FAILED */
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
+#endif /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
+#ifndef OPENSSL_NO_ENGINE
+        } else if ((cmd == CMD_SIGN) && (!strcmp(*argv, "-engine") || !strcmp(*argv, "-pkcs11engine"))) {
+            if (--argc < 1) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            options->p11engine = *(++argv);
         } else if (!strcmp(*argv, "-engineCtrl")) {
             if (--argc < 1) {
                 usage(argv0, "all");
@@ -4608,6 +4622,12 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
             options->login = 1;
 #endif /* OPENSSL_NO_ENGINE */
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
+        } else if (!strcmp(*argv, "-provider")) {
+            if (--argc < 1) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            options->provider = *(++argv);
         } else if ((cmd == CMD_SIGN) && !strcmp(*argv, "-nolegacy")) {
             options->legacy = 0;
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
@@ -4888,9 +4908,15 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
         !options->infile ||
         (cmd != CMD_VERIFY && !options->outfile) ||
         (cmd == CMD_SIGN && !((options->certfile && options->keyfile) ||
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+            options->provider ||
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 #ifndef OPENSSL_NO_ENGINE
-            options->p11engine || options->p11module ||
+            options->p11engine ||
 #endif /* OPENSSL_NO_ENGINE */
+#if !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L
+            options->p11module ||
+#endif /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
             options->pkcs12file))) {
         if (failarg)
             fprintf(stderr, "Unknown option: %s\n", failarg);
@@ -4911,6 +4937,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
     return 1; /* OK */
 }
 
+#ifndef OPENSSL_NO_ENGINE
 static void engine_control_set(GLOBAL_OPTIONS *options, const char *arg)
 {
     EngineControl *engine_ctrl = EngineControl_new();
@@ -4923,6 +4950,7 @@ static void engine_control_set(GLOBAL_OPTIONS *options, const char *arg)
     ASN1_STRING_set(engine_ctrl->cmd, arg, (int)strlen(arg));
     sk_EngineControl_push(options->engine_ctrls, engine_ctrl);
 }
+#endif /* OPENSSL_NO_ENGINE */
 
 int main(int argc, char **argv)
 {
