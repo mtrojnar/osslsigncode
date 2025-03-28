@@ -165,73 +165,76 @@ int data_write_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
 PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx)
 {
     int i, signer = -1;
-    PKCS7 *p7;
     PKCS7_SIGNER_INFO *si = NULL;
     STACK_OF(X509) *chain = NULL;
+    PKCS7 *p7 = PKCS7_new();
 
-    p7 = PKCS7_new();
+    if (!p7)
+        return NULL;
+
     PKCS7_set_type(p7, NID_pkcs7_signed);
     PKCS7_content_new(p7, NID_pkcs7_data);
-    if (ctx->options->cert != NULL) {
-        /*
-         * the private key and corresponding certificate are parsed from the PKCS12
-         * structure or loaded from the security token, so we may omit to check
-         * the consistency of a private key with the public key in an X509 certificate
-         */
-        si = PKCS7_add_signature(p7, ctx->options->cert, ctx->options->pkey,
-            ctx->options->md);
-        if (si == NULL)
-            return NULL; /* FAILED */
-    } else {
-        /* find the signer's certificate located somewhere in the whole certificate chain */
-        for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
-            X509 *signcert = sk_X509_value(ctx->options->certs, i);
-            if (X509_check_private_key(signcert, ctx->options->pkey)) {
-                si = PKCS7_add_signature(p7, signcert, ctx->options->pkey, ctx->options->md);
-                signer = i;
-                break;
-            }
-        }
-        if (si == NULL) {
-            fprintf(stderr, "Failed to checking the consistency of a private key: %s\n",
-                ctx->options->keyfile);
-            fprintf(stderr, "          with a public key in any X509 certificate: %s\n\n",
-                ctx->options->certfile);
-            return NULL; /* FAILED */
+
+    /* find the signer's certificate located somewhere in the whole certificate chain */
+    for (i=0; i<sk_X509_num(ctx->options->certs); i++) {
+        X509 *signcert = sk_X509_value(ctx->options->certs, i);
+
+        if (X509_check_private_key(signcert, ctx->options->pkey)) {
+            si = PKCS7_add_signature(p7, signcert, ctx->options->pkey, ctx->options->md);
+            signer = i;
+            if (signer > 0)
+                printf("Warning: For optimal performance, consider placing the signer certificate at the beginning of the certificate chain.\n");
+            break;
         }
     }
+    if (!si) {
+        fprintf(stderr, "Failed to checking the consistency of a private key: %s\n",
+            ctx->options->keyfile);
+        fprintf(stderr, "          with a public key in any X509 certificate: %s\n\n",
+#if !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L
+            ctx->options->certfile ? ctx->options->certfile : ctx->options->p11cert);
+#else
+            ctx->options->certfile);
+#endif /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
+        goto err;
+    }
+
     if (!pkcs7_signer_info_add_signing_time(si, ctx)) {
-        return NULL; /* FAILED */
+        goto err;
     }
     if (!pkcs7_signer_info_add_purpose(si, ctx)) {
-        return NULL; /* FAILED */
+        goto err;
     }
     if ((ctx->options->desc || ctx->options->url) &&
             !pkcs7_signer_info_add_spc_sp_opus_info(si, ctx)) {
         fprintf(stderr, "Couldn't allocate memory for opus info\n");
-        return NULL; /* FAILED */
+        goto err;
     }
     if ((ctx->options->nested_number >= 0) &&
             !pkcs7_signer_info_add_sequence_number(si, ctx)) {
-        return NULL; /* FAILED */
+        goto err;
     }
     /* create X509 chain sorted in ascending order by their DER encoding */
     chain = X509_chain_get_sorted(ctx, signer);
-    if (chain == NULL) {
+    if (!chain) {
         fprintf(stderr, "Failed to create a sorted certificate chain\n");
-        return NULL; /* FAILED */
+        goto err;
     }
     /* add sorted certificate chain */
     for (i=0; i<sk_X509_num(chain); i++) {
-        PKCS7_add_certificate(p7, sk_X509_value(chain, i));
+        (void)PKCS7_add_certificate(p7, sk_X509_value(chain, i));
     }
     /* add crls */
     if (ctx->options->crls) {
         for (i=0; i<sk_X509_CRL_num(ctx->options->crls); i++)
-            PKCS7_add_crl(p7, sk_X509_CRL_value(ctx->options->crls, i));
+            (void)PKCS7_add_crl(p7, sk_X509_CRL_value(ctx->options->crls, i));
     }
     sk_X509_free(chain);
     return p7; /* OK */
+
+err:
+    PKCS7_free(p7);
+    return NULL; /* FAILED */
 }
 
 /*
@@ -732,11 +735,6 @@ static STACK_OF(X509) *X509_chain_get_sorted(FILE_FORMAT_CTX *ctx, int signer)
     int i;
     STACK_OF(X509) *chain = sk_X509_new(X509_compare);
 
-    /* add the signer's certificate */
-    if (ctx->options->cert != NULL && !sk_X509_push(chain, ctx->options->cert)) {
-        sk_X509_free(chain);
-        return NULL;
-    }
     if (signer != -1 && !sk_X509_push(chain, sk_X509_value(ctx->options->certs, signer))) {
         sk_X509_free(chain);
         return NULL;

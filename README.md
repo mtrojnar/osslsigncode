@@ -131,14 +131,25 @@ To sign a CAB file containing java class files:
 ```
 Only the 'low' parameter is currently supported.
 
-If you want to use PKCS11 token, you should indicate PKCS11 engine and module.
+If you want to use a PKCS#11 token, you should specify the PKCS#11 engine and module.
 An example of using osslsigncode with SoftHSM:
 ```
   osslsigncode sign \
-    -pkcs11engine /usr/lib64/engines-1.1/pkcs11.so \
+    -engine /usr/lib64/engines-1.1/pkcs11.so \
     -pkcs11module /usr/lib64/pkcs11/libsofthsm2.so \
     -pkcs11cert 'pkcs11:token=softhsm-token;object=cert' \
     -key 'pkcs11:token=softhsm-token;object=key' \
+    -in yourapp.exe -out yourapp-signed.exe
+```
+
+Since OpenSSL 3.0, you can use a PKCS#11 token with the PKCS#11 provider.
+An example of using osslsigncode with OpenSC:
+```
+  osslsigncode sign \
+    -provider /usr/lib64/ossl-modules/pkcs11prov.so \
+    -pkcs11module /usr/lib64/opensc-pkcs11.so \
+    -pkcs11cert 'pkcs11:token=my-token;object=cert' \
+    -key 'pkcs11:token=my-token;object=key' \
     -in yourapp.exe -out yourapp-signed.exe
 ```
 
@@ -156,7 +167,7 @@ placed in the same directory as the `osslsigncode.exe` executable.
 Below is an example of how to use osslsigncode with the CNG engine:
 ```
   osslsigncode sign \
-    -pkcs11engine cng \
+    -engine cng \
     -pkcs11cert osslsigncode_cert \
     -key osslsigncode_cert \
     -engineCtrl store_flags:0 \

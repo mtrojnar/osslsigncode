@@ -6,6 +6,7 @@
 - added the "-engineCtrl" option to control hardware and CNG engines
 - improved unauthenticated blob support (thanks to Asger Hautop Drewsen)
 - added the '-blobFile' option to specify a file containing the blob content
+- added PKCS#11 provider support (requires OpenSSL 3.0)
 
 ### 2.9 (2024.06.29)
 
