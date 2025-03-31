@@ -1488,6 +1488,7 @@ static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64
 
     if (!get_current_position(bio, &offset)) {
         fprintf(stderr, "Unable to get offset\n");
+        OPENSSL_free(header.fileName);
         OPENSSL_free(dataToWrite);
         return 0; /* FAILED */
     }
@@ -1497,6 +1498,7 @@ static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64
         size_t check;
         if (!BIO_write_ex(bio, dataToWrite + written, toWrite, &check)
             || check != toWrite) {
+            OPENSSL_free(header.fileName);
             OPENSSL_free(dataToWrite);
             return 0; /* FAILED */
         }
@@ -1591,6 +1593,7 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
 {
     size_t check;
     ZIP_LOCAL_HEADER header;
+    int ret = 0;
 
     memset(&header, 0, sizeof(header));
     if (entry->offsetOfLocalHeader >= (uint64_t)zip->fileSize) {
@@ -1601,7 +1604,7 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
         return 0; /* FAILED */
     }
     if (!zipReadLocalHeader(&header, zip, entry->compressedSize)) {
-        return 0; /* FAILED */
+        goto out;
     }
     if (entry->overrideData) {
         header.compressedSize = entry->overrideData->compressedSize;
@@ -1612,14 +1615,14 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
     if (entry->overrideData) {
         if (!BIO_write_ex(bio, entry->overrideData->data, entry->overrideData->compressedSize, &check)
             || check != entry->overrideData->compressedSize) {
-            return 0; /* FAILED */
+            goto out;
         }
         if (entry->compressedSize > (uint64_t)zip->fileSize - entry->offsetOfLocalHeader) {
             fprintf(stderr, "Corrupted compressedSize : 0x%08" PRIX64 "\n", entry->compressedSize);
-            return 0; /* FAILED */
+            goto out;
         }
         if (fseeko(zip->file, (int64_t)entry->compressedSize, SEEK_CUR) < 0) {
-            return 0; /* FAILED */
+            goto out;
         }
         *sizeOnDisk += entry->overrideData->compressedSize;
     } else {
@@ -1630,12 +1633,12 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
             size_t size = fread(data, 1, toWrite, zip->file);
             if (size != toWrite) {
                 OPENSSL_free(data);
-                return 0; /* FAILED */
+                goto out;
             }
             if (!BIO_write_ex(bio, data, toWrite, &check)
                 || check != toWrite) {
                 OPENSSL_free(data);
-                return 0; /* FAILED */
+                goto out;
             }
             *sizeOnDisk += toWrite;
             len -= toWrite;
@@ -1654,19 +1657,21 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
         }
         if (zip->isZip64) {
             if (fseeko(zip->file, 24, SEEK_CUR) < 0) {
-                return 0; /* FAILED */
+                goto out;
             }
             *sizeOnDisk += 24;
         } else {
             if (fseeko(zip->file, 16, SEEK_CUR) < 0) {
-                return 0; /* FAILED */
+                goto out;
             }
             *sizeOnDisk += 16;
         }
     }
+    ret = 1; /* OK */
+out:
     OPENSSL_free(header.fileName);
     OPENSSL_free(header.extraField);
-    return 1; /* OK */
+    return ret;
 }
 
 /*
@@ -1835,6 +1840,8 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
         uncompressedSize = entry->uncompressedSize;
         memset(&header, 0, sizeof(header));
         if (!zipReadLocalHeader(&header, zip, compressedSize)) {
+            OPENSSL_free(header.fileName);
+            OPENSSL_free(header.extraField);
             return 0; /* FAILED */
         }
         if (header.fileNameLen != entry->fileNameLen
@@ -1843,6 +1850,8 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
             || header.uncompressedSize != uncompressedSize
             || header.compression != entry->compression) {
             fprintf(stderr, "Local header does not match central directory entry\n");
+            OPENSSL_free(header.fileName);
+            OPENSSL_free(header.extraField);
             return 0; /* FAILED */
         }
         /* we don't really need those */
@@ -2144,6 +2153,7 @@ static int zipDeflate(uint8_t *dest, uint64_t *destLen, uint8_t *source, uLong s
 
     err = deflateInit2(&stream, 8, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
     if (err != Z_OK) {
+        deflateEnd(&stream);
         return err;
     }
     stream.next_out = dest;
