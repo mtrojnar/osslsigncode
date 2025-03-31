@@ -4269,7 +4269,7 @@ static int read_crypto_params(GLOBAL_OPTIONS *options)
 
     /* OpenSSL store API does not support PKCS#7 format */
     if (sk_X509_num(options->certs) == 0 && !read_pkcs7_certfile(options)) {
-        goto out;
+        return 0; /* FAILED */
     }
 out:
     return (options->pkey && sk_X509_num(options->certs) > 0) ? 1 : 0;
