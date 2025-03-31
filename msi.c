@@ -1785,7 +1785,6 @@ static int ministream_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
     dirent->entry->startSectorLocation = out->sectorNum;
     /* ministream save */
     BIO_write(outdata, out->ministream, (int)out->miniStreamLen);
-    OPENSSL_free(out->ministream);
     /* fill to the end with known data, such as all zeroes */
     if (out->miniStreamLen % out->sectorSize > 0) {
         remain = out->sectorSize - out->miniStreamLen % out->sectorSize;
@@ -2186,6 +2185,8 @@ static int msiout_set(MSI_FILE *msi, uint32_t len_msi, uint32_t len_msiex, MSI_O
     out->header = header_new(msi->m_hdr, out);
     out->minifatMemallocCount = msi->m_hdr->numMiniFATSector;
     out->fatMemallocCount = msi->m_hdr->numFATSector;
+    out->difatMemallocCount = 0;
+    out->difat = NULL;
     out->ministream = NULL;
     out->minifat = OPENSSL_malloc((uint64_t)out->minifatMemallocCount * out->sectorSize);
     out->fat = OPENSSL_malloc((uint64_t)out->fatMemallocCount * out->sectorSize);
@@ -2226,7 +2227,9 @@ static int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint
 out:
     OPENSSL_free(out.header);
     OPENSSL_free(out.fat);
+    OPENSSL_free(out.difat);
     OPENSSL_free(out.minifat);
+    OPENSSL_free(out.ministream);
     return ret;
 }
 
