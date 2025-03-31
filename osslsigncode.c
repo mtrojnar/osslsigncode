@@ -1357,7 +1357,7 @@ static int add_unauthenticated_blob(PKCS7 *p7, const char *blob_file)
         fprintf(stderr, "Failed to obtain PKCS#7 signer info list\n");
         return 0; /* FAILED */
     }
-    si = sk_PKCS7_SIGNER_INFO_value(p7->d.sign->signer_info, 0);
+    si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si) {
         fprintf(stderr, "Failed to obtain signer info from PKCS#7 structure\n");
         return 0; /* FAILED */
