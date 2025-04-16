@@ -4231,7 +4231,8 @@ static int read_crypto_params(GLOBAL_OPTIONS *options)
     /* Security token */
 #ifndef OPENSSL_NO_ENGINE
     /* PKCS#11 'dynamic' engine */
-    } else if (options->p11engine && !engine_load(options)) {
+    } else if (options->p11engine) {
+        if(!engine_load(options))
             goto out;
 #endif /* OPENSSL_NO_ENGINE */
     } else if (options->p11module) {
@@ -4240,13 +4241,14 @@ static int read_crypto_params(GLOBAL_OPTIONS *options)
         if ((options->provider && provider_load(options->provider)) || provider_load("pkcs11prov")) {
             load_objects_from_store(options->keyfile, options->pass, &options->pkey, NULL, NULL);
             load_objects_from_store(options->p11cert, options->pass, NULL, options->certs, NULL);
-        } else
+        } else {
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 #ifndef OPENSSL_NO_ENGINE
-        /* try to find and load libp11 'pkcs11' engine */
-        if (!engine_load(options)) {
-            goto out;
+            /* try to find and load libp11 'pkcs11' engine */
+            if (!engine_load(options)) {
+                goto out;
 #endif /* OPENSSL_NO_ENGINE */
+            }
         }
 #endif /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
     } else {
