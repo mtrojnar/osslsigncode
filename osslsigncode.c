@@ -4226,12 +4226,12 @@ static int read_crypto_params(GLOBAL_OPTIONS *options)
     /* Try to use PKCS#12 container with certificates and the private key ('-pkcs12' option) */
     if (options->pkcs12file) {
         load_objects_from_store(options->pkcs12file, options->pass, &options->pkey, options->certs, options->crls);
-
+    }
 #if !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L
     /* Security token */
 #ifndef OPENSSL_NO_ENGINE
     /* PKCS#11 'dynamic' engine */
-    } else if (options->p11engine) {
+    else if (options->p11engine) {
         if(!engine_load(options))
             goto out;
 #endif /* OPENSSL_NO_ENGINE */
@@ -4241,17 +4241,16 @@ static int read_crypto_params(GLOBAL_OPTIONS *options)
         if ((options->provider && provider_load(options->provider)) || provider_load("pkcs11prov")) {
             load_objects_from_store(options->keyfile, options->pass, &options->pkey, NULL, NULL);
             load_objects_from_store(options->p11cert, options->pass, NULL, options->certs, NULL);
-        } else {
+        } else
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 #ifndef OPENSSL_NO_ENGINE
             /* try to find and load libp11 'pkcs11' engine */
-            if (!engine_load(options)) {
+            if (!engine_load(options))
                 goto out;
 #endif /* OPENSSL_NO_ENGINE */
-            }
-        }
+    }
 #endif /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
-    } else {
+    else {
         /* Load the the private key ('-key' option) */
         load_objects_from_store(options->keyfile, options->pass, &options->pkey, NULL, NULL);
     }
@@ -4273,7 +4272,9 @@ static int read_crypto_params(GLOBAL_OPTIONS *options)
     if (sk_X509_num(options->certs) == 0 && !read_pkcs7_certfile(options)) {
         return 0; /* FAILED */
     }
+#if !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L
 out:
+#endif /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
     return (options->pkey && sk_X509_num(options->certs) > 0) ? 1 : 0;
 }
 
