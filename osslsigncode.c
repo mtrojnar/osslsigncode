@@ -2216,7 +2216,6 @@ static int verify_timestamp_token(PKCS7 *p7, CMS_ContentInfo *timestamp)
  */
 static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *timestamp, time_t time)
 {
-    X509_STORE *store;
     STACK_OF(CMS_SignerInfo) *sinfos;
     CMS_SignerInfo *cmssi;
     X509 *signer;
@@ -2224,8 +2223,8 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
     STACK_OF(X509_CRL) *crls = NULL;
     char *url = NULL;
     int verok = 0;
+    X509_STORE *store = X509_STORE_new();
 
-    store = X509_STORE_new();
     if (!store)
         goto out;
     if (x509_store_load_file(store, ctx->options->tsa_cafile)) {
@@ -2240,12 +2239,10 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
          */
         if (!x509_store_set_time(store, time)) {
             fprintf(stderr, "Failed to set store time\n");
-            X509_STORE_free(store);
             goto out;
         }
     } else {
         printf("Use the \"-TSA-CAfile\" option to add the Time-Stamp Authority certificates bundle to verify the Timestamp Server.\n");
-        X509_STORE_free(store);
         goto out;
     }
 
@@ -2255,14 +2252,12 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
         STACK_OF(X509) *cms_certs;
 
         printf("CMS_verify error\n");
-        X509_STORE_free(store);
         printf("\nFailed timestamp certificate chain retrieved from the signature:\n");
         cms_certs = CMS_get1_certs(timestamp);
         print_certs_chain(cms_certs);
         sk_X509_pop_free(cms_certs, X509_free);
         goto out;
     }
-    X509_STORE_free(store);
 
     sinfos = CMS_get0_SignerInfos(timestamp);
     cmssi = sk_CMS_SignerInfo_value(sinfos, 0);
@@ -2299,7 +2294,6 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
         int crlok = verify_crl(ctx->options->tsa_cafile, ctx->options->tsa_crlfile,
             crls, signer, chain);
         sk_X509_pop_free(chain, X509_free);
-        sk_X509_CRL_pop_free(crls, X509_CRL_free);
         printf("Timestamp Server Signature CRL verification: %s\n", crlok ? "ok" : "failed");
         if (!crlok)
             goto out;
@@ -2317,6 +2311,8 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
     }
     verok = 1; /* OK */
 out:
+    X509_STORE_free(store);
+    sk_X509_CRL_pop_free(crls, X509_CRL_free);
     if (!verok)
         ERR_print_errors_fp(stderr);
     return verok;
@@ -2345,49 +2341,24 @@ static int PKCS7_type_is_other(PKCS7 *p7)
 #endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
 
 /*
- * [in] ctx: structure holds input and output data
  * [in] p7: PKCS#7 signature
- * [in] time: signature verification time
- * [in] signer: signer's X509 certificate
+ * [in] store: X509_STORE
  * [returns] 1 on error or 0 on success
  */
-static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X509 *signer)
+static int verify_pkcs7_data(PKCS7 *p7, X509_STORE *store)
 {
-    X509_STORE *store;
-    X509_CRL *crl = NULL;
-    STACK_OF(X509_CRL) *crls = NULL;
-    BIO *bio = NULL;
     int verok = 0;
-    char *url = NULL;
+#if OPENSSL_VERSION_NUMBER<0x30500000L
+    BIO *bio = NULL;
     PKCS7 *contents = p7->d.sign->contents;
 
-    store = X509_STORE_new();
-    if (!store)
-        goto out;
-
-    if (!x509_store_load_file(store, ctx->options->cafile)) {
-        fprintf(stderr, "Failed to add store lookup file\n");
-        X509_STORE_free(store);
-        goto out;
-    }
-    if (time != INVALID_TIME) {
-        printf("Signature verification time: ");
-        print_time_t(time);
-        if (!x509_store_set_time(store, time)) {
-            fprintf(stderr, "Failed to set signature time\n");
-            X509_STORE_free(store);
-            goto out;
-        }
-    } else if (ctx->options->time != INVALID_TIME) {
-        printf("Signature verification time: ");
-        print_time_t(ctx->options->time);
-        if (!x509_store_set_time(store, ctx->options->time)) {
-            fprintf(stderr, "Failed to set verifying time\n");
-            X509_STORE_free(store);
-            goto out;
-        }
-    }
-    /* verify a PKCS#7 signedData structure */
+    /*
+     * In the PKCS7_verify() function, the BIO *indata parameter refers to
+     * the signed data if the content is detached from p7.
+     * Otherwise, indata should be NULL, and then the signed data must be in p7.
+     * The OpenSSL error workaround is to put the inner content into BIO *indata parameter
+     * https://github.com/openssl/openssl/pull/22575
+     */
     if (PKCS7_type_is_other(contents) && (contents->d.other != NULL)
         && (contents->d.other->value.sequence != NULL)
         && (contents->d.other->value.sequence->length > 0)) {
@@ -2402,7 +2373,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
             if (inf != V_ASN1_CONSTRUCTED || tag != V_ASN1_SEQUENCE) {
                 fprintf(stderr, "Corrupted data content\n");
                 X509_STORE_free(store);
-                goto out;
+                return 0; /* FAILED */
             }
             bio = BIO_new_mem_buf(data, (int)len);
         } else {
@@ -2413,26 +2384,61 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
     } else {
         fprintf(stderr, "Corrupted data content\n");
         X509_STORE_free(store);
+        return 0; /* FAILED */
+    }
+    verok = PKCS7_verify(p7, NULL, store, bio, NULL, 0);
+    BIO_free(bio);
+#else /* OPENSSL_VERSION_NUMBER<0x30500000L */
+    verok = PKCS7_verify(p7, NULL, store, NULL, NULL, 0);
+#endif /* OPENSSL_VERSION_NUMBER<0x30500000L */
+    return verok;
+}
+
+/*
+ * [in] ctx: structure holds input and output data
+ * [in] p7: PKCS#7 signature
+ * [in] time: signature verification time
+ * [in] signer: signer's X509 certificate
+ * [returns] 1 on error or 0 on success
+ */
+static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X509 *signer)
+{
+    X509_CRL *crl = NULL;
+    STACK_OF(X509_CRL) *crls = NULL;
+    int verok = 0;
+    char *url = NULL;
+    X509_STORE *store = X509_STORE_new();
+
+    if (!store)
+        goto out;
+
+    if (!x509_store_load_file(store, ctx->options->cafile)) {
+        fprintf(stderr, "Failed to add store lookup file\n");
         goto out;
     }
+    if (time != INVALID_TIME) {
+        printf("Signature verification time: ");
+        print_time_t(time);
+        if (!x509_store_set_time(store, time)) {
+            fprintf(stderr, "Failed to set signature time\n");
+            goto out;
+        }
+    } else if (ctx->options->time != INVALID_TIME) {
+        printf("Signature verification time: ");
+        print_time_t(ctx->options->time);
+        if (!x509_store_set_time(store, ctx->options->time)) {
+            fprintf(stderr, "Failed to set verifying time\n");
+            goto out;
+        }
+    }
+    /* verify a PKCS#7 signedData structure */
     printf("Signing certificate chain verified using:\n");
-    /*
-     * In the PKCS7_verify() function, the BIO *indata parameter refers to
-     * the signed data if the content is detached from p7.
-     * Otherwise, indata should be NULL, and then the signed data must be in p7.
-     * The OpenSSL error workaround is to put the inner content into BIO *indata parameter
-     * https://github.com/openssl/openssl/pull/22575
-     */
-    if (!PKCS7_verify(p7, NULL, store, bio, NULL, 0)) {
+    if (!verify_pkcs7_data(p7, store)) {
         printf("PKCS7_verify error\n");
-        X509_STORE_free(store);
-        BIO_free(bio);
         printf("Failed signing certificate chain retrieved from the signature:\n");
         print_certs_chain(p7->d.sign->cert);
         goto out;
     }
-    X509_STORE_free(store);
-    BIO_free(bio);
 
     /* verify a Certificate Revocation List */
     if (!ctx->options->ignore_crl) {
@@ -2464,7 +2470,7 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
         STACK_OF(X509) *chain = p7->d.sign->cert;
         int crlok = verify_crl(ctx->options->cafile, ctx->options->crlfile,
             crls, signer, chain);
-        sk_X509_CRL_pop_free(crls, X509_CRL_free);
+
         printf("Signature CRL verification: %s\n", crlok ? "ok" : "failed");
         if (!crlok)
             goto out;
@@ -2477,6 +2483,8 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
 
     verok = 1; /* OK */
 out:
+    X509_STORE_free(store);
+    sk_X509_CRL_pop_free(crls, X509_CRL_free);
     if (!verok)
         ERR_print_errors_fp(stderr);
     return verok;
