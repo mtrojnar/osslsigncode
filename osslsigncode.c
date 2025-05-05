@@ -303,10 +303,17 @@ static BIO *bio_encode_rfc3161_request(PKCS7 *p7, const EVP_MD *md)
         goto out;
 
     bhash = BIO_new(BIO_f_md());
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         goto out;
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(bhash, BIO_new(BIO_s_null()));
     BIO_write(bhash, si->enc_digest->data, si->enc_digest->length);
     BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
@@ -1817,10 +1824,17 @@ static int trusted_cert(X509 *cert, int error) {
     const EVP_MD *md = EVP_get_digestbynid(NID_sha256);
     BIO *bhash = BIO_new(BIO_f_md());
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(bhash, md)) {
         BIO_free_all(bhash);
         return 0; /* FAILED */
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(bhash, BIO_new(BIO_s_null()));
     len = i2d_X509(cert, NULL);
     p = OPENSSL_malloc((size_t)len);
@@ -2173,12 +2187,19 @@ static int verify_timestamp_token(PKCS7 *p7, CMS_ContentInfo *timestamp)
 
             /* compute a hash from the encrypted message digest value of the file */
             bhash = BIO_new(BIO_f_md());
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
             if (!BIO_set_md(bhash, md)) {
                 fprintf(stderr, "Unable to set the message digest of BIO\n");
                 BIO_free_all(bhash);
                 TS_TST_INFO_free(token);
                 return 0; /* FAILED */
             }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
             BIO_push(bhash, BIO_new(BIO_s_null()));
             BIO_write(bhash, si->enc_digest->data, si->enc_digest->length);
             BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
@@ -2531,12 +2552,19 @@ static int verify_leaf_hash(X509 *cert, const char *leafhash)
 
     /* compute the leaf certificate hash */
     bhash = BIO_new(BIO_f_md());
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         OPENSSL_free(mdbuf);
         return 0; /* FAILED */
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(bhash, BIO_new(BIO_s_null()));
     certlen = (size_t)i2d_X509(cert, NULL);
     certbuf = OPENSSL_malloc(certlen);
@@ -3346,7 +3374,23 @@ static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b)
     long index_a, index_b;
     int ret = 0;
 
+#if OPENSSL_VERSION_NUMBER<0x30000000L
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wincompatible-pointer-types-discards-qualifiers"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdiscarded-qualifiers"
+#endif
+#endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
     p7_a = PKCS7_dup(*a);
+#if OPENSSL_VERSION_NUMBER<0x30000000L
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
     if (!p7_a)
         goto out;
     signer_info = PKCS7_get_signer_info(p7_a);
@@ -3358,7 +3402,23 @@ static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b)
     time_a = asn1_time_get_si_time(si);
     index_a = get_sequence_number(si);
 
+#if OPENSSL_VERSION_NUMBER<0x30000000L
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wincompatible-pointer-types-discards-qualifiers"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdiscarded-qualifiers"
+#endif
+#endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
     p7_b = PKCS7_dup(*b);
+#if OPENSSL_VERSION_NUMBER<0x30000000L
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
     if (!p7_b)
         goto out;
     signer_info = PKCS7_get_signer_info(p7_b);
@@ -5011,9 +5071,16 @@ int main(int argc, char **argv)
     if (options.cmd != CMD_VERIFY) {
         /* Create message digest BIO */
         hash = BIO_new(BIO_f_md());
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
         if (!BIO_set_md(hash, options.md)) {
             DO_EXIT_0("Unable to set the message digest of BIO\n");
         }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
         /* Create outdata file */
         outdata = BIO_new_file(options.outfile, "w+bx");
         if (!outdata && errno != EEXIST)

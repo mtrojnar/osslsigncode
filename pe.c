@@ -779,11 +779,18 @@ static BIO *pe_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     uint32_t idx = 0, fileend;
     BIO *bhash = BIO_new(BIO_f_md());
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return 0; /* FAILED */
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(bhash, BIO_new(BIO_s_null()));
     if (ctx->pe_ctx->sigpos)
         fileend = ctx->pe_ctx->sigpos;
@@ -958,11 +965,18 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
     phlen = pphlen * (3 + (int)nsections + (int)(ctx->pe_ctx->fileend / pagesize));
 
     bhash = BIO_new(BIO_f_md());
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return NULL;  /* FAILED */
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(bhash, BIO_new(BIO_s_null()));
     if (!BIO_write_ex(bhash, ctx->options->indata, ctx->pe_ctx->header_size + 88, &written)
         || written != ctx->pe_ctx->header_size + 88) {
@@ -1005,6 +1019,10 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
         for (l=0; l<rs; l+=pagesize, pi++) {
             PUT_UINT32_LE(ro + l, res + pi*pphlen);
             bhash = BIO_new(BIO_f_md());
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
             if (!BIO_set_md(bhash, md)) {
                 fprintf(stderr, "Unable to set the message digest of BIO\n");
                 BIO_free_all(bhash);
@@ -1012,6 +1030,9 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
                 OPENSSL_free(res);
                 return NULL;  /* FAILED */
             }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
             BIO_push(bhash, BIO_new(BIO_s_null()));
             if (rs - l < pagesize) {
                 if (!BIO_write_ex(bhash, ctx->options->indata + ro + l, rs - l, &written)

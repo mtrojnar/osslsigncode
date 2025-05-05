@@ -373,11 +373,18 @@ static u_char *msi_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     u_char *mdbuf = NULL;
     BIO *bhash = BIO_new(BIO_f_md());
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return NULL;  /* FAILED */
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(bhash, BIO_new(BIO_s_null()));
     if (!bio_hash_data(bhash, ctx->options->indata, 0, ctx->msi_ctx->fileend)) {
         fprintf(stderr, "Unable to calculate digest\n");
@@ -426,11 +433,18 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
     printf("Message digest algorithm         : %s\n", OBJ_nid2sn(mdtype));
     md = EVP_get_digestbynid(mdtype);
     hash = BIO_new(BIO_f_md());
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(hash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(hash);
         return 0; /* FAILED */
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(hash, BIO_new(BIO_s_null()));
     if (ctx->msi_ctx->p_msiex) {
         BIO *prehash = BIO_new(BIO_f_md());
@@ -440,12 +454,19 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
             BIO_free_all(prehash);
             return 0; /* FAILED */
         }
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
         if (!BIO_set_md(prehash, md)) {
             fprintf(stderr, "Unable to set the message digest of BIO\n");
             BIO_free_all(hash);
             BIO_free_all(prehash);
             return 0; /* FAILED */
         }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
         BIO_push(prehash, BIO_new(BIO_s_null()));
 
         print_hash("Current MsiDigitalSignatureEx    ", "", (u_char *)ctx->msi_ctx->p_msiex,
@@ -2298,11 +2319,18 @@ static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash)
     size_t written;
     BIO *prehash = BIO_new(BIO_f_md());
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(prehash, ctx->options->md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(prehash);
         return 0; /* FAILED */
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(prehash, BIO_new(BIO_s_null()));
 
     if (!msi_prehash_dir(ctx->msi_ctx->dirent, prehash, 1)) {
