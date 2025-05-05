@@ -268,11 +268,13 @@ typedef struct {
     int output_pkcs7;
 #ifndef OPENSSL_NO_ENGINE
     char *p11engine;
+    STACK_OF(EngineControl) *engine_ctrls;
+    int login;
+#endif /* OPENSSL_NO_ENGINE */
+#if !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L
     char *p11module;
     char *p11cert;
-    int login;
-    STACK_OF(EngineControl) *engine_ctrls;
-#endif /* OPENSSL_NO_ENGINE */
+#endif /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
     int askpass;
     char *readpass;
     char *pass;
