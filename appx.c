@@ -873,11 +873,18 @@ static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD
     u_char *mdbuf = NULL;
     BIO *bhash = BIO_new(BIO_f_md());
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return NULL; /* FAILED */
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(bhash, BIO_new(BIO_s_null()));
     if (!appx_write_central_directory(bhash, zip, 1, cdOffset)) {
         fprintf(stderr, "Unable to write central directory\n");
@@ -1000,11 +1007,18 @@ static uint8_t *appx_calc_zip_data_hash(uint64_t *cdOffset, ZIP_FILE *zip, const
     BIO *bhash = BIO_new(BIO_f_md());
     uint64_t noEntries = 0;
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return NULL; /* FAILED */
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(bhash, BIO_new(BIO_s_null()));
     *cdOffset = 0;
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
@@ -1758,12 +1772,19 @@ static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *
         return NULL; /* FAILED */
     }
     bhash = BIO_new(BIO_f_md());
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         OPENSSL_free(data);
         BIO_free_all(bhash);
         return NULL; /* FAILED */
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(bhash, BIO_new(BIO_s_null()));
     if (!bio_hash_data(bhash, (char *)data, 0, dataSize)) {
         OPENSSL_free(data);

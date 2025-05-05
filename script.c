@@ -242,11 +242,18 @@ static u_char *script_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     u_char *mdbuf;
     BIO *hash = BIO_new(BIO_f_md());
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(hash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(hash);
         return NULL; /* FAILED */
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(hash, BIO_new(BIO_s_null()));
     if (!script_write_bio(hash, ctx->options->indata, ctx->script_ctx->fileend)) {
         BIO_free_all(hash);
@@ -782,12 +789,18 @@ static BIO *script_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
         fileend = ctx->script_ctx->sigpos;
     else
         fileend = ctx->script_ctx->fileend;
-
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(hash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(hash);
         return NULL; /* FAILED */
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(hash, BIO_new(BIO_s_null()));
     if (!script_digest_convert(hash, ctx, fileend)) {
         fprintf(stderr, "Unable calc a message digest value\n");

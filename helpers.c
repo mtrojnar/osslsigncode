@@ -777,6 +777,15 @@ static int X509_compare(const X509 *const *a, const X509 *const *b)
     size_t a_len, b_len;
     int ret;
 
+#if OPENSSL_VERSION_NUMBER<0x30000000L
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wincompatible-pointer-types-discards-qualifiers"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdiscarded-qualifiers"
+#endif
+#endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
     a_len = (size_t)i2d_X509(*a, NULL);
     a_tmp = a_data = OPENSSL_malloc(a_len);
     i2d_X509(*a, &a_tmp);
@@ -784,6 +793,13 @@ static int X509_compare(const X509 *const *a, const X509 *const *b)
     b_len = (size_t)i2d_X509(*b, NULL);
     b_tmp = b_data = OPENSSL_malloc(b_len);
     i2d_X509(*b, &b_tmp);
+#if OPENSSL_VERSION_NUMBER<0x30000000L
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+#endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
 
     ret = memcmp(a_data, b_data, MIN(a_len, b_len));
     OPENSSL_free(a_data);

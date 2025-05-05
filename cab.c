@@ -205,11 +205,18 @@ static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     u_char *mdbuf = NULL;
     BIO *bhash = BIO_new(BIO_f_md());
 
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+#endif
     if (!BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return 0;  /* FAILED */
     }
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
     BIO_push(bhash, BIO_new(BIO_s_null()));
 
     /* u1 signature[4] 4643534D MSCF: 0-3 */
