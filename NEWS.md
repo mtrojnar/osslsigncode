@@ -2,11 +2,13 @@
 
 ### 2.10 (unreleased)
 
+- added PKCS#11 provider support (requires OpenSSL 3.0)
 - added compatiblity with the CNG engine version 1.1 or later
 - added the "-engineCtrl" option to control hardware and CNG engines
-- improved unauthenticated blob support (thanks to Asger Hautop Drewsen)
 - added the '-blobFile' option to specify a file containing the blob content
-- added PKCS#11 provider support (requires OpenSSL 3.0)
+- improved unauthenticated blob support (thanks to Asger Hautop Drewsen)
+- fixed support for multiple signerInfo contentType OIDs (CTL and Authenticode)
+- fixed tests for python-cryptography >= 43.0.0
 
 ### 2.9 (2024.06.29)
 
