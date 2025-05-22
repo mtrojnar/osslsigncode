@@ -4672,7 +4672,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
             }
             options->p11module = *(++argv);
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
-#ifdef USE_WIN32
+#ifdef _WIN32
             if (_putenv_s("PKCS11_MODULE_PATH", options->p11module))
 #else
             if (setenv("PKCS11_MODULE_PATH", options->p11module, 1))
