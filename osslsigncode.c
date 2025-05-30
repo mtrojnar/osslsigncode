@@ -4141,9 +4141,11 @@ static ENGINE *engine_dynamic(GLOBAL_OPTIONS *options)
         ptr = strrchr(options->p11engine, '/');
         if (!ptr) /* no slash -> try backslash */
             ptr = strrchr(options->p11engine, '\\');
-        if (ptr) /* directory separator found */
+        if (ptr) { /* directory separator found */
             ptr++; /* skip it */
-        else /* directory separator not found */
+            if (!strncmp(ptr, "lib", 3))
+                ptr += 3; /* skip the "lib" prefix */
+        } else /* directory separator not found */
             ptr = options->p11engine;
         id = OPENSSL_strdup(ptr);
         ptr = strchr(id, '.');
