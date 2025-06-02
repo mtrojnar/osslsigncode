@@ -4167,21 +4167,6 @@ static ENGINE *engine_dynamic(GLOBAL_OPTIONS *options)
 }
 
 /*
- * Load a pkcs11 engine
- * [in] none
- * [returns] pointer to ENGINE
- */
-static ENGINE *engine_pkcs11(void)
-{
-    ENGINE *engine = ENGINE_by_id("pkcs11");
-    if (!engine) {
-        fprintf(stderr, "Failed to find and load 'pkcs11' engine\n");
-        return NULL; /* FAILED */
-    }
-    return engine; /* OK */
-}
-
-/*
  * Load the private key and the signer certificate from a security token
  * [in, out] options: structure holds the input data
  * [in] engine: ENGINE structure
@@ -4260,12 +4245,18 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
 
 static int engine_load(GLOBAL_OPTIONS *options)
 {
+    const char *id = options->p11engine ? options->p11engine : "pkcs11";
     ENGINE *engine;
 
-    if (options->p11engine)
+    if (strchr(id, '.')) {
+        /* Treat strings with a dot as paths to dynamic engine modules */
         engine = engine_dynamic(options);
-    else
-        engine = engine_pkcs11();
+    } else {
+        /* Treat strings without a dot as engine IDs */
+        engine = ENGINE_by_id(id);
+        if (!engine)
+            fprintf(stderr, "Failed to find and load '%s' engine\n", id);
+    }
     if (!engine)
         return 0; /* FAILED */
     printf("Engine \"%s\" set.\n", ENGINE_get_id(engine));
