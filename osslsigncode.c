@@ -4317,6 +4317,12 @@ static int read_crypto_params(GLOBAL_OPTIONS *options)
     }
 #endif /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
     else {
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+        if (options->provider) {
+            /* Attempt to load a provider without a PKCS#11 module (e.g., for the CNG provider) */
+            (void)provider_load(options->provider);
+        }
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
         /* Load the the private key ('-key' option) */
         load_objects_from_store(options->keyfile, options->pass, &options->pkey, NULL, NULL);
     }
