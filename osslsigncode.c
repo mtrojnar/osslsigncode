@@ -4125,7 +4125,7 @@ static int read_pkcs7_certfile(GLOBAL_OPTIONS *options)
  * [in] options: structure holds the input data
  * [returns] pointer to ENGINE
  */
-static ENGINE *engine_dynamic(GLOBAL_OPTIONS *options)
+static ENGINE *engine_dynamic(const char *path)
 {
     ENGINE *engine;
     char *id;
@@ -4135,18 +4135,18 @@ static ENGINE *engine_dynamic(GLOBAL_OPTIONS *options)
         fprintf(stderr, "Failed to load 'dynamic' engine\n");
         return NULL; /* FAILED */
     }
-    if (options->p11engine) { /* strip directory and extension */
+    if (path) { /* strip directory and extension */
         char *ptr;
 
-        ptr = strrchr(options->p11engine, '/');
+        ptr = strrchr(path, '/');
         if (!ptr) /* no slash -> try backslash */
-            ptr = strrchr(options->p11engine, '\\');
+            ptr = strrchr(path, '\\');
         if (ptr) { /* directory separator found */
             ptr++; /* skip it */
             if (!strncmp(ptr, "lib", 3))
                 ptr += 3; /* skip the "lib" prefix */
         } else /* directory separator not found */
-            ptr = options->p11engine;
+            ptr = (char *)path;
         id = OPENSSL_strdup(ptr);
         ptr = strchr(id, '.');
         if (ptr) /* file extensions found */
@@ -4154,7 +4154,7 @@ static ENGINE *engine_dynamic(GLOBAL_OPTIONS *options)
     } else {
         id = OPENSSL_strdup("pkcs11");
     }
-    if (!ENGINE_ctrl_cmd_string(engine, "SO_PATH", options->p11engine, 0)
+    if (!ENGINE_ctrl_cmd_string(engine, "SO_PATH", path, 0)
             || !ENGINE_ctrl_cmd_string(engine, "ID", id, 0)
             || !ENGINE_ctrl_cmd_string(engine, "LIST_ADD", "1", 0)
             || !ENGINE_ctrl_cmd_string(engine, "LOAD", NULL, 0)) {
@@ -4250,7 +4250,7 @@ static int engine_load(GLOBAL_OPTIONS *options)
 
     if (strchr(id, '.')) {
         /* Treat strings with a dot as paths to dynamic engine modules */
-        engine = engine_dynamic(options);
+        engine = engine_dynamic(id);
     } else {
         /* Treat strings without a dot as engine IDs */
         engine = ENGINE_by_id(id);
