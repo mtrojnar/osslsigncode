@@ -3,7 +3,9 @@
 ### 2.10 (unreleased)
 
 - added JavaScript signing
-- added PKCS#11 provider support (requires OpenSSL 3.0)
+- added PKCS#11 provider support (requires OpenSSL 3.0+)
+- added support for providers without specifying "-pkcs11module" option
+  (OpenSSL 3.0+, e.g., for the upcoming CNG provider)
 - added compatiblity with the CNG engine version 1.1 or later
 - added the "-engineCtrl" option to control hardware and CNG engines
 - added the '-blobFile' option to specify a file containing the blob content
