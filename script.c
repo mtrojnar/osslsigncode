@@ -35,8 +35,8 @@ const SCRIPT_FORMAT supported_formats[] = {
 
 #define header_hash "SIG # Begin signature block"
 #define footer_hash "SIG # End signature block"
-#define header_js "SIG // Begin signature block"
-#define footer_js "SIG // End signature block"
+#define header_js "Begin signature block"
+#define footer_js "End signature block"
 
 typedef struct {
     const char *open, *close, *header, *footer;
@@ -46,7 +46,7 @@ const SCRIPT_COMMENT comment_text[] = {
     [comment_hash] = {"# ", "", header_hash, footer_hash},
     [comment_xml]  = {"<!-- ", " -->", header_hash, footer_hash},
     [comment_c]    = {"/* ", " */", header_hash, footer_hash},
-    [comment_js]   = {"// ", "", header_js, footer_js}
+    [comment_js]   = {"// SIG // ", "", header_js, footer_js}
 };
 
 struct script_ctx_st {
