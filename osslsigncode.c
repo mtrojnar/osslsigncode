@@ -4136,7 +4136,8 @@ static ENGINE *engine_dynamic(const char *path)
         return NULL; /* FAILED */
     }
     if (path) { /* strip directory and extension */
-        char *ptr;
+        const char *ptr;
+        char *dot;
 
         ptr = strrchr(path, '/');
         if (!ptr) /* no slash -> try backslash */
@@ -4146,11 +4147,11 @@ static ENGINE *engine_dynamic(const char *path)
             if (!strncmp(ptr, "lib", 3))
                 ptr += 3; /* skip the "lib" prefix */
         } else /* directory separator not found */
-            ptr = (char *)path;
+            ptr = path;
         id = OPENSSL_strdup(ptr);
-        ptr = strchr(id, '.');
-        if (ptr) /* file extensions found */
-            *ptr = '\0'; /* remove them */
+        dot = strchr(id, '.');
+        if (dot) /* file extensions found */
+            *dot = '\0'; /* remove them */
     } else {
         id = OPENSSL_strdup("pkcs11");
     }
