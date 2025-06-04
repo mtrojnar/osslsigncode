@@ -2,6 +2,7 @@
 
 ### 2.10 (unreleased)
 
+- added JavaScript signing
 - added PKCS#11 provider support (requires OpenSSL 3.0)
 - added compatiblity with the CNG engine version 1.1 or later
 - added the "-engineCtrl" option to control hardware and CNG engines

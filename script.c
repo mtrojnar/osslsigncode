@@ -8,11 +8,17 @@
 #include "helpers.h"
 #include "utf.h"
 
-typedef enum {comment_hash, comment_xml, comment_c, comment_not_found} comment_style;
+typedef enum {
+    comment_hash,
+    comment_xml,
+    comment_c,
+    comment_js,
+    comment_not_found
+} COMMENT_STYLE;
 
 typedef struct {
     const char *extension;
-    comment_style comment;
+    COMMENT_STYLE comment;
 } SCRIPT_FORMAT;
 
 const SCRIPT_FORMAT supported_formats[] = {
@@ -23,21 +29,24 @@ const SCRIPT_FORMAT supported_formats[] = {
     {".psm1",   comment_hash},
     {".cdxml",  comment_xml},
     {".mof",    comment_c},
+    {".js",     comment_js},
     {NULL,      comment_not_found},
 };
 
-const char *signature_header = "SIG # Begin signature block";
-const char *signature_footer = "SIG # End signature block";
+#define header_hash "SIG # Begin signature block"
+#define footer_hash "SIG # End signature block"
+#define header_js "SIG // Begin signature block"
+#define footer_js "SIG // End signature block"
 
 typedef struct {
-    const char *open;
-    const char *close;
+    const char *open, *close, *header, *footer;
 } SCRIPT_COMMENT;
 
 const SCRIPT_COMMENT comment_text[] = {
-    [comment_hash] = {"# ", ""},
-    [comment_xml]  = {"<!-- ", " -->"},
-    [comment_c]    = {"/* ", " */"}
+    [comment_hash] = {"# ", "", header_hash, footer_hash},
+    [comment_xml]  = {"<!-- ", " -->", header_hash, footer_hash},
+    [comment_c]    = {"/* ", " */", header_hash, footer_hash},
+    [comment_js]   = {"// ", "", header_js, footer_js}
 };
 
 struct script_ctx_st {
@@ -333,8 +342,8 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     const char *close_tag = ctx->script_ctx->comment_text->close;
     size_t open_tag_len = strlen(open_tag);
     size_t close_tag_len = strlen(close_tag);
-    size_t signature_header_len = strlen(signature_header);
-    size_t signature_footer_len = strlen(signature_footer);
+    size_t header_len = strlen(ctx->script_ctx->comment_text->header);
+    size_t footer_len = strlen(ctx->script_ctx->comment_text->footer);
     PKCS7 *retval = NULL;
 
     if (!script_check_file(ctx)) {
@@ -371,12 +380,12 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
             }
             ptr++;
         }
-        /* process signature_header and signature_footer */
-        if (ptr + signature_header_len < base64_data + base64_len &&
-                !memcmp(ptr, signature_header, signature_header_len))
-            ptr += signature_header_len;
-        if (ptr + signature_footer_len <= base64_data + base64_len &&
-                !memcmp(ptr, signature_footer, signature_footer_len))
+        /* process header and footer */
+        if (ptr + header_len < base64_data + base64_len &&
+                !memcmp(ptr, ctx->script_ctx->comment_text->header, header_len))
+            ptr += header_len;
+        if (ptr + footer_len <= base64_data + base64_len &&
+                !memcmp(ptr, ctx->script_ctx->comment_text->footer, footer_len))
             break; /* success */
 
         /* copy until the closing tag */
@@ -538,7 +547,9 @@ static int script_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     (void)BIO_set_close(bio, BIO_NOCLOSE);
 
     /* split to individual lines and write to outdata */
-    if (!write_commented(ctx, outdata, signature_header, strlen(signature_header)))
+    if (!write_commented(ctx, outdata,
+            ctx->script_ctx->comment_text->header,
+            strlen(ctx->script_ctx->comment_text->header)))
         goto cleanup;
     for (i = 0; i < buffer->length; i += 64) {
         if (!write_commented(ctx, outdata, buffer->data + i,
@@ -546,7 +557,9 @@ static int script_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
             goto cleanup;
         }
     }
-    if (!write_commented(ctx, outdata, signature_footer, strlen(signature_footer)))
+    if (!write_commented(ctx, outdata,
+            ctx->script_ctx->comment_text->footer,
+            strlen(ctx->script_ctx->comment_text->footer)))
         goto cleanup;
 
     /* signtool expects CRLF terminator at the end of the text file */
@@ -612,7 +625,7 @@ static SCRIPT_CTX *script_ctx_get(char *indata, uint32_t filesize, const SCRIPT_
             *ptr && commented_header_len < commented_header_size;
             commented_header_len++)
         ptr = utf8DecodeRune(ptr, 1, commented_header + commented_header_len);
-    for (ptr = signature_header;
+    for (ptr = comment->header;
             *ptr && commented_header_len < commented_header_size;
             commented_header_len++)
         ptr = utf8DecodeRune(ptr, 1, commented_header + commented_header_len);
