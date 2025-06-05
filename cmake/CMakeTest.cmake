@@ -75,9 +75,9 @@ if(Python3_FOUND)
             endif(NOT client_result)
         endif(EXISTS "${LOGS}/url.log")
 
-    set(extensions_all "exe" "ex_" "msi" "256appx" "512appx" "cat" "ps1" "psc1" "mof")
-    set(extensions_nocat "exe" "ex_" "msi" "256appx" "512appx" "ps1" "psc1" "mof")
-    set(extensions_nocatappx "exe" "ex_" "msi" "ps1" "psc1" "mof")
+    set(extensions_all "exe" "ex_" "msi" "256appx" "512appx" "cat" "ps1" "psc1" "mof" "js")
+    set(extensions_nocat "exe" "ex_" "msi" "256appx" "512appx" "ps1" "psc1" "mof" "js")
+    set(extensions_nocatappx "exe" "ex_" "msi" "ps1" "psc1" "mof" "js")
     set(formats "pem" "der")
 
     else(NOT cryptography_error)

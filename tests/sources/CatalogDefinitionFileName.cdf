@@ -55,3 +55,6 @@ CATATTR1=0x11010001:OSAttr:2:6.0
 
 <HASH>MOFfile=..\files\unsigned.mof
 <HASH>MOFfileATTR1=0x11010001:File:unsigned.mof
+
+<HASH>JSfile=..\files\unsigned.js
+<HASH>JSfileATTR1=0x11010001:File:unsigned.js
