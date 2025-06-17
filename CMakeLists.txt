@@ -27,10 +27,6 @@ set(PACKAGE_BUGREPORT "Michal.Trojnara@stunnel.org")
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-if(WIN32)
-    add_definitions(-DUSE_WIN32)
-endif()
-
 # load CMake library modules
 include(FindOpenSSL)
 if(OPENSSL_VERSION VERSION_LESS "1.1.1")
