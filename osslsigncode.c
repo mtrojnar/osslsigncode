@@ -1758,8 +1758,32 @@ static void print_cert(X509 *cert, int i)
 
     if (!cert)
         return;
-    subject = X509_NAME_oneline(X509_get_subject_name(cert), NULL, 0);
-    issuer = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
+    // Flags for proper UTF-8 output
+    unsigned long flags = XN_FLAG_RFC2253 | ASN1_STRFLGS_UTF8_CONVERT | ASN1_STRFLGS_ESC_CTRL;
+    flags &= ~ASN1_STRFLGS_ESC_MSB;
+
+    BIO *bio = BIO_new(BIO_s_mem());
+    if (bio) {
+        X509_NAME_print_ex(bio, X509_get_subject_name(cert), 0, flags);
+        BUF_MEM *bptr;
+        BIO_get_mem_ptr(bio, &bptr);
+        subject = OPENSSL_strndup(bptr->data, bptr->length);
+        BIO_free(bio);
+    } else {
+        subject = NULL;
+    }
+
+    bio = BIO_new(BIO_s_mem());
+    if (bio) {
+        X509_NAME_print_ex(bio, X509_get_issuer_name(cert), 0, flags);
+        BUF_MEM *bptr;
+        BIO_get_mem_ptr(bio, &bptr);
+        issuer = OPENSSL_strndup(bptr->data, bptr->length);
+        BIO_free(bio);
+    } else {
+        issuer = NULL;
+    }
+
     serialbn = ASN1_INTEGER_to_BN(X509_get_serialNumber(cert), NULL);
     serial = BN_bn2hex(serialbn);
     printf("\t------------------\n");
