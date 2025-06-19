@@ -353,6 +353,8 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     if (ctx->script_ctx->utf == 8) {
         base64_len = signature_len;
         base64_data = OPENSSL_malloc(base64_len);
+        if (!base64_data)
+            return NULL; /* memory allocation failed */
         memcpy(base64_data, signature_data, base64_len);
     } else {
         base64_len = utf16_to_utf8((const void *)signature_data,
@@ -691,6 +693,8 @@ static int write_commented(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *data,
      * - closing tag
      * - trailing NUL ("\0") */
     line = OPENSSL_malloc(2 + open_tag_len + length + close_tag_len + 1);
+    if (!line)
+        return 0; /* memory allocation failed */
     strcpy(line, "\r\n");
     strcat(line, open_tag);
     memcpy(line + 2 + open_tag_len, data, length);
