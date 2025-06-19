@@ -17,7 +17,7 @@ CERTS_PATH = os.path.join(RESULT_PATH, "./Testing/certs/")
 CONF_PATH = os.path.join(RESULT_PATH, "./Testing/conf/")
 LOGS_PATH = os.path.join(RESULT_PATH, "./Testing/logs/")
 REQUEST = os.path.join(FILES_PATH, "./jreq.tsq")
-RESPONS = os.path.join(FILES_PATH, "./jresp.tsr")
+RESPONSE = os.path.join(FILES_PATH, "./jresp.tsr")
 OPENSSL_CONF = os.path.join(CONF_PATH, "./openssl_tsa.cnf")
 SERVER_LOG = os.path.join(LOGS_PATH, "./server.log")
 URL_LOG = os.path.join(LOGS_PATH, "./url.log")
@@ -26,7 +26,7 @@ OPENSSL_TS = ["openssl", "ts",
     "-reply", "-config", OPENSSL_CONF,
     "-passin", "pass:passme",
     "-queryfile", REQUEST,
-    "-out", RESPONS]
+    "-out", RESPONSE]
 
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -86,7 +86,7 @@ class RequestHandler(SimpleHTTPRequestHandler):
                 self.send_header("Content-type", "application/timestamp-reply")
                 self.end_headers()
                 resp_data = b''
-                with open(RESPONS, mode="rb") as file:
+                with open(RESPONSE, mode="rb") as file:
                     resp_data = file.read()
                 self.wfile.write(resp_data)
 
