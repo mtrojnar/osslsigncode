@@ -1750,6 +1750,40 @@ static int print_time_t(const time_t time)
 }
 
 /*
+ * Convert an X509_NAME to a UTF-8 string
+ * [in] name: X509 name to convert
+ * [returns] allocated string; "N/A" on error
+ */
+static char *x509_name_to_utf8(const X509_NAME *name)
+{
+    BIO *bio;
+    BUF_MEM *bptr;
+    char *str;
+    unsigned long flags;
+
+    if (!name)
+        return OPENSSL_strdup("N/A");
+
+    flags = XN_FLAG_RFC2253 | ASN1_STRFLGS_UTF8_CONVERT |
+            ASN1_STRFLGS_ESC_CTRL;
+    flags &= ~ASN1_STRFLGS_ESC_MSB;
+
+    bio = BIO_new(BIO_s_mem());
+    if (!bio)
+        return OPENSSL_strdup("N/A");
+    if (X509_NAME_print_ex(bio, name, 0, flags) < 0) {
+        BIO_free(bio);
+        return OPENSSL_strdup("N/A");
+    }
+    BIO_get_mem_ptr(bio, &bptr);
+    str = OPENSSL_strndup(bptr->data, bptr->length);
+    BIO_free(bio);
+    if (!str)
+        return OPENSSL_strdup("N/A");
+    return str;
+}
+
+/*
  * Print certificate subject name, issuer name, serial number and expiration date
  * [in] cert: X509 certificate
  * [in] i: certificate number in order
@@ -1762,8 +1796,8 @@ static void print_cert(X509 *cert, int i)
 
     if (!cert)
         return;
-    subject = X509_NAME_oneline(X509_get_subject_name(cert), NULL, 0);
-    issuer = X509_NAME_oneline(X509_get_issuer_name(cert), NULL, 0);
+    subject = x509_name_to_utf8(X509_get_subject_name(cert));
+    issuer = x509_name_to_utf8(X509_get_issuer_name(cert));
     serialbn = ASN1_INTEGER_to_BN(X509_get_serialNumber(cert), NULL);
     serial = BN_bn2hex(serialbn);
     printf("\t------------------\n");
@@ -2633,10 +2667,11 @@ static int print_cms_timestamp(CMS_ContentInfo *timestamp, time_t time)
 
     if (!CMS_SignerInfo_get0_signer_id(si, NULL, &issuer, &serialno) || !issuer)
         return 0; /* FAILED */
-    issuer_name = X509_NAME_oneline(issuer, NULL, 0);
+    issuer_name = x509_name_to_utf8(issuer);
     serialbn = ASN1_INTEGER_to_BN(serialno, NULL);
     serial = BN_bn2hex(serialbn);
-    printf("\tIssuer: %s\n\tSerial: %s\n", issuer_name, serial);
+    printf("\tIssuer: %s\n\tSerial: %s\n",
+           issuer_name, serial);
     OPENSSL_free(issuer_name);
     BN_free(serialbn);
     OPENSSL_free(serial);
