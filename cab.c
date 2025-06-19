@@ -696,7 +696,7 @@ static CAB_CTX *cab_ctx_get(char *indata, uint32_t filesize)
         * and consist of 4 bytes (little-endian order)
         * siglen - additional data size is located at offset 48 (from file beginning)
         * and consist of 4 bytes (little-endian order)
-        * If there are additional headers, size of the CAB archive file is calcualted
+        * If there are additional headers, size of the CAB archive file is calculated
         * as additional data offset plus additional data size.
         */
         sigpos = GET_UINT32_LE(indata + 44);

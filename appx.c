@@ -288,7 +288,7 @@ static void zipWriteCentralDirectoryEntry(BIO *bio, uint64_t *sizeOnDisk, ZIP_CE
 static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64_t dataSize);
 static int zipOverrideFileData(ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint8_t *data, uint64_t dataSize);
 static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO *bio, uint64_t *sizeOnDisk);
-static void zipWriteLocalHeader(BIO *bio, uint64_t *sizeonDisk, ZIP_LOCAL_HEADER *heade);
+static void zipWriteLocalHeader(BIO *bio, uint64_t *sizeonDisk, ZIP_LOCAL_HEADER *header);
 static int zipEntryExist(ZIP_FILE *zip, const char *name);
 static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *md);
 static size_t zipReadFileDataByName(uint8_t **pData, ZIP_FILE *zip, const char *name);
@@ -1908,7 +1908,7 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
         OPENSSL_free(compressedData);
 
         if (ret != Z_OK) {
-            fprintf(stderr, "Data decompresssion failed, zlib error: %d\n", ret);
+            fprintf(stderr, "Data decompression failed, zlib error: %d\n", ret);
             OPENSSL_free(uncompressedData);
             return 0; /* FAILED */
         } else {

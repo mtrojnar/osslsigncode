@@ -2399,8 +2399,8 @@ static int msi_hash_length_get(FILE_FORMAT_CTX *ctx)
 /*
  * Get DigitalSignature and MsiDigitalSignatureEx streams
  * to check if the signature exists.
- * [in, out] ctx: structure holds input and output datafv
- * [returns] 0 on error or 1 on successs
+ * [in, out] ctx: structure holds input and output data
+ * [returns] 0 on error or 1 on success
  */
 static int msi_check_file(FILE_FORMAT_CTX *ctx)
 {

@@ -2090,7 +2090,7 @@ static X509_CRL *x509_crl_get(FILE_FORMAT_CTX *ctx, char *url)
         ctx->options->noverifypeer ? NULL : ctx->options->https_crlfile);
 #endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
     if (!bio) {
-        fprintf(stderr, "Faild to get CRL from %s\n\n", url);
+        fprintf(stderr, "Failed to get CRL from %s\n\n", url);
         return NULL; /* FAILED */
     }
     crl = d2i_X509_CRL_bio(bio, NULL);  /* DER format */
@@ -2100,7 +2100,7 @@ static X509_CRL *x509_crl_get(FILE_FORMAT_CTX *ctx, char *url)
     }
     BIO_free_all(bio);
     if (!crl) {
-         fprintf(stderr, "Faild to decode CRL from %s\n\n", url);
+         fprintf(stderr, "Failed to decode CRL from %s\n\n", url);
          return NULL; /* FAILED */
     }
     return crl; /* OK */
@@ -4221,17 +4221,17 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
         struct {
             const char *id;
             X509 *cert;
-        } parms;
+        } params;
 
-        parms.id = options->p11cert;
-        parms.cert = NULL;
-        ENGINE_ctrl_cmd(engine, "LOAD_CERT_CTRL", 0, &parms, NULL, 1);
-        if (!parms.cert) {
+        params.id = options->p11cert;
+        params.cert = NULL;
+        ENGINE_ctrl_cmd(engine, "LOAD_CERT_CTRL", 0, &params, NULL, 1);
+        if (!params.cert) {
             fprintf(stderr, "Failed to load certificate %s\n", options->p11cert);
             ENGINE_finish(engine);
             return 0; /* FAILED */
         } else
-            sk_X509_push(options->certs, parms.cert);
+            sk_X509_push(options->certs, params.cert);
     }
 
     options->pkey = ENGINE_load_private_key(engine, options->keyfile, NULL, NULL);
