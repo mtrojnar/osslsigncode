@@ -627,6 +627,10 @@ static BIO *bio_get_http_curl(long *http_code, char *url, BIO *req, char *proxy,
     /* Start a libcurl easy session and set options for a curl easy handle */
     printf("Connecting to %s\n", url);
     curl = curl_easy_init();
+    if (!curl) {
+        fprintf(stderr, "CURL initialization failed\n");
+        return NULL; /* FAILED */
+    }
     if (proxy) {
         res = curl_easy_setopt(curl, CURLOPT_PROXY, proxy);
         if (res != CURLE_OK) {
