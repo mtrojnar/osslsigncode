@@ -12,6 +12,8 @@
 - improved unauthenticated blob support (thanks to Asger Hautop Drewsen)
 - fixed support for multiple signerInfo contentType OIDs (CTL and Authenticode)
 - fixed tests for python-cryptography >= 43.0.0
+- improved UTF-8 handling for certificate subjects and issuers;
+  missing names now print as "N/A"
 
 ### 2.9 (2024.06.29)
 
