@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Implementation of a HTTP server"""
+"""Implementation of an HTTP server"""
 
 import argparse
 import os

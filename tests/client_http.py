@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Implementation of a HTTP client"""
+"""Implementation of an HTTP client"""
 
 import os
 import sys

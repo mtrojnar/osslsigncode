@@ -925,7 +925,7 @@ static int appx_write_central_directory(BIO *bio, ZIP_FILE *zip, int removeSigna
         if (removeSignature && !strcmp(entry->fileName, APP_SIGNATURE_FILENAME)) {
             continue;
         }
-        /* APP_SIGNATURE is nt 'tainted' by offset shift after replacing the contents of [content_types] */
+        /* APP_SIGNATURE is not 'tainted' by offset shift after replacing the contents of [content_types] */
         zipWriteCentralDirectoryEntry(bio, &sizeOnDisk, entry, strcmp(entry->fileName, APP_SIGNATURE_FILENAME) ? offsetDiff : 0);
         cdSize += sizeOnDisk;
         if (entry->overrideData) {
@@ -1430,7 +1430,7 @@ static void zipWriteCentralDirectoryEntry(BIO *bio, uint64_t *sizeOnDisk, ZIP_CE
 #if 0
     if (entry->extraFieldLen > 0 && entry->extraField)
     {
-        /* TODO, if override daata, need to rewrite the extra field */
+        /* TODO, if override data, need to rewrite the extra field */
         BIO_write(bio, entry->extraField, entry->extraFieldLen);
     }
 #endif

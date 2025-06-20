@@ -51,7 +51,7 @@ def clear_catalog(certs_path) -> None:
         file.write(random_hex)
 
 def main() -> None:
-    """Wait for all tests certificate, compute leafhash"""
+    """Wait for all test certificates and compute leaf hash"""
 
     parser = argparse.ArgumentParser()
     parser.add_argument(

@@ -1,4 +1,4 @@
-- signature extraction/removal/verificaton on MSI/CAB files
+- signature extraction/removal/verification on MSI/CAB files
 - clean up / untangle code
 - separate timestamping
 - remove mmap usage to increase portability

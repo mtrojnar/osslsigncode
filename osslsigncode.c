@@ -998,7 +998,7 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
 #endif /* OPENSSL_VERSION_NUMBER<0x30000000L */
 
 /*
- * Decode a HTTP response from BIO and write it into the PKCS7 structure
+ * Decode an HTTP response from BIO and write it into the PKCS7 structure
  * Add timestamp to the PKCS7 SignerInfo structure:
  * sig->d.sign->signer_info->unauth_attr
  * [in, out] p7: new PKCS#7 signature

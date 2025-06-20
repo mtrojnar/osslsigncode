@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Windows: Implementation of a HTTP server"""
+"""Windows: Implementation of an HTTP server"""
 
 import argparse
 import os

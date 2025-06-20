@@ -29,7 +29,7 @@ def main() -> None:
             # all exceptions are critical
             print(err, file=sys.stderr)
     else:
-        print("Usage:\n\t{} COMMAND [ARG]...'".format(sys.argv[0]), file=sys.stderr)
+        print("Usage:\n\t{} COMMAND [ARG]...".format(sys.argv[0]), file=sys.stderr)
     sys.exit(1)
 
 
