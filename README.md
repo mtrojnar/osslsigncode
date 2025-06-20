@@ -215,13 +215,13 @@ osslsigncode.exe add -addUnauthenticatedBlob -in your_signed_file.exe -out out.e
 This feature allows for doing dumb things.  Be very careful with what you put
 in the unauthenticated blob, as an attacker could modify this.  Do NOT, under
 any circumstances, put a URL here that you will use to download an additional
-file.  If you do do that, you would need to check the newly downloaded file is
+file.  If you do that, you would need to check the newly downloaded file is
 code signed AND that it has been signed with your cert AND that it is the
 version you expect.
 
 ## BUGS, QUESTIONS etc.
 
-Check whether your your question or suspected bug was already
+Check whether your question or suspected bug was already
 discussed on https://github.com/mtrojnar/osslsigncode/issues.
 Otherwise, open a new issue.
 
