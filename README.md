@@ -19,7 +19,7 @@ machine every time I need to sign a binary - I can compile and build
 the binaries using Wine on my Linux machine, but I can't sign them
 since the signtool.exe makes good use of the CryptoAPI in Windows, and
 these APIs aren't (yet?) fully implemented in Wine, so the signtool.exe
-tool  would fail. And, so, osslsigncode was born.
+tool would fail. And, so, osslsigncode was born.
 
 ## WHAT CAN IT DO?
 
@@ -124,7 +124,7 @@ You can use a certificate and key stored in a PKCS#12 container:
     -n "Your Application" -i http://www.yourwebsite.com/ \
     -in yourapp.exe -out yourapp-signed.exe
 ```
-To sign a CAB file containing java class files:
+To sign a CAB file containing Java class files:
 ```
   osslsigncode sign -certs <cert-file> -key <key-file> \
     -n "Your Application" -i http://www.yourwebsite.com/ \
