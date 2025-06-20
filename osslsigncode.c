@@ -1,5 +1,5 @@
 /*
-   OpenSSL based Authenticode signing for PE/MSI/Java CAB files.
+   OpenSSL based Authenticode signing for PE, CAB, CAT, MSI, APPX and script files.
 
    Copyright (C) 2005-2015 Per Allansson <pallansson@gmail.com>
    Copyright (C) 2018-2023 Michał Trojnara <Michal.Trojnara@stunnel.org>
@@ -3786,7 +3786,9 @@ static void help_for(const char *argv0, const char *cmd)
     if (on_list(cmd, cmds_all)) {
         printf("osslsigncode is a small tool that implements part of the functionality of the Microsoft\n");
         printf("tool signtool.exe - more exactly the Authenticode signing and timestamping.\n");
-        printf("It can sign and timestamp PE (EXE/SYS/DLL/etc), CAB and MSI files,\n");
+        printf("It can sign and timestamp PE (EXE/SYS/DLL/etc), CAB, CAT, MSI and APPX files,\n");
+        printf("as well as script files with extensions .ps1, .ps1xml, .psc1, .psd1,\n");
+        printf(".psm1, .cdxml, .mof and .js,\n");
         printf("supports getting the timestamp through a proxy as well.\n");
         printf("osslsigncode also supports signature verification, removal and extraction.\n\n");
         printf("%-22s = print osslsigncode version and usage\n", "--version | -v");
