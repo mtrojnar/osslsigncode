@@ -474,6 +474,10 @@ int is_content_type(PKCS7 *p7, const char *objid)
     int ret;
 
     indir_objid = OBJ_txt2obj(objid, 1);
+    if (!indir_objid) {
+        fprintf(stderr, "Invalid object identifier: %s\n", objid);
+        return 0; /* FAILED */
+    }
     ret = p7 && PKCS7_type_is_signed(p7) &&
         !OBJ_cmp(p7->d.sign->contents->type, indir_objid) &&
         (p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE ||
