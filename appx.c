@@ -912,7 +912,7 @@ static int appx_write_central_directory(BIO *bio, ZIP_FILE *zip, int removeSigna
     uint16_t noEntries = 0;
 
     for (entry = zip->centralDirectoryHead; entry != NULL; entry = entry->next) {
-        /* the signature file is considered non existent for hashing purposes */
+        /* the signature file is considered nonexistent for hashing purposes */
         uint64_t sizeOnDisk = 0;
         if (noEntries > zip->centralDirectoryRecordCount) {
             fprintf(stderr, "Corrupted central directory structure\n");
@@ -1187,7 +1187,7 @@ static int appx_compare_hashes(FILE_FORMAT_CTX *ctx)
             return 0; /* FAILED */
         }
     } else if (!ctx->appx_ctx->calculatedCIHash && !ctx->appx_ctx->existingCIHash) {
-        /* this is fine, CI file is optional -> if it is missing we expect both hashes to be non existent */
+        /* this is fine, CI file is optional -> if it is missing we expect both hashes to be nonexistent */
     } else {
         fprintf(stderr, "Code Integrity hash missing\n");
         return 0; /* FAILED */
