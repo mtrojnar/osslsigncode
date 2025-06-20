@@ -1,4 +1,4 @@
-OpenSSL based Authenticode signing for PE/MSI/Java CAB files.
+OpenSSL based Authenticode signing for PE, CAB, CAT, MSI, APPX and script files.
 
 Copyright (C) 2005-2014 Per Allansson <pallansson@gmail.com>
 Copyright (C) 2018-2022 Michał Trojnara <Michal.Trojnara@stunnel.org>

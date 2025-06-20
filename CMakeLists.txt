@@ -11,7 +11,7 @@ set(BUILTIN_SOCKET ON CACHE BOOL "") # for static Python
 # configure basic project information
 project(osslsigncode
     VERSION 2.10
-    DESCRIPTION "OpenSSL based Authenticode signing for PE, CAB, CAT and MSI files"
+    DESCRIPTION "OpenSSL based Authenticode signing for PE, CAB, CAT, MSI, APPX and script files"
     HOMEPAGE_URL "https://github.com/mtrojnar/osslsigncode"
     LANGUAGES C)
 

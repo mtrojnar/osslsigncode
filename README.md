@@ -23,7 +23,9 @@ tool  would fail. And, so, osslsigncode was born.
 
 ## WHAT CAN IT DO?
 
-It can sign and timestamp PE (EXE/SYS/DLL/etc), CAB, CAT and MSI files.
+It can sign and timestamp PE (EXE/SYS/DLL/etc), CAB, CAT, MSI and APPX files,
+as well as script files with extensions `.ps1`, `.ps1xml`, `.psc1`, `.psd1`,
+`.psm1`, `.cdxml`, `.mof`, and `.js`.
 It supports the equivalent of signtool.exe's "-j javasign.dll -jp low",
 i.e. add a valid signature for a CAB file containing Java files.
 It supports getting the timestamp through a proxy as well. It also
