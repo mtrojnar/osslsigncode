@@ -4362,7 +4362,7 @@ static int read_crypto_params(GLOBAL_OPTIONS *options)
             (void)provider_load(options->provider);
         }
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
-        /* Load the the private key ('-key' option) */
+        /* Load the private key ('-key' option) */
         load_objects_from_store(options->keyfile, options->pass, &options->pkey, NULL, NULL);
     }
 #if OPENSSL_VERSION_NUMBER<0x1010108f
