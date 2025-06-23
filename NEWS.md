@@ -1,6 +1,6 @@
 # osslsigncode change log
 
-### 2.10 (unreleased)
+### 2.10 (2025.06.23)
 
 - added JavaScript signing
 - added PKCS#11 provider support (requires OpenSSL 3.0+)
@@ -10,10 +10,9 @@
 - added the "-engineCtrl" option to control hardware and CNG engines
 - added the '-blobFile' option to specify a file containing the blob content
 - improved unauthenticated blob support (thanks to Asger Hautop Drewsen)
+- improved UTF-8 handling for certificate subjects and issuers
 - fixed support for multiple signerInfo contentType OIDs (CTL and Authenticode)
 - fixed tests for python-cryptography >= 43.0.0
-- improved UTF-8 handling for certificate subjects and issuers;
-  missing names now print as "N/A"
 
 ### 2.9 (2024.06.29)
 
