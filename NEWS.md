@@ -1,5 +1,7 @@
 # osslsigncode change log
 
+### 2.11 (unreleased)
+
 ### 2.10 (2025.06.23)
 
 - added JavaScript signing
