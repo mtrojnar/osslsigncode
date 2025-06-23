@@ -13,4 +13,4 @@ jobs:
       - uses: actions/checkout@v4
       - uses: codespell-project/actions-codespell@master
         with:
-          skip: *.pem
+          skip: '*.pem'
