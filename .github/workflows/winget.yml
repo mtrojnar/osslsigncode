@@ -1,0 +1,25 @@
+name: Publish to WinGet
+on:
+  release:
+    types: [released, published]
+
+jobs:
+  publish:
+    # Komac supports running on Linux instance.
+    # Use Ubuntu as runner have benifits for validating the config via nektos/act.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: vedantmgoyal9/winget-releaser@main
+        with:
+          identifier: MichalTrojnara.osslsigncode
+          installers-regex: '-windows-x64-mingw\.zip$'
+          # I would recommend using this "range-rolling" release mode.
+          # Keep ONLY the latest 7 releases in the repository it's acceptable.
+          max-versions-to-keep: 7
+          release-repository: osslsigncode
+          # IMPORTANT: HAVE TO be the original author.
+          fork-user: mtrojnar
+          # IMPORTANT: This token should be created and configured externally.
+          #   I can do nothing with it.
+          token: ${{ secrets.WINGET_TOKEN }}
