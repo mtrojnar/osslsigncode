@@ -1766,7 +1766,7 @@ static char *x509_name_to_utf8(const X509_NAME *name)
 
     flags = XN_FLAG_RFC2253 | ASN1_STRFLGS_UTF8_CONVERT |
             ASN1_STRFLGS_ESC_CTRL;
-    flags &= ~ASN1_STRFLGS_ESC_MSB;
+    flags &= ~(unsigned long)ASN1_STRFLGS_ESC_MSB;
 
     bio = BIO_new(BIO_s_mem());
     if (!bio)
