@@ -133,8 +133,9 @@ To sign a CAB file containing Java class files:
 ```
 Only the 'low' parameter is currently supported.
 
-If you want to use a PKCS#11 token, you should specify the PKCS#11 engine and module.
-An example of using osslsigncode with SoftHSM:
+### Using the PKCS#11 Engine with osslsigncode
+If you want to use a PKCS#11 token, specify the PKCS#11 engine and module.
+Example usage with SoftHSM:
 ```
   osslsigncode sign \
     -engine /usr/lib64/engines-1.1/pkcs11.so \
@@ -144,8 +145,10 @@ An example of using osslsigncode with SoftHSM:
     -in yourapp.exe -out yourapp-signed.exe
 ```
 
-Since OpenSSL 3.0, you can use a PKCS#11 token with the PKCS#11 provider.
-An example of using osslsigncode with OpenSC:
+### Using the PKCS#11 Provider with osslsigncode (OpenSSL 3.x only)
+OpenSSL 3.0 introduced a new provider-based architecture. To use a PKCS#11 token
+ with `osslsigncode`, specify the PKCS#11 provider and module.
+Example usage with OpenSC:
 ```
   osslsigncode sign \
     -provider /usr/lib64/ossl-modules/pkcs11prov.so \
@@ -155,26 +158,40 @@ An example of using osslsigncode with OpenSC:
     -in yourapp.exe -out yourapp-signed.exe
 ```
 
-You can use a certificate and key stored in the Windows Certificate Store with
-the CNG engine version 1.1 or later. For more information, refer to
+### Using the CNG Engine with osslsigncode (Windows only)
+The CNG engine allows using certificates and keys stored in the Windows
+Certificate Store. It requires CNG engine version 1.1 or later. For more
+information, refer to
 
   https://www.stunnel.org/cng-engine.html
 
 A non-commercial edition of CNG engine is available for testing, personal,
 educational, or research purposes.
 
-To use the CNG engine with osslsigncode, ensure that the `cng.dll` library is
-placed in the same directory as the `osslsigncode.exe` executable.
+To ensure `osslsigncode` can locate and load the CNG engine module (`cng.dll`)
+even when it is not installed in the default system engine directory, you can:
 
-Below is an example of how to use osslsigncode with the CNG engine:
+- Specify the full or relative path to `cng.dll`:
 ```
-  osslsigncode sign \
-    -engine cng \
-    -pkcs11cert osslsigncode_cert \
-    -key osslsigncode_cert \
-    -engineCtrl store_flags:0 \
-    -engineCtrl store_name:MY \
-    -engineCtrl PIN:yourpass \
+  osslsigncode sign -engine C:\my\engines\cng.dll ...
+```
+- Or set the `OPENSSL_ENGINES` environment variable to the directory containing
+`cng.dll`, and refer to the engine by its ID:
+```
+  set OPENSSL_ENGINES=C:\my\engines
+  osslsigncode sign -engine cng ...
+```
+
+Below is an example of how to use `osslsigncode` with the CNG engine on Windows:
+```
+  set OPENSSL_ENGINES=C:\my\engines
+  osslsigncode sign ^
+    -engine cng ^
+    -pkcs11cert osslsigncode_cert ^
+    -key osslsigncode_cert ^
+    -engineCtrl store_flags:0 ^
+    -engineCtrl store_name:MY ^
+    -engineCtrl PIN:yourpass ^
     -in yourapp.exe -out yourapp-signed.exe
 ```
 

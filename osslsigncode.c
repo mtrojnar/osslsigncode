@@ -4290,11 +4290,11 @@ static int engine_load(GLOBAL_OPTIONS *options)
     const char *id = options->p11engine ? options->p11engine : "pkcs11";
     ENGINE *engine;
 
-    if (strchr(id, '.')) {
-        /* Treat strings with a dot as paths to dynamic engine modules */
+    if (strpbrk(id, "/\\") || id[0] == '.') {
+        /* Treat as a path to a dynamic engine module */
         engine = engine_dynamic(id);
     } else {
-        /* Treat strings without a dot as engine IDs */
+        /* Treat as an engine ID */
         engine = ENGINE_by_id(id);
         if (!engine)
             fprintf(stderr, "Failed to find and load '%s' engine\n", id);
