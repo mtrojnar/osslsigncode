@@ -237,6 +237,7 @@ struct appx_ctx_st {
     u_char *existingDataHash;
     u_char *existingCIHash;
     int isBundle;
+    int isAppxBlockMap;
     const EVP_MD *md;
     int hashlen;
 } appx_ctx_t;
@@ -282,7 +283,8 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
 static int appx_compare_hashes(FILE_FORMAT_CTX *ctx);
 static int appx_remove_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry);
 static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry);
-static const EVP_MD *appx_get_md(ZIP_FILE *zip);
+static const EVP_MD *appx_get_md(FILE_FORMAT_CTX *ctx, const EVP_MD *md, ZIP_FILE *zip);
+static const EVP_MD *appx_get_md_from_signature(FILE_FORMAT_CTX *ctx);
 static ZIP_CENTRAL_DIRECTORY_ENTRY *zipGetCDEntryByName(ZIP_FILE *zip, const char *name);
 static void zipWriteCentralDirectoryEntry(BIO *bio, uint64_t *sizeOnDisk, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, uint64_t offsetDiff);
 static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64_t dataSize);
@@ -332,7 +334,6 @@ static void bioAddU16(BIO *bio, uint16_t v);
 static FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata)
 {
     FILE_FORMAT_CTX *ctx;
-    const EVP_MD *md;
     ZIP_FILE *zip = openZip(options->infile);
 
     /* squash unused parameter warnings */
@@ -345,22 +346,18 @@ static FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *ou
     if (options->verbose) {
         zipPrintCentralDirectory(zip);
     }
-    md = appx_get_md(zip);
-    if (!md) {
-        freeZip(zip);
-        return NULL; /* FAILED */
-    }
     ctx = OPENSSL_malloc(sizeof(FILE_FORMAT_CTX));
     ctx->appx_ctx = OPENSSL_zalloc(sizeof(appx_ctx_t));
     ctx->appx_ctx->zip = zip;
     ctx->format = &file_format_appx;
     ctx->options = options;
-    ctx->appx_ctx->md = md;
+    ctx->appx_ctx->md = appx_get_md(ctx, options->md, zip);
     if (zipGetCDEntryByName(zip, APPXBUNDLE_MANIFEST_FILENAME)) {
         ctx->appx_ctx->isBundle = 1;
     }
-    if (options->cmd == CMD_SIGN || options->cmd==CMD_ATTACH
-        || options->cmd==CMD_ADD || options->cmd == CMD_EXTRACT_DATA) {
+    if (ctx->appx_ctx->isAppxBlockMap &&
+        (options->cmd == CMD_SIGN || options->cmd==CMD_ATTACH
+        || options->cmd==CMD_ADD || options->cmd == CMD_EXTRACT_DATA)) {
         printf("Warning: Ignore -h option, use the hash algorithm specified in AppxBlockMap.xml\n");
     }
     if (options->pagehash == 1)
@@ -513,7 +510,6 @@ static PKCS7 *appx_pkcs7_extract(FILE_FORMAT_CTX *ctx)
 
     /* Check if the signature exists */
     if (!zipEntryExist(ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME)) {
-        fprintf(stderr, "%s does not exist\n", APP_SIGNATURE_FILENAME);
         return NULL; /* FAILED */
     }
     dataSize = zipReadFileDataByName(&data, ctx->appx_ctx->zip, APP_SIGNATURE_FILENAME);
@@ -798,14 +794,17 @@ static BIO *appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
 {
     uint64_t cdOffset = 0;
 
-    ctx->appx_ctx->calculatedBMHash = zipCalcDigest(ctx->appx_ctx->zip, BLOCK_MAP_FILENAME, ctx->appx_ctx->md);
+    if (ctx->appx_ctx->isAppxBlockMap) {
+        ctx->appx_ctx->calculatedBMHash = zipCalcDigest(ctx->appx_ctx->zip, BLOCK_MAP_FILENAME, ctx->appx_ctx->md);
+    }
     ctx->appx_ctx->calculatedCTHash = zipCalcDigest(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME, ctx->appx_ctx->md);
     ctx->appx_ctx->calculatedDataHash = appx_calc_zip_data_hash(&cdOffset, ctx->appx_ctx->zip, ctx->appx_ctx->md);
     ctx->appx_ctx->calculatedCDHash = appx_calc_zip_central_directory_hash(ctx->appx_ctx->zip, ctx->appx_ctx->md, cdOffset);
     ctx->appx_ctx->calculatedCIHash = zipCalcDigest(ctx->appx_ctx->zip, CODE_INTEGRITY_FILENAME, ctx->appx_ctx->md);
 
-    if (!ctx->appx_ctx->calculatedBMHash || !ctx->appx_ctx->calculatedCTHash
-        || !ctx->appx_ctx->calculatedCDHash || !ctx->appx_ctx->calculatedDataHash) {
+    if ((ctx->appx_ctx->isAppxBlockMap && !ctx->appx_ctx->calculatedBMHash)
+        || !ctx->appx_ctx->calculatedCTHash || !ctx->appx_ctx->calculatedCDHash
+        || !ctx->appx_ctx->calculatedDataHash) {
         fprintf(stderr, "One or more hashes calculation failed\n");
         return NULL; /* FAILED */
     }
@@ -843,10 +842,12 @@ static BIO *appx_hash_blob_get(FILE_FORMAT_CTX *ctx)
     pos += 4;
     memcpy(data + pos, ctx->appx_ctx->calculatedCTHash, (size_t)mdlen);
     pos += mdlen;
-    memcpy(data + pos, AXBM_SIGNATURE, 4);
-    pos += 4;
-    memcpy(data + pos, ctx->appx_ctx->calculatedBMHash, (size_t)mdlen);
-    pos += mdlen;
+    if (ctx->appx_ctx->calculatedBMHash) {
+        memcpy(data + pos, AXBM_SIGNATURE, 4);
+        pos += 4;
+        memcpy(data + pos, ctx->appx_ctx->calculatedBMHash, (size_t)mdlen);
+        pos += mdlen;
+    }
     if (ctx->appx_ctx->calculatedCIHash) {
         memcpy(data + pos, AXCI_SIGNATURE, 4);
         pos += 4;
@@ -854,7 +855,7 @@ static BIO *appx_hash_blob_get(FILE_FORMAT_CTX *ctx)
         pos += mdlen;
     }
     if (ctx->options->verbose) {
-        print_hash("Hash of file: ", "\n", data, pos);
+        print_hash("Hash of file ", "\n", data, pos);
     }
     ctx->appx_ctx->hashlen = BIO_write(hashes, data, pos);
     OPENSSL_free(data);
@@ -1081,9 +1082,11 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
     uint8_t *data = content->messageDigest->digest->data;
     int mdlen = EVP_MD_size(ctx->appx_ctx->md);
     int pos = 4;
+    int expected_hashes = ctx->appx_ctx->isAppxBlockMap ? 4 : 3;
 
-    /* we are expecting at least 4 hashes + 4 byte header */
-    if (length < 4 * mdlen + 4) {
+    /* Expecting 4 hashes + 4-byte header if isAppxBlockMap is set,
+     * otherwise 3 hashes + 4-byte header */
+    if (length < expected_hashes * mdlen + 4) {
         fprintf(stderr, "Hash too short\n");
         return 0; /* FAILED */
     }
@@ -1121,7 +1124,7 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
         fprintf(stderr, "Central directory hash missing\n");
         return 0; /* FAILED */
     }
-    if (!ctx->appx_ctx->existingBMHash) {
+    if (ctx->appx_ctx->isAppxBlockMap && !ctx->appx_ctx->existingBMHash) {
         fprintf(stderr, "Block map hash missing\n");
         return 0; /* FAILED */
     }
@@ -1145,14 +1148,16 @@ static int appx_compare_hashes(FILE_FORMAT_CTX *ctx)
 {
     int mdtype = EVP_MD_nid(ctx->appx_ctx->md);
 
-    if (ctx->appx_ctx->calculatedBMHash && ctx->appx_ctx->existingBMHash) {
-        printf("Checking Block Map hashes:\n");
-        if (!compare_digests(ctx->appx_ctx->existingBMHash, ctx->appx_ctx->calculatedBMHash, mdtype)) {
+    if (ctx->appx_ctx->isAppxBlockMap) {
+        if (ctx->appx_ctx->calculatedBMHash && ctx->appx_ctx->existingBMHash) {
+            printf("Checking Block Map hashes:\n");
+            if (!compare_digests(ctx->appx_ctx->existingBMHash, ctx->appx_ctx->calculatedBMHash, mdtype)) {
+                return 0; /* FAILED */
+            }
+        } else {
+            fprintf(stderr, "Block map hash missing ctx->appx_ctx->isAppxBlockMap=%d\n", ctx->appx_ctx->isAppxBlockMap);
             return 0; /* FAILED */
         }
-    } else {
-        fprintf(stderr, "Block map hash missing\n");
-        return 0; /* FAILED */
     }
     if (ctx->appx_ctx->calculatedCTHash && ctx->appx_ctx->existingCTHash) {
         printf("Checking Content Types hashes:\n");
@@ -1270,23 +1275,35 @@ static int appx_append_ct_signature_entry(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_E
 }
 
 /*
- * Get a hash algorithm specified in the AppxBlockMap.xml file.
+ * Determine the message digest algorithm to use when verifying or signing
+ *   1. From the AppxBlockMap.xml (if available)
+ *   2. From the PKCS7 signature (if present)
+ *   3. Fall back to the provided default digest
+ * [in, out] ctx: structure holds input and output data
+ * [in] md: default digest algorithm to use if none found elsewhere
  * [in] zip: structure holds specific ZIP data
  * [returns] one of SHA256/SHA384/SHA512 digest algorithms
  */
-static const EVP_MD *appx_get_md(ZIP_FILE *zip)
+static const EVP_MD *appx_get_md(FILE_FORMAT_CTX *ctx, const EVP_MD *md, ZIP_FILE *zip)
 {
     uint8_t *data = NULL;
     char *start, *end, *pos;
     char *valueStart = NULL, *valueEnd = NULL;
-    const EVP_MD *md = NULL;
+    const EVP_MD *appx_md = NULL;
     size_t slen, dataSize;
 
+    /* Try to get a hash algorithm specified in the AppxBlockMap.xml file */
     dataSize = zipReadFileDataByName(&data, zip, BLOCK_MAP_FILENAME);
     if (dataSize <= 0) {
-        fprintf(stderr, "Could not read: %s\n", BLOCK_MAP_FILENAME);
-        return NULL; /* FAILED */
+        /* Excel Spreadsheet Macro-enabled (XLSM) file */
+        appx_md = appx_get_md_from_signature(ctx); /* signed XLSM file */
+        if (!appx_md)
+            appx_md = md; /* unsigned, use default message digest algorithm */
+        printf("Message digest algorithm: %s\n", EVP_MD_get0_name(appx_md));
+        return appx_md;
     }
+    ctx->appx_ctx->isAppxBlockMap = 1; /* AppxBlockMap.xml detected */
+
     start = strstr((const char *)data, HASH_METHOD_TAG);
     if (!start) {
         fprintf(stderr, "Parse error: tag: %s not found in %s\n", HASH_METHOD_TAG, BLOCK_MAP_FILENAME);
@@ -1322,20 +1339,52 @@ static const EVP_MD *appx_get_md(ZIP_FILE *zip)
     slen = (size_t)(valueEnd - valueStart + 1);
     if (strlen(HASH_METHOD_SHA256) == slen && !memcmp(valueStart, HASH_METHOD_SHA256, slen)) {
         printf("Hash method is SHA256\n");
-        md = EVP_sha256();
+        appx_md = EVP_sha256();
     } else if (strlen(HASH_METHOD_SHA384) == slen && !memcmp(valueStart, HASH_METHOD_SHA384, slen)) {
         printf("Hash method is SHA384\n");
-        md = EVP_sha384();
+        appx_md = EVP_sha384();
     } else if (strlen(HASH_METHOD_SHA512) == slen && !memcmp(valueStart, HASH_METHOD_SHA512, slen)) {
         printf("Hash method is SHA512\n");
-        md = EVP_sha512();
+        appx_md = EVP_sha512();
     } else {
         fprintf(stderr, "Unsupported hash method\n");
         OPENSSL_free(data);
         return NULL; /* FAILED */
     }
     OPENSSL_free(data);
-    return md;
+    return appx_md;
+}
+
+/*
+ * Extract the message digest algorithm used in the PKCS7 signature
+ * [in] ctx: structure holds input and output data
+ */
+static const EVP_MD *appx_get_md_from_signature(FILE_FORMAT_CTX *ctx)
+{
+
+    int mdtype = -1;
+    PKCS7 *p7 = appx_pkcs7_extract(ctx);
+
+    if (!p7)
+        return NULL; /* FAILED */
+
+    if (is_content_type(p7, SPC_INDIRECT_DATA_OBJID)) {
+        ASN1_STRING *content_val = p7->d.sign->contents->d.other->value.sequence;
+        const u_char *p = content_val->data;
+        SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
+
+        if (idc) {
+            if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
+                mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
+            }
+            SpcIndirectDataContent_free(idc);
+        }
+    }
+    if (mdtype == -1) {
+        fprintf(stderr, "Failed to extract current message digest\n");
+        return NULL; /* FAILED */
+    }
+    return EVP_get_digestbynid(mdtype);
 }
 
 /*

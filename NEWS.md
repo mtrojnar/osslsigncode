@@ -2,6 +2,8 @@
 
 ### 2.11 (unreleased)
 
+- added support for Excel macro-enabled workbook files (XLSM)
+
 ### 2.10 (2025.06.23)
 
 - added JavaScript signing
