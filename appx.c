@@ -2790,11 +2790,12 @@ static int readZip64EOCDR(ZIP64_EOCDR *eocdr, FILE *file, uint64_t offset)
 
 static int get_current_position(BIO *bio, uint64_t *offset)
 {
-    FILE *file = NULL;
     int64_t pos;
 
-    BIO_get_fp(bio, &file);
-    pos = ftello(file);
+    if (!bio) {
+         return 0; /* FAILED */
+    }
+    pos = BIO_tell(bio);
     if (pos < 0) {
         return 0; /* FAILED */
     }
