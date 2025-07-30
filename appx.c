@@ -2744,7 +2744,10 @@ static int get_current_position(BIO *bio, uint64_t *offset)
     FILE *file = NULL;
     int64_t pos;
 
-    BIO_get_fp(bio, &file);
+    if (BIO_get_fp(bio, &file) != 1 || file == NULL) {
+        fprintf(stderr, "BIO_get_fp() failed\n");
+        return 0; /* FAILED */
+    }
     pos = ftello(file);
     if (pos < 0) {
         return 0; /* FAILED */
