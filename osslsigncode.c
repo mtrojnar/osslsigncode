@@ -5110,6 +5110,7 @@ int main(int argc, char **argv)
         DO_EXIT_0("Failed to read key or certificates\n");
 
     if (options.cmd != CMD_VERIFY) {
+        FILE *fp;
         /* Create message digest BIO */
         hash = BIO_new(BIO_f_md());
 #if defined(__GNUC__)
@@ -5123,13 +5124,17 @@ int main(int argc, char **argv)
 #pragma GCC diagnostic pop
 #endif
         /* Create outdata file */
-        outdata = BIO_new_file(options.outfile, "w+bx");
-        if (!outdata && errno != EEXIST)
-            outdata = BIO_new_file(options.outfile, "w+b");
-        if (!outdata) {
+        fp = fopen(options.outfile, "w+b");
+        if (!fp) {
             BIO_free_all(hash);
             DO_EXIT_1("Failed to create file: %s\n", options.outfile);
         }
+        outdata = BIO_new_fp(fp, BIO_CLOSE);
+        if (!outdata) {
+            fclose(fp);
+            BIO_free_all(hash);
+            DO_EXIT_1("Failed to wrap FILE in BIO: %s\n", options.outfile);
+         }
     }
     ctx = file_format_script.ctx_new(&options, hash, outdata);
     if (!ctx)
