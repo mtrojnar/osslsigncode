@@ -244,6 +244,7 @@ static PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
 static void print_cert(X509 *cert, int i);
 static int x509_store_load_crlfile(X509_STORE *store, char *cafile, char *crlfile);
 static void load_objects_from_store(const char *url, char *pass, EVP_PKEY **pkey, STACK_OF(X509) *certs, STACK_OF(X509_CRL) *crls);
+static BIO *bio_new_file(const char *filename, const char *mode);
 #ifndef OPENSSL_NO_ENGINE
 static void engine_control_set(GLOBAL_OPTIONS *options, const char *arg);
 #endif /* OPENSSL_NO_ENGINE */
@@ -1277,7 +1278,7 @@ static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
     TS_RESP *response = NULL;
     int i, res = 1;
 
-    btmp = BIO_new_file(ctx->options->tsa_certfile, "rb");
+    btmp = bio_new_file(ctx->options->tsa_certfile, "rb");
     if (!btmp) {
         fprintf(stderr, "Failed to read Time-Stamp Authority certificate file: %s\n", ctx->options->tsa_certfile);
         return 0; /* FAILED */
@@ -1285,7 +1286,7 @@ static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
     /* .pem certificate file */
     chain = X509_chain_read_certs(btmp, NULL);
     BIO_free(btmp);
-    btmp = BIO_new_file(ctx->options->tsa_keyfile, "rb");
+    btmp = bio_new_file(ctx->options->tsa_keyfile, "rb");
     if (!btmp) {
         fprintf(stderr, "Failed to read private key file: %s\n", ctx->options->tsa_keyfile);
         return 0; /* FAILED */
@@ -4104,7 +4105,7 @@ err:
  */
 static int read_der_keyfile(GLOBAL_OPTIONS *options)
 {
-    BIO *btmp = BIO_new_file(options->keyfile, "rb");
+    BIO *btmp = bio_new_file(options->keyfile, "rb");
 
     if (!btmp) {
         fprintf(stderr, "Failed to read private key file: %s\n", options->keyfile);
@@ -4130,7 +4131,7 @@ static int read_der_keyfile(GLOBAL_OPTIONS *options)
 static int read_pkcs7_certfile(GLOBAL_OPTIONS *options)
 {
     PKCS7 *p7;
-    BIO *btmp = BIO_new_file(options->certfile, "rb");
+    BIO *btmp = bio_new_file(options->certfile, "rb");
 
     if (!btmp) {
         fprintf(stderr, "Failed to read certificate from: %s\n",
@@ -4607,6 +4608,26 @@ static int file_exists(const char *filename)
         }
     }
     return 0; /* File does not exist */
+}
+
+static BIO *bio_new_file(const char *filename, const char *mode)
+{
+    FILE *file;
+    BIO *bio;
+
+    if (!filename)
+        return NULL;
+
+    file = fopen(filename, mode);
+    if (!file)
+        return NULL;
+
+    bio = BIO_new_fp(file, BIO_CLOSE);
+    if (!bio) {
+        fclose(file);
+        return NULL;
+    }
+    return bio;
 }
 
 /*
@@ -5110,7 +5131,6 @@ int main(int argc, char **argv)
         DO_EXIT_0("Failed to read key or certificates\n");
 
     if (options.cmd != CMD_VERIFY) {
-        FILE *fp;
         /* Create message digest BIO */
         hash = BIO_new(BIO_f_md());
 #if defined(__GNUC__)
@@ -5123,17 +5143,11 @@ int main(int argc, char **argv)
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
-        /* Create outdata file */
-        fp = fopen(options.outfile, "w+b");
-        if (!fp) {
+        /* Create output file — file existence already verified via file_exists() */
+        outdata = bio_new_file(options.outfile, "w+b");
+        if (!outdata) {
             BIO_free_all(hash);
             DO_EXIT_1("Failed to create file: %s\n", options.outfile);
-        }
-        outdata = BIO_new_fp(fp, BIO_CLOSE);
-        if (!outdata) {
-            fclose(fp);
-            BIO_free_all(hash);
-            DO_EXIT_1("Failed to wrap FILE in BIO: %s\n", options.outfile);
          }
     }
     ctx = file_format_script.ctx_new(&options, hash, outdata);
