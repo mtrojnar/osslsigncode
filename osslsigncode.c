@@ -3606,11 +3606,11 @@ static void usage(const char *argv0, const char *cmd)
         printf("%1s[ --help ]\n\n", "");
     }
     if (on_list(cmd, cmds_sign)) {
-        printf("%1s[ sign ] -pkcs12 <pkcs12file> | ( [ -certs <certfile> | -spc <certfile> ]\n", "");
+        printf("%1s[ sign ] -pkcs12 <file> | ( [ -certs <file|URI> | -spc <file> ]\n", "");
 #if !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L
-        printf("%12s( -key <keyfile> | ( -key <pkcs11 key URI> -pkcs11module <module> [ -pkcs11cert <pkcs11 cert URI> ] )\n", "");
+        printf("%12s( -key <file|URI> [ -pkcs11module <module> ] [ -pkcs11cert <pkcs11 cert URI> ] )\n", "");
 #else /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
-        printf("%12s-key <keyfile> )\n", "");
+        printf("%12s-key <file|URI> )\n", "");
 #endif /* !defined(OPENSSL_NO_ENGINE) || OPENSSL_VERSION_NUMBER>=0x30000000L */
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
         printf("%12s[ -provider <provider> | ", "");
@@ -3620,7 +3620,7 @@ static void usage(const char *argv0, const char *cmd)
 #endif /* OPENSSL_NO_ENGINE */
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
 #ifndef OPENSSL_NO_ENGINE
-        printf("%s( -engine <engine> [ -login ] [ -engineCtrl <command[:parameter]> ] ) ] ) )\n", "");
+        printf("%s( -engine <engine> [ -login ] [ -engineCtrl <command[:parameter]> ] ) ] )\n", "");
 #endif /* OPENSSL_NO_ENGINE */
 #if OPENSSL_VERSION_NUMBER>=0x30000000L
         printf("%12s[ -nolegacy ]\n", "");
@@ -3631,73 +3631,73 @@ static void usage(const char *argv0, const char *cmd)
 #endif /* PROVIDE_ASKPASS */
         printf("%1s[ -readpass <file> ]\n", "");
         printf("%12s(use \"-\" with readpass to read from stdin)\n", "");
-        printf("%12s[ -ac <crosscertfile> ]\n", "");
+        printf("%12s[ -ac <file> ]\n", "");
         printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
         printf("%12s[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n", "");
         printf("%12s[ -ph ]\n", "");
         printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
         printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
-        printf("%12s[ -TSA-certs <TSA-certfile> ] [ -TSA-key <TSA-keyfile> ]\n", "");
+        printf("%12s[ -TSA-certs <file> ] [ -TSA-key <file> ]\n", "");
         printf("%12s[ -TSA-time <unix-time> ]\n", "");
-        printf("%12s[ -HTTPS-CAfile <infile> ]\n", "");
-        printf("%12s[ -HTTPS-CRLfile <infile> ]\n", "");
+        printf("%12s[ -HTTPS-CAfile <file> ]\n", "");
+        printf("%12s[ -HTTPS-CRLfile <file> ]\n", "");
         printf("%12s[ -time <unix-time> ]\n", "");
-        printf("%12s[ -addUnauthenticatedBlob [ -blobFile <blobfile> ] ]\n", "");
+        printf("%12s[ -addUnauthenticatedBlob [ -blobFile <file> ] ]\n", "");
         printf("%12s[ -nest ]\n", "");
         printf("%12s[ -verbose ]\n", "");
         printf("%12s[ -add-msi-dse ]\n", "");
         printf("%12s[ -pem ]\n", "");
-        printf("%12s[ -in ] <infile> [-out ] <outfile>\n\n", "");
+        printf("%12s[ -in ] <file> [-out ] <file>\n\n", "");
     }
     if (on_list(cmd, cmds_extract_data)) {
         printf("%1sextract-data [ -pem ]\n", "");
         printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
         printf("%12s[ -ph ]\n", "");
         printf("%12s[ -add-msi-dse ]\n", "");
-        printf("%12s[ -in ] <infile> [ -out ] <datafile>\n\n", "");
+        printf("%12s[ -in ] <file> [ -out ] <file>\n\n", "");
     }
     if (on_list(cmd, cmds_add)) {
-        printf("%1sadd [ -addUnauthenticatedBlob [ -blobFile <blobfile> ] ]\n", "");
+        printf("%1sadd [ -addUnauthenticatedBlob [ -blobFile <file> ] ]\n", "");
         printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
         printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
-        printf("%12s[ -TSA-certs <TSA-certfile> ] [ -TSA-key <TSA-keyfile> ]\n", "");
+        printf("%12s[ -TSA-certs <file> ] [ -TSA-key <file> ]\n", "");
         printf("%12s[ -TSA-time <unix-time> ]\n", "");
-        printf("%12s[ -HTTPS-CAfile <infile> ]\n", "");
-        printf("%12s[ -HTTPS-CRLfile <infile> ]\n", "");
+        printf("%12s[ -HTTPS-CAfile <file> ]\n", "");
+        printf("%12s[ -HTTPS-CRLfile <file> ]\n", "");
         printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
         printf("%12s[ -index <index> ]\n", "");
         printf("%12s[ -verbose ]\n", "");
         printf("%12s[ -add-msi-dse ]\n", "");
-        printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
+        printf("%12s[ -in ] <file> [ -out ] <file>\n\n", "");
     }
     if (on_list(cmd, cmds_attach)) {
-        printf("%1sattach-signature [ -sigin ] <sigfile>\n", "");
-        printf("%12s[ -CAfile <infile> ]\n", "");
-        printf("%12s[ -CRLfile <infile> ]\n", "");
-        printf("%12s[ -TSA-CAfile <infile> ]\n", "");
-        printf("%12s[ -TSA-CRLfile <infile> ]\n", "");
+        printf("%1sattach-signature [ -sigin ] <file>\n", "");
+        printf("%12s[ -CAfile <file> ]\n", "");
+        printf("%12s[ -CRLfile <file> ]\n", "");
+        printf("%12s[ -TSA-CAfile <file> ]\n", "");
+        printf("%12s[ -TSA-CRLfile <file> ]\n", "");
         printf("%12s[ -time <unix-time> ]\n", "");
         printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
         printf("%12s[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n", "");
         printf("%12s[ -nest ]\n", "");
         printf("%12s[ -add-msi-dse ]\n", "");
-        printf("%12s[ -in ] <infile> [ -out ] <outfile>\n\n", "");
+        printf("%12s[ -in ] <file> [ -out ] <file>\n\n", "");
     }
     if (on_list(cmd, cmds_extract)) {
         printf("%1sextract-signature [ -pem ]\n", "");
-        printf("%12s[ -in ] <infile> [ -out ] <sigfile>\n\n", "");
+        printf("%12s[ -in ] <file> [ -out ] <file>\n\n", "");
     }
     if (on_list(cmd, cmds_remove))
-        printf("%1sremove-signature [ -in ] <infile> [ -out ] <outfile>\n\n", "");
+        printf("%1sremove-signature [ -in ] <file> [ -out ] <file>\n\n", "");
     if (on_list(cmd, cmds_verify)) {
-        printf("%1sverify [ -in ] <infile>\n", "");
-        printf("%12s[ -c | -catalog <infile> ]\n", "");
-        printf("%12s[ -CAfile <infile> ]\n", "");
-        printf("%12s[ -CRLfile <infile> ]\n", "");
-        printf("%12s[ -HTTPS-CAfile <infile> ]\n", "");
-        printf("%12s[ -HTTPS-CRLfile <infile> ]\n", "");
-        printf("%12s[ -TSA-CAfile <infile> ]\n", "");
-        printf("%12s[ -TSA-CRLfile <infile> ]\n", "");
+        printf("%1sverify [ -in ] <file>\n", "");
+        printf("%12s[ -c | -catalog <file> ]\n", "");
+        printf("%12s[ -CAfile <file> ]\n", "");
+        printf("%12s[ -CRLfile <file> ]\n", "");
+        printf("%12s[ -HTTPS-CAfile <file> ]\n", "");
+        printf("%12s[ -HTTPS-CRLfile <file> ]\n", "");
+        printf("%12s[ -TSA-CAfile <file> ]\n", "");
+        printf("%12s[ -TSA-CRLfile <file> ]\n", "");
         printf("%12s[ -p <proxy> ]\n", "");
         printf("%12s[ -index <index> ]\n", "");
         printf("%12s[ -ignore-timestamp ]\n", "");
@@ -3858,7 +3858,7 @@ static void help_for(const char *argv0, const char *cmd)
     if (on_list(cmd, cmds_CAfile))
         printf("%-24s= the file containing one or more trusted certificates in PEM format\n", "-CAfile");
     if (on_list(cmd, cmds_certs))
-        printf("%-24s= the signing certificate to use\n", "-certs, -spc");
+        printf("%-24s= certificate chain (signing cert + intermediates)\n", "-certs, -spc");
     if (on_list(cmd, cmds_comm))
         printf("%-24s= set commercial purpose (default: individual purpose)\n", "-comm");
     if (on_list(cmd, cmds_CRLfile))
@@ -3883,7 +3883,7 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%-24s= disable legacy mode and don't automatically load the legacy provider\n", "-nolegacy");
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
     if (on_list(cmd, cmds_key))
-        printf("%-24s= the private key to use or PKCS#11 URI identifies a key in the token\n", "-key");
+        printf("%-24s= private key (optionally with signing cert) from file or URI\n", "-key");
     if (on_list(cmd, cmds_n))
         printf("%-24s= specifies a description of the signed content\n", "-n");
     if (on_list(cmd, cmds_nest))
@@ -4365,8 +4365,8 @@ static int read_crypto_params(GLOBAL_OPTIONS *options)
             (void)provider_load(options->provider);
         }
 #endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
-        /* Load the private key ('-key' option) */
-        load_objects_from_store(options->keyfile, options->pass, &options->pkey, NULL, NULL);
+        /* Load the private key and the signing certificate ('-key' option) */
+        load_objects_from_store(options->keyfile, options->pass, &options->pkey, options->certs, NULL);
     }
 #if OPENSSL_VERSION_NUMBER<0x1010108f
     /* Workaround for OpenSSL 1.1.1g and older, where the store API does not
