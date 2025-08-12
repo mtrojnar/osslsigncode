@@ -17,6 +17,7 @@ static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX 
 static int pkcs7_signer_info_add_sequence_number(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 static STACK_OF(X509) *X509_chain_get_sorted(FILE_FORMAT_CTX *ctx, int signer);
 static int X509_compare(const X509 *const *a, const X509 *const *b);
+static void sk_X509_remove_duplicates(STACK_OF(X509) *chain);
 
 /*
  * Common functions
@@ -763,6 +764,9 @@ static STACK_OF(X509) *X509_chain_get_sorted(FILE_FORMAT_CTX *ctx, int signer)
     }
     /* sort certificate chain using the supplied comparison function */
     sk_X509_sort(chain);
+    /* remove duplicates */
+    sk_X509_remove_duplicates(chain);
+
     return chain;
 }
 
@@ -812,6 +816,35 @@ static int X509_compare(const X509 *const *a, const X509 *const *b)
     if (ret == 0 && a_len != b_len) /* identical up to the length of the shorter DER */
         ret = a_len < b_len ? -1 : 1; /* shorter is smaller */
     return ret;
+}
+
+/*
+ * Remove duplicate certificates from a sorted STACK_OF(X509).
+ *
+ * This function assumes the stack is sorted according to X.690-compliant
+ * certificate comparison, so duplicate certificates appear consecutively.
+ * It iterates through the stack and removes any duplicate certificates
+ * by comparing each element with its immediate predecessor.
+ * The stack is modified in place.
+ */
+static void sk_X509_remove_duplicates(STACK_OF(X509) *chain)
+{
+    int i, n = sk_X509_num(chain);
+
+    if (n < 2)
+        return;
+
+    /* start from the second element */
+    for (i = 1; i < n; ) {
+        if (!X509_cmp(sk_X509_value(chain, i - 1), sk_X509_value(chain, i))) {
+            /* duplicate found: remove the certificate at index i */
+            (void)sk_X509_delete(chain, i);
+            n--; /* reduce stack size since one element was removed */
+            /* do not increment i, as next element shifts into index i */
+        } else {
+            i++; /* advance only if no removal was done */
+        }
+    }
 }
 
 /*
