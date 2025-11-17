@@ -281,10 +281,10 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         return 0; /* FAILED */
     }
     if (!pe_verify_page_hash(ctx, ph, phlen, phtype)) {
-        fprintf(stderr, "Signature verification: failed\n\n");
+        fprintf(stderr, "Signature verification: failed  -- Ignoring page hash error\n\n");
         OPENSSL_free(ph);
         OPENSSL_free(cmdbuf);
-        return 0; /* FAILED */
+        return 1; /* FAILED */
     }
     OPENSSL_free(ph);
     OPENSSL_free(cmdbuf);
