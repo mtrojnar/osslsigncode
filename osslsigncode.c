@@ -961,6 +961,23 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
 
         s_bio = OSSL_HTTP_get(url, proxy, NULL, NULL, NULL, http_tls_cb, &info, 0,
             NULL, expected_content_type, 0, 0, timeout);
+        if (!s_bio) {
+            /*
+             * Some CRL distribution points return "application/octet-stream" rather
+             * than "application/pkix-crl". Retry without enforcing Content-Type and
+             * let the CRL parser validate the content instead.
+             */
+            ERR_clear_error();
+            s_bio = OSSL_HTTP_get(url, proxy, NULL, NULL, NULL, http_tls_cb, &info, 0,
+                NULL, NULL, 0, 0, timeout);
+        }
+        if (!s_bio) {
+            printf("Warning: Failed to get data as pkix-crl, attempting without specifying expected content type.\n");
+            // fprintf(stderr,"Warning: CRL fetch failed with Content-Type enforcement (expected %s); retrying without enforcement.\n",expected_content_type);
+            ERR_clear_error();
+            s_bio = OSSL_HTTP_get(url, proxy, NULL, NULL, NULL, http_tls_cb, &info, 0,
+                NULL, NULL, 0, 0, timeout);
+        }
     } else { /* POST */
         const char *content_type = "application/timestamp-query"; /* RFC3161 Timestamp */
         const char *expected_content_type = "application/timestamp-reply";
