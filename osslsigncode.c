@@ -957,10 +957,8 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
     info.ssl_ctx = ssl_ctx;
 
     if (!req) { /* GET */
-        const char *expected_content_type = "application/pkix-crl";
-
         s_bio = OSSL_HTTP_get(url, proxy, NULL, NULL, NULL, http_tls_cb, &info, 0,
-            NULL, expected_content_type, 0, 0, timeout);
+            NULL, NULL, 0, 0, timeout);
     } else { /* POST */
         const char *content_type = "application/timestamp-query"; /* RFC3161 Timestamp */
         const char *expected_content_type = "application/timestamp-reply";
