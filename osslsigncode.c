@@ -2535,9 +2535,17 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
         if (!crlok)
             goto out;
     }
-    /* check extended key usage flag XKU_CODE_SIGN */
+    /*
+     * Verify that:
+     * - extendedKeyUsage, if present, permits codeSigning (RFC 5280 section 4.2.1.12)
+     * - keyUsage, if present, permits digitalSignature (RFC 5280 section 4.2.1.3)
+     */
     if (!(X509_get_extended_key_usage(signer) & XKU_CODE_SIGN)) {
-        fprintf(stderr, "Unsupported Signer's certificate purpose XKU_CODE_SIGN\n");
+        fprintf(stderr, "Signer certificate rejected: extendedKeyUsage does not permit codeSigning\n");
+        goto out;
+    }
+    if (!(X509_get_key_usage(signer) & X509v3_KU_DIGITAL_SIGNATURE)) {
+        fprintf(stderr, "Signer certificate rejected: keyUsage does not permit digitalSignature\n");
         goto out;
     }
 
