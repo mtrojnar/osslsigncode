@@ -338,6 +338,17 @@ class LeafCertificate(X509Extensions):
         authority_key = AuthorityKeyIdentifier.from_issuer_subject_key_identifier(
             self.issuer_cert.extensions.get_extension_for_class(SubjectKeyIdentifier).value
         )
+        key_usage = KeyUsage(
+            digital_signature=True,
+            content_commitment=False,
+            key_encipherment=False,
+            data_encipherment=False,
+            key_agreement=False,
+            key_cert_sign=False,
+            crl_sign=False,
+            encipher_only=False,
+            decipher_only=False
+        )
         extended_key_usage = ExtendedKeyUsage(
             [ExtendedKeyUsageOID.CODE_SIGNING]
         )
@@ -352,6 +363,7 @@ class LeafCertificate(X509Extensions):
             .add_extension(BasicConstraints(ca=False, path_length=None), critical=False)
             .add_extension(SubjectKeyIdentifier.from_public_key(public_key), critical=False)
             .add_extension(authority_key, critical=False)
+            .add_extension(key_usage, critical=False)
             .add_extension(extended_key_usage, critical=False)
             .add_extension(self.create_x509_crldp(), critical=False)
             .sign(self.issuer_key, SHA256())
