@@ -798,63 +798,37 @@ static int verify_callback(int ok, X509_STORE_CTX *ctx)
 /*
  * Read data from socket BIO
  * [in] s_bio: socket BIO
- * [in] rctx: open connection context
- * [in] use_ssl: HTTPS request switch
  * [returns] memory BIO
  */
-static BIO *socket_bio_read(BIO *s_bio, OSSL_HTTP_REQ_CTX *rctx, int use_ssl)
+static BIO *socket_bio_read(BIO *s_bio)
 {
-    int retry = 1, ok = 0, written = 0, resp_len = 0;
+    int retry = 1, ok = 0;
     char *buf = OPENSSL_malloc(OSSL_HTTP_DEFAULT_MAX_RESP_LEN);
     BIO *resp = BIO_new(BIO_s_mem());
 
-    if (rctx) {
-        resp_len = (int)OSSL_HTTP_REQ_CTX_get_resp_len(rctx);
-    }
-    if (resp_len == 0) {
-        if (use_ssl)
-            BIO_ssl_shutdown(s_bio);
-        else {
-            int fd = (int)BIO_get_fd(s_bio, NULL);
-
-            if (fd >= 0) {
-#ifdef WIN32
-                (void)shutdown(fd, SD_SEND);
-#else /* WIN32 */
-                (void)shutdown(fd, SHUT_WR);
-#endif /* WIN32 */
-            }
-        }
-    }
-    ERR_clear_error();
     while (retry) {
         int n;
 
         errno = 0;
         n = BIO_read(s_bio, buf, OSSL_HTTP_DEFAULT_MAX_RESP_LEN);
         if (n > 0) {
-            written += BIO_write(resp, buf, n);
+            (void)BIO_write(resp, buf, n);
         } else if (BIO_eof(s_bio) == 1) {
             ok = 1;
-            retry = 0; /* EOF */
+            retry = 0; /* HTTP EOF */
         } else if (BIO_should_retry(s_bio)) {
         } else {
             unsigned long err = ERR_get_error();
 
             if (err == 0) {
                 ok = 1;
-                retry = 0; /* use_ssl EOF */
+                retry = 0; /* HTTPS EOF */
             } else {
                 fprintf(stderr, "\nHTTP failure: error %ld: %s\n", err, ERR_reason_error_string(err));
                 retry = 0; /* FAILED */
             }
         }
-        if (resp_len > 0 && resp_len == written) {
-            ok = 1;
-            retry = 0; /* all response has been read */
-        }
     }
-    OSSL_HTTP_close(rctx, ok);
     OPENSSL_free(buf);
     if (!ok) {
         BIO_free_all(resp);
@@ -916,12 +890,10 @@ static void check_authenticode_timestamp(BIO **resp)
 static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *cafile, char *crlfile)
 {
     BIO *tmp_bio = NULL, *s_bio = NULL, *resp = NULL;
-    OSSL_HTTP_REQ_CTX *rctx = NULL;
     HTTP_TLS_Info info;
     SSL_CTX *ssl_ctx = NULL;
     char *server = NULL, *port = NULL, *path = NULL;
     int timeout = -1; /* blocking mode, exactly one try, see BIO_do_connect_retry() */
-    int keep_alive = 1; /* prefer */
     int use_ssl = 0;
 
     if (!url) {
@@ -975,9 +947,9 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
             content_type = "application/octet-stream"; /* Authenticode Timestamp */
             expected_content_type = "application/octet-stream";
         }
-        s_bio = OSSL_HTTP_transfer(&rctx, server, port, path, use_ssl, proxy, NULL,
+        s_bio = OSSL_HTTP_transfer(NULL, server, port, path, use_ssl, proxy, NULL,
             NULL, NULL, http_tls_cb, &info, 0, NULL, content_type, req,
-            expected_content_type, 0, 0, timeout, keep_alive);
+            expected_content_type, 0, 0, timeout, 0);
         BIO_free(tmp_bio);
     }
     OPENSSL_free(server);
@@ -986,7 +958,7 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
     SSL_CTX_free(ssl_ctx);
 
     if (s_bio) {
-        resp = socket_bio_read(s_bio, rctx, use_ssl);
+        resp = socket_bio_read(s_bio);
         BIO_free_all(s_bio);
         if (resp && req && !rfc3161)
             check_authenticode_timestamp(&resp);
