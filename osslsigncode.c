@@ -929,6 +929,14 @@ static BIO *bio_get_http(char *url, BIO *req, char *proxy, int rfc3161, char *ca
     info.ssl_ctx = ssl_ctx;
 
     if (!req) { /* GET */
+        /*
+         * HTTP server implementations accessed via the URI SHOULD specify the
+         * media type application/pkix-crl in the Content-Type header field of
+         * the response (RFC 5280, section 4.2.1.13).
+         * In practice, some CRL distribution points return "application/octet-stream"
+         * instead. Therefore, do not enforce the Content-Type and rely on the CRL
+         * parser to validate the response content.
+         */
         s_bio = OSSL_HTTP_get(url, proxy, NULL, NULL, NULL, http_tls_cb, &info, 0,
             NULL, NULL, 0, 0, timeout);
     } else { /* POST */
