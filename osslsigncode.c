@@ -1901,11 +1901,22 @@ static int verify_ca_callback(int ok, X509_STORE_CTX *ctx)
 
 static int verify_crl_callback(int ok, X509_STORE_CTX *ctx)
 {
+    X509_CRL *crl;
     int error = X509_STORE_CTX_get_error(ctx);
     int depth = X509_STORE_CTX_get_error_depth(ctx);
-
     X509 *current_cert = X509_STORE_CTX_get_current_cert(ctx);
+
     print_cert(current_cert, depth);
+
+    crl = X509_STORE_CTX_get0_current_crl(ctx);
+    if (crl) {
+        BIO *bio = BIO_new_fp(stdout, BIO_NOCLOSE);
+
+        X509_CRL_print(bio, crl);
+        BIO_free(bio);
+        printf("\n");
+    }
+
     if (!ok) {
         if (trusted_cert(current_cert, error)) {
             return 1;
