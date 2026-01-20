@@ -1,6 +1,14 @@
 # osslsigncode change log
 
-### 2.11 (unreleased)
+### 2.11 (2026.01.20)
+- added keyUsage validation for signer certificate
+  (thanks to Hanqing Zhao and Zi-Quan You for reporting the issue)
+- added printing CRL details during signature verification
+- implemented a workaround for CRL servers returning the HTTP Content-Type
+  header other than application/pkix-crl (thanks to Chris Thibodeaux)
+- fixed HTTP keep-alive handling
+- fixed macOS compiler and linker flags
+- fixed undefined BIO_get_fp() behavior with BIO_FLAGS_UPLINK_INTERNAL
 
 ### 2.10 (2025.06.23)
 

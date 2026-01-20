@@ -10,13 +10,13 @@ set(BUILTIN_SOCKET ON CACHE BOOL "") # for static Python
 
 # configure basic project information
 project(osslsigncode
-    VERSION 2.10
+    VERSION 2.11
     DESCRIPTION "OpenSSL based Authenticode signing for PE, CAB, CAT, MSI, APPX and script files"
     HOMEPAGE_URL "https://github.com/mtrojnar/osslsigncode"
     LANGUAGES C)
 
 # force nonstandard version format for development packages
-set(DEV "-dev")
+set(DEV "")
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}${DEV}")
 
 # version and contact information
