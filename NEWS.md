@@ -1,5 +1,7 @@
 # osslsigncode change log
 
+### 2.12 (unreleased)
+
 ### 2.11 (2026.01.20)
 - added keyUsage validation for signer certificate
   (thanks to Hanqing Zhao and Zi-Quan You for reporting the issue)
