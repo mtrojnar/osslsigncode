@@ -3082,10 +3082,9 @@ static int verify_content_member_digest(FILE_FORMAT_CTX *ctx, ASN1_TYPE *content
         fprintf(stderr, "Failed to extract SpcIndirectDataContent data\n");
         return 1; /* FAILED */
     }
-    if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
-        /* get a digest algorithm a message digest of the file from the content */
-        mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
-        memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
+    if (spc_extract_digest_safe(idc, mdbuf, &mdtype) < 0) {
+        SpcIndirectDataContent_free(idc);
+        return 1; /* FAILED */
     }
     if (mdtype == -1) {
         fprintf(stderr, "Failed to extract current message digest\n\n");

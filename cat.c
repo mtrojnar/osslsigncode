@@ -390,10 +390,9 @@ static int cat_print_content_member_digest(ASN1_TYPE *content)
     idc = d2i_SpcIndirectDataContent(NULL, &data, ASN1_STRING_length(value));
     if (!idc)
         return 0; /* FAILED */
-    if (idc->messageDigest && idc->messageDigest->digest && idc->messageDigest->digestAlgorithm) {
-        /* get a digest algorithm a message digest of the file from the content */
-        mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
-        memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)idc->messageDigest->digest->length);
+    if (spc_extract_digest_safe(idc, mdbuf, &mdtype) < 0) {
+        SpcIndirectDataContent_free(idc);
+        return 0; /* FAILED */
     }
     SpcIndirectDataContent_free(idc);
     if (mdtype == -1) {

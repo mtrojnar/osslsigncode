@@ -549,6 +549,33 @@ SpcLink *spc_link_obsolete_get(void)
 }
 
 /*
+ * Safely extract digest from SpcIndirectDataContent
+ * [in] idc: parsed SpcIndirectDataContent
+ * [out] mdbuf: output buffer (must be EVP_MAX_MD_SIZE bytes)
+ * [out] mdtype: digest algorithm's NID
+ * [returns] -1 on error or digest length on success
+ */
+int spc_extract_digest_safe(SpcIndirectDataContent *idc,
+    u_char *mdbuf, int *mdtype)
+{
+    int digest_len;
+
+    if (!idc || !idc->messageDigest || !idc->messageDigest->digest ||
+            !idc->messageDigest->digestAlgorithm) {
+        fprintf(stderr, "Missing digest data\n");
+        return -1;
+    }
+    digest_len = idc->messageDigest->digest->length;
+    if (digest_len <= 0 || digest_len > EVP_MAX_MD_SIZE) {
+        fprintf(stderr, "Invalid digest length: %d\n", digest_len);
+        return -1;
+    }
+    memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)digest_len);
+    *mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
+    return digest_len;
+}
+
+/*
  * [in] mdbuf, cmdbuf: message digests
  * [in] mdtype: message digest algorithm type
  * [returns] 0 on error or 1 on success
