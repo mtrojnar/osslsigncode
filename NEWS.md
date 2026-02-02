@@ -1,6 +1,17 @@
 # osslsigncode change log
 
-### 2.12 (unreleased)
+### 2.12 (2026.02.02)
+
+**CRITICAL SECURITY VULNERABILITY**
+
+This release fixes a critical memory corruption vulnerability.  A malicious
+attacker could create a signed file, which, when verified with osslsigncode,
+triggers arbitrary code execution.  Any previous version of osslsigncode should
+be immediately upgraded if the tool is used for verification of untrusted
+files.
+
+- fixed a buffer overflow while extracting message digests
+  (reported and fixed by Antoni Klajn, Opera)
 
 ### 2.11 (2026.01.20)
 - added keyUsage validation for signer certificate
