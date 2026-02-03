@@ -1,5 +1,7 @@
 # osslsigncode change log
 
+### 2.13 (unreleased)
+
 ### 2.12 (2026.02.02)
 
 **CRITICAL SECURITY VULNERABILITY**
