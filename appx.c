@@ -1503,6 +1503,7 @@ static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64
     if (!get_current_position(bio, &offset)) {
         fprintf(stderr, "Unable to get offset\n");
         OPENSSL_free(header.fileName);
+        header.fileName = NULL;
         OPENSSL_free(dataToWrite);
         return 0; /* FAILED */
     }
@@ -1513,6 +1514,7 @@ static int zipAppendSignatureFile(BIO *bio, ZIP_FILE *zip, uint8_t *data, uint64
         if (!BIO_write_ex(bio, dataToWrite + written, toWrite, &check)
             || check != toWrite) {
             OPENSSL_free(header.fileName);
+            header.fileName = NULL;
             OPENSSL_free(dataToWrite);
             return 0; /* FAILED */
         }
@@ -1685,6 +1687,8 @@ static int zipRewriteData(ZIP_FILE *zip, ZIP_CENTRAL_DIRECTORY_ENTRY *entry, BIO
 out:
     OPENSSL_free(header.fileName);
     OPENSSL_free(header.extraField);
+    header.fileName = NULL;
+    header.extraField = NULL;
     return ret;
 }
 
@@ -1863,6 +1867,8 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
         if (!zipReadLocalHeader(&header, zip, compressedSize)) {
             OPENSSL_free(header.fileName);
             OPENSSL_free(header.extraField);
+            header.fileName = NULL;
+            header.extraField = NULL;
             return 0; /* FAILED */
         }
         if (header.fileNameLen != entry->fileNameLen
@@ -1873,11 +1879,15 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
             fprintf(stderr, "Local header does not match central directory entry\n");
             OPENSSL_free(header.fileName);
             OPENSSL_free(header.extraField);
+            header.fileName = NULL;
+            header.extraField = NULL;
             return 0; /* FAILED */
         }
         /* we don't really need those */
         OPENSSL_free(header.fileName);
         OPENSSL_free(header.extraField);
+        header.fileName = NULL;
+        header.extraField = NULL;
 
         if (compressedSize > (uint64_t)zip->fileSize - entry->offsetOfLocalHeader) {
             fprintf(stderr, "Corrupted compressedSize : 0x%08" PRIX64 "\n", entry->compressedSize);
@@ -2011,6 +2021,8 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
             fprintf(stderr, "The input file is not a valid zip file - flags indicate data descriptor, but data descriptor signature does not match\n");
             OPENSSL_free(header->fileName);
             OPENSSL_free(header->extraField);
+            header->fileName = NULL;
+            header->extraField = NULL;
             return 0; /* FAILED */
         }
         header->crc32 = fileGetU32(file);
