@@ -1856,6 +1856,11 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
     }
     if (entry->overrideData) {
         compressedSize = entry->overrideData->compressedSize;
+        /* Validate sizes for safe allocation */
+        if (compressedSize > (uint64_t)(SIZE_MAX - 1)) {
+            fprintf(stderr, "Corrupted compressedSize : %" PRIu64"\n", compressedSize);
+            return 0; /* FAILED */
+        }
         uncompressedSize = entry->overrideData->uncompressedSize;
         compressedData = OPENSSL_zalloc(compressedSize + 1);
         memcpy(compressedData, entry->overrideData->data, compressedSize);
@@ -1889,8 +1894,10 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
         header.fileName = NULL;
         header.extraField = NULL;
 
-        if (compressedSize > (uint64_t)zip->fileSize - entry->offsetOfLocalHeader) {
-            fprintf(stderr, "Corrupted compressedSize : 0x%08" PRIX64 "\n", entry->compressedSize);
+        /* Validate sizes for safe allocation */
+        if (compressedSize > (uint64_t)(SIZE_MAX - 1)
+            || compressedSize > (uint64_t)zip->fileSize - entry->offsetOfLocalHeader) {
+            fprintf(stderr, "Corrupted compressedSize : %" PRIu64"\n", compressedSize);
             return 0; /* FAILED */
         }
         compressedData = OPENSSL_zalloc(compressedSize + 1);
@@ -1909,10 +1916,23 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
         *pData = compressedData;
         dataSize = compressedSize;
     } else if (entry->compression == COMPRESSION_DEFLATE) {
-        uint8_t *uncompressedData = OPENSSL_zalloc(uncompressedSize + 1);
-        uint64_t destLen = uncompressedSize;
-        uint64_t sourceLen = compressedSize;
+        uint8_t *uncompressedData;
+        uint64_t destLen, sourceLen;
         int ret;
+
+        /* Validate sizes for safe allocation */
+        if (uncompressedSize > (uint64_t)(SIZE_MAX - 1)) {
+            fprintf(stderr, "Corrupted uncompressedSize : %" PRIu64"\n", uncompressedSize);
+            return 0; /* FAILED */
+        }
+        /* Detect suspicious compression ratio (zip bomb protection) */
+        if (uncompressedSize > 1024 * 1024 && uncompressedSize / 100 >= compressedSize) {
+              fprintf(stderr, "Error: suspicious compression ratio\n");
+              return 0; /* FAILED */
+        }
+        uncompressedData = OPENSSL_zalloc(uncompressedSize + 1);
+        destLen = uncompressedSize;
+        sourceLen = compressedSize;
 
         ret = zipInflate(uncompressedData, &destLen, compressedData, (uLong *)&sourceLen);
         OPENSSL_free(compressedData);
@@ -1980,6 +2000,8 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
     header->extraFieldLen = fileGetU16(file);
     /* file name (variable size) */
     if (header->fileNameLen > 0) {
+        /* fileNameLen is uint16_t (ZIP spec, 2-byte field),
+         * so fileNameLen + 1 cannot overflow size_t */
         header->fileName = OPENSSL_zalloc(header->fileNameLen + 1);
         size = fread(header->fileName, 1, header->fileNameLen, file);
         if (size != header->fileNameLen) {
@@ -1991,6 +2013,8 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
     }
     /* extra field (variable size) */
     if (header->extraFieldLen > 0) {
+        /* extraFieldLen is uint16_t (ZIP spec, 2-byte field),
+         * so extraFieldLen + 1 cannot overflow size_t */
         header->extraField = OPENSSL_zalloc(header->extraFieldLen + 1);
         size = fread(header->extraField, 1, header->extraFieldLen, file);
         if (size != header->extraFieldLen) {
@@ -2489,6 +2513,8 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
     entry->offsetOfLocalHeader = fileGetU32(file);
     /* file name (variable size) */
     if (entry->fileNameLen > 0) {
+        /* fileNameLen is uint16_t (ZIP spec, 2-byte field),
+         * so fileNameLen + 1 cannot overflow size_t */
         entry->fileName = OPENSSL_zalloc(entry->fileNameLen + 1);
         size = fread(entry->fileName, 1, entry->fileNameLen, file);
         if (size != entry->fileNameLen) {
@@ -2499,6 +2525,8 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
     }
     /* extra field (variable size) */
     if (entry->extraFieldLen > 0) {
+        /* extraFieldLen is uint16_t (ZIP spec, 2-byte field),
+         * so extraFieldLen + 1 cannot overflow size_t */
         entry->extraField = OPENSSL_zalloc(entry->extraFieldLen + 1);
         size = fread(entry->extraField, 1, entry->extraFieldLen, file);
         if (size != entry->extraFieldLen) {
@@ -2509,6 +2537,8 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
     }
     /* file comment (variable size) */
     if (entry->fileCommentLen > 0) {
+        /* fileCommentLen is uint16_t (ZIP spec, 2-byte field),
+         * so fileCommentLen + 1 cannot overflow size_t */
         entry->fileComment = OPENSSL_zalloc(entry->fileCommentLen + 1);
         size = fread(entry->fileComment, 1, entry->fileCommentLen, file);
         if (size != entry->fileCommentLen) {
@@ -2647,6 +2677,8 @@ static int readZipEOCDR(ZIP_EOCDR *eocdr, FILE *file)
     }
 #endif
     if (eocdr->commentLen > 0) {
+        /* ZIP_EOCDR commentLen is uint16_t (ZIP spec, 2-byte field),
+         * so fileCommentLen + 1 cannot overflow size_t */
         eocdr->comment = OPENSSL_zalloc(eocdr->commentLen + 1);
         size = fread(eocdr->comment, 1, eocdr->commentLen, file);
         if (size != eocdr->commentLen) {
