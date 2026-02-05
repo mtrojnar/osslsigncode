@@ -3082,12 +3082,8 @@ static int verify_content_member_digest(FILE_FORMAT_CTX *ctx, ASN1_TYPE *content
         fprintf(stderr, "Failed to extract SpcIndirectDataContent data\n");
         return 1; /* FAILED */
     }
-    if (spc_extract_digest_safe(idc, mdbuf, &mdtype) < 0) {
-        SpcIndirectDataContent_free(idc);
-        return 1; /* FAILED */
-    }
-    if (mdtype == -1) {
-        fprintf(stderr, "Failed to extract current message digest\n\n");
+    if (spc_indirect_data_content_get_digest(idc, mdbuf, &mdtype) < 0) {
+        fprintf(stderr, "Failed to extract message digest from signature\n\n");
         SpcIndirectDataContent_free(idc);
         return 1; /* FAILED */
     }

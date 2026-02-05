@@ -549,33 +549,6 @@ SpcLink *spc_link_obsolete_get(void)
 }
 
 /*
- * Safely extract digest from SpcIndirectDataContent
- * [in] idc: parsed SpcIndirectDataContent
- * [out] mdbuf: output buffer (must be EVP_MAX_MD_SIZE bytes)
- * [out] mdtype: digest algorithm's NID
- * [returns] -1 on error or digest length on success
- */
-int spc_extract_digest_safe(SpcIndirectDataContent *idc,
-    u_char *mdbuf, int *mdtype)
-{
-    int digest_len;
-
-    if (!idc || !idc->messageDigest || !idc->messageDigest->digest ||
-            !idc->messageDigest->digestAlgorithm) {
-        fprintf(stderr, "Missing digest data\n");
-        return -1;
-    }
-    digest_len = idc->messageDigest->digest->length;
-    if (digest_len <= 0 || digest_len > EVP_MAX_MD_SIZE) {
-        fprintf(stderr, "Invalid digest length: %d\n", digest_len);
-        return -1;
-    }
-    memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)digest_len);
-    *mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
-    return digest_len;
-}
-
-/*
  * [in] mdbuf, cmdbuf: message digests
  * [in] mdtype: message digest algorithm type
  * [returns] 0 on error or 1 on success
@@ -588,6 +561,37 @@ int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype)
     print_hash("Current message digest    ", "", mdbuf, mdlen);
     print_hash("Calculated message digest ", mdok ? "\n" : "    MISMATCH!!!\n", cmdbuf, mdlen);
     return mdok;
+}
+
+/*
+ * Safely extract digest from SpcIndirectDataContent with bounds checking.
+ * This function validates that the digest length from the ASN.1 structure
+ * does not exceed the destination buffer size, preventing buffer overflows
+ * from maliciously crafted signatures.
+ * [in] idc: parsed SpcIndirectDataContent structure
+ * [out] mdbuf: output buffer (must be at least EVP_MAX_MD_SIZE bytes)
+ * [out] mdtype: digest algorithm NID
+ * [returns] digest length on success, -1 on error
+ */
+int spc_indirect_data_content_get_digest(SpcIndirectDataContent *idc, u_char *mdbuf, int *mdtype)
+{
+    int digest_len;
+
+    if (!idc || !idc->messageDigest || !idc->messageDigest->digest ||
+        !idc->messageDigest->digestAlgorithm) {
+        return -1; /* FAILED */
+    }
+    digest_len = idc->messageDigest->digest->length;
+
+    /* Validate digest length to prevent buffer overflow */
+    if (digest_len <= 0 || digest_len > EVP_MAX_MD_SIZE) {
+        fprintf(stderr, "Invalid digest length in signature: %d (expected 1-%d)\n",
+                digest_len, EVP_MAX_MD_SIZE);
+        return -1; /* FAILED */
+    }
+    *mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
+    memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)digest_len);
+    return digest_len; /* OK */
 }
 
 /*
@@ -645,6 +649,10 @@ static int spc_indirect_data_content_create(u_char **blob, int *len, FILE_FORMAT
     idc->data->value->type = V_ASN1_SEQUENCE;
     idc->data->value->value.sequence = ASN1_STRING_new();
     idc->data->type = ctx->format->data_blob_get(&p, &l, ctx);
+    if (!idc->data->type) {
+        SpcIndirectDataContent_free(idc);
+        return 0; /* FAILED */
+    }
     idc->data->value->value.sequence->data = p;
     idc->data->value->value.sequence->length = l;
     idc->messageDigest->digestAlgorithm->algorithm = OBJ_nid2obj(mdtype);
