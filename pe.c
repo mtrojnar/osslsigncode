@@ -255,7 +255,9 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
                 SpcIndirectDataContent_free(idc);
                 return 0; /* FAILED */
             }
-            if (spc_extract_digest_safe(idc, mdbuf, &mdtype) < 0) {
+            if (spc_indirect_data_content_get_digest(idc, mdbuf, &mdtype) < 0) {
+                fprintf(stderr, "Failed to extract message digest from signature\n\n");
+                OPENSSL_free(ph);
                 SpcIndirectDataContent_free(idc);
                 return 0; /* FAILED */
             }
@@ -920,6 +922,8 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
     char *sections;
     const EVP_MD *md = EVP_get_digestbynid(phtype);
     BIO *bhash;
+    uint32_t filebound;
+    size_t pphlen_sz, sections_factor;
 
     /* NumberOfSections indicates the size of the section table,
      * which immediately follows the headers, can be up to 65535 under Vista and later */
@@ -961,8 +965,29 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
         fprintf(stderr, "Corrupted optional header size: 0x%08X\n", opthdr_size);
         return NULL; /* FAILED */
     }
+    /* Validate that pagesize >= hdrsize to prevent integer underflow */
+    if (pagesize < hdrsize) {
+        fprintf(stderr, "Page size (0x%08X) is smaller than header size (0x%08X)\n",
+                pagesize, hdrsize);
+        return NULL; /* FAILED */
+    }
     pphlen = 4 + EVP_MD_size(md);
-    phlen = pphlen * (3 + (int)nsections + (int)(ctx->pe_ctx->fileend / pagesize));
+
+    /* Use size_t arithmetic and check for overflow */
+    pphlen_sz = (size_t)pphlen;
+    sections_factor = 3 + (size_t)nsections + ((size_t)ctx->pe_ctx->fileend / pagesize);
+
+    /* Check for multiplication overflow */
+    if (sections_factor > SIZE_MAX / pphlen_sz) {
+        fprintf(stderr, "Page hash allocation size would overflow\n");
+        return NULL; /* FAILED */
+    }
+    phlen = (int)(pphlen_sz * sections_factor);
+    /* Sanity limit - page hash shouldn't exceed reasonable size (16 MB) */
+    if (phlen < 0 || (size_t)phlen > SIZE_16M) {
+        fprintf(stderr, "Page hash size exceeds limit: %d\n", phlen);
+        return NULL; /* FAILED */
+    }
 
     bhash = BIO_new(BIO_f_md());
 #if defined(__GNUC__)
@@ -1008,13 +1033,23 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
     BIO_gets(bhash, (char*)res + 4, EVP_MD_size(md));
     BIO_free_all(bhash);
     sections = ctx->options->indata + ctx->pe_ctx->header_size + 24 + opthdr_size;
+    /* Determine the file boundary for section data validation */
+    filebound = ctx->pe_ctx->sigpos ? ctx->pe_ctx->sigpos : ctx->pe_ctx->fileend;
     for (i=0; i<nsections; i++) {
-        /* Resource Table address and size */
+        /* SizeOfRawData and PointerToRawData from section header */
         rs = GET_UINT32_LE(sections + 16);
         ro = GET_UINT32_LE(sections + 20);
         if (rs == 0 || rs >= UINT32_MAX) {
             sections += 40;
             continue;
+        }
+        /* Validate section bounds against file size to prevent OOB read */
+        if (ro >= filebound || rs > filebound - ro) {
+            fprintf(stderr, "Section %d has invalid bounds: offset=0x%08X, size=0x%08X, fileend=0x%08X\n",
+                    i, ro, rs, filebound);
+            OPENSSL_free(zeroes);
+            OPENSSL_free(res);
+            return NULL; /* FAILED */
         }
         for (l=0; l<rs; l+=pagesize, pi++) {
             PUT_UINT32_LE(ro + l, res + pi*pphlen);
@@ -1088,6 +1123,10 @@ static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int 
     if (!ph)
         return 1; /* OK */
     cph = pe_page_hash_calc(&cphlen, ctx, phtype);
+    if (!cph) {
+        fprintf(stderr, "Page hash verification failed: could not calculate page hash\n");
+        return 0; /* FAILED */
+    }
     mdok = (phlen == cphlen) && !memcmp(ph, cph, (size_t)phlen);
     printf("Page hash algorithm  : %s\n", OBJ_nid2sn(phtype));
     if (ctx->options->verbose) {
