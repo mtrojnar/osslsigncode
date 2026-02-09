@@ -1047,7 +1047,7 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
         return NULL;  /* FAILED */
     }
     off = ctx->pe_ctx->header_size + 160 + (size_t)ctx->pe_ctx->pe32plus * 16;
-    if (hdrsize < off) {
+    if (hdrsize < off || hdrsize > filebound) {
         BIO_free_all(bhash);
         return NULL;  /* FAILED: header too small */
     }
