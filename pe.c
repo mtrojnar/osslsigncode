@@ -163,8 +163,10 @@ static ASN1_OBJECT *pe_spc_image_data_get(u_char **p, int *plen, FILE_FORMAT_CTX
         if (EVP_MD_size(ctx->options->md) > EVP_MD_size(EVP_sha1()))
             phtype = NID_sha256;
         link = pe_page_hash_link_get(ctx, phtype);
-        if (!link)
+        if (!link) {
+            SpcPeImageData_free(pid);
             return NULL; /* FAILED */
+        }
         pid->file = link;
     } else {
         pid->file = spc_link_obsolete_get();
@@ -404,6 +406,7 @@ static PKCS7 *pe_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
     content = spc_indirect_data_content_get(hash, ctx);
     if (!content) {
         fprintf(stderr, "Failed to get spcIndirectDataContent\n");
+        PKCS7_free(p7);
         return NULL; /* FAILED */
     }
     if (!sign_spc_indirect_data_content(p7, content)) {
