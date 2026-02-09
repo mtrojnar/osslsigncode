@@ -1321,7 +1321,8 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx)
 {
     uint32_t real_pe_checksum, sum = 0;
 
-    if (!ctx) {
+    if (ctx == NULL || ctx->pe_ctx == NULL || ctx->options == NULL
+        || ctx->options->indata == NULL) {
         fprintf(stderr, "Init error\n");
         return 0; /* FAILED */
     }
@@ -1333,25 +1334,52 @@ static int pe_check_file(FILE_FORMAT_CTX *ctx)
         printf("Calculated PE checksum: %08X\n", real_pe_checksum);
         printf("Warning: invalid PE checksum\n");
     }
+    /* Signature directory bounds */
     if (ctx->pe_ctx->sigpos == 0 || ctx->pe_ctx->siglen == 0
-        || ctx->pe_ctx->sigpos > ctx->pe_ctx->fileend) {
+        || ctx->pe_ctx->sigpos > ctx->pe_ctx->fileend
+        || ctx->pe_ctx->siglen > ctx->pe_ctx->fileend - ctx->pe_ctx->sigpos) {
         fprintf(stderr, "No signature found\n");
         return 0; /* FAILED */
     }
     /*
+     * Validate WIN_CERTIFICATE chain.
      * If the sum of the rounded dwLength values does not equal the Size value,
      * then either the attribute certificate table or the Size field is corrupted.
      */
     while (sum < ctx->pe_ctx->siglen) {
-        uint32_t len = GET_UINT32_LE(ctx->options->indata + ctx->pe_ctx->sigpos + sum);
-        if (ctx->pe_ctx->siglen - len > 8) {
+        uint32_t len, off;
+
+        /* Prevent overflow in sigpos + sum */
+        if (sum > UINT32_MAX - ctx->pe_ctx->sigpos) {
             fprintf(stderr, "Corrupted attribute certificate table\n");
-            fprintf(stderr, "Attribute certificate table size  : %08X\n", ctx->pe_ctx->siglen);
-            fprintf(stderr, "Attribute certificate entry length: %08X\n\n", len);
             return 0; /* FAILED */
         }
-        /* quadword align data */
-        len += len % 8 ? 8 - len % 8 : 0;
+        off = ctx->pe_ctx->sigpos + sum;
+
+        /* Need at least 4 bytes to read dwLength */
+        if (off > ctx->pe_ctx->fileend || ctx->pe_ctx->fileend - off < 4) {
+            fprintf(stderr, "Corrupted attribute certificate table\n");
+            return 0; /* FAILED */
+        }
+        len = GET_UINT32_LE(ctx->options->indata + off);
+
+        /* dwLength must include the 8-byte WIN_CERTIFICATE header */
+        if (len < 8 || len > ctx->pe_ctx->siglen - sum || len > ctx->pe_ctx->fileend - off) {
+            fprintf(stderr, "Corrupted attribute certificate table\n");
+            return 0; /* FAILED */
+        }
+
+        /* Quadword align data */
+        if (len % 8) {
+            uint32_t pad = 8 - (len % 8);
+
+            /* Ensure quadword alignment does not overflow or exceed remaining table size */
+            if (pad > ctx->pe_ctx->siglen - sum - len) {
+                fprintf(stderr, "Corrupted attribute certificate table\n");
+                return 0; /* FAILED */
+            }
+            len += pad;
+        }
         sum += len;
     }
     if (sum != ctx->pe_ctx->siglen) {
