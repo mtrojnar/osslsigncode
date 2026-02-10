@@ -1,5 +1,7 @@
 # osslsigncode change log
 
+### 2.14 (unreleased)
+
 ### 2.13 (2026.02.10)
 
 **MULTIPLE SECURITY VULNERABILITIES**
