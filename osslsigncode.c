@@ -5324,6 +5324,9 @@ err_cleanup:
     if (ctx && ctx->format->ctx_cleanup) {
         ctx->format->ctx_cleanup(ctx);
     }
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+    providers_cleanup();
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
     if (ret)
         ERR_print_errors_fp(stderr);
     if (options.cmd == CMD_HELP)
@@ -5360,11 +5363,6 @@ int main(int argc, char **argv)
     ret = main_execute(argc, argv);
 
 err_cleanup:
-    /* one-time OpenSSL cleanup */
-#if OPENSSL_VERSION_NUMBER>=0x30000000L
-    providers_cleanup();
-#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
-
     return ret;
 }
 
