@@ -1,6 +1,19 @@
 # osslsigncode change log
 
-### 2.13 (unreleased)
+### 2.13 (2026.02.10)
+
+**MULTIPLE SECURITY VULNERABILITIES**
+
+This release includes important security fixes. Users are strongly encouraged
+to upgrade, as the issues below may be exploitable when processing untrusted
+files.
+
+- fixed integer overflows when processing APPX compressed data streams
+  (by Małgorzata Olszówka)
+- fixed double-free vulnerabilities in APPX file processing
+  (by Małgorzata Olszówka)
+- fixed multiple memory corruption issues in PE page hash computation
+  (by Antoni Klajn (Opera) and Małgorzata Olszówka)
 
 ### 2.12 (2026.02.02)
 
