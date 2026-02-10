@@ -5078,7 +5078,7 @@ static void engine_control_set(GLOBAL_OPTIONS *options, const char *arg)
 }
 #endif /* OPENSSL_NO_ENGINE */
 
-int main(int argc, char **argv)
+static int main_execute(int argc, char **argv)
 {
     FILE_FORMAT_CTX *ctx = NULL;
     GLOBAL_OPTIONS options;
@@ -5089,24 +5089,6 @@ int main(int argc, char **argv)
 
     /* reset options */
     memset(&options, 0, sizeof(GLOBAL_OPTIONS));
-
-    /* Set up OpenSSL */
-    if (!OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CRYPTO_STRINGS
-        | OPENSSL_INIT_ADD_ALL_CIPHERS
-        | OPENSSL_INIT_ADD_ALL_DIGESTS
-        | OPENSSL_INIT_LOAD_CONFIG, NULL))
-        DO_EXIT_0("Failed to init crypto\n");
-
-    /* create some MS Authenticode OIDS we need later on */
-    if (!OBJ_create(SPC_STATEMENT_TYPE_OBJID, NULL, NULL)
-        /* PKCS9_COUNTER_SIGNATURE exists as OpenSSL OBJ_pkcs9_countersignature */
-        || !OBJ_create(MS_JAVA_SOMETHING, NULL, NULL)
-        || !OBJ_create(SPC_SP_OPUS_INFO_OBJID, NULL, NULL)
-        || !OBJ_create(SPC_NESTED_SIGNATURE_OBJID, NULL, NULL)
-        || !OBJ_create(SPC_UNAUTHENTICATED_DATA_BLOB_OBJID, NULL, NULL)
-        || !OBJ_create(SPC_RFC3161_OBJID, NULL, NULL)
-        || !OBJ_create(PKCS9_SEQUENCE_NUMBER, NULL, NULL))
-        DO_EXIT_0("Failed to create objects\n");
 
     /* commands and options initialization */
     if (!main_configure(argc, argv, &options))
@@ -5342,9 +5324,6 @@ err_cleanup:
     if (ctx && ctx->format->ctx_cleanup) {
         ctx->format->ctx_cleanup(ctx);
     }
-#if OPENSSL_VERSION_NUMBER>=0x30000000L
-    providers_cleanup();
-#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
     if (ret)
         ERR_print_errors_fp(stderr);
     if (options.cmd == CMD_HELP)
@@ -5352,6 +5331,40 @@ err_cleanup:
     else
         printf(ret ? "Failed\n" : "Succeeded\n");
     free_options(&options);
+    return ret;
+}
+
+int main(int argc, char **argv)
+{
+    int ret = -1;
+
+    /* one-time OpenSSL initialization */
+    if (!OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CRYPTO_STRINGS
+        | OPENSSL_INIT_ADD_ALL_CIPHERS
+        | OPENSSL_INIT_ADD_ALL_DIGESTS
+        | OPENSSL_INIT_LOAD_CONFIG, NULL))
+        DO_EXIT_0("Failed to init crypto\n");
+
+    /* create some MS Authenticode OIDS we need later on */
+    if (!OBJ_create(SPC_STATEMENT_TYPE_OBJID, NULL, NULL)
+        /* PKCS9_COUNTER_SIGNATURE exists as OpenSSL OBJ_pkcs9_countersignature */
+        || !OBJ_create(MS_JAVA_SOMETHING, NULL, NULL)
+        || !OBJ_create(SPC_SP_OPUS_INFO_OBJID, NULL, NULL)
+        || !OBJ_create(SPC_NESTED_SIGNATURE_OBJID, NULL, NULL)
+        || !OBJ_create(SPC_UNAUTHENTICATED_DATA_BLOB_OBJID, NULL, NULL)
+        || !OBJ_create(SPC_RFC3161_OBJID, NULL, NULL)
+        || !OBJ_create(PKCS9_SEQUENCE_NUMBER, NULL, NULL))
+        DO_EXIT_0("Failed to create objects\n");
+
+    /* perform the requested operation */
+    ret = main_execute(argc, argv);
+
+err_cleanup:
+    /* one-time OpenSSL cleanup */
+#if OPENSSL_VERSION_NUMBER>=0x30000000L
+    providers_cleanup();
+#endif /* OPENSSL_VERSION_NUMBER>=0x30000000L */
+
     return ret;
 }
 
