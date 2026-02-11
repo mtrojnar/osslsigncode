@@ -91,6 +91,8 @@ const u_char purpose_comm[] = {
     0x01, 0x82, 0x37, 0x02, 0x01, 0x16
 };
 
+static UI_METHOD *ui_method;
+
 /*
  * ASN.1 definitions (more or less from official MS Authenticode docs)
  */
@@ -4429,19 +4431,15 @@ static int ui_read(UI *ui, UI_STRING *uis)
 }
 
 static UI_METHOD *ui_osslsigncode(void) {
-    static UI_METHOD *ui_method=NULL;
+    UI_METHOD *ui = UI_create_method("osslsigncode UI");
 
-    if (ui_method) /* already initialized */
-        return ui_method;
-    ui_method = UI_create_method("osslsigncode UI");
-    if (!ui_method) {
-        return NULL;
+    if (ui) {
+        UI_method_set_opener(ui, UI_method_get_opener(UI_OpenSSL()));
+        UI_method_set_writer(ui, UI_method_get_writer(UI_OpenSSL()));
+        UI_method_set_reader(ui, ui_read);
+        UI_method_set_closer(ui, UI_method_get_closer(UI_OpenSSL()));
     }
-    UI_method_set_opener(ui_method, UI_method_get_opener(UI_OpenSSL()));
-    UI_method_set_writer(ui_method, UI_method_get_writer(UI_OpenSSL()));
-    UI_method_set_reader(ui_method, ui_read);
-    UI_method_set_closer(ui_method, UI_method_get_closer(UI_OpenSSL()));
-    return ui_method;
+    return ui;
 }
 
  /* store_type == 0 means here multiple types of credentials are to be loaded */
@@ -4452,7 +4450,7 @@ static void load_objects_from_store(const char *url, char *pass, EVP_PKEY **pkey
     if (!url)
         return;
 
-    store_ctx = OSSL_STORE_open(url, ui_osslsigncode(), pass, NULL, NULL);
+    store_ctx = OSSL_STORE_open(url, ui_method, pass, NULL, NULL);
     if (!store_ctx)
         return;
 
@@ -4553,7 +4551,6 @@ static void providers_cleanup(void)
 {
     sk_OSSL_PROVIDER_pop_free(providers, provider_free);
     providers = NULL;
-    UI_destroy_method(ui_osslsigncode());
 }
 
 static int provider_load(const char *pname)
@@ -5359,10 +5356,14 @@ int main(int argc, char **argv)
         || !OBJ_create(PKCS9_SEQUENCE_NUMBER, NULL, NULL))
         DO_EXIT_0("Failed to create objects\n");
 
+    ui_method = ui_osslsigncode();
+
     /* perform the requested operation */
     ret = main_execute(argc, argv);
 
 err_cleanup:
+    UI_destroy_method(ui_method);
+
     return ret;
 }
 
