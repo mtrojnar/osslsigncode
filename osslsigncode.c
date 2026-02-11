@@ -5356,14 +5356,12 @@ int main(int argc, char **argv)
         || !OBJ_create(PKCS9_SEQUENCE_NUMBER, NULL, NULL))
         DO_EXIT_0("Failed to create objects\n");
 
-    ui_method = ui_osslsigncode();
-
     /* perform the requested operation */
+    ui_method = ui_osslsigncode();
     ret = main_execute(argc, argv);
-
-err_cleanup:
     UI_destroy_method(ui_method);
 
+err_cleanup:
     return ret;
 }
 
