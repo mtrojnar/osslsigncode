@@ -67,7 +67,7 @@
  * 2:d=1  hl=2 l=   2 prim:  BIT STRING
  * 6:d=1  hl=2 l=   0 cons:  SEQUENCE
 */
-const u_char java_attrs_low[] = {
+static const u_char java_attrs_low[] = {
     0x30, 0x06, 0x03, 0x02, 0x00, 0x01, 0x30, 0x00
 };
 
@@ -76,7 +76,7 @@ const u_char java_attrs_low[] = {
  * 0:d=0  hl=2 l=  12 cons: SEQUENCE
  * 2:d=1  hl=2 l=  10 prim:  OBJECT     :Microsoft Individual Code Signing
 */
-const u_char purpose_ind[] = {
+static const u_char purpose_ind[] = {
     0x30, 0x0c, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04,
     0x01, 0x82, 0x37, 0x02, 0x01, 0x15
 };
@@ -86,7 +86,7 @@ const u_char purpose_ind[] = {
  * 0:d=0  hl=2 l=  12 cons: SEQUENCE
  * 2:d=1  hl=2 l=  10 prim:  OBJECT     :Microsoft Commercial Code Signing
 */
-const u_char purpose_comm[] = {
+static const u_char purpose_comm[] = {
     0x30, 0x0c, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04,
     0x01, 0x82, 0x37, 0x02, 0x01, 0x16
 };
