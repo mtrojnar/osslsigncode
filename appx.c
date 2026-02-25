@@ -1923,11 +1923,13 @@ static size_t zipReadFileData(ZIP_FILE *zip, uint8_t **pData, ZIP_CENTRAL_DIRECT
         /* Validate sizes for safe allocation */
         if (uncompressedSize > (uint64_t)(SIZE_MAX - 1)) {
             fprintf(stderr, "Corrupted uncompressedSize : %" PRIu64"\n", uncompressedSize);
+            OPENSSL_free(compressedData);
             return 0; /* FAILED */
         }
         /* Detect suspicious compression ratio (zip bomb protection) */
         if (uncompressedSize > 1024 * 1024 && uncompressedSize / 100 >= compressedSize) {
               fprintf(stderr, "Error: suspicious compression ratio\n");
+              OPENSSL_free(compressedData);
               return 0; /* FAILED */
         }
         uncompressedData = OPENSSL_zalloc(uncompressedSize + 1);
