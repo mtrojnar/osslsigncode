@@ -1085,7 +1085,6 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
         return NULL;  /* FAILED */
     }
     BIO_free_all(bhash);
-    bhash = NULL;
 
     for (i = 0; i < (int)nsections; i++) {
         /* SizeOfRawData and PointerToRawData from section header */
@@ -1177,7 +1176,6 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
                 return NULL;  /* FAILED */
             }
             BIO_free_all(bhash);
-            bhash = NULL;
         }
         lastpos = ro + rs;
         sections += 40;
