@@ -196,18 +196,12 @@ if(Python3_FOUND AND NOT cryptography_error)
         foreach(format ${formats})
             add_test(NAME "attached_${format}_${ext}"
                 COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "attach-signature"
-                # sign options
                 "-add-msi-dse"
                 "-h" "sha512"
                 "-nest"
                 "-sigin" "${FILES}/${ext}.${format}"
                 "-in" "${FILES}/signed.${ext}"
-                "-out" "${FILES}/attached_${format}.${ext}"
-                # verify options
-                "-require-leaf-hash" "FILE ${CERTS}/leafhash.txt"
-                "-time" "1567296000" # Signature verification time: Sep  1 00:00:00 2019 GMT
-                "-CAfile" "${CERTS}/CACert.pem"
-                "-CRLfile" "${CERTS}/CACertCRL.pem")
+                "-out" "${FILES}/attached_${format}.${ext}")
             set_tests_properties("attached_${format}_${ext}" PROPERTIES
                 DEPENDS "signed_${ext};extract_pem_${ext};extract_der_${ext}")
             list(APPEND ALL_TESTS "attached_${format}_${ext}")
@@ -413,17 +407,11 @@ if(Python3_FOUND AND NOT cryptography_error)
             foreach(format ${formats})
                 add_test(NAME "attached_data_${ext}_${data_format}_${format}"
                     COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "attach-signature"
-                    # sign options
                     "-add-msi-dse"
                     "-h" "sha384"
                     "-sigin" "${FILES}/signed_data_${ext}_${data_format}.${format}"
                     "-in" "${FILES}/unsigned.${ext}"
-                    "-out" "${FILES}/attached_data_${data_format}_${format}.${ext}"
-                    # verify options
-                    "-require-leaf-hash" "FILE ${CERTS}/leafhash.txt"
-                    "-time" "1567296000" # Signature verification time: Sep  1 00:00:00 2019 GMT
-                    "-CAfile" "${CERTS}/CACert.pem"
-                    "-CRLfile" "${CERTS}/CACertCRL.pem")
+                    "-out" "${FILES}/attached_data_${data_format}_${format}.${ext}")
                 set_tests_properties("attached_data_${ext}_${data_format}_${format}" PROPERTIES
                     DEPENDS "signed_data_${ext}_${data_format};signed_data_pem_${ext}_${data_format}")
                 list(APPEND ALL_TESTS "attached_data_${ext}_${data_format}_${format}")

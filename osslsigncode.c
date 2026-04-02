@@ -243,6 +243,7 @@ static int X509_attribute_chain_append_object(STACK_OF(X509_ATTRIBUTE) **unauth_
 static STACK_OF(PKCS7) *signature_list_create(PKCS7 *p7);
 static int PKCS7_compare(const PKCS7 *const *a, const PKCS7 *const *b);
 static PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
+static STACK_OF(PKCS7) *get_signature_list(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options);
 static void print_cert(X509 *cert, int i);
 static int x509_store_load_crlfile(X509_STORE *store, char *cafile, char *crlfile);
 static void load_objects_from_store(const char *url, char *pass, EVP_PKEY **pkey, STACK_OF(X509) *certs, STACK_OF(X509_CRL) *crls);
@@ -3239,91 +3240,67 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 }
 
 /*
- * [in] ctx: structure holds input and output data
+ * Verifies signatures in a file.
+ * [in] ctx: file format context (input/output data)
+ * [in] options: verification options
+ * [in] verify_signature_flag:
+ *      - non-zero: verify both digest and cryptographic signature
+ *      - zero: verify only digest/content consistency (no signature validation)
  * [returns] 1 on error or 0 on success
  */
-static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
+static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options,
+    int verify_signature_flag)
 {
     int i, ret = 1, verified = 0;
-    PKCS7 *p7;
-    STACK_OF(PKCS7) *signatures = NULL;
     int detached = options->catalog ? 1 : 0;
+    STACK_OF(PKCS7) *signatures = NULL;
 
-    if (detached) {
-        GLOBAL_OPTIONS *cat_options;
-        FILE_FORMAT_CTX *cat_ctx;
-
-        if (!ctx->format->is_detaching_supported || !ctx->format->is_detaching_supported()) {
-            fprintf(stderr, "This format does not support detached PKCS#7 signature\n");
-            return 1; /* FAILED */
-        }
-        printf("Checking the specified catalog file\n\n");
-        cat_options = OPENSSL_memdup(options, sizeof(GLOBAL_OPTIONS));
-        if (!cat_options) {
-            fprintf(stderr, "OPENSSL_memdup error.\n");
-            return 1; /* FAILED */
-        }
-        cat_options->infile = options->catalog;
-        cat_options->cmd = CMD_EXTRACT;
-        cat_ctx = file_format_cat.ctx_new(cat_options, NULL, NULL);
-        if (!cat_ctx) {
-            fprintf(stderr, "CAT file initialization error\n");
-            return 1; /* FAILED */
-        }
-        if (!cat_ctx->format->pkcs7_extract) {
-            fprintf(stderr, "Unsupported command: extract-signature\n");
-            return 1; /* FAILED */
-        }
-        p7 = cat_ctx->format->pkcs7_extract(cat_ctx);
-        cat_ctx->format->ctx_cleanup(cat_ctx);
-        OPENSSL_free(cat_options);
-    } else {
-        if (!ctx->format->pkcs7_extract) {
-            fprintf(stderr, "Unsupported command: extract-signature\n");
-            return 1; /* FAILED */
-        }
-        p7 = ctx->format->pkcs7_extract(ctx);
-    }
-    if (!p7) {
-        fprintf(stderr, "Unable to extract existing signature\n");
+    signatures = get_signature_list(ctx, options);
+    if (!signatures)
         return 1; /* FAILED */
-    }
-    signatures = signature_list_create(p7);
-    if (!signatures) {
-        fprintf(stderr, "Failed to create signature list\n\n");
+
+    if (!detached && !ctx->format->verify_digests) {
+        fprintf(stderr, "Unsupported method: verify_digests\n");
         sk_PKCS7_pop_free(signatures, PKCS7_free);
         return 1; /* FAILED */
     }
+
     for (i = 0; i < sk_PKCS7_num(signatures); i++) {
         PKCS7 *sig;
+        int digest_ok = 0;
 
         if (options->index >= 0 && options->index != i) {
             printf("Warning: signature verification at index %d was skipped\n", i);
             continue;
         }
+
         sig = sk_PKCS7_value(signatures, i);
+        printf("\nSignature Index: %d %s\n\n", i, i == 0 ? " (Primary Signature)" : "");
+
         if (detached) {
-            if (!verify_content(ctx, sig)) {
-                ret &= verify_signature(ctx, sig);
-            } else {
+            digest_ok = (verify_content(ctx, sig) == 0);
+            if (!digest_ok)
                 printf("Catalog verification: failed\n\n");
-            }
-            verified++;
-        } else if (ctx->format->verify_digests) {
-            printf("\nSignature Index: %d %s\n\n", i, i==0 ? " (Primary Signature)" : "");
-            if (ctx->format->verify_digests(ctx, sig)) {
+        } else {
+            digest_ok = (ctx->format->verify_digests(ctx, sig) != 0);
+        }
+        if (digest_ok) {
+            if (!verify_signature_flag) {
+                /* success: at least one digest matches */
+                ret = 0;
+            } else {
+                /* success if at least one valid signature is found */
                 ret &= verify_signature(ctx, sig);
             }
-            verified++;
-        } else {
-            fprintf(stderr, "Unsupported method: verify_digests\n");
-            return 1; /* FAILED */
         }
+        verified++;
     }
     printf("Number of verified signatures: %d\n", verified);
     sk_PKCS7_pop_free(signatures, PKCS7_free);
+
     if (ret)
         ERR_print_errors_fp(stderr);
+
     return ret;
 }
 
@@ -3500,8 +3477,72 @@ static PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx)
 }
 
 /*
+ * Extracts PKCS#7 object and creates a list of signatures
+ * [in] ctx: file format context
+ * [in] options: structure holds input parameters
+ * [returns] STACK_OF(PKCS7) on success or NULL on error
+ */
+static STACK_OF(PKCS7) *get_signature_list(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options)
+{
+    PKCS7 *p7;
+    STACK_OF(PKCS7) *signatures;
+
+    if (options->catalog) {
+        GLOBAL_OPTIONS *cat_options;
+        FILE_FORMAT_CTX *cat_ctx;
+
+        if (!ctx->format->is_detaching_supported || !ctx->format->is_detaching_supported()) {
+            fprintf(stderr, "This format does not support detached PKCS#7 signature\n");
+            return NULL;
+        }
+        printf("Checking the specified catalog file\n\n");
+        cat_options = OPENSSL_memdup(options, sizeof(GLOBAL_OPTIONS));
+        if (!cat_options) {
+            fprintf(stderr, "OPENSSL_memdup error\n");
+            return NULL;
+        }
+        cat_options->infile = options->catalog;
+        cat_options->cmd = CMD_EXTRACT;
+        cat_ctx = file_format_cat.ctx_new(cat_options, NULL, NULL);
+        if (!cat_ctx) {
+            fprintf(stderr, "CAT file initialization error\n");
+            OPENSSL_free(cat_options);
+            return NULL;
+        }
+        if (!cat_ctx->format->pkcs7_extract) {
+            fprintf(stderr, "Unsupported command: extract-signature\n");
+            cat_ctx->format->ctx_cleanup(cat_ctx);
+            OPENSSL_free(cat_options);
+            return NULL;
+        }
+        p7 = cat_ctx->format->pkcs7_extract(cat_ctx);
+        cat_ctx->format->ctx_cleanup(cat_ctx);
+        OPENSSL_free(cat_options);
+    } else {
+        if (!ctx->format->pkcs7_extract) {
+            fprintf(stderr, "Unsupported command: extract-signature\n");
+            return NULL;
+        }
+        p7 = ctx->format->pkcs7_extract(ctx);
+    }
+    if (!p7) {
+        fprintf(stderr, "Unable to extract existing signature\n");
+        return NULL;
+    }
+    signatures = signature_list_create(p7);
+    if (!signatures) {
+        fprintf(stderr, "Failed to create signature list\n\n");
+        PKCS7_free(p7);
+        return NULL;
+    }
+
+    return signatures;
+}
+
+/*
+ * Verifies integrity of data after attaching a signature.
  * [in] options: structure holds the input data
- * [returns] 1 on error or 0 on success
+ * [returns] 0 on success, 1 on error or mismatch
  */
 static int check_attached_data(GLOBAL_OPTIONS *options)
 {
@@ -3532,7 +3573,8 @@ static int check_attached_data(GLOBAL_OPTIONS *options)
         OPENSSL_free(tmp_options);
         return 1; /* FAILED */
     }
-    if (verify_signed_file(ctx, tmp_options)) {
+    /* Check that attached data matches PKCS#7 digest (no signature validation) */
+    if (verify_signed_file(ctx, tmp_options, 0)) {
         fprintf(stderr, "Signature mismatch\n");
         ctx->format->ctx_cleanup(ctx);
         OPENSSL_free(tmp_options);
@@ -3663,13 +3705,7 @@ static void usage(const char *argv0, const char *cmd)
     }
     if (on_list(cmd, cmds_attach)) {
         printf("%1sattach-signature [ -sigin ] <file>\n", "");
-        printf("%12s[ -CAfile <file> ]\n", "");
-        printf("%12s[ -CRLfile <file> ]\n", "");
-        printf("%12s[ -TSA-CAfile <file> ]\n", "");
-        printf("%12s[ -TSA-CRLfile <file> ]\n", "");
-        printf("%12s[ -time <unix-time> ]\n", "");
         printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
-        printf("%12s[ -require-leaf-hash {md5,sha1,sha2(56),sha384,sha512}:XXXXXXXXXXXX... ]\n", "");
         printf("%12s[ -nest ]\n", "");
         printf("%12s[ -add-msi-dse ]\n", "");
         printf("%12s[ -in ] <file> [ -out ] <file>\n\n", "");
@@ -3720,13 +3756,13 @@ static void help_for(const char *argv0, const char *cmd)
 #ifdef PROVIDE_ASKPASS
     const char *cmds_askpass[] = {"sign", NULL};
 #endif /* PROVIDE_ASKPASS */
-    const char *cmds_CAfile[] = {"attach-signature", "verify", NULL};
+    const char *cmds_CAfile[] = {"verify", NULL};
     const char *cmds_catalog[] = {"verify", NULL};
     const char *cmds_certs[] = {"sign", NULL};
     const char *cmds_comm[] = {"sign", NULL};
-    const char *cmds_CRLfile[] = {"attach-signature", "verify", NULL};
+    const char *cmds_CRLfile[] = {"verify", NULL};
     const char *cmds_CRLfileHTTPS[] = {"add", "sign", "verify", NULL};
-    const char *cmds_CRLfileTSA[] = {"attach-signature", "verify", NULL};
+    const char *cmds_CRLfileTSA[] = {"verify", NULL};
     const char *cmds_h[] = {"add", "attach-signature", "sign", "extract-data", NULL};
     const char *cmds_i[] = {"sign", NULL};
     const char *cmds_in[] = {"add", "attach-signature", "extract-signature",
@@ -3760,16 +3796,16 @@ static void help_for(const char *argv0, const char *cmd)
 #endif /* OPENSSL_NO_ENGINE */
     const char *cmds_pkcs12[] = {"sign", NULL};
     const char *cmds_readpass[] = {"sign", NULL};
-    const char *cmds_require_leaf_hash[] = {"attach-signature", "verify", NULL};
+    const char *cmds_require_leaf_hash[] = {"verify", NULL};
     const char *cmds_sigin[] = {"attach-signature", NULL};
-    const char *cmds_time[] = {"attach-signature", "sign", "verify", NULL};
+    const char *cmds_time[] = {"sign", "verify", NULL};
     const char *cmds_ignore_timestamp[] = {"verify", NULL};
     const char *cmds_ignore_cdp[] = {"verify", NULL};
     const char *cmds_ignore_crl[] = {"verify", NULL};
     const char *cmds_t[] = {"add", "sign", NULL};
     const char *cmds_ts[] = {"add", "sign", NULL};
     const char *cmds_CAfileHTTPS[] = {"add", "sign", "verify", NULL};
-    const char *cmds_CAfileTSA[] = {"attach-signature", "verify", NULL};
+    const char *cmds_CAfileTSA[] = {"verify", NULL};
     const char *cmds_certsTSA[] = {"add", "sign", NULL};
     const char *cmds_keyTSA[] = {"add", "sign", NULL};
     const char *cmds_timeTSA[] = {"add", "sign", NULL};
@@ -3789,6 +3825,7 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%-22s = add an unauthenticated blob or a timestamp to a previously-signed file\n", "add");
         printf("%-22s = sign file using a given signature\n", "attach-signature");
         printf("%-22s = extract signature from a previously-signed file\n", "extract-signature");
+        printf("%-22s = extract a data content to be signed\n", "extract-data");
         printf("%-22s = remove sections of the embedded signature on a file\n", "remove-signature");
         printf("%-22s = digitally sign a file\n", "sign");
         printf("%-22s = verifies the digital signature of a file\n\n", "verify");
@@ -3800,8 +3837,6 @@ static void help_for(const char *argv0, const char *cmd)
     }
     if (on_list(cmd, cmds_attach)) {
         printf("\nUse the \"attach-signature\" command to attach the signature stored in the \"sigin\" file.\n");
-        printf("In order to verify this signature you should specify how to find needed CA or TSA\n");
-        printf("certificates, if appropriate.\n\n");
         printf("Options:\n");
     }
     if (on_list(cmd, cmds_extract)) {
@@ -4655,7 +4690,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
     if (cmd == CMD_HELP) {
         return 0; /* FAILED */
     }
-    if (cmd == CMD_SIGN || cmd == CMD_VERIFY || cmd == CMD_ATTACH) {
+    if (cmd == CMD_SIGN || cmd == CMD_VERIFY) {
         options->cafile = get_cafile();
         options->https_cafile = get_cafile();
         options->tsa_cafile = get_cafile();
@@ -4820,7 +4855,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->url = *(++argv);
-        } else if ((cmd == CMD_ATTACH || cmd == CMD_SIGN || cmd == CMD_VERIFY)
+        } else if ((cmd == CMD_SIGN || cmd == CMD_VERIFY)
                 && (!strcmp(*argv, "-time") || !strcmp(*argv, "-st"))) {
             if (--argc < 1) {
                 usage(argv0, "all");
@@ -4889,14 +4924,14 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->catalog = *(++argv);
-        } else if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && !strcmp(*argv, "-CAfile")) {
+        } else if (cmd == CMD_VERIFY && !strcmp(*argv, "-CAfile")) {
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
             OPENSSL_free(options->cafile);
             options->cafile = OPENSSL_strdup(*++argv);
-        } else if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && !strcmp(*argv, "-CRLfile")) {
+        } else if (cmd == CMD_VERIFY && !strcmp(*argv, "-CRLfile")) {
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
@@ -4917,20 +4952,20 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->https_crlfile = OPENSSL_strdup(*++argv);
-        } else if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && (!strcmp(*argv, "-untrusted") || !strcmp(*argv, "-TSA-CAfile"))) {
+        } else if (cmd == CMD_VERIFY && (!strcmp(*argv, "-untrusted") || !strcmp(*argv, "-TSA-CAfile"))) {
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
             OPENSSL_free(options->tsa_cafile);
             options->tsa_cafile = OPENSSL_strdup(*++argv);
-        } else if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && (!strcmp(*argv, "-CRLuntrusted") || !strcmp(*argv, "-TSA-CRLfile"))) {
+        } else if (cmd == CMD_VERIFY && (!strcmp(*argv, "-CRLuntrusted") || !strcmp(*argv, "-TSA-CRLfile"))) {
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
             options->tsa_crlfile = OPENSSL_strdup(*++argv);
-        } else if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && !strcmp(*argv, "-require-leaf-hash")) {
+        } else if (cmd == CMD_VERIFY && !strcmp(*argv, "-require-leaf-hash")) {
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
@@ -5047,7 +5082,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
         return 0; /* FAILED */
     }
 #ifndef WIN32
-    if ((cmd == CMD_VERIFY || cmd == CMD_ATTACH) && access(options->cafile, R_OK)) {
+    if (cmd == CMD_VERIFY && access(options->cafile, R_OK)) {
         printf("Use the \"-CAfile\" option to add one or more trusted CA certificates to verify the signature.\n");
         return 0; /* FAILED */
     }
@@ -5141,7 +5176,7 @@ static int main_execute(int argc, char **argv)
         DO_EXIT_0("Initialization error or unsupported input file type.\n");
     }
     if (options.cmd == CMD_VERIFY) {
-        ret = verify_signed_file(ctx, &options);
+        ret = verify_signed_file(ctx, &options, 1);
         goto skip_signing;
     } else if (options.cmd == CMD_EXTRACT_DATA) {
         if (!ctx->format->pkcs7_contents_get) {
@@ -5288,13 +5323,15 @@ skip_signing:
     }
     if (!ret && options.cmd == CMD_ATTACH) {
         ret = check_attached_data(&options);
-        if (!ret)
+        if (!ret) {
             printf("Signature successfully attached\n");
-        /* else
-         * the new PKCS#7 signature has been successfully appended to the outfile
-         * but only its verification failed (incorrect verification parameters?)
-         * so the output file is not deleted
-         */
+        } else {
+            /*
+             * The output file was created, but its content does not match
+             * the attached PKCS#7 digest, so it is treated as invalid and removed.
+             */
+            remove_file(options.outfile);
+        }
     }
 
 err_cleanup:
