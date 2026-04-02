@@ -2,6 +2,9 @@
 
 ### 2.14 (unreleased)
 
+- attach-signature now uses digest-only verification instead of full signature
+  validation; output file is not kept if digest verification fails
+
 ### 2.13 (2026.02.10)
 
 **MULTIPLE SECURITY VULNERABILITIES**
