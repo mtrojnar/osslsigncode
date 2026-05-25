@@ -97,20 +97,40 @@ set_target_properties(osslsigncode PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
 # testing with CTest
 include(CMakeTest)
 
+# documentation with Pandoc
+include(CMakeDoc)
+
 # installation rules for a project
-set(BINDIR "${CMAKE_INSTALL_PREFIX}/bin")
-install(TARGETS osslsigncode RUNTIME DESTINATION ${BINDIR})
+include(GNUInstallDirs)
+
+install(TARGETS osslsigncode RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+install(FILES
+    "${PROJECT_SOURCE_DIR}/README.md"
+    "${PROJECT_SOURCE_DIR}/NEWS.md"
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+
 if(UNIX)
     include(CMakeDist)
 else(UNIX)
     install(
-        DIRECTORY ${PROJECT_BINARY_DIR}/ DESTINATION ${BINDIR}
+        DIRECTORY ${PROJECT_BINARY_DIR}/
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
         FILES_MATCHING
         PATTERN "*.dll"
         PATTERN "vcpkg_installed" EXCLUDE
         PATTERN "CMakeFiles" EXCLUDE
         PATTERN "Testing" EXCLUDE)
 endif(UNIX)
+
+# uninstall target
+configure_file(
+    "${PROJECT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in"
+    "${PROJECT_BINARY_DIR}/cmake_uninstall.cmake"
+    IMMEDIATE @ONLY)
+
+add_custom_target(uninstall
+    COMMAND ${CMAKE_COMMAND} -P "${PROJECT_BINARY_DIR}/cmake_uninstall.cmake")
 
 #[[
 Local Variables:
