@@ -393,23 +393,22 @@ static int cat_print_content_member_digest(ASN1_TYPE *content)
 {
     SpcIndirectDataContent *idc;
     u_char mdbuf[EVP_MAX_MD_SIZE];
-    const u_char *data ;
     int mdtype = -1;
-    ASN1_STRING *value;
 
-    value = content->value.sequence;
-    data = ASN1_STRING_get0_data(value);
-    idc = d2i_SpcIndirectDataContent(NULL, &data, ASN1_STRING_length(value));
+    idc = asn1_type_get_indirect_data_content(content);
     if (!idc)
         return 0; /* FAILED */
+
     if (spc_indirect_data_content_get_digest(idc, mdbuf, &mdtype) < 0) {
         fprintf(stderr, "Failed to extract message digest from signature\n\n");
         SpcIndirectDataContent_free(idc);
         return 0; /* FAILED */
     }
     SpcIndirectDataContent_free(idc);
+
     printf("\tHash algorithm: %s\n", OBJ_nid2sn(mdtype));
     print_hash("\tMessage digest", "", mdbuf, EVP_MD_size(EVP_get_digestbynid(mdtype)));
+
     return 1; /* OK */
 }
 

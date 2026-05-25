@@ -342,6 +342,91 @@ PKCS7 *pkcs7_set_content(ASN1_OCTET_STRING *content)
 }
 
 /*
+ * Retrieve the message digest and digest algorithm from PKCS7
+ * SpcIndirectDataContent.
+ *
+ * [in] p7: PKCS7 structure containing SPC_INDIRECT_DATA_OBJID content
+ * [out] mdbuf: message digest buffer, at least EVP_MAX_MD_SIZE bytes
+ * [out] mdtype: OpenSSL NID of the digest algorithm
+ * [returns] 0 on error or 1 on success
+ */
+int pkcs7_get_content_digest(PKCS7 *p7, u_char *mdbuf, int *mdtype)
+{
+    SpcIndirectDataContent *idc;
+
+    if (!mdbuf || !mdtype)
+        return 0; /* FAILED */
+
+    *mdtype = -1;
+
+    idc = pkcs7_get_indirect_data_content(p7);
+    if (!idc) {
+        fprintf(stderr, "Failed to decode SpcIndirectDataContent\n\n");
+        return 0; /* FAILED */
+    }
+    if (spc_indirect_data_content_get_digest(idc, mdbuf, mdtype) < 0) {
+        fprintf(stderr, "Failed to extract message digest from signature\n\n");
+        SpcIndirectDataContent_free(idc);
+        return 0; /* FAILED */
+    }
+    SpcIndirectDataContent_free(idc);
+    if (*mdtype == -1) {
+        fprintf(stderr, "Failed to extract current message digest\n\n");
+        return 0; /* FAILED */
+    }
+    return 1; /* OK */
+}
+
+/*
+ * Decode SpcIndirectDataContent from a PKCS7 signedData content.
+ *
+ * [in] p7: PKCS7 structure containing SPC_INDIRECT_DATA_OBJID content
+ * [returns] newly allocated SpcIndirectDataContent, or NULL on error
+ *
+ * The caller is responsible for freeing the returned object with
+ * SpcIndirectDataContent_free().
+ */
+SpcIndirectDataContent *pkcs7_get_indirect_data_content(PKCS7 *p7)
+{
+    if (!is_content_type(p7, SPC_INDIRECT_DATA_OBJID))
+        return NULL;
+
+    if (!p7->d.sign || !p7->d.sign->contents || !p7->d.sign->contents->d.other)
+        return NULL;
+
+    return asn1_type_get_indirect_data_content(p7->d.sign->contents->d.other);
+}
+
+/*
+ * Decode SpcIndirectDataContent from an ASN1_TYPE object.
+ * The ASN1_TYPE is expected to contain a V_ASN1_SEQUENCE value.
+ *
+ * [in] content: ASN1_TYPE containing DER-encoded SpcIndirectDataContent
+ * [returns] newly allocated SpcIndirectDataContent, or NULL on error
+ *
+ * The caller is responsible for freeing the returned object with
+ * SpcIndirectDataContent_free().
+ */
+SpcIndirectDataContent *asn1_type_get_indirect_data_content(ASN1_TYPE *content)
+{
+    ASN1_STRING *value;
+    const unsigned char *data;
+    int len;
+
+    if (!content || content->type != V_ASN1_SEQUENCE)
+        return NULL;
+
+    value = content->value.sequence;
+    if (!value)
+        return NULL;
+
+    data = ASN1_STRING_get0_data(value);
+    len = ASN1_STRING_length(value);
+
+    return d2i_SpcIndirectDataContent(NULL, &data, len);
+}
+
+/*
  * Return spcIndirectDataContent.
  * [in] hash: message digest BIO
  * [in] ctx: structure holds input and output data
