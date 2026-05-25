@@ -249,8 +249,10 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 
     if (is_content_type(p7, SPC_INDIRECT_DATA_OBJID)) {
         ASN1_STRING *content_val = p7->d.sign->contents->d.other->value.sequence;
-        const u_char *p = content_val->data;
-        SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
+        const u_char *p = ASN1_STRING_get0_data(content_val);
+        int len = ASN1_STRING_length(content_val);
+        SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, len);
+
         if (idc) {
             if (!pe_page_hash_get(&ph, &phlen, &phtype, idc->data)) {
                 fprintf(stderr, "Failed to extract a page hash\n\n");
@@ -847,43 +849,71 @@ static BIO *pe_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
  * [in] obj: SPC_INDIRECT_DATA OID: 1.3.6.1.4.1.311.2.1.4 containing page hash
  * [returns] 0 on error or 1 on success
  */
-static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype, SpcAttributeTypeAndOptionalValue *obj)
+static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype,
+    SpcAttributeTypeAndOptionalValue *obj)
 {
-    const u_char *blob;
+    const unsigned char *blob;
+    const unsigned char *sequence_data;
+    const unsigned char *classid_data;
+    const unsigned char *serialized_data;
     SpcPeImageData *id;
     SpcSerializedObject *so;
-    int l, l2;
+    int sequence_len, classid_len, serialized_len, l, l2;
     char buf[128];
 
+    /* Validate input object */
     if (!obj || !obj->value)
         return 0; /* FAILED */
-    blob = obj->value->value.sequence->data;
-    id = d2i_SpcPeImageData(NULL, &blob, obj->value->value.sequence->length);
-    if (!id) {
+
+    /* Decode SpcPeImageData from ASN.1 sequence */
+    sequence_data = ASN1_STRING_get0_data(obj->value->value.sequence);
+    sequence_len = ASN1_STRING_length(obj->value->value.sequence);
+
+    /* d2i_* modifies the input pointer, so use a temporary variable */
+    blob = sequence_data;
+    id = d2i_SpcPeImageData(NULL, &blob, sequence_len);
+    if (!id)
         return 0; /* FAILED */
-    }
+
+    /* Validate SpcPeImageData contents */
     if (!id->file) {
         SpcPeImageData_free(id);
         return 0; /* FAILED */
     }
+
+    /* Type 1 means SpcSerializedObject */
     if (id->file->type != 1) {
         SpcPeImageData_free(id);
-        return 1; /* OK - This is not SpcSerializedObject structure that contains page hashes */
+        return 1; /* OK - no page hashes present */
     }
+
     so = id->file->value.moniker;
-    if (so->classId->length != sizeof classid_page_hash ||
-        memcmp(so->classId->data, classid_page_hash, sizeof classid_page_hash)) {
+
+    /* Validate serialized object class ID */
+    classid_data = ASN1_STRING_get0_data((ASN1_STRING *)so->classId);
+    classid_len = ASN1_STRING_length((ASN1_STRING *)so->classId);
+
+    if (classid_len != sizeof classid_page_hash ||
+        memcmp(classid_data, classid_page_hash, sizeof classid_page_hash)) {
         SpcPeImageData_free(id);
         return 0; /* FAILED */
     }
-    /* skip ASN.1 SET hdr */
-    l = asn1_simple_hdr_len(so->serializedData->data, so->serializedData->length);
-    blob = so->serializedData->data + l;
-    obj = d2i_SpcAttributeTypeAndOptionalValue(NULL, &blob, so->serializedData->length - l);
+
+    /*Get serialized ASN.1 blob */
+    serialized_data = ASN1_STRING_get0_data((ASN1_STRING *)so->serializedData);
+    serialized_len = ASN1_STRING_length((ASN1_STRING *)so->serializedData);
+
+    /* Skip ASN.1 SET header */
+    l = asn1_simple_hdr_len(serialized_data, serialized_len);
+    blob = serialized_data + l;
+
+    /* Decode nested SpcAttributeTypeAndOptionalValue */
+    obj = d2i_SpcAttributeTypeAndOptionalValue(NULL, &blob, serialized_len - l);
     SpcPeImageData_free(id);
     if (!obj)
         return 0; /* FAILED */
 
+    /* Determine page hash algorithm */
     *phtype = 0;
     buf[0] = 0x00;
     OBJ_obj2txt(buf, sizeof buf, obj->type, 1);
@@ -895,15 +925,30 @@ static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype, SpcAttributeTy
         SpcAttributeTypeAndOptionalValue_free(obj);
         return 0; /* FAILED */
     }
-    /* Skip ASN.1 SET hdr */
-    l2 = asn1_simple_hdr_len(obj->value->value.sequence->data, obj->value->value.sequence->length);
-    /* Skip ASN.1 OCTET STRING hdr */
-    l = asn1_simple_hdr_len(obj->value->value.sequence->data + l2, obj->value->value.sequence->length - l2);
+
+    /* IMPORTANT:
+     * obj now points to the newly decoded structure,
+     * so refresh sequence_data/sequence_len */
+    sequence_data = ASN1_STRING_get0_data(obj->value->value.sequence);
+    sequence_len = ASN1_STRING_length(obj->value->value.sequence);
+
+    /* Skip ASN.1 SET header */
+    l2 = asn1_simple_hdr_len(sequence_data, sequence_len);
+
+    /* Skip ASN.1 OCTET STRING header */
+    l = asn1_simple_hdr_len(sequence_data + l2, sequence_len - l2);
     l += l2;
-    *phlen = obj->value->value.sequence->length - l;
+
+    /* Extract raw page hash blob */
+    *phlen = sequence_len - l;
     *ph = OPENSSL_malloc((size_t)*phlen);
-    memcpy(*ph, obj->value->value.sequence->data + l, (size_t)*phlen);
+    if (!*ph) {
+        SpcAttributeTypeAndOptionalValue_free(obj);
+        return 0; /* FAILED */
+    }
+    memcpy(*ph, sequence_data + l, (size_t)*phlen);
     SpcAttributeTypeAndOptionalValue_free(obj);
+
     return 1; /* OK */
 }
 

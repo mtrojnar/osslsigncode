@@ -297,27 +297,39 @@ static int cat_add_content_type(PKCS7 *p7, PKCS7 *cursig)
  */
 static int cat_sign_content(PKCS7 *p7, PKCS7 *contents)
 {
-    u_char *content;
-    int seqhdrlen, content_length;
+    const unsigned char *sequence_data;
+    const unsigned char *content;
+    ASN1_STRING *sequence;
+    int seqhdrlen, sequence_len, content_length;
 
-    if (!contents->d.other || !contents->d.other->value.sequence
-          || !contents->d.other->value.sequence->data) {
+    if (!contents->d.other || !contents->d.other->value.sequence) {
         fprintf(stderr, "Failed to get content value\n");
         return 0; /* FAILED */
     }
-    seqhdrlen = asn1_simple_hdr_len(contents->d.other->value.sequence->data,
-        contents->d.other->value.sequence->length);
-    content = contents->d.other->value.sequence->data + seqhdrlen;
-    content_length = contents->d.other->value.sequence->length - seqhdrlen;
+
+    sequence = contents->d.other->value.sequence;
+    sequence_data = ASN1_STRING_get0_data(sequence);
+    sequence_len = ASN1_STRING_length(sequence);
+
+    if (!sequence_data) {
+        fprintf(stderr, "Failed to get content value\n");
+        return 0; /* FAILED */
+    }
+
+    seqhdrlen = asn1_simple_hdr_len(sequence_data, sequence_len);
+    content = (const unsigned char *)sequence_data + seqhdrlen;
+    content_length = sequence_len - seqhdrlen;
 
     if (!pkcs7_sign_content(p7, content, content_length)) {
         fprintf(stderr, "Failed to sign content\n");
         return 0; /* FAILED */
     }
+
     if (!PKCS7_set_content(p7, PKCS7_dup(contents))) {
         fprintf(stderr, "PKCS7_set_content failed\n");
         return 0; /* FAILED */
     }
+
     return 1; /* OK */
 }
 

@@ -575,22 +575,27 @@ int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype)
  */
 int spc_indirect_data_content_get_digest(SpcIndirectDataContent *idc, u_char *mdbuf, int *mdtype)
 {
+    ASN1_OCTET_STRING *digest_asn1;
+    const unsigned char *digest_data;
     int digest_len;
 
     if (!idc || !idc->messageDigest || !idc->messageDigest->digest ||
         !idc->messageDigest->digestAlgorithm) {
         return -1; /* FAILED */
     }
-    digest_len = idc->messageDigest->digest->length;
+    digest_asn1 = idc->messageDigest->digest;
+    digest_len = ASN1_STRING_length((ASN1_STRING *)digest_asn1);
 
     /* Validate digest length to prevent buffer overflow */
     if (digest_len <= 0 || digest_len > EVP_MAX_MD_SIZE) {
         fprintf(stderr, "Invalid digest length in signature: %d (expected 1-%d)\n",
-                digest_len, EVP_MAX_MD_SIZE);
+            digest_len, EVP_MAX_MD_SIZE);
         return -1; /* FAILED */
     }
+
+    digest_data = ASN1_STRING_get0_data((ASN1_STRING *)digest_asn1);
     *mdtype = OBJ_obj2nid(idc->messageDigest->digestAlgorithm->algorithm);
-    memcpy(mdbuf, idc->messageDigest->digest->data, (size_t)digest_len);
+    memcpy(mdbuf, digest_data, (size_t)digest_len);
     return digest_len; /* OK */
 }
 
@@ -653,8 +658,12 @@ static int spc_indirect_data_content_create(u_char **blob, int *len, FILE_FORMAT
         SpcIndirectDataContent_free(idc);
         return 0; /* FAILED */
     }
-    idc->data->value->value.sequence->data = p;
-    idc->data->value->value.sequence->length = l;
+    if (!ASN1_STRING_set(idc->data->value->value.sequence, p, l)) {
+        OPENSSL_free(p);
+        SpcIndirectDataContent_free(idc);
+        return 0; /* FAILED */
+    }
+    OPENSSL_free(p);
     idc->messageDigest->digestAlgorithm->algorithm = OBJ_nid2obj(mdtype);
     idc->messageDigest->digestAlgorithm->parameters = ASN1_TYPE_new();
     idc->messageDigest->digestAlgorithm->parameters->type = V_ASN1_NULL;

@@ -472,8 +472,9 @@ static int appx_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
     if (is_content_type(p7, SPC_INDIRECT_DATA_OBJID)) {
         ASN1_STRING *content_val = p7->d.sign->contents->d.other->value.sequence;
-        const u_char *p = content_val->data;
-        SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
+        const u_char *p = ASN1_STRING_get0_data(content_val);
+        int len = ASN1_STRING_length(content_val);
+        SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, len);
 
         if (idc) {
             BIO *hashes;
@@ -1077,13 +1078,13 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
     AppxSpcSipInfo_free(si);
     BIO_free_all(stdbio);
 #endif
-    int length = content->messageDigest->digest->length;
-    uint8_t *data = content->messageDigest->digest->data;
+    int len = ASN1_STRING_length(content->messageDigest->digest);
+    const uint8_t *data = ASN1_STRING_get0_data(content->messageDigest->digest);
     int mdlen = EVP_MD_size(ctx->appx_ctx->md);
     int pos = 4;
 
     /* we are expecting at least 4 hashes + 4 byte header */
-    if (length < 4 * mdlen + 4) {
+    if (len < 4 * mdlen + 4) {
         fprintf(stderr, "Hash too short\n");
         return 0; /* FAILED */
     }
@@ -1091,7 +1092,7 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
         fprintf(stderr, "Hash signature does not match\n");
         return 0; /* FAILED */
     }
-    while (pos + mdlen + 4 <= length) {
+    while (pos + mdlen + 4 <= len) {
         if (!memcmp(data + pos, AXPC_SIGNATURE, 4)) {
             ctx->appx_ctx->existingDataHash = OPENSSL_malloc((size_t)mdlen);
             memcpy(ctx->appx_ctx->existingDataHash, data + pos + 4, (size_t)mdlen);
