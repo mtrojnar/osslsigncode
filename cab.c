@@ -339,8 +339,10 @@ static int cab_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 
     if (is_content_type(p7, SPC_INDIRECT_DATA_OBJID)) {
         ASN1_STRING *content_val = p7->d.sign->contents->d.other->value.sequence;
-        const u_char *p = content_val->data;
-        SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, content_val->length);
+        const u_char *data = ASN1_STRING_get0_data(content_val);
+        int len = ASN1_STRING_length(content_val);
+
+        SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &data, len);
         if (idc) {
             if (spc_indirect_data_content_get_digest(idc, mdbuf, &mdtype) < 0) {
                 fprintf(stderr, "Failed to extract message digest from signature\n\n");
