@@ -470,33 +470,33 @@ static int appx_hash_length_get(FILE_FORMAT_CTX *ctx)
  */
 static int appx_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
-    if (is_content_type(p7, SPC_INDIRECT_DATA_OBJID)) {
-        ASN1_STRING *content_val = p7->d.sign->contents->d.other->value.sequence;
-        const u_char *p = ASN1_STRING_get0_data(content_val);
-        int len = ASN1_STRING_length(content_val);
-        SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, len);
+    SpcIndirectDataContent *idc;
+    BIO *hashes;
 
-        if (idc) {
-            BIO *hashes;
-            if (!appx_extract_hashes(ctx, idc)) {
-                fprintf(stderr, "Failed to extract hashes from the signature\n");
-                SpcIndirectDataContent_free(idc);
-                return 0; /* FAILED */
-            }
-            hashes = appx_calculate_hashes(ctx);
-            if (!hashes) {
-                SpcIndirectDataContent_free(idc);
-                return 0; /* FAILED */
-            }
-            BIO_free_all(hashes);
-            if (!appx_compare_hashes(ctx)) {
-                fprintf(stderr, "Signature hash verification failed\n");
-                SpcIndirectDataContent_free(idc);
-                return 0; /* FAILED */
-            }
-            SpcIndirectDataContent_free(idc);
-        }
+    idc = pkcs7_get_indirect_data_content(p7);
+    if (!idc)
+        return 1; /* OK - no SpcIndirectDataContent */
+
+    if (!appx_extract_hashes(ctx, idc)) {
+        fprintf(stderr, "Failed to extract hashes from the signature\n");
+        SpcIndirectDataContent_free(idc);
+        return 0; /* FAILED */
     }
+
+    hashes = appx_calculate_hashes(ctx);
+    if (!hashes) {
+        SpcIndirectDataContent_free(idc);
+        return 0; /* FAILED */
+    }
+    BIO_free_all(hashes);
+
+    if (!appx_compare_hashes(ctx)) {
+        fprintf(stderr, "Signature hash verification failed\n");
+        SpcIndirectDataContent_free(idc);
+        return 0; /* FAILED */
+    }
+
+    SpcIndirectDataContent_free(idc);
     return 1; /* OK */
 }
 

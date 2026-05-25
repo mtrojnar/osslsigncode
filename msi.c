@@ -414,22 +414,7 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
     const EVP_MD *md;
     BIO *hash;
 
-    if (is_content_type(p7, SPC_INDIRECT_DATA_OBJID)) {
-        ASN1_STRING *content_val = p7->d.sign->contents->d.other->value.sequence;
-        const u_char *p = ASN1_STRING_get0_data(content_val);
-        int len = ASN1_STRING_length(content_val);
-        SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, len);
-
-        if (idc) {
-            if (spc_indirect_data_content_get_digest(idc, mdbuf, &mdtype) < 0) {
-                fprintf(stderr, "Failed to extract message digest from signature\n\n");
-                SpcIndirectDataContent_free(idc);
-                return 0; /* FAILED */
-            }
-            SpcIndirectDataContent_free(idc);
-        }
-    }
-    if (mdtype == -1) {
+    if (!pkcs7_get_content_digest(p7, mdbuf, &mdtype)) {
         fprintf(stderr, "Failed to extract current message digest\n\n");
         return 0; /* FAILED */
     }

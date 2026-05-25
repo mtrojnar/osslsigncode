@@ -87,6 +87,7 @@ static uint32_t pe_calc_checksum(BIO *bio, uint32_t header_size);
 static uint32_t pe_calc_realchecksum(FILE_FORMAT_CTX *ctx);
 static int pe_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static BIO *pe_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
+static int pkcs7_get_page_hash(PKCS7 *p7, u_char **ph, int *phlen, int *phtype);
 static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype, SpcAttributeTypeAndOptionalValue *obj);
 static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype);
 static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype);
@@ -247,53 +248,34 @@ static int pe_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
     u_char *cmdbuf = NULL;
     u_char *ph = NULL;
 
-    if (is_content_type(p7, SPC_INDIRECT_DATA_OBJID)) {
-        ASN1_STRING *content_val = p7->d.sign->contents->d.other->value.sequence;
-        const u_char *p = ASN1_STRING_get0_data(content_val);
-        int len = ASN1_STRING_length(content_val);
-        SpcIndirectDataContent *idc = d2i_SpcIndirectDataContent(NULL, &p, len);
-
-        if (idc) {
-            if (!pe_page_hash_get(&ph, &phlen, &phtype, idc->data)) {
-                fprintf(stderr, "Failed to extract a page hash\n\n");
-                SpcIndirectDataContent_free(idc);
-                return 0; /* FAILED */
-            }
-            if (spc_indirect_data_content_get_digest(idc, mdbuf, &mdtype) < 0) {
-                fprintf(stderr, "Failed to extract message digest from signature\n\n");
-                OPENSSL_free(ph);
-                SpcIndirectDataContent_free(idc);
-                return 0; /* FAILED */
-            }
-            SpcIndirectDataContent_free(idc);
-        }
-    }
-    if (mdtype == -1) {
+    if (!pkcs7_get_content_digest(p7, mdbuf, &mdtype)) {
         fprintf(stderr, "Failed to extract current message digest\n\n");
-        OPENSSL_free(ph);
         return 0; /* FAILED */
     }
     md = EVP_get_digestbynid(mdtype);
     cmdbuf = pe_digest_calc(ctx, md);
     if (!cmdbuf) {
         fprintf(stderr, "Failed to calculate message digest\n\n");
-        OPENSSL_free(ph);
         return 0; /* FAILED */
     }
     if (!compare_digests(mdbuf, cmdbuf, mdtype)) {
         fprintf(stderr, "Signature verification: failed\n\n");
-        OPENSSL_free(ph);
         OPENSSL_free(cmdbuf);
         return 0; /* FAILED */
     }
+    OPENSSL_free(cmdbuf);
+
+	if (!pkcs7_get_page_hash(p7, &ph, &phlen, &phtype)) {
+		fprintf(stderr, "Failed to extract page hash\n\n");
+		return 0; /* FAILED */
+	}
     if (!pe_verify_page_hash(ctx, ph, phlen, phtype)) {
         fprintf(stderr, "Signature verification: failed\n\n");
         OPENSSL_free(ph);
-        OPENSSL_free(cmdbuf);
         return 0; /* FAILED */
     }
     OPENSSL_free(ph);
-    OPENSSL_free(cmdbuf);
+
     return 1; /* OK */
 }
 
@@ -840,6 +822,36 @@ static BIO *pe_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
 /*
  * Page hash support
  */
+
+/*
+ * Retrieve a page hash from PKCS7 SPC_INDIRECT_DATA structure.
+ * [in] p7: PKCS7 signature
+ * [out] ph: page hash
+ * [out] phlen: page hash length
+ * [out] phtype: NID_sha1 or NID_sha256
+ * [returns] 0 on error or 1 on success
+ */
+static int pkcs7_get_page_hash(PKCS7 *p7, u_char **ph, int *phlen, int *phtype)
+{
+    SpcIndirectDataContent *idc = pkcs7_get_indirect_data_content(p7);
+
+    if (!idc) {
+        fprintf(stderr, "Failed to decode SpcIndirectDataContent\n\n");
+        return 0; /* FAILED */
+    }
+    if (!idc->data) {
+        fprintf(stderr, "Missing SpcIndirectDataContent data\n\n");
+        SpcIndirectDataContent_free(idc);
+        return 0; /* FAILED */
+    }
+    if (!pe_page_hash_get(ph, phlen, phtype, idc->data)) {
+        fprintf(stderr, "Failed to extract a page hash\n\n");
+        SpcIndirectDataContent_free(idc);
+        return 0; /* FAILED */
+    }
+    SpcIndirectDataContent_free(idc);
+    return 1; /* OK */
+}
 
 /*
  * Retrieve a page hash from SPC_INDIRECT_DATA structure.
