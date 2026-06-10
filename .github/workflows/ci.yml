@@ -38,7 +38,7 @@ jobs:
             triplet: x64-windows
             compiler: vs
             arch: x64
-            os: windows-latest
+            os: windows-2022
             generator: Ninja
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
@@ -46,7 +46,7 @@ jobs:
             triplet: x86-windows
             compiler: vs
             arch: x86
-            os: windows-latest
+            os: windows-2022
             generator: Ninja
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
@@ -54,14 +54,14 @@ jobs:
             triplet: x64-windows-static
             compiler: vs
             arch: x64
-            os: windows-latest
+            os: windows-2022
             generator: Ninja
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
           - id: windows-x64-mingw
             triplet: x64-windows
             compiler: mingw
-            os: windows-latest
+            os: windows-2022
             generator: Ninja
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
@@ -72,11 +72,11 @@ jobs:
       VCPKG_ROOT: ${{matrix.vcpkg_root}}
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
 
     - name: Cache the vcpkg archives
       if: matrix.cache != ''
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ${{matrix.cache}}
         key: ${{matrix.id}}-${{hashFiles('vcpkg.json')}}
@@ -86,7 +86,7 @@ jobs:
 
     - name: Configure Visual Studio
       if: matrix.compiler == 'vs'
-      uses: ilammy/msvc-dev-cmd@v1
+      uses: step-security/msvc-dev-cmd@v1
       with:
         arch: ${{matrix.arch}}
 
@@ -103,7 +103,7 @@ jobs:
 
     - name: Set up Python (macOS)
       if: runner.os == 'macOS'
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
           python-version: '3.13'
           update-environment: false
@@ -127,7 +127,7 @@ jobs:
 
     - name: Setup the oldest supported version of cmake (macOS)
       if: runner.os == 'macOS'
-      uses: jwlawson/actions-setup-cmake@v2.0
+      uses: jwlawson/actions-setup-cmake@v2.2.0
 
     - name: Install python3 cryptography module (Linux)
       if: runner.os == 'Linux'
@@ -211,7 +211,7 @@ jobs:
         ctest -C ${{env.BUILD_TYPE}}
 
     - name: Upload the errors
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       if: failure()
       with:
         name: errors-${{matrix.id}}
@@ -225,7 +225,7 @@ jobs:
       run: cmake --install ${{github.workspace}}/build
 
     - name: Upload the executables
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: ${{env.version}}-${{matrix.id}}
         path: ${{github.workspace}}/dist
