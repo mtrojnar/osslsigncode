@@ -1,9 +1,14 @@
 # osslsigncode change log
 
-### 2.14 (unreleased)
+### 2.14 (2026.07.20)
 
+- added comprehensive command documentation in Markdown; man page and HTML
+  versions are generated when Pandoc is available
+- CMake installations now honor standard GNU install directories, include
+  README and NEWS, and can be uninstalled
 - attach-signature now uses digest-only verification instead of full signature
   validation; output file is not kept if digest verification fails
+- fixed a memory leak when rejecting invalid compressed APPX data
 
 ### 2.13 (2026.02.10)
 
