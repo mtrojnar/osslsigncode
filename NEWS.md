@@ -1,5 +1,7 @@
 # osslsigncode change log
 
+### 2.15 (unreleased)
+
 ### 2.14 (2026.07.20)
 
 - added comprehensive command documentation in Markdown; man page and HTML
