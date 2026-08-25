@@ -158,6 +158,53 @@ Example usage with OpenSC:
     -in yourapp.exe -out yourapp-signed.exe
 ```
 
+### Using a cloud PKCS#11 module with osslsigncode
+Some code signing services keep the private key in their own HSM and publish a
+PKCS#11 module that talks to it over the network, so there is no token to plug
+in and no vendor desktop application to run. `osslsigncode` drives such a module
+exactly like a local token, which makes headless signing on Linux and in CI
+possible.
+
+[ssign-pkcs11](https://github.com/Le-Syl21/ssign) is one example. It is an
+independent, third-party project, not affiliated with or endorsed by
+`osslsigncode`, and it exposes a Certum SimplySign cloud certificate as a
+PKCS#11 module.
+
+The engine and provider options are the same as for a local token. With the
+PKCS#11 provider (OpenSSL 3.x only):
+```
+  export CERTUM_EMAIL=you@example.com CERTUM_OTP=<your-TOTP-seed>
+  osslsigncode sign \
+    -provider /usr/lib64/ossl-modules/pkcs11prov.so \
+    -pkcs11module ./libssign_pkcs11.so \
+    -pkcs11cert 'pkcs11:type=cert' \
+    -key 'pkcs11:type=private' \
+    -ac certum-code-signing-2021-ca.pem \
+    -h sha256 -t http://time.certum.pl/ \
+    -in yourapp.exe -out yourapp-signed.exe
+```
+or with the PKCS#11 engine:
+```
+  osslsigncode sign \
+    -engine /usr/lib64/engines-1.1/pkcs11.so \
+    -pkcs11module ./libssign_pkcs11.so \
+    -pkcs11cert 'pkcs11:type=cert' \
+    -key 'pkcs11:type=private' \
+    -ac certum-code-signing-2021-ca.pem \
+    -h sha256 -t http://time.certum.pl/ \
+    -in yourapp.exe -out yourapp-signed.exe
+```
+Either option may be omitted, in which case `osslsigncode` loads the
+`pkcs11prov` provider if it is available and otherwise falls back to the libp11
+`pkcs11` engine.
+
+This module holds one certificate and one key, so the `pkcs11:` URIs only have
+to select by object type; a module backed by a token with several objects still
+needs the usual `token=` and `object=` attributes. The credentials are read from
+the environment by the module itself, never passed on the `osslsigncode` command
+line. `-ac` adds the issuing CA certificate, obtained from the service, so the
+signed chain verifies.
+
 ### Using the CNG Engine with osslsigncode (Windows only)
 The CNG engine allows using certificates and keys stored in the Windows
 Certificate Store. It requires CNG engine version 1.1 or later. For more
