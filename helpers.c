@@ -399,7 +399,11 @@ SpcIndirectDataContent *pkcs7_get_indirect_data_content(PKCS7 *p7)
 
 /*
  * Decode SpcIndirectDataContent from an ASN1_TYPE object.
- * The ASN1_TYPE is expected to contain a V_ASN1_SEQUENCE value.
+ *
+ * RFC 5652 section 5.2.1 defines PKCS#7 content as EXPLICIT ANY,
+ * while CMS defines eContent as EXPLICIT OCTET STRING. Therefore,
+ * Authenticode content may appear directly as a SEQUENCE or be
+ * carried inside a CMS OCTET STRING.
  *
  * [in] content: ASN1_TYPE containing DER-encoded SpcIndirectDataContent
  * [returns] newly allocated SpcIndirectDataContent, or NULL on error
@@ -413,10 +417,16 @@ SpcIndirectDataContent *asn1_type_get_indirect_data_content(ASN1_TYPE *content)
     const unsigned char *data;
     int len;
 
-    if (!content || content->type != V_ASN1_SEQUENCE)
+    if (!content)
         return NULL;
 
-    value = content->value.sequence;
+    if (content->type == V_ASN1_SEQUENCE)
+        value = content->value.sequence;
+    else if (content->type == V_ASN1_OCTET_STRING)
+        value = content->value.octet_string;
+    else
+        return NULL;
+
     if (!value)
         return NULL;
 
