@@ -235,7 +235,7 @@ static int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t na
 static BIO *msi_digest_calc_bio(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash);
 static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse, PKCS7 *p7);
-static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root);
+static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root, int include_dse);
 static MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi);
 static void msi_file_free(MSI_FILE *msi);
 static MSI_FILE *msi_file_new(char *buffer, uint32_t len);
@@ -353,7 +353,7 @@ static PKCS7 *msi_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_
         fprintf(stderr, "Unable to calc MsiDigitalSignatureEx\n");
         return NULL; /* FAILED */
     }
-    if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1)) {
+    if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1, 0)) {
         fprintf(stderr, "Unable to msi_handle_dir()\n");
         return NULL; /* FAILED */
     }
@@ -467,11 +467,17 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         }
         BIO_gets(prehash, (char*)cexmdbuf, EVP_MAX_MD_SIZE);
         BIO_free_all(prehash);
-        BIO_write(hash, (char*)cexmdbuf, EVP_MD_size(md));
-        print_hash("Calculated MsiDigitalSignatureEx ", "", cexmdbuf, EVP_MD_size(md));
+        mdok = !memcmp(ctx->msi_ctx->p_msiex, cexmdbuf, (size_t)EVP_MD_size(md));
+        print_hash("Calculated MsiDigitalSignatureEx ", mdok ? "" : "    MISMATCH!!!\n",
+            cexmdbuf, EVP_MD_size(md));
+        if (!mdok) {
+            fprintf(stderr, "MsiDigitalSignatureEx verification: failed\n\n");
+            BIO_free_all(hash);
+            return 0; /* FAILED */
+        }
     }
 
-    if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1)) {
+    if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1, 1)) {
         fprintf(stderr, "Failed to calculate DigitalSignature\n\n");
         BIO_free_all(hash);
         return 0; /* FAILED */
@@ -492,7 +498,7 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         return 0; /* FAILED */
     }
     mdlen = EVP_MD_size(EVP_get_digestbynid(mdtype));
-    print_hash("Calculated message digest        ", "\n", cdigest, mdlen);
+    print_hash("Calculated simple message digest ", "\n", cdigest, mdlen);
     OPENSSL_free(cdigest);
     return 1; /* OK */
 }
@@ -1458,8 +1464,12 @@ out:
     return ret;
 }
 
-/* Recursively hash a MSI directory (storage) */
-static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root)
+/*
+ * Recursively hash an MSI directory (storage).
+ * The root DigitalSignature stream is always skipped.
+ * The MsiDigitalSignatureEx stream is included only when include_dse is set.
+ */
+static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root, int include_dse)
  {
     int i, ret = 0;
     STACK_OF(MSI_DIRENT) *children;
@@ -1474,8 +1484,9 @@ static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_roo
     for (i = 0; i < sk_MSI_DIRENT_num(children); i++) {
         MSI_DIRENT *child = sk_MSI_DIRENT_value(children, i);
         if (is_root && (!memcmp(child->name, digital_signature, MIN(child->nameLen, sizeof digital_signature))
-            || !memcmp(child->name, digital_signature_ex, MIN(child->nameLen, sizeof digital_signature_ex)))) {
-            /* Skip DigitalSignature and MsiDigitalSignatureEx streams */
+            || (!include_dse
+                && !memcmp(child->name, digital_signature_ex, MIN(child->nameLen, sizeof digital_signature_ex))))) {
+            /* Always skip DigitalSignature; optionally skip MsiDigitalSignatureEx */
             continue;
         }
         if (child->type == DIR_STREAM) {
@@ -1495,7 +1506,7 @@ static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_roo
             OPENSSL_free(indata);
         }
         if (child->type == DIR_STORAGE) {
-            if (!msi_hash_dir(msi, child, hash, 0)) {
+            if (!msi_hash_dir(msi, child, hash, 0, include_dse)) {
                 fprintf(stderr, "Failed to hash a MSI storage\n");
                 goto out;
             }
@@ -2254,7 +2265,7 @@ static BIO *msi_digest_calc_bio(FILE_FORMAT_CTX *ctx, BIO *hash)
         fprintf(stderr, "Unable to calc MsiDigitalSignatureEx\n");
         return NULL; /* FAILED */
     }
-    if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1)) {
+    if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1, 0)) {
         fprintf(stderr, "Unable to msi_handle_dir()\n");
         return NULL; /* FAILED */
     }
