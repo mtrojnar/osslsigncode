@@ -283,6 +283,17 @@ file.  If you do that, you would need to check the newly downloaded file is
 code signed AND that it has been signed with your cert AND that it is the
 version you expect.
 
+## COMPATIBILITY NOTES
+
+### MSI MsiDigitalSignatureEx compatibility
+
+Starting with osslsigncode 2.15, MSI files previously signed with
+`-add-msi-dse` whose streams sort before `MsiDigitalSignatureEx` must
+be re-signed. Corrected signatures for these files will not verify
+with osslsigncode versions older than 2.15.
+
+Other MSI files are unaffected.
+
 ## BUGS, QUESTIONS etc.
 
 Check whether your question or suspected bug was already

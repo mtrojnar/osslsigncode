@@ -3,6 +3,7 @@
 ### 2.15 (unreleased)
 
 - fixed Cygwin compilation by not passing ELF-specific linker flags
+- fixed MSI MsiDigitalSignatureEx digest ordering during signing and verification
 
 ### 2.14 (2026.07.20)
 

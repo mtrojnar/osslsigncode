@@ -233,9 +233,9 @@ static MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse);
 static int msi_file_read(MSI_FILE *msi, MSI_ENTRY *entry, uint32_t offset, char *buffer, uint32_t len);
 static int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLen);
 static BIO *msi_digest_calc_bio(FILE_FORMAT_CTX *ctx, BIO *hash);
-static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash);
+static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx);
 static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse, PKCS7 *p7);
-static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root);
+static int msi_hash_dir(MSI_CTX *msi_ctx, MSI_DIRENT *dirent, BIO *hash, int is_root);
 static MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi);
 static void msi_file_free(MSI_FILE *msi);
 static MSI_FILE *msi_file_new(char *buffer, uint32_t len);
@@ -349,12 +349,12 @@ static PKCS7 *msi_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_
     /* squash the unused parameter warning, use initialized message digest BIO */
     (void)md;
 
-    if (ctx->options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ctx, hash)) {
+    if (ctx->options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ctx)) {
         fprintf(stderr, "Unable to calc MsiDigitalSignatureEx\n");
         return NULL; /* FAILED */
     }
-    if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1)) {
-        fprintf(stderr, "Unable to msi_handle_dir()\n");
+    if (!msi_hash_dir(ctx->msi_ctx, ctx->msi_ctx->dirent, hash, 1)) {
+        fprintf(stderr, "Unable to msi_hash_dir()\n");
         return NULL; /* FAILED */
     }
     content = spc_indirect_data_content_get(hash, ctx);
@@ -467,11 +467,17 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         }
         BIO_gets(prehash, (char*)cexmdbuf, EVP_MAX_MD_SIZE);
         BIO_free_all(prehash);
-        BIO_write(hash, (char*)cexmdbuf, EVP_MD_size(md));
-        print_hash("Calculated MsiDigitalSignatureEx ", "", cexmdbuf, EVP_MD_size(md));
+        mdok = !memcmp(ctx->msi_ctx->p_msiex, cexmdbuf, (size_t)EVP_MD_size(md));
+        print_hash("Calculated MsiDigitalSignatureEx ", mdok ? "" : "    MISMATCH!!!\n",
+            cexmdbuf, EVP_MD_size(md));
+        if (!mdok) {
+            fprintf(stderr, "MsiDigitalSignatureEx verification: failed\n\n");
+            BIO_free_all(hash);
+            return 0; /* FAILED */
+        }
     }
 
-    if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1)) {
+    if (!msi_hash_dir(ctx->msi_ctx, ctx->msi_ctx->dirent, hash, 1)) {
         fprintf(stderr, "Failed to calculate DigitalSignature\n\n");
         BIO_free_all(hash);
         return 0; /* FAILED */
@@ -492,7 +498,7 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         return 0; /* FAILED */
     }
     mdlen = EVP_MD_size(EVP_get_digestbynid(mdtype));
-    print_hash("Calculated message digest        ", "\n", cdigest, mdlen);
+    print_hash("Calculated simple message digest ", "\n", cdigest, mdlen);
     OPENSSL_free(cdigest);
     return 1; /* OK */
 }
@@ -1458,35 +1464,106 @@ out:
     return ret;
 }
 
-/* Recursively hash a MSI directory (storage) */
-static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_root)
- {
-    int i, ret = 0;
+/*
+ * Recursively hash an MSI directory (storage).
+ * DigitalSignature is excluded from the content digest.
+ * When used, MsiDigitalSignatureEx is hashed at its sorted position.
+ */
+static int msi_hash_dir(MSI_CTX *msi_ctx, MSI_DIRENT *dirent,
+    BIO *hash, int is_root)
+{
+    int i, ret = 0, dse_found = 0;
+    MSI_DIRENT dse = {0};
     STACK_OF(MSI_DIRENT) *children;
 
-    if (!dirent || !dirent->children) {
+    if (!dirent || !dirent->children)
         return ret;
-    }
+
     children = sk_MSI_DIRENT_dup(dirent->children);
+    if (!children)
+        return ret;
+
+    /*
+     * When generating a DSE-enabled content digest, MsiDigitalSignatureEx
+     * may already be calculated while its directory entry does not yet exist.
+     * Add a temporary entry so it participates in stream sorting.
+     */
+    if (is_root && msi_ctx->p_msiex) {
+        for (i = 0; i < sk_MSI_DIRENT_num(children); i++) {
+            MSI_DIRENT *child = sk_MSI_DIRENT_value(children, i);
+
+            if (child->nameLen == sizeof digital_signature_ex
+                && !memcmp(child->name, digital_signature_ex, sizeof digital_signature_ex)) {
+                dse_found = 1;
+                break;
+            }
+        }
+
+        if (!dse_found) {
+            memcpy(dse.name, digital_signature_ex, sizeof digital_signature_ex);
+            dse.nameLen = sizeof digital_signature_ex;
+            dse.type = DIR_STREAM;
+
+            if (!sk_MSI_DIRENT_push(children, &dse))
+                goto out;
+        }
+    }
+
     sk_MSI_DIRENT_set_cmp_func(children, &dirent_cmp_hash);
     sk_MSI_DIRENT_sort(children);
 
     for (i = 0; i < sk_MSI_DIRENT_num(children); i++) {
         MSI_DIRENT *child = sk_MSI_DIRENT_value(children, i);
-        if (is_root && (!memcmp(child->name, digital_signature, MIN(child->nameLen, sizeof digital_signature))
-            || !memcmp(child->name, digital_signature_ex, MIN(child->nameLen, sizeof digital_signature_ex)))) {
-            /* Skip DigitalSignature and MsiDigitalSignatureEx streams */
+
+        if (is_root
+            && child->nameLen == sizeof digital_signature
+            && !memcmp(child->name, digital_signature, sizeof digital_signature)) {
             continue;
         }
+
+        if (is_root
+            && child->nameLen == sizeof digital_signature_ex
+            && !memcmp(child->name, digital_signature_ex, sizeof digital_signature_ex)) {
+            /*
+             * MsiDigitalSignatureEx is handled separately from regular streams.
+             * p_msiex contains the DSE value to be included in the content digest.
+             *
+             * During verification, p_msiex contains the value read from the existing
+             * MsiDigitalSignatureEx stream. When generating a DSE-enabled digest,
+             * it contains the newly calculated metadata digest.
+             *
+             * If p_msiex is NULL, the DSE stream is intentionally skipped.
+            */
+            if (msi_ctx->p_msiex) {
+                size_t written;
+
+                if (!BIO_write_ex(hash, msi_ctx->p_msiex, msi_ctx->len_msiex, &written)
+                    || written != msi_ctx->len_msiex) {
+                    goto out;
+                }
+            }
+            /*
+             * Never process the physical DSE entry as a regular stream.
+             * Its content is either supplied through p_msiex above or
+             * intentionally excluded from the content digest.
+             */
+            continue;
+        }
+
         if (child->type == DIR_STREAM) {
             char *indata;
             uint32_t inlen = GET_UINT32_LE(child->entry->size);
+
             if (inlen == 0 || inlen >= MAXREGSECT) {
                 /* Skip null and corrupted streams */
                 continue;
             }
-            indata = (char *)OPENSSL_malloc(inlen);
-            if (!msi_file_read(msi, child->entry, 0, indata, inlen)) {
+
+            indata = OPENSSL_malloc(inlen);
+            if (!indata)
+                goto out;
+
+            if (!msi_file_read(msi_ctx->msi, child->entry, 0, indata, inlen)) {
                 fprintf(stderr, "Failed to read stream data\n");
                 OPENSSL_free(indata);
                 goto out;
@@ -1494,15 +1571,18 @@ static int msi_hash_dir(MSI_FILE *msi, MSI_DIRENT *dirent, BIO *hash, int is_roo
             BIO_write(hash, indata, (int)inlen);
             OPENSSL_free(indata);
         }
+
         if (child->type == DIR_STORAGE) {
-            if (!msi_hash_dir(msi, child, hash, 0)) {
+            if (!msi_hash_dir(msi_ctx, child, hash, 0)) {
                 fprintf(stderr, "Failed to hash a MSI storage\n");
                 goto out;
             }
         }
     }
+
     BIO_write(hash, dirent->entry->clsid, sizeof dirent->entry->clsid);
     ret = 1; /* OK */
+
 out:
     sk_MSI_DIRENT_free(children);
     return ret;
@@ -2250,12 +2330,12 @@ out:
  */
 static BIO *msi_digest_calc_bio(FILE_FORMAT_CTX *ctx, BIO *hash)
 {
-    if (ctx->options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ctx, hash)) {
+    if (ctx->options->add_msi_dse && !msi_calc_MsiDigitalSignatureEx(ctx)) {
         fprintf(stderr, "Unable to calc MsiDigitalSignatureEx\n");
         return NULL; /* FAILED */
     }
-    if (!msi_hash_dir(ctx->msi_ctx->msi, ctx->msi_ctx->dirent, hash, 1)) {
-        fprintf(stderr, "Unable to msi_handle_dir()\n");
+    if (!msi_hash_dir(ctx->msi_ctx, ctx->msi_ctx->dirent, hash, 1)) {
+        fprintf(stderr, "Unable to msi_hash_dir()\n");
         return NULL; /* FAILED */
     }
     return hash;
@@ -2268,12 +2348,12 @@ static BIO *msi_digest_calc_bio(FILE_FORMAT_CTX *ctx, BIO *hash)
  * file names, file sizes, creation times and modification times.
  *
  * The file content hashing part stays the same, so the
- * msi_handle_dir() function can be used across both variants.
+ * msi_hash_dir() function can be used across both variants.
  *
  * When an MsiDigitalSignatureEx section is present in an MSI file,
  * the meaning of the DigitalSignature section changes:  Instead
  * of being merely a file content hash (as what is output by the
- * msi_handle_dir() function), it is now hashes both content
+ * msi_hash_dir() function), it now hashes both content
  * and metadata.
  *
  * Here is how it works:
@@ -2283,29 +2363,27 @@ static BIO *msi_digest_calc_bio(FILE_FORMAT_CTX *ctx, BIO *hash)
  * file content hashing method would - but it only processes the
  * metadata.
  *
- * Once the pre-hash is calculated, a new hash is created for
- * calculating the hash of the file content.  The output of the
- * pre-hash is added as the first element of the file content hash.
- *
- * After the pre-hash is written, what follows is the "regular"
- * stream of data that would normally be written when performing
- * file content hashing.
+ * Once the pre-hash is calculated, its output is stored in the
+ * MsiDigitalSignatureEx stream.  The MsiDigitalSignatureEx stream
+ * is then included in the file content hash at its position in the
+ * sorted stream order.
  *
  * The output of this hash, which combines both metadata and file
  * content, is what will be output in signed form to the
  * DigitalSignature section when in 'MsiDigitalSignatureEx' mode.
  *
  * As mentioned previously, this new mode of operation is signalled
- * by the presence of a 'MsiDigitalSignatureEx' section in the MSI
- * file.  This section must come after the 'DigitalSignature'
- * section, and its content must be the output of the pre-hash
- * ("metadata") hash.
+ * by the presence of a 'MsiDigitalSignatureEx' stream in the MSI
+ * file.  The stream contains the output of the pre-hash
+ * ("metadata") calculation.
  */
-
-static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash)
+static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx)
 {
-    size_t written;
+    int len;
     BIO *prehash = BIO_new(BIO_f_md());
+
+    if (!prehash)
+        return 0; /* FAILED */
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -2323,6 +2401,7 @@ static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash)
 
     if (!msi_prehash_dir(ctx->msi_ctx->dirent, prehash, 1)) {
         fprintf(stderr, "Unable to calculate MSI pre-hash ('metadata') hash\n");
+        BIO_free_all(prehash);
         return 0; /* FAILED */
     }
     if (ctx->msi_ctx->p_msiex) {
@@ -2330,12 +2409,23 @@ static int msi_calc_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, BIO *hash)
         OPENSSL_free(ctx->msi_ctx->p_msiex);
         ctx->msi_ctx->p_msiex = NULL;
     }
+
     ctx->msi_ctx->p_msiex = OPENSSL_malloc(EVP_MAX_MD_SIZE);
-    ctx->msi_ctx->len_msiex = (uint32_t)BIO_gets(prehash,
-        (char *)ctx->msi_ctx->p_msiex, EVP_MAX_MD_SIZE);
-    if (!BIO_write_ex(hash, ctx->msi_ctx->p_msiex, ctx->msi_ctx->len_msiex, &written)
-        || written != ctx->msi_ctx->len_msiex)
+    if (!ctx->msi_ctx->p_msiex) {
+        BIO_free_all(prehash);
         return 0; /* FAILED */
+    }
+
+    len = BIO_gets(prehash, (char *)ctx->msi_ctx->p_msiex, EVP_MAX_MD_SIZE);
+    if (len <= 0) {
+        OPENSSL_free(ctx->msi_ctx->p_msiex);
+        ctx->msi_ctx->p_msiex = NULL;
+        ctx->msi_ctx->len_msiex = 0;
+        BIO_free_all(prehash);
+        return 0; /* FAILED */
+    }
+    ctx->msi_ctx->len_msiex = (uint32_t)len;
+
     BIO_free_all(prehash);
     return 1; /* OK */
 }
