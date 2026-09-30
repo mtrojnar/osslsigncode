@@ -424,6 +424,16 @@ if(Python3_FOUND AND NOT cryptography_error)
 
 ### Sign with Time-Stamp Authority ###
 
+        # Self-contained loopback TSA and DER fixtures; checks exit status AND
+        # diagnostics for multiple, mixed, untrusted and malformed timestamps.
+        add_test(NAME "multiple_timestamps"
+            COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/multiple_timestamps.py"
+                ${OSSLSIGNCODE} "${CMAKE_CURRENT_SOURCE_DIR}/tests/files/unsigned.exe")
+        set_tests_properties("multiple_timestamps" PROPERTIES
+            ENVIRONMENT "HTTP_PROXY=;http_proxy=;HTTPS_PROXY=;https_proxy=;ALL_PROXY=;all_proxy="
+            TIMEOUT 120)
+        list(APPEND ALL_TESTS "multiple_timestamps")
+
         # Sign with the RFC3161 Time-Stamp Authority
         set(pem_certs "cert" "expired" "revoked")
         foreach(ext ${extensions_all})

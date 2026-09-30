@@ -5,6 +5,10 @@
 - fixed Cygwin compilation by not passing ELF-specific linker flags
 - fixed MSI MsiDigitalSignatureEx digest ordering during signing and verification
 - fixed verification to report failure when timestamp verification fails
+- added multiple timestamp support: `add` preserves existing timestamps and
+  `-timestamp-all` requires every specified Authenticode/RFC 3161 server
+- verification now tries all timestamps and accepts any trusted timestamp for
+  which the Authenticode signature also validates at the timestamp's time
 
 ### 2.14 (2026.07.20)
 

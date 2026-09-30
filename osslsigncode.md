@@ -22,7 +22,7 @@ osslsigncode - Authenticode signing, timestamping, extraction, attachment, remov
 [`-h` *digest*]
 [`-n` *description*] [`-i` *URL*]
 [`-jp` `low`] [`-comm`] [`-ph`]
-[`-t` *URL* ... | `-ts` *URL* ...]
+[`-t` *URL* ...] [`-ts` *URL* ...] [`-timestamp-all`]
 [`-TSA-certs` *file* `-TSA-key` *file-or-URI* [`-TSA-time` *unix-time*]]
 [`-HTTPS-CAfile` *file*] [`-HTTPS-CRLfile` *file*]
 [`-time` *unix-time*]
@@ -36,7 +36,7 @@ osslsigncode - Authenticode signing, timestamping, extraction, attachment, remov
 
 `osslsigncode` `add`
 [`-addUnauthenticatedBlob` [`-blobFile` *file*]]
-[`-t` *URL* ... | `-ts` *URL* ...]
+[`-t` *URL* ...] [`-ts` *URL* ...] [`-timestamp-all`]
 [`-TSA-certs` *file* `-TSA-key` *file-or-URI* [`-TSA-time` *unix-time*]]
 [`-HTTPS-CAfile` *file*] [`-HTTPS-CRLfile` *file*]
 [`-h` *digest*] [`-index` *n*] [`-verbose`] [`-add-msi-dse`]
@@ -275,18 +275,28 @@ build.
 
 ## Timestamping and network options
 
-The following timestamping modes are **mutually exclusive** within a single
-`sign` or `add` invocation:
+By default, Authenticode (`-t`) and RFC 3161 (`-ts`) timestamping are
+mutually exclusive within one `sign` or `add` invocation. With
+`-timestamp-all`, both protocols can be used together. Built-in timestamping
+(`-TSA-certs` and `-TSA-key`) cannot be combined with remote timestamping.
 
-- Authenticode timestamping with `-t`
-- RFC 3161 timestamping with `-ts`
-- built-in RFC 3161 timestamp generation with `-TSA-certs` and `-TSA-key`
+Adding a timestamp preserves existing timestamps, including timestamps of the
+other protocol. Multiple timestamps are stored as values of their respective
+unsigned attributes. To replace timestamps, explicitly remove the signature
+and sign again; `add` no longer replaces existing timestamps implicitly.
 
 `-t` *URL*  
-: Add an Authenticode timestamp from the specified URL.  May be repeated.
+: Add an Authenticode timestamp. May be repeated to specify fallback servers;
+  stop after the first successful response unless `-timestamp-all` is used.
 
 `-ts` *URL*  
-: Add an RFC 3161 timestamp from the specified URL.  May be repeated.
+: Add an RFC 3161 timestamp. May be repeated to specify fallback servers;
+  stop after the first successful response unless `-timestamp-all` is used.
+
+`-timestamp-all`
+: Require a timestamp from every specified `-t` and `-ts` URL. Allows both
+  protocols in one invocation. If any request fails, the operation fails
+  rather than producing a partially timestamped output.
 
 `-p` *proxy*  
 : Proxy used for timestamp or CRL retrieval.
@@ -327,6 +337,18 @@ The following timestamping modes are **mutually exclusive** within a single
 : Read blob contents from *file*.  If omitted, a placeholder blob is created.
 
 ## Verification options
+
+Every value of every Authenticode and RFC 3161 timestamp attribute is checked.
+A signature with timestamps succeeds if at least one timestamp is trusted and
+valid **and** the Authenticode signature validates at that timestamp's time.
+Invalid, untrusted, or malformed alternatives do not override a successful
+pair. If no pair validates, that signature fails, even if the signing
+certificate is currently valid. A malformed or empty timestamp attribute is
+not treated as an absent timestamp.
+
+Without timestamps, or with `-ignore-timestamp`, the requested `-time` or
+current time is used instead. For a file containing multiple signatures, one
+eligible valid signature still suffices; `-index` restricts which are tried.
 
 `-c`, `-catalog` *file*  
 : Verify the input file against the specified catalog file.
@@ -389,7 +411,8 @@ missing TSA trust chain
   are supplied with `-TSA-CAfile`, and where needed `-TSA-CRLfile`.
 
 conflicting timestamp modes  
-: `-t`, `-ts`, and built-in TSA signing cannot be combined in one command.
+: Combining `-t` and `-ts` requires `-timestamp-all`. Built-in TSA signing
+  cannot be combined with either remote timestamp mode.
 
 MSI signature mode mismatch  
 : Re-signing or nesting an MSI signature must be consistent with whether the
