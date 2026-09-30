@@ -3220,7 +3220,7 @@ static int verify_content(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
  */
 static int verify_signature(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
-    int leafok, verok;
+    int leafok, verok, timeok = 1;
     STACK_OF(X509) *signers;
     X509 *signer;
     CMS_ContentInfo *timestamp = NULL;
@@ -3259,7 +3259,7 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
             printf("\nTimestamp Server Signature verification is disabled\n");
             time = INVALID_TIME;
         } else {
-            int timeok = verify_timestamp(ctx, p7, timestamp, time);
+            timeok = verify_timestamp(ctx, p7, timestamp, time);
             printf("\nTimestamp Server Signature verification: %s\n", timeok ? "ok" : "failed");
             if (!timeok) {
                 time = INVALID_TIME;
@@ -3271,7 +3271,7 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         printf("\nTimestamp is not available\n\n");
     verok = verify_authenticode(ctx, p7, time, signer);
     printf("Signature verification: %s\n\n", verok ? "ok" : "failed");
-    if (!verok)
+    if (!timeok || !verok)
         return 1; /* FAILED */
 
     return 0; /* OK */

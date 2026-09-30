@@ -467,6 +467,37 @@ if(Python3_FOUND AND NOT cryptography_error)
             list(APPEND ALL_TESTS "verify_ts_cert_${ext}")
         endforeach(ext ${extensions_all})
 
+        # Verify with untrusted Time-Stamp Authority
+        # This test is expected to fail
+        foreach(ext ${extensions_all})
+            add_test(NAME "verify_ts_untrusted_${ext}"
+                COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "verify"
+                "-time" "1567296000" # Signature verification time: Sep 1 00:00:00 2019 GMT
+                "-CAfile" "${CERTS}/CACert.pem"
+                "-TSA-CAfile" "${CERTS}/CACert.pem" # Use an unrelated CA to make TSA verification fail
+                "-in" "${FILES}/ts_cert.${ext}")
+            set_tests_properties("verify_ts_untrusted_${ext}" PROPERTIES
+                ENVIRONMENT "HTTP_PROXY=;http_proxy=;"
+                DEPENDS "sign_ts_cert_${ext}"
+                WILL_FAIL TRUE)
+            list(APPEND ALL_TESTS "verify_ts_untrusted_${ext}")
+        endforeach(ext ${extensions_all})
+
+        # Verify with untrusted Time-Stamp Authority and ignored timestamp
+        foreach(ext ${extensions_all})
+            add_test(NAME "verify_ts_untrusted_ignore_${ext}"
+                COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "verify"
+                "-time" "1567296000" # Signature verification time: Sep 1 00:00:00 2019 GMT
+                "-ignore-timestamp"
+                "-CAfile" "${CERTS}/CACert.pem"
+                "-TSA-CAfile" "${CERTS}/CACert.pem" # Use an unrelated CA to make TSA verification fail
+                "-in" "${FILES}/ts_cert.${ext}")
+            set_tests_properties("verify_ts_untrusted_ignore_${ext}" PROPERTIES
+                ENVIRONMENT "HTTP_PROXY=;http_proxy=;"
+                DEPENDS "sign_ts_cert_${ext}")
+            list(APPEND ALL_TESTS "verify_ts_untrusted_ignore_${ext}")
+        endforeach(ext ${extensions_all})
+
         # Signature verification time: Jan  1 00:00:00 2035 GMT
         foreach(ext ${extensions_all})
             add_test(NAME "verify_ts_future_${ext}"
