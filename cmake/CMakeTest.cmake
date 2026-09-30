@@ -544,6 +544,20 @@ if(Python3_FOUND AND NOT cryptography_error)
             endforeach(cert ${pem_certs})
         endforeach(ext ${extensions_all})
 
+        # Append two more RFC3161 timestamps to the existing one
+        add_test(NAME "add_ts_all_exe"
+            COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "add"
+            "-timestamp-all"
+            "-ts" "FILE ${LOGS}/url.log"
+            "-ts" "FILE ${LOGS}/url.log"
+            "-in" "${FILES}/ts_cert.exe"
+            "-out" "${FILES}/ts_all.exe")
+        set_tests_properties("add_ts_all_exe" PROPERTIES
+            ENVIRONMENT "HTTP_PROXY=;http_proxy="
+            DEPENDS "sign_ts_cert_exe"
+            RESOURCE_LOCK "tsa")
+        list(APPEND ALL_TESTS "add_ts_all_exe")
+
 
 ### Verify Time-Stamp Authority ###
 
@@ -560,6 +574,18 @@ if(Python3_FOUND AND NOT cryptography_error)
                 DEPENDS "sign_ts_cert_${ext}")
             list(APPEND ALL_TESTS "verify_ts_cert_${ext}")
         endforeach(ext ${extensions_all})
+
+        # Verify a signature with multiple timestamps
+        add_test(NAME "verify_ts_all_exe"
+            COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "verify"
+            "-time" "1567296000" # Signature verification time: Sep  1 00:00:00 2019 GMT
+            "-CAfile" "${CERTS}/CACert.pem"
+            "-TSA-CAfile" "${CERTS}/TSACA.pem"
+            "-in" "${FILES}/ts_all.exe")
+        set_tests_properties("verify_ts_all_exe" PROPERTIES
+            ENVIRONMENT "HTTP_PROXY=;http_proxy=;"
+            DEPENDS "add_ts_all_exe")
+        list(APPEND ALL_TESTS "verify_ts_all_exe")
 
         # Verify with untrusted Time-Stamp Authority
         # This test is expected to fail
@@ -718,6 +744,7 @@ if(Python3_FOUND AND NOT cryptography_error)
         set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/jreq.tsq")
         set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/jresp.tsr")
     endforeach(ext ${extensions_all})
+    set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/ts_all.exe")
 
     add_test(NAME "remove_files"
         COMMAND ${CMAKE_COMMAND} -E rm -f ${OUTPUT_FILES})
