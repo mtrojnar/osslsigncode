@@ -288,6 +288,7 @@ typedef struct {
     int nturl;
     char *tsurl[MAX_TS_SERVERS];
     int ntsurl;
+    int timestamp_all;
     char *proxy;
     int noverifypeer;
     int addBlob;
