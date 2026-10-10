@@ -132,6 +132,7 @@
 
 #define SIZE_64K 65536       /* 2^16 */
 #define SIZE_16M 16777216    /* 2^24 */
+#define SIZE_512M 536870912  /* 2^29 */
 
 /*
  * Macro names:
