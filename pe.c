@@ -984,6 +984,7 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
     BIO *bhash = NULL;
     uint32_t filebound;
     size_t pphlen_sz, sections_factor;
+    uint64_t pages;
 
     if (rphlen == NULL || ctx == NULL || ctx->options == NULL || ctx->pe_ctx == NULL
         || ctx->options->indata == NULL)
@@ -1044,20 +1045,6 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
     }
     pphlen = 4 + mdlen;
 
-    /* Compute an upper bound for result size and guard overflow */
-    pphlen_sz = (size_t)pphlen;
-    sections_factor = 3 + (size_t)nsections + ((size_t)ctx->pe_ctx->fileend / pagesize);
-    if (sections_factor > SIZE_MAX / pphlen_sz) {
-        fprintf(stderr, "Page hash allocation size would overflow\n");
-        return NULL; /* FAILED */
-    }
-    phlen = (int)(pphlen_sz * sections_factor);
-    /* Sanity limit - page hash shouldn't exceed reasonable size (16 MB) */
-    if (phlen < 0 || (size_t)phlen > SIZE_16M) {
-        fprintf(stderr, "Page hash size exceeds limit: %d\n", phlen);
-        return NULL; /* FAILED */
-    }
-
     /* Determine the file boundary for section data validation */
     filebound = ctx->pe_ctx->sigpos ? ctx->pe_ctx->sigpos : ctx->pe_ctx->fileend;
 
@@ -1071,6 +1058,37 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
         return NULL; /* FAILED */
     }
     sections = (char *)ctx->options->indata + sect_off;
+
+    /* Compute an upper bound for result size from the pages of the sections.
+     * Data outside the sections (e.g. an overlay appended to the file) is not
+     * hashed, so the file size alone must not be used here */
+    for (i = 0, pages = 0; i < (int)nsections; i++) {
+        rs = GET_UINT32_LE(sections + (size_t)i * 40 + 16);
+        ro = GET_UINT32_LE(sections + (size_t)i * 40 + 20);
+        if (rs == 0)
+            continue;
+        /* Validate section bounds against file size before using its size */
+        if (ro >= filebound || rs > filebound - ro) {
+            fprintf(stderr, "Section %d has invalid bounds: offset=0x%08X, size=0x%08X, fileend=0x%08X\n",
+                    i, ro, rs, filebound);
+            return NULL; /* FAILED */
+        }
+        pages += ((uint64_t)rs + pagesize - 1) / pagesize;
+    }
+    /* Never more than the pages of the whole file, overlapping sections
+     * that would need more are rejected while computing the page hash */
+    if (pages > (uint64_t)nsections + ctx->pe_ctx->fileend / pagesize)
+        pages = (uint64_t)nsections + ctx->pe_ctx->fileend / pagesize;
+    /* header page + last entry (end of the last section) + 1 spare */
+    sections_factor = 3 + (size_t)pages;
+    pphlen_sz = (size_t)pphlen;
+    /* Sanity limit - a PE file is at most 4 GB, so even with 512 byte pages
+     * the page hash stays below 512 MB */
+    if (sections_factor > SIZE_512M / pphlen_sz) {
+        fprintf(stderr, "Page hash size exceeds limit: %zu\n", sections_factor * pphlen_sz);
+        return NULL; /* FAILED */
+    }
+    phlen = (int)(pphlen_sz * sections_factor);
 
     bhash = BIO_new(BIO_f_md());
     if (bhash == NULL)
