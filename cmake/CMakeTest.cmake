@@ -43,6 +43,7 @@ if(Python3_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/conf"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/client_http.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/make_certificates.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_pe_checksum.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/start_server.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/exec.py"
             DESTINATION "${TEST_DIR}/")
@@ -246,6 +247,40 @@ if(Python3_FOUND AND NOT cryptography_error)
             DEPENDS "signed_${ext}")
         list(APPEND ALL_TESTS "nested_${ext}")
     endforeach(ext ${extensions_all})
+
+
+### PE checksum ###
+
+    # The CheckSum field of a signed PE file is compared with an independent
+    # computation, for overlays of odd and even sizes and of different contents.
+    set(checksum_cases "1_255" "3_0" "65537_255" "300001_127")
+    foreach(case ${checksum_cases})
+        string(REPLACE "_" ";" case_args ${case})
+        list(GET case_args 0 case_size)
+        list(GET case_args 1 case_fill)
+        add_test(NAME "checksum_${case}_create"
+            COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/check_pe_checksum.py"
+            "make" "${FILES}/unsigned.exe" "${FILES}/checksum_${case}.exe"
+            ${case_size} ${case_fill})
+        add_test(NAME "checksum_${case}_sign"
+            COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "sign"
+            "-pkcs12" "${CERTS}/cert.p12"
+            "-readpass" "${CERTS}/password.txt"
+            "-in" "${FILES}/checksum_${case}.exe"
+            "-out" "${FILES}/checksum_${case}_signed.exe")
+        add_test(NAME "checksum_${case}_check"
+            COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/check_pe_checksum.py"
+            "check" "${FILES}/checksum_${case}_signed.exe")
+        set_tests_properties("checksum_${case}_create" PROPERTIES
+            DEPENDS "start_server")
+        set_tests_properties("checksum_${case}_sign" PROPERTIES
+            DEPENDS "checksum_${case}_create")
+        set_tests_properties("checksum_${case}_check" PROPERTIES
+            DEPENDS "checksum_${case}_sign")
+        list(APPEND ALL_TESTS "checksum_${case}_create" "checksum_${case}_sign" "checksum_${case}_check")
+        set(OUTPUT_FILES ${OUTPUT_FILES}
+            "${FILES}/checksum_${case}.exe" "${FILES}/checksum_${case}_signed.exe")
+    endforeach(case ${checksum_cases})
 
 
 ### Verify signature ###
