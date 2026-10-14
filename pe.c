@@ -975,7 +975,8 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
 {
     uint16_t nsections, opthdr_size;
     uint32_t alignment, pagesize, hdrsize;
-    uint32_t rs, ro, l, lastpos = 0;
+    uint32_t rs, ro, lastpos = 0;
+    uint64_t l;  /* 64-bit: l += pagesize wraps to 0 for a section near 4 GB */
     int mdlen, pphlen, phlen, i, pi = 1;
     size_t written, off, sect_off, sect_tbl, need;
     u_char *res = NULL, *zeroes = NULL;
@@ -1189,7 +1190,7 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
                 return NULL; /* FAILED */
             }
 
-            PUT_UINT32_LE(ro + l, res + (size_t)pi * (size_t)pphlen);
+            PUT_UINT32_LE((uint32_t)(ro + l), res + (size_t)pi * (size_t)pphlen);
 
             bhash = BIO_new(BIO_f_md());
             if (bhash == NULL) {
