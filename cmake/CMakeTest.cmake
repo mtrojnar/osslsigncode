@@ -15,7 +15,7 @@ if(Python3_FOUND)
     if(NOT cryptography_error)
         message(STATUS "Using python3-cryptography version ${cryptography_output}")
         option(STOP_SERVER "Stop HTTP server after tests" ON)
-        option(LARGE_FILE_TESTS "Sign 2.6 GB PE files (slow, needs about 8 GB of disk space and a 64-bit build)" OFF)
+        option(LARGE_FILE_TESTS "Sign 2.6 GB and 4 GB PE files (slow, needs about 16 GB of disk space and a 64-bit build)" OFF)
 
         # Remove http proxy configuration that may change behavior
         unset(ENV{HTTP_PROXY})
@@ -426,15 +426,18 @@ if(Python3_FOUND AND NOT cryptography_error)
     # Page hash buffer was sized from the file size, so a large file failed even when
     # most of it is an overlay, and was limited to 16 MB for large sections.
     if(LARGE_FILE_TESTS)
-        foreach(kind "section" "overlay")
+        # "wrap" has a section of 0xFFFFF200 bytes: the page offset overflowed 32 bits
+        foreach(kind "section" "overlay" "wrap")
+            set(large_size 2600000000)
+            set(overlay_arg "")
             if(kind STREQUAL "overlay")
                 set(overlay_arg "overlay")
-            else(kind STREQUAL "overlay")
-                set(overlay_arg "")
+            elseif(kind STREQUAL "wrap")
+                set(large_size 4294964224)
             endif(kind STREQUAL "overlay")
             add_test(NAME "large_${kind}_create"
                 COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/make_large_pe.py"
-                "${FILES}/large_${kind}.exe" 2600000000 ${overlay_arg})
+                "${FILES}/large_${kind}.exe" ${large_size} ${overlay_arg})
             add_test(NAME "large_${kind}_sign"
                 COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "sign"
                 "-pkcs12" "${CERTS}/cert.p12"
@@ -442,21 +445,25 @@ if(Python3_FOUND AND NOT cryptography_error)
                 "-ph" "-h" "sha256"
                 "-in" "${FILES}/large_${kind}.exe"
                 "-out" "${FILES}/large_${kind}_signed.exe")
-            add_test(NAME "large_${kind}_verify"
-                COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "verify"
-                "-CAfile" "${CERTS}/CACert.pem"
-                "-ignore-timestamp"
-                "-in" "${FILES}/large_${kind}_signed.exe")
             set_tests_properties("large_${kind}_create" PROPERTIES
                 DEPENDS "start_server" TIMEOUT 300)
             set_tests_properties("large_${kind}_sign" PROPERTIES
                 DEPENDS "large_${kind}_create" TIMEOUT 900)
-            set_tests_properties("large_${kind}_verify" PROPERTIES
-                DEPENDS "large_${kind}_sign" TIMEOUT 900)
-            list(APPEND ALL_TESTS "large_${kind}_create" "large_${kind}_sign" "large_${kind}_verify")
+            list(APPEND ALL_TESTS "large_${kind}_create" "large_${kind}_sign")
+            # The signed "wrap" file is over 4 GB and cannot be opened again
+            if(NOT kind STREQUAL "wrap")
+                add_test(NAME "large_${kind}_verify"
+                    COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "verify"
+                    "-CAfile" "${CERTS}/CACert.pem"
+                    "-ignore-timestamp"
+                    "-in" "${FILES}/large_${kind}_signed.exe")
+                set_tests_properties("large_${kind}_verify" PROPERTIES
+                    DEPENDS "large_${kind}_sign" TIMEOUT 900)
+                list(APPEND ALL_TESTS "large_${kind}_verify")
+            endif(NOT kind STREQUAL "wrap")
             set(OUTPUT_FILES ${OUTPUT_FILES}
                 "${FILES}/large_${kind}.exe" "${FILES}/large_${kind}_signed.exe")
-        endforeach(kind "section" "overlay")
+        endforeach(kind "section" "overlay" "wrap")
     endif(LARGE_FILE_TESTS)
 
     if(OPENSSL_VERSION VERSION_GREATER_EQUAL "3.0.0" OR CURL_FOUND)
