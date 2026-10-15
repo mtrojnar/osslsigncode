@@ -1079,33 +1079,26 @@ static int add_timestamp(PKCS7 *p7, FILE_FORMAT_CTX *ctx, char *url, int rfc3161
 }
 
 /*
- * [in, out] p7: new PKCS#7 signature
- * [in] ctx: structure holds input and output data
+ * Try fallback servers, or require every server with -timestamp-all.
  * [returns] 0 on error or 1 on success
  */
-static int add_timestamp_authenticode(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
+static int add_timestamps(PKCS7 *p7, FILE_FORMAT_CTX *ctx, int rfc3161)
 {
+    char **urls = rfc3161 ? ctx->options->tsurl : ctx->options->turl;
+    int count = rfc3161 ? ctx->options->ntsurl : ctx->options->nturl;
     int i;
-    for (i=0; i<ctx->options->nturl; i++) {
-        if (!add_timestamp(p7, ctx, ctx->options->turl[i], 0))
-            return 1; /* OK */
-    }
-    return 0; /* FAILED */
-}
 
-/*
- * [in, out] p7: new PKCS#7 signature
- * [in] ctx: structure holds input and output data
- * [returns] 0 on error or 1 on success
- */
-static int add_timestamp_rfc3161(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
-{
-    int i;
-    for (i=0; i<ctx->options->ntsurl; i++) {
-        if (!add_timestamp(p7, ctx, ctx->options->tsurl[i], 1))
+    for (i = 0; i < count; i++) {
+        int failed = add_timestamp(p7, ctx, urls[i], rfc3161);
+
+        if (ctx->options->timestamp_all) {
+            if (failed)
+                return 0; /* FAILED */
+        } else if (!failed) {
             return 1; /* OK */
+        }
     }
-    return 0; /* FAILED */
+    return ctx->options->timestamp_all;
 }
 
 /*
@@ -1466,12 +1459,12 @@ static int add_unauthenticated_blob(PKCS7 *p7, const char *blob_file)
 static int add_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 {
     /* add counter-signature/timestamp */
-    if (ctx->options->nturl && !add_timestamp_authenticode(p7, ctx)) {
+    if (ctx->options->nturl && !add_timestamps(p7, ctx, 0)) {
         fprintf(stderr, "%s\n%s\n", "Authenticode timestamping failed",
             "Use the \"-ts\" option to add the RFC3161 Time-Stamp Authority or choose another one Authenticode Time-Stamp Authority");
         return 1; /* FAILED */
     }
-    if (ctx->options->ntsurl && !add_timestamp_rfc3161(p7, ctx)) {
+    if (ctx->options->ntsurl && !add_timestamps(p7, ctx, 1)) {
         fprintf(stderr, "%s\n%s\n", "RFC 3161 timestamping failed",
             "Use the \"-t\" option to add the Authenticode Time-Stamp Authority or choose another one RFC3161 Time-Stamp Authority");
         return 1; /* FAILED */
@@ -1651,14 +1644,6 @@ static int X509_attribute_chain_append_object(STACK_OF(X509_ATTRIBUTE) **unauth_
                 continue;
             object_txt[0] = 0x00;
             OBJ_obj2txt(object_txt, sizeof object_txt, object, 1);
-            if ((!strcmp(oid, PKCS9_COUNTER_SIGNATURE) || !strcmp(oid, SPC_RFC3161_OBJID))
-                && (!strcmp(object_txt, PKCS9_COUNTER_SIGNATURE) || !strcmp(object_txt, SPC_RFC3161_OBJID))) {
-                /* free up countersignature/timestamp in unauthenticated attributes
-                 * to override the previous timestamp */
-                X509at_delete_attr(*unauth_attr, i);
-                X509_ATTRIBUTE_free(attr);
-                continue;
-            }
             if (!strcmp(oid, object_txt)) {
                 /* append p to the V_ASN1_SEQUENCE */
                 if (!X509_ATTRIBUTE_set1_data(attr, V_ASN1_SEQUENCE, p, len))
@@ -2694,14 +2679,11 @@ static int print_cms_timestamp(CMS_ContentInfo *timestamp, time_t time)
 }
 
 /*
- * RFC3852: the message-digest authenticated attribute type MUST be
- * present when there are any authenticated attributes present
- * [in] timestamp: CMS_ContentInfo struct for Authenticode Timestamp or RFC 3161 Timestamp
+ * Print signature attributes; timestamps are handled separately during verification.
  * [in] p7: PKCS#7 signature
  * [in] verbose: additional output mode
- * [returns] 0 on error or 1 on success
  */
-static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7 *p7, int verbose)
+static void print_signature_attributes(PKCS7 *p7, int verbose)
 {
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
     PKCS7_SIGNER_INFO *si;
@@ -2712,14 +2694,13 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
     const ASN1_STRING *value;
     const u_char *data;
     char object_txt[128];
-    time_t time = INVALID_TIME;
 
     signer_info = PKCS7_get_signer_info(p7);
     if (!signer_info)
-        return INVALID_TIME; /* FAILED */
+        return;
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si)
-        return INVALID_TIME; /* FAILED */
+        return;
     md_nid = OBJ_obj2nid(si->digest_alg->algorithm);
     printf("Message digest algorithm: %s\n",
         (md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2sn(md_nid));
@@ -2836,68 +2817,7 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
             continue;
         object_txt[0] = 0x00;
         OBJ_obj2txt(object_txt, sizeof object_txt, object, 1);
-        if (!strcmp(object_txt, PKCS9_COUNTER_SIGNATURE)) {
-            /* Authenticode Timestamp - Policy OID: 1.2.840.113549.1.9.6 */
-            CMS_ContentInfo *cms;
-            PKCS7_SIGNER_INFO *countersi;
-
-            value = (const ASN1_STRING *)X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
-            if (value == NULL)
-                continue;
-            data = ASN1_STRING_get0_data(value);
-            countersi = d2i_PKCS7_SIGNER_INFO(NULL, &data, ASN1_STRING_length(value));
-            if (countersi == NULL) {
-                printf("Warning: Authenticode Timestamp could not be decoded correctly\n");
-                ERR_print_errors_fp(stderr);
-                continue;
-            }
-            time = time_t_get_si_time(countersi);
-            if (time != INVALID_TIME) {
-                cms = cms_get_timestamp(p7->d.sign, countersi);
-                if (cms) {
-                    if (!print_cms_timestamp(cms, time)) {
-                        CMS_ContentInfo_free(cms);
-                        printf("Warning: Authenticode Timestamp could not be decoded correctly\n");
-                        ERR_print_errors_fp(stderr);
-                        continue;
-                    }
-                    *timestamp = cms;
-                } else {
-                    printf("Warning: Corrupt Authenticode Timestamp embedded content\n");
-                }
-            } else {
-                printf("Warning: PKCS9_TIMESTAMP_SIGNING_TIME attribute not found\n");
-                PKCS7_SIGNER_INFO_free(countersi);
-            }
-        } else if (!strcmp(object_txt, SPC_RFC3161_OBJID)) {
-            /* RFC3161 Timestamp - Policy OID: 1.3.6.1.4.1.311.3.3.1 */
-            CMS_ContentInfo *cms;
-
-            value = (const ASN1_STRING *)X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
-            if (value == NULL)
-                continue;
-            data = ASN1_STRING_get0_data(value);
-            cms = d2i_CMS_ContentInfo(NULL, &data, ASN1_STRING_length(value));
-            if (cms == NULL) {
-                printf("Warning: RFC3161 Timestamp could not be decoded correctly\n");
-                ERR_print_errors_fp(stderr);
-                continue;
-            }
-            time = time_t_get_cms_time(cms);
-            if (time != INVALID_TIME) {
-                if (!print_cms_timestamp(cms, time)) {
-                    CMS_ContentInfo_free(cms);
-                    printf("Warning: RFC3161 Timestamp could not be decoded correctly\n");
-                    ERR_print_errors_fp(stderr);
-                    continue;
-                }
-                *timestamp = cms;
-            } else {
-                printf("Warning: Corrupt RFC3161 Timestamp embedded content\n");
-                CMS_ContentInfo_free(cms);
-                ERR_print_errors_fp(stderr);
-            }
-        } else if (!strcmp(object_txt, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
+        if (!strcmp(object_txt, SPC_UNAUTHENTICATED_DATA_BLOB_OBJID)) {
             /* Unauthenticated Data Blob - Policy OID: 1.3.6.1.4.1.42921.1.2.1 */
             value = (const ASN1_STRING *)X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_UTF8STRING, NULL);
             if (value == NULL) {
@@ -2929,8 +2849,6 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
             (md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2sn(md_nid));
         print_hash("Signature", "", data, len);
     }
-
-    return time;
 }
 
 /*
@@ -3043,7 +2961,7 @@ static time_t time_t_get_cms_time(CMS_ContentInfo *cms)
  * Create new CMS_ContentInfo struct for Authenticode Timestamp.
  * This struct does not contain any TS_TST_INFO as specified in RFC 3161.
  * [in] p7_signed: PKCS#7 signedData structure
- * [in] countersignature: Authenticode Timestamp decoded to PKCS7_SIGNER_INFO
+ * [in] countersignature: Authenticode Timestamp decoded to PKCS7_SIGNER_INFO (consumed)
  * [returns] pointer to CMS_ContentInfo structure
  */
 static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
@@ -3058,7 +2976,7 @@ static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
 
     p7 = PKCS7_new();
     si = sk_PKCS7_SIGNER_INFO_value(p7_signed->signer_info, 0);
-    if (si == NULL)
+    if (!p7 || !si)
         goto out;
 
     /* Create new signed PKCS7 timestamp structure. */
@@ -3066,6 +2984,7 @@ static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
         goto out;
     if (!PKCS7_add_signer(p7, countersignature))
         goto out;
+    countersignature = NULL; /* owned by p7 */
     for (i = 0; i < sk_X509_num(p7_signed->cert); i++) {
         if (!PKCS7_add_certificate(p7, sk_X509_value(p7_signed->cert, i)))
             goto out;
@@ -3095,6 +3014,7 @@ static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
 out:
     if (!cms)
         ERR_print_errors_fp(stderr);
+    PKCS7_SIGNER_INFO_free(countersignature);
     PKCS7_free(p7);
     return cms;
 }
@@ -3213,6 +3133,97 @@ static int verify_content(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
     return 1; /* FAILED */
 }
 
+/* Decode one timestamp value. The caller owns the returned CMS object. */
+static CMS_ContentInfo *timestamp_decode(PKCS7 *p7, X509_ATTRIBUTE *attr,
+    int index, int rfc3161, time_t *time)
+{
+    const ASN1_STRING *value;
+    const u_char *data, *end;
+    CMS_ContentInfo *cms = NULL;
+    int len;
+
+    *time = INVALID_TIME;
+    value = X509_ATTRIBUTE_get0_data(attr, index, V_ASN1_SEQUENCE, NULL);
+    if (!value)
+        return NULL;
+    data = ASN1_STRING_get0_data(value);
+    len = ASN1_STRING_length(value);
+    if (!data || len <= 0)
+        return NULL;
+    end = data + len;
+    if (rfc3161) {
+        cms = d2i_CMS_ContentInfo(NULL, &data, len);
+        if (cms)
+            *time = time_t_get_cms_time(cms);
+    } else {
+        PKCS7_SIGNER_INFO *si = d2i_PKCS7_SIGNER_INFO(NULL, &data, len);
+
+        if (si) {
+            *time = time_t_get_si_time(si);
+            /* cms_get_timestamp consumes si, including on failure. */
+            cms = cms_get_timestamp(p7->d.sign, si);
+        }
+    }
+    if (data != end || *time == INVALID_TIME) {
+        CMS_ContentInfo_free(cms);
+        return NULL;
+    }
+    return cms;
+}
+
+/*
+ * Try every value of every timestamp attribute. A timestamp is usable only if
+ * both it and the Authenticode signature validate at that timestamp's time.
+ * Missing timestamps (or -ignore-timestamp) use the requested/current time.
+ * [returns] 0 on error or 1 on success
+ */
+static int verify_signature_timestamps(FILE_FORMAT_CTX *ctx, PKCS7 *p7, X509 *signer)
+{
+    PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(PKCS7_get_signer_info(p7), 0);
+    STACK_OF(X509_ATTRIBUTE) *attrs = PKCS7_get_attributes(si);
+    int i, j, found = 0, verified = 0, count = 0;
+
+    if (ctx->options->ignore_timestamp) {
+        printf("\nTimestamp Server Signature verification is disabled\n");
+        return verify_authenticode(ctx, p7, INVALID_TIME, signer);
+    }
+    for (i = 0; i < X509at_get_attr_count(attrs); i++) {
+        X509_ATTRIBUTE *attr = X509at_get_attr(attrs, i);
+        int nid = OBJ_obj2nid(X509_ATTRIBUTE_get0_object(attr));
+        int rfc3161 = nid == OBJ_txt2nid(SPC_RFC3161_OBJID);
+
+        if (!rfc3161 && nid != OBJ_txt2nid(PKCS9_COUNTER_SIGNATURE))
+            continue;
+        found = 1; /* Even an empty/malformed timestamp must not mean 'absent'. */
+        if (X509_ATTRIBUTE_count(attr) == 0)
+            printf("Warning: Timestamp attribute contains no values\n");
+        for (j = 0; j < X509_ATTRIBUTE_count(attr); j++) {
+            time_t time;
+            CMS_ContentInfo *timestamp = timestamp_decode(p7, attr, j, rfc3161, &time);
+            int timeok = 0;
+
+            printf("\nTimestamp Index: %d\n", count++);
+            if (timestamp && print_cms_timestamp(timestamp, time))
+                timeok = verify_timestamp(ctx, p7, timestamp, time);
+            else
+                printf("Warning: Timestamp could not be decoded correctly\n");
+            printf("\nTimestamp Server Signature verification: %s\n", timeok ? "ok" : "failed");
+            if (timeok) {
+                int verok = verify_authenticode(ctx, p7, time, signer);
+
+                printf("Signature verification at timestamp time: %s\n", verok ? "ok" : "failed");
+                verified |= verok;
+            }
+            CMS_ContentInfo_free(timestamp);
+            ERR_clear_error();
+        }
+    }
+    if (found)
+        return verified;
+    printf("\nTimestamp is not available\n\n");
+    return verify_authenticode(ctx, p7, INVALID_TIME, signer);
+}
+
 /*
  * [in] ctx: structure holds input and output data
  * [in] p7: PKCS#7 signature
@@ -3220,11 +3231,9 @@ static int verify_content(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
  */
 static int verify_signature(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 {
-    int leafok, verok, timeok = 1;
+    int leafok, verok;
     STACK_OF(X509) *signers;
     X509 *signer;
-    CMS_ContentInfo *timestamp = NULL;
-    time_t time;
 
     signers = PKCS7_get0_signers(p7, NULL, 0);
     if (!signers || sk_X509_num(signers) != 1) {
@@ -3236,7 +3245,7 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
     printf("Signer's certificate:\n");
     print_cert(signer, 0);
 
-    time = time_t_timestamp_get_attributes(&timestamp, p7, ctx->options->verbose);
+    print_signature_attributes(p7, ctx->options->verbose);
     if (ctx->options->leafhash != NULL) {
         leafok = verify_leaf_hash(signer, ctx->options->leafhash);
         printf("\nLeaf hash match: %s\n", leafok ? "ok" : "failed");
@@ -3254,24 +3263,9 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
         printf("TSA's certificates file: %s\n", ctx->options->tsa_cafile);
     if (ctx->options->tsa_crlfile)
         printf("TSA's CRL file: %s\n", ctx->options->tsa_crlfile);
-    if (timestamp) {
-        if (ctx->options->ignore_timestamp) {
-            printf("\nTimestamp Server Signature verification is disabled\n");
-            time = INVALID_TIME;
-        } else {
-            timeok = verify_timestamp(ctx, p7, timestamp, time);
-            printf("\nTimestamp Server Signature verification: %s\n", timeok ? "ok" : "failed");
-            if (!timeok) {
-                time = INVALID_TIME;
-            }
-        }
-        CMS_ContentInfo_free(timestamp);
-        ERR_clear_error();
-    } else
-        printf("\nTimestamp is not available\n\n");
-    verok = verify_authenticode(ctx, p7, time, signer);
+    verok = verify_signature_timestamps(ctx, p7, signer);
     printf("Signature verification: %s\n\n", verok ? "ok" : "failed");
-    if (!timeok || !verok)
+    if (!verok)
         return 1; /* FAILED */
 
     return 0; /* OK */
@@ -3706,8 +3700,8 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -h {md5,sha1,sha2(56),sha384,sha512} ]\n", "");
         printf("%12s[ -n <desc> ] [ -i <url> ] [ -jp <level> ] [ -comm ]\n", "");
         printf("%12s[ -ph ]\n", "");
-        printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
-        printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
+        printf("%12s[ -t <timestampurl> [ -t ... ] ] [ -ts <timestampurl> [ -ts ... ] ]\n", "");
+        printf("%12s[ -timestamp-all ] [ -p <proxy> ] [ -noverifypeer ]\n", "");
         printf("%12s[ -TSA-certs <file> ] [ -TSA-key <file> ]\n", "");
         printf("%12s[ -TSA-time <unix-time> ]\n", "");
         printf("%12s[ -HTTPS-CAfile <file> ]\n", "");
@@ -3729,8 +3723,8 @@ static void usage(const char *argv0, const char *cmd)
     }
     if (on_list(cmd, cmds_add)) {
         printf("%1sadd [ -addUnauthenticatedBlob [ -blobFile <file> ] ]\n", "");
-        printf("%12s[ -t <timestampurl> [ -t ... ] [ -p <proxy> ] [ -noverifypeer  ]\n", "");
-        printf("%12s[ -ts <timestampurl> [ -ts ... ] [ -p <proxy> ] [ -noverifypeer ] ]\n", "");
+        printf("%12s[ -t <timestampurl> [ -t ... ] ] [ -ts <timestampurl> [ -ts ... ] ]\n", "");
+        printf("%12s[ -timestamp-all ] [ -p <proxy> ] [ -noverifypeer ]\n", "");
         printf("%12s[ -TSA-certs <file> ] [ -TSA-key <file> ]\n", "");
         printf("%12s[ -TSA-time <unix-time> ]\n", "");
         printf("%12s[ -HTTPS-CAfile <file> ]\n", "");
@@ -4003,11 +3997,12 @@ static void help_for(const char *argv0, const char *cmd)
     if (on_list(cmd, cmds_t)) {
         printf("%-24s= specifies that the digital signature will be timestamped\n", "-t");
         printf("%26sby the Time-Stamp Authority (TSA) indicated by the URL\n", "");
-        printf("%26sthis option cannot be used with the -ts option\n", "");
+        printf("%26sURLs are tried in order until one succeeds (unless -timestamp-all is used)\n", "");
     }
     if (on_list(cmd, cmds_ts)) {
         printf("%-24s= specifies the URL of the RFC 3161 Time-Stamp Authority server\n", "-ts");
-        printf("%26sthis option cannot be used with the -t option\n", "");
+        printf("%26sURLs are tried in order until one succeeds (unless -timestamp-all is used)\n", "");
+        printf("%-24s= require a timestamp from every -t and -ts URL; allows both protocols\n", "-timestamp-all");
     }
     if (on_list(cmd, cmds_time))
         printf("%-24s= the unix-time to set the signing and/or verifying time\n", "-time");
@@ -4733,7 +4728,10 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
         options->https_cafile = get_cafile();
         options->tsa_cafile = get_cafile();
     }
-    for (argc--,argv++; argc >= 1; argc--,argv++) {
+    argc--;
+    argv++;
+    /* Options consume a variable number of arguments. */
+    while (argc >= 1) {
         if (!strcmp(*argv, "-in")) {
             if (--argc < 1) {
                 usage(argv0, "all");
@@ -4900,14 +4898,16 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->time = (time_t)strtoull(*(++argv), NULL, 10);
+        } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-timestamp-all")) {
+            options->timestamp_all = 1;
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-t")) {
-            if (--argc < 1) {
+            if (--argc < 1 || options->nturl >= MAX_TS_SERVERS) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
             options->turl[options->nturl++] = *(++argv);
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-ts")) {
-            if (--argc < 1) {
+            if (--argc < 1 || options->ntsurl >= MAX_TS_SERVERS) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
@@ -5078,6 +5078,8 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
             failarg = *argv;
             break;
         }
+        argc--;
+        argv++;
     }
     if (!options->infile && argc > 0) {
         options->infile = *(argv++);
@@ -5098,7 +5100,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
         return 0; /* FAILED */
     }
     if (argc > 0 ||
-        (options->nturl && options->ntsurl) ||
+        (options->nturl && options->ntsurl && !options->timestamp_all) ||
         (options->nturl && options->tsa_certfile && options->tsa_keyfile) ||
         (options->ntsurl && options->tsa_certfile && options->tsa_keyfile) ||
         !options->infile ||

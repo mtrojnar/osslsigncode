@@ -118,6 +118,20 @@ or if you want to add a timestamp as well:
     -t http://timestamp.digicert.com \
     -in yourapp.exe -out yourapp-signed.exe
 ```
+To require multiple timestamps, use `-timestamp-all` with repeated `-ts` or
+`-t` options (both protocols may be combined):
+```
+  osslsigncode add -timestamp-all \
+    -ts https://tsa1.example.com/ -ts https://tsa2.example.com/ \
+    -in yourapp-signed.exe -out yourapp-multistamped.exe
+```
+Every requested server must succeed. Without `-timestamp-all`, repeated URLs
+remain fallback servers, stopping after the first success. `add` preserves
+existing timestamps. Verification succeeds if at least one trusted timestamp
+and the signing certificate/signature validate at that timestamp's time;
+invalid alternatives do not invalidate a valid pair. Use `-ignore-timestamp`
+to verify at the requested/current time instead.
+
 You can use a certificate and key stored in a PKCS#12 container:
 ```
   osslsigncode sign -pkcs12 <pkcs12-file> -pass <pkcs12-password> \
