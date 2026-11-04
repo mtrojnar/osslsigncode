@@ -6,10 +6,14 @@ import sys
 
 
 def pe_checksum(data: bytes) -> int:
-    """Compute the PE checksum as documented for the CheckSum field.
+    """Compute the PE checksum of an even-length file.
 
     Add the 16-bit little-endian words of the file, without the CheckSum field,
-    with an end-around carry, then add the length of the file."""
+    with an end-around carry, then add the length of the file.
+    Odd lengths are not supported: osslsigncode ignores the trailing byte,
+    while CheckSumMappedFile() adds it."""
+    if len(data) % 2:
+        raise ValueError("odd file length {} is not supported".format(len(data)))
     pe_offset = struct.unpack_from("<I", data, 60)[0]
     field = pe_offset + 24 + 64  # OptionalHeader.CheckSum
     total = 0
@@ -28,7 +32,11 @@ def check(path: str) -> int:
         data = file.read()
     pe_offset = struct.unpack_from("<I", data, 60)[0]
     stored = struct.unpack_from("<I", data, pe_offset + 24 + 64)[0]
-    expected = pe_checksum(data)
+    try:
+        expected = pe_checksum(data)
+    except ValueError as err:
+        print("{}: {}".format(path, err), file=sys.stderr)
+        return 1
     if stored != expected:
         print("{}: checksum 0x{:08X}, expected 0x{:08X}".format(path, stored, expected),
               file=sys.stderr)

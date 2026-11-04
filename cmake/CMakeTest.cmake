@@ -254,7 +254,9 @@ if(Python3_FOUND AND NOT cryptography_error)
 ### PE checksum ###
 
     # The CheckSum field of a signed PE file is compared with an independent
-    # computation, for overlays of odd and even sizes and of different contents.
+    # computation, and verify must not report an invalid checksum.
+    # Signing pads the file to 8 bytes, so the signed files have even lengths;
+    # the overlay sizes vary the padding and the fill bytes vary the contents.
     set(checksum_cases "1_255" "3_0" "65537_255" "300001_127")
     foreach(case ${checksum_cases})
         string(REPLACE "_" ";" case_args ${case})
@@ -279,7 +281,17 @@ if(Python3_FOUND AND NOT cryptography_error)
             DEPENDS "checksum_${case}_create")
         set_tests_properties("checksum_${case}_check" PROPERTIES
             DEPENDS "checksum_${case}_sign")
-        list(APPEND ALL_TESTS "checksum_${case}_create" "checksum_${case}_sign" "checksum_${case}_check")
+        # verify only warns on a checksum mismatch, so match its output
+        add_test(NAME "checksum_${case}_verify"
+            COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "verify"
+            "-CAfile" "${CERTS}/CACert.pem"
+            "-CRLfile" "${CERTS}/CACertCRL.pem"
+            "-in" "${FILES}/checksum_${case}_signed.exe")
+        set_tests_properties("checksum_${case}_verify" PROPERTIES
+            DEPENDS "checksum_${case}_sign"
+            FAIL_REGULAR_EXPRESSION "invalid PE checksum")
+        list(APPEND ALL_TESTS "checksum_${case}_create" "checksum_${case}_sign"
+            "checksum_${case}_check" "checksum_${case}_verify")
         set(OUTPUT_FILES ${OUTPUT_FILES}
             "${FILES}/checksum_${case}.exe" "${FILES}/checksum_${case}_signed.exe")
     endforeach(case ${checksum_cases})
