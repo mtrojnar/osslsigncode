@@ -491,7 +491,8 @@ if(Python3_FOUND AND NOT cryptography_error)
                     "-out" "${FILES}/ts_${cert}.${ext}")
                 set_tests_properties("sign_ts_${cert}_${ext}" PROPERTIES
                     ENVIRONMENT "HTTP_PROXY=;http_proxy="
-                    DEPENDS "start_server")
+                    DEPENDS "start_server"
+                    RESOURCE_LOCK "tsa") # The test TSA shares request files
                 list(APPEND ALL_TESTS "sign_ts_${cert}_${ext}")
             endforeach(cert ${pem_certs})
         endforeach(ext ${extensions_all})
