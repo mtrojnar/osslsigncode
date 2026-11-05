@@ -6,8 +6,8 @@ name: Release
 #
 #   Linux   -> fully-static musl binaries (zero shared-lib deps), built in
 #              Alpine on native amd64 and arm64 runners.
-#   macOS   -> arm64 + x86_64, third-party libs (OpenSSL/zlib) linked
-#              statically via vcpkg; only system libs remain dynamic.
+#   macOS   -> arm64 + x86_64, OpenSSL and zlib built from source and linked
+#              statically; only system libs remain dynamic.
 #   Windows -> arm64 + x64 static (MSVC static CRT + static deps) -> single self
 #              contained .exe.
 
@@ -137,9 +137,10 @@ jobs:
           if-no-files-found: error
 
   # --------------------------------------------------------------------------
-  # macOS: arm64 + x86_64. Third-party deps come from vcpkg static triplets, so
-  # the binary depends only on always-present system libraries. (A truly static
-  # binary is not possible on macOS -- libSystem must be dynamic.)
+  # macOS: arm64 + x86_64. OpenSSL and zlib are built from source as static
+  # libraries for the minimum supported macOS, so the binary depends only on
+  # always-present system libraries. (A truly static binary is not possible on
+  # macOS -- libSystem must be dynamic.)
   # --------------------------------------------------------------------------
   macos:
     name: macos-${{ matrix.arch }}
@@ -159,22 +160,29 @@ jobs:
             py_arch: x64
     runs-on: ${{ matrix.os }}
     env:
-      VCPKG_ROOT: /usr/local/share/vcpkg
+      # The minimum supported macOS. clang and CMake both read this, so the
+      # dependencies and osslsigncode itself are all built for it.
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
       ZLIB_VERSION: 1.3.1
+      ZLIB_SHA256: 9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
       ZLIB_PREFIX: /tmp/zlibinstall
-      MIN_MACOS_VERSION: "14.0"
+      OPENSSL_VERSION: 3.5.9
+      OPENSSL_SHA256: 603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
+      OPENSSL_PREFIX: /tmp/opensslinstall
     steps:
       - name: Resolve version
         run: echo "VERSION=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_ENV"
 
-      # Macos doesn't have a static zlib build available (at least I couldn't
-      # figure out how to get one), so build and cache it.
+      # Neither the runner nor vcpkg's pinned baseline provides static
+      # libraries built for the minimum supported macOS: Homebrew bottles
+      # target the runner's macOS, and the baseline's zlib does not build with
+      # current SDKs. Build and cache both libraries instead.
       - name: Restore cached ZLib
         id: cache-zlib
         uses: actions/cache@v6
         with:
           path: "${{env.ZLIB_PREFIX}}"
-          key: zlib-${{ env.ZLIB_VERSION }}-static-${{ matrix.arch }}-macos
+          key: zlib-${{ env.ZLIB_VERSION }}-static-${{ matrix.arch }}-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}
       - name: Build ZLib
         if: steps.cache-zlib.outputs.cache-hit != 'true'
         shell: sh
@@ -183,13 +191,38 @@ jobs:
           cd /tmp
           wget -O zlib.tar.gz \
             "https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz"
+          echo "${ZLIB_SHA256}  zlib.tar.gz" | shasum -a 256 -c
           tar xf zlib.tar.gz
           cd "zlib-${ZLIB_VERSION}"
-          # ./config auto-detects amd64 vs arm64, so it works for both matrix rows.
-          # no-module => legacy provider is compiled into libcrypto.a (no dlopen).
           CFLAGS="-arch ${{ matrix.osx_arch }}" ./configure --static --prefix="${{env.ZLIB_PREFIX}}"
           make -j"$(sysctl -n hw.ncpu)"
           make install
+
+      - name: Restore cached OpenSSL
+        id: cache-openssl
+        uses: actions/cache@v6
+        with:
+          path: "${{env.OPENSSL_PREFIX}}"
+          key: openssl-${{ env.OPENSSL_VERSION }}-static-${{ matrix.arch }}-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}
+      - name: Build OpenSSL
+        if: steps.cache-openssl.outputs.cache-hit != 'true'
+        shell: sh
+        run: |
+          set -eux
+          cd /tmp
+          wget -O openssl.tar.gz \
+            "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+          echo "${OPENSSL_SHA256}  openssl.tar.gz" | shasum -a 256 -c
+          tar xf openssl.tar.gz
+          cd "openssl-${OPENSSL_VERSION}"
+          # no-module => legacy provider is compiled into libcrypto.a (no dlopen).
+          # Use the macOS system OpenSSL directory rather than a path that only
+          # exists on the build machine.
+          ./Configure "darwin64-${{ matrix.osx_arch }}-cc" \
+            no-shared no-module no-tests no-docs \
+            --prefix="${{env.OPENSSL_PREFIX}}" --libdir=lib --openssldir=/etc/ssl
+          make -j"$(sysctl -n hw.ncpu)"
+          make install_sw
 
       # Setup xcode build environment
       - name: Install Xcode (macOS)
@@ -228,14 +261,22 @@ jobs:
             -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/dist" \
             -DCMAKE_OSX_ARCHITECTURES="${{ matrix.osx_arch }}" \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET="${{env.MIN_MACOS_VERSION}}" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="${{env.MACOSX_DEPLOYMENT_TARGET}}" \
+            -DOPENSSL_ROOT_DIR="${{env.OPENSSL_PREFIX}}" \
             -DZLIB_ROOT="${{env.ZLIB_PREFIX}}" \
             -DZLIB_USE_STATIC_LIBS=TRUE \
             -DOPENSSL_USE_STATIC_LIBS=TRUE
 
+      # The linker only warns when it links objects built for a newer macOS
+      # than the deployment target, so fail the build explicitly.
       - name: Build
         run: |
-          cmake --build "${{github.workspace}}/build" --config "$BUILD_TYPE"
+          set -o pipefail
+          cmake --build "${{github.workspace}}/build" --config "$BUILD_TYPE" 2>&1 | tee build.log
+          if grep -q 'was built for newer' build.log; then
+            echo "::error::linked objects require a newer macOS than ${MACOSX_DEPLOYMENT_TARGET}"
+            exit 1
+          fi
 
       - name: Verify no third-party dylibs are linked
         run: |
@@ -243,6 +284,11 @@ jobs:
           otool -L "$bin"
           if otool -L "$bin" | grep -Ei 'vcpkg|Cellar|libssl|libcrypto'; then
             echo "::error::binary links a non-system dylib"
+            exit 1
+          fi
+          if ! "$bin" --version | grep -q "OpenSSL ${OPENSSL_VERSION} "; then
+            "$bin" --version
+            echo "::error::binary does not use the OpenSSL ${OPENSSL_VERSION} built above"
             exit 1
           fi
           strip -S "$bin" || true
