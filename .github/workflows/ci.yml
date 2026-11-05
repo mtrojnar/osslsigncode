@@ -2,7 +2,9 @@ name: Continuous Integration
 
 on:
   push:
+    branches: [master]
   pull_request:
+  workflow_dispatch:
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
