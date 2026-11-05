@@ -2800,9 +2800,12 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
             if (value == NULL)
                 continue;
             data = ASN1_STRING_get0_data(value);
-            if (!memcmp(data, purpose_comm, sizeof purpose_comm))
+            len = ASN1_STRING_length(value);
+            if (len == (int)sizeof purpose_comm
+                && !memcmp(data, purpose_comm, sizeof purpose_comm))
                 printf("\tMicrosoft Commercial Code Signing purpose\n");
-            else if (!memcmp(data, purpose_ind, sizeof purpose_ind))
+            else if (len == (int)sizeof purpose_ind
+                && !memcmp(data, purpose_ind, sizeof purpose_ind))
                 printf("\tMicrosoft Individual Code Signing purpose\n");
             else
                 printf("\tUnrecognized Code Signing purpose\n");
@@ -2812,7 +2815,9 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
             if (value == NULL)
                 continue;
             data = ASN1_STRING_get0_data(value);
-            if (!memcmp(data, java_attrs_low, sizeof java_attrs_low))
+            len = ASN1_STRING_length(value);
+            if (len == (int)sizeof java_attrs_low
+                && !memcmp(data, java_attrs_low, sizeof java_attrs_low))
                 printf("\tLow level of permissions in Microsoft Internet Explorer 4.x for CAB files\n");
             else
                 printf("\tUnrecognized level of permissions in Microsoft Internet Explorer 4.x for CAB files\n");
