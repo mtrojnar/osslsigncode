@@ -2084,6 +2084,16 @@ static int zipReadLocalHeader(ZIP_LOCAL_HEADER *header, ZIP_FILE *zip, uint64_t 
                 return 0; /* FAILED */
             }
             len = bufferGetU16(header->extraField, &pos);
+            /* The zip64 payload must fit inside the extra field, otherwise
+               bufferGetU64() below reads past the allocation. */
+            if (4 + len > header->extraFieldLen) {
+                fprintf(stderr, "Invalid zip64 local header entry\n");
+                OPENSSL_free(header->fileName);
+                OPENSSL_free(header->extraField);
+                header->fileName = NULL;
+                header->extraField = NULL;
+                return 0; /* FAILED */
+            }
             if (header->uncompressedSize == UINT32_MAX) {
                 if (len >= 8) {
                     header->uncompressedSize = bufferGetU64(header->extraField, &pos);
@@ -2568,6 +2578,13 @@ static ZIP_CENTRAL_DIRECTORY_ENTRY *zipReadNextCentralDirectoryEntry(FILE *file)
                 return NULL; /* FAILED */
             }
             len = bufferGetU16(entry->extraField, &pos);
+            /* The zip64 payload must fit inside the extra field, otherwise
+               bufferGetU64() below reads past the allocation. */
+            if (4 + len > entry->extraFieldLen) {
+                fprintf(stderr, "Invalid zip64 central directory entry\n");
+                freeZipCentralDirectoryEntry(entry);
+                return NULL; /* FAILED */
+            }
             if (entry->uncompressedSize == UINT32_MAX) {
                 if (len >= 8) {
                     entry->uncompressedSize = bufferGetU64(entry->extraField, &pos);
