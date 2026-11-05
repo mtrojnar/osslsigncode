@@ -48,7 +48,7 @@ jobs:
             os: ubuntu-24.04-arm
             py_arch: arm64
     runs-on: ${{ matrix.os }}
-    container: alpine:3.20
+    container: alpine:3.24
     steps:
       # Handle github actions shenanigans on linux alpine arm
       - uses: laverdet/alpine-arm64@v1
@@ -66,9 +66,7 @@ jobs:
             python3 py3-cryptography py3-pip openssl \
             openssl-dev openssl-libs-static \
             wget tar perl \
-            zlib-dev zlib-static linux-headers \
-            nghttp2-static brotli-static zstd-static \
-            libidn2-static c-ares-static libpsl-static libunistring-static
+            zlib-dev zlib-static linux-headers
 
       # Ensure the cryptography package is available
       - name: Validate Python Setup
@@ -100,7 +98,9 @@ jobs:
         run: |
           bin="build/osslsigncode"
           file "$bin"
-          if ! file "$bin" | grep -q 'statically linked'; then
+          # Newer toolchains produce static PIE binaries, which are equally
+          # self-contained.
+          if ! file "$bin" | grep -Eq 'statically linked|static-pie linked'; then
             echo "::error::binary is not fully static"
             ldd "$bin" || true
             exit 1
