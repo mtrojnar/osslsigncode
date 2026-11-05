@@ -7,6 +7,7 @@
 - fixed verification to report failure when timestamp verification fails
 - fixed use-after-free when removing an APPX signature entry from the central directory
 - fixed out-of-bounds read when printing an empty PKCS#7 message digest
+- fixed heap out-of-bounds reads when parsing malformed APPX ZIP64 extra fields
 
 ### 2.14 (2026.07.20)
 
