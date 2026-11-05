@@ -556,9 +556,9 @@ void print_hash(const char *descript1, const char *descript2, const u_char *mdbu
     hexbuf[0] = '\0';
     for (i = 0; i < len; i++) {
 #ifdef WIN32
-        j += sprintf_s(hexbuf + j, size - j, "%02X", mdbuf[i]);
+        j += (size_t)sprintf_s(hexbuf + j, size - j, "%02X", mdbuf[i]);
 #else
-        j += sprintf(hexbuf + j, "%02X", mdbuf[i]);
+        j += (size_t)sprintf(hexbuf + j, "%02X", mdbuf[i]);
 #endif /* WIN32 */
     }
     printf("%s: %s %s\n", descript1, hexbuf, descript2);
