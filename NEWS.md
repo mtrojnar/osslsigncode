@@ -5,6 +5,7 @@
 - fixed Cygwin compilation by not passing ELF-specific linker flags
 - fixed MSI MsiDigitalSignatureEx digest ordering during signing and verification
 - fixed verification to report failure when timestamp verification fails
+- fixed out-of-bounds read when printing an empty PKCS#7 message digest
 
 ### 2.14 (2026.07.20)
 
