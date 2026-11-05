@@ -215,13 +215,6 @@ jobs:
           python --version
           python -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
 
-      - name: Cache vcpkg archives
-        uses: actions/cache@v6
-        with:
-          path: /Users/runner/.cache/vcpkg/archives
-          key: release-${{ matrix.triplet }}-${{ hashFiles('vcpkg.json') }}
-          restore-keys: release-${{ matrix.triplet }}-
-
       # Checkout the specific tag/reference the run is targeting (for back
       # porting).
       - uses: actions/checkout@v7
@@ -332,19 +325,41 @@ jobs:
           python.exe --version
           python.exe -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
 
-      - name: Cache vcpkg archives
-        uses: actions/cache@v6
-        with:
-          path: C:/Users/runneradmin/AppData/Local/vcpkg/archives
-          key: release-${{matrix.triplet}}-windows-static-${{ hashFiles('vcpkg.json') }}
-          restore-keys: release-${{matrix.triplet}}-windows-static-
-
       # Checkout the specific tag/reference the run is targeting (for back
       # porting).
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref_name }}
           fetch-depth: 0
+
+      # Package ABIs change with the runner image, which also provides the
+      # Visual Studio bundled vcpkg selected by msvc-dev-cmd, so a key based
+      # only on vcpkg.json can keep restoring unusable archives.
+      - name: Identify vcpkg build inputs
+        id: vcpkg-inputs
+        shell: pwsh
+        run: |
+          "image=$env:ImageVersion" >> $env:GITHUB_OUTPUT
+
+      # A tag run searches all of its own keys before any default-branch
+      # cache, so a broad fallback here would let a stale archive win over a
+      # matching one. Match the current build inputs in every scope first.
+      - name: Restore the vcpkg archives
+        id: vcpkg-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: C:/Users/runneradmin/AppData/Local/vcpkg/archives
+          key: release-${{matrix.triplet}}-${{steps.vcpkg-inputs.outputs.image}}-${{hashFiles('vcpkg.json')}}
+          restore-keys: |
+            release-${{matrix.triplet}}-${{steps.vcpkg-inputs.outputs.image}}-
+
+      # Older archives remain useful: vcpkg validates each package's ABI itself.
+      - name: Restore older vcpkg archives
+        if: steps.vcpkg-cache.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v6
+        with:
+          path: C:/Users/runneradmin/AppData/Local/vcpkg/archives
+          key: release-${{matrix.triplet}}-
 
       # Handle the CETCOMPAT patch for older versions to support building
       # past tags.
@@ -383,6 +398,33 @@ jobs:
             -DVCPKG_TARGET_TRIPLET="${{ matrix.triplet }}" `
             -DZLIB_USE_STATIC_LIBS=TRUE `
             -DOPENSSL_USE_STATIC_LIBS=TRUE
+
+      # Restored archives may include packages for older build inputs. Keep
+      # only the ABIs this configuration installed, so the cache does not
+      # grow. This is housekeeping, so it must not block a release.
+      - name: Drop unused vcpkg archives
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $cache = "C:/Users/runneradmin/AppData/Local/vcpkg/archives"
+          $status = "${{github.workspace}}/build/vcpkg_installed/vcpkg/status"
+          if (!(Test-Path $status) -or !(Test-Path $cache)) { exit 0 }
+          $used = Select-String -Path $status -Pattern '^Abi: (\w+)' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value }
+          if (!$used) { exit 0 }
+          Get-ChildItem $cache -Recurse -File -Filter *.zip |
+            Where-Object { $used -notcontains $_.BaseName } |
+            Remove-Item
+
+      # vcpkg installs dependencies during CMake configuration. Persist new
+      # binaries before build or test failures can prevent a cache save.
+      - name: Save the vcpkg archives
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: C:/Users/runneradmin/AppData/Local/vcpkg/archives
+          key: ${{steps.vcpkg-cache.outputs.cache-primary-key}}
 
       - name: Build
         run: cmake --build build --config ${{ env.BUILD_TYPE }}
