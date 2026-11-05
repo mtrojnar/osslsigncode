@@ -33,7 +33,6 @@ jobs:
             os: macOS-latest
             generator: Unix Makefiles
             vcpkg_root: /usr/local/share/vcpkg
-            cache: /Users/runner/.cache/vcpkg/archives
           - id: windows-x64-vs
             triplet: x64-windows
             compiler: vs
@@ -74,14 +73,42 @@ jobs:
     steps:
     - uses: actions/checkout@v5
 
-    - name: Cache the vcpkg archives
+    # Package ABIs can change with the runner image and its vcpkg checkout, so a
+    # key based only on vcpkg.json can keep restoring unusable archives. The
+    # MSVC jobs use Visual Studio's bundled vcpkg instead, which ImageVersion
+    # covers; the revision only matters where ImageVersion is unset.
+    - name: Identify vcpkg build inputs
       if: matrix.cache != ''
-      uses: actions/cache@v5
+      id: vcpkg-inputs
+      shell: pwsh
+      run: |
+        $revision = git -C "${{matrix.vcpkg_root}}" rev-parse HEAD
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        "revision=$revision" >> $env:GITHUB_OUTPUT
+        "image=$env:ImageVersion" >> $env:GITHUB_OUTPUT
+
+    # A PR run searches all of its own keys before any base-branch cache, so a
+    # broad fallback here would let a stale PR archive win over a matching one
+    # from master. Match the current build inputs in every scope first.
+    - name: Restore the vcpkg archives
+      if: matrix.cache != ''
+      id: vcpkg-cache
+      uses: actions/cache/restore@v5
       with:
         path: ${{matrix.cache}}
-        key: ${{matrix.id}}-${{hashFiles('vcpkg.json')}}
+        key: ${{matrix.id}}-v2-${{steps.vcpkg-inputs.outputs.image}}-${{steps.vcpkg-inputs.outputs.revision}}-${{hashFiles('vcpkg.json')}}
         restore-keys: |
-          ${{matrix.id}}-${{hashFiles('vcpkg.json')}}
+          ${{matrix.id}}-v2-${{steps.vcpkg-inputs.outputs.image}}-${{steps.vcpkg-inputs.outputs.revision}}-
+          ${{matrix.id}}-v2-${{steps.vcpkg-inputs.outputs.image}}-
+
+    # Older archives remain useful: vcpkg validates each package's ABI itself.
+    - name: Restore older vcpkg archives
+      if: matrix.cache != '' && steps.vcpkg-cache.outputs.cache-matched-key == ''
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{matrix.cache}}
+        key: ${{matrix.id}}-v2-
+        restore-keys: |
           ${{matrix.id}}-
 
     - name: Configure Visual Studio
@@ -182,6 +209,30 @@ jobs:
           -B "${{github.workspace}}/build" `
           -DCMAKE_BUILD_TYPE="${{env.BUILD_TYPE}}" `
           -DCMAKE_INSTALL_PREFIX="${{github.workspace}}/dist"
+
+    # Restored archives may include packages for older build inputs. Keep only
+    # the ABIs this configuration installed, so the cache does not grow.
+    - name: Drop unused vcpkg archives
+      if: matrix.cache != '' && steps.vcpkg-cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        $status = "${{github.workspace}}/build/vcpkg_installed/vcpkg/status"
+        if (!(Test-Path $status) -or !(Test-Path "${{matrix.cache}}")) { exit 0 }
+        $used = Select-String -Path $status -Pattern '^Abi: (\w+)' |
+          ForEach-Object { $_.Matches[0].Groups[1].Value }
+        if (!$used) { exit 0 }
+        Get-ChildItem "${{matrix.cache}}" -Recurse -File -Filter *.zip |
+          Where-Object { $used -notcontains $_.BaseName } |
+          Remove-Item
+
+    # vcpkg installs dependencies during CMake configuration. Persist new
+    # binaries before build or test failures can prevent a cache save.
+    - name: Save the vcpkg archives
+      if: matrix.cache != '' && steps.vcpkg-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v5
+      with:
+        path: ${{matrix.cache}}
+        key: ${{steps.vcpkg-cache.outputs.cache-primary-key}}
 
     - name: Build
       run: cmake
