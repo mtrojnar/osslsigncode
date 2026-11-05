@@ -544,15 +544,21 @@ int bio_hash_data(BIO *hash, char *indata, size_t idx, size_t fileend)
 void print_hash(const char *descript1, const char *descript2, const u_char *mdbuf, int len)
 {
     char *hexbuf = NULL;
-    int size, i, j = 0;
+    size_t size, j = 0;
+    int i;
 
-    size = 2 * len + 1;
-    hexbuf = OPENSSL_malloc((size_t)size);
+    if (len < 0)
+        return;
+    size = 2 * (size_t)len + 1;
+    hexbuf = OPENSSL_malloc(size);
+    if (hexbuf == NULL)
+        return;
+    hexbuf[0] = '\0';
     for (i = 0; i < len; i++) {
 #ifdef WIN32
-        j += sprintf_s(hexbuf + j, size - j, "%02X", mdbuf[i]);
+        j += (size_t)sprintf_s(hexbuf + j, size - j, "%02X", mdbuf[i]);
 #else
-        j += sprintf(hexbuf + j, "%02X", mdbuf[i]);
+        j += (size_t)sprintf(hexbuf + j, "%02X", mdbuf[i]);
 #endif /* WIN32 */
     }
     printf("%s: %s %s\n", descript1, hexbuf, descript2);
