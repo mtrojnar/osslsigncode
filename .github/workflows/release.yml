@@ -8,8 +8,8 @@ name: Release
 #              Alpine on native amd64 and arm64 runners.
 #   macOS   -> arm64 + x86_64, OpenSSL and zlib built from source and linked
 #              statically; only system libs remain dynamic.
-#   Windows -> arm64 + x64 static (MSVC static CRT + static deps) -> single self
-#              contained .exe.
+#   Windows -> arm64 + x64 static (MSVC static CRT, OpenSSL and zlib built from
+#              source) -> single self contained .exe.
 
 on:
   push:
@@ -325,7 +325,7 @@ jobs:
           if-no-files-found: error
 
   # --------------------------------------------------------------------------
-  # Windows: x64 + arm64, MSVC static triplet -> static CRT + static deps -> a single
+  # Windows: x64 + arm64, MSVC static CRT + static OpenSSL and zlib -> a single
   # self-contained .exe (no vcredist / no third-party DLLs).
   # --------------------------------------------------------------------------
   windows:
@@ -336,17 +336,20 @@ jobs:
         include:
           - arch: arm64
             os: windows-11-arm
-            triplet: arm64-windows-static
             vs_arch: arm64
-            win_arch: arm64
+            openssl_target: VC-WIN64-CLANGASM-ARM
           - arch: amd64
             os: windows-latest
-            triplet: x64-windows-static
             vs_arch: amd64
-            win_arch: x64
+            openssl_target: VC-WIN64A
     runs-on: ${{matrix.os}}
     env:
-      VCPKG_ROOT: C:/vcpkg
+      ZLIB_VERSION: 1.3.2
+      ZLIB_SHA256: bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16
+      OPENSSL_VERSION: 3.5.9
+      OPENSSL_SHA256: 603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
+      NASM_VERSION: "3.02"
+      NASM_SHA256: 161d0bfaff53c2f9e9f3e69fd0672323ebabafd1268976a5cec11be92a19aee7
     steps:
       - name: Resolve version
         shell: bash
@@ -378,34 +381,93 @@ jobs:
           ref: ${{ github.event.inputs.tag || github.ref_name }}
           fetch-depth: 0
 
-      # Package ABIs change with the runner image, which also provides the
-      # Visual Studio bundled vcpkg selected by msvc-dev-cmd, so a key based
-      # only on vcpkg.json can keep restoring unusable archives.
-      - name: Identify vcpkg build inputs
-        id: vcpkg-inputs
+      # vcpkg's pinned baseline ships OpenSSL releases that are no longer
+      # supported, so build the same pinned OpenSSL as the macOS job, and zlib.
+      # The libraries are cached per MSVC toolset, because a toolset must not
+      # be older than the one that built the libraries it links.
+      #
+      # Avoid environment variable names that OpenSSL's makefile also defines,
+      # such as DEPS: nmake exports makefile macros over them.
+      - name: Set dependency paths
         shell: pwsh
         run: |
-          "image=$env:ImageVersion" >> $env:GITHUB_OUTPUT
+          "OSSLSIGNCODE_DEPS=$env:RUNNER_TEMP\deps" >> $env:GITHUB_ENV
 
-      # A tag run searches all of its own keys before any default-branch
-      # cache, so a broad fallback here would let a stale archive win over a
-      # matching one. Match the current build inputs in every scope first.
-      - name: Restore the vcpkg archives
-        id: vcpkg-cache
-        uses: actions/cache/restore@v6
+      - name: Restore cached ZLib
+        id: cache-zlib
+        uses: actions/cache@v6
         with:
-          path: C:/Users/runneradmin/AppData/Local/vcpkg/archives
-          key: release-${{matrix.triplet}}-${{steps.vcpkg-inputs.outputs.image}}-${{hashFiles('vcpkg.json')}}
-          restore-keys: |
-            release-${{matrix.triplet}}-${{steps.vcpkg-inputs.outputs.image}}-
+          path: ${{ env.OSSLSIGNCODE_DEPS }}/zlib
+          key: zlib-${{ env.ZLIB_VERSION }}-static-${{ matrix.arch }}-windows-msvc${{ env.VCToolsVersion }}
+      - name: Build ZLib
+        if: steps.cache-zlib.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          Set-Location $env:RUNNER_TEMP
+          Invoke-WebRequest -OutFile zlib.tar.gz `
+            "https://github.com/madler/zlib/releases/download/v$env:ZLIB_VERSION/zlib-$env:ZLIB_VERSION.tar.gz"
+          if ((Get-FileHash zlib.tar.gz -Algorithm SHA256).Hash -ne $env:ZLIB_SHA256) {
+            throw "zlib.tar.gz: checksum mismatch"
+          }
+          tar xf zlib.tar.gz
+          cmake -G Ninja -S "zlib-$env:ZLIB_VERSION" -B zlib-build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -DZLIB_BUILD_SHARED=OFF `
+            -DZLIB_BUILD_TESTING=OFF `
+            -DCMAKE_INSTALL_PREFIX="$env:OSSLSIGNCODE_DEPS\zlib"
+          cmake --build zlib-build
+          cmake --install zlib-build
 
-      # Older archives remain useful: vcpkg validates each package's ABI itself.
-      - name: Restore older vcpkg archives
-        if: steps.vcpkg-cache.outputs.cache-matched-key == ''
-        uses: actions/cache/restore@v6
+      - name: Restore cached OpenSSL
+        id: cache-openssl
+        uses: actions/cache@v6
         with:
-          path: C:/Users/runneradmin/AppData/Local/vcpkg/archives
-          key: release-${{matrix.triplet}}-
+          path: ${{ env.OSSLSIGNCODE_DEPS }}/openssl
+          key: openssl-${{ env.OPENSSL_VERSION }}-static-${{ matrix.arch }}-windows-msvc${{ env.VCToolsVersion }}
+      # OpenSSL needs NASM for its x64 assembly; arm64 uses clang-cl instead.
+      - name: Install NASM
+        if: steps.cache-openssl.outputs.cache-hit != 'true' && matrix.arch == 'amd64'
+        shell: pwsh
+        run: |
+          Set-Location $env:RUNNER_TEMP
+          Invoke-WebRequest -OutFile nasm.zip `
+            "https://www.nasm.us/pub/nasm/releasebuilds/$env:NASM_VERSION/win64/nasm-$env:NASM_VERSION-win64.zip"
+          if ((Get-FileHash nasm.zip -Algorithm SHA256).Hash -ne $env:NASM_SHA256) {
+            throw "nasm.zip: checksum mismatch"
+          }
+          Expand-Archive nasm.zip -DestinationPath .
+          "$env:RUNNER_TEMP\nasm-$env:NASM_VERSION" >> $env:GITHUB_PATH
+      # Keep OpenSSL's default prefix under Program Files and stage the
+      # installation with DESTDIR: the prefix is compiled into the library as
+      # the engine and provider search path, so it must not be a directory
+      # that unprivileged users can create on the machines running the binary.
+      - name: Build OpenSSL
+        if: steps.cache-openssl.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ("${{ matrix.arch }}" -eq "arm64") {
+            $env:PATH = "$env:ProgramFiles\LLVM\bin;$env:PATH"
+            clang-cl --version
+          } else {
+            nasm -v
+          }
+          Set-Location $env:RUNNER_TEMP
+          Invoke-WebRequest -OutFile openssl.tar.gz `
+            "https://github.com/openssl/openssl/releases/download/openssl-$env:OPENSSL_VERSION/openssl-$env:OPENSSL_VERSION.tar.gz"
+          if ((Get-FileHash openssl.tar.gz -Algorithm SHA256).Hash -ne $env:OPENSSL_SHA256) {
+            throw "openssl.tar.gz: checksum mismatch"
+          }
+          tar xf openssl.tar.gz
+          Set-Location "openssl-$env:OPENSSL_VERSION"
+          # no-shared selects the static runtime (/MT); no-module compiles the
+          # legacy provider into libcrypto.
+          perl Configure "${{ matrix.openssl_target }}" no-shared no-module no-tests no-docs
+          Select-String -Path makefile -Pattern '^(INSTALLTOP|OPENSSLDIR|ENGINESDIR|MODULESDIR)_dir='
+          nmake
+          nmake install_sw DESTDIR="$env:OSSLSIGNCODE_DEPS\openssl"
 
       # Handle the CETCOMPAT patch for older versions to support building
       # past tags.
@@ -434,46 +496,37 @@ jobs:
           fi
           git --no-pager diff -- cmake/SetCompilerFlags.cmake || true
 
+      # msvc-dev-cmd sets VCPKG_ROOT, which makes CMakeLists.txt load the vcpkg
+      # toolchain with the Ninja generator, so clear it. zlib names its static
+      # library zs.lib, which FindZLIB does not search for.
       - name: Configure
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          Remove-Item Env:VCPKG_ROOT -ErrorAction SilentlyContinue
           cmake -G Ninja -S "${{ github.workspace }}" -B build `
             -DCMAKE_BUILD_TYPE="${{ env.BUILD_TYPE }}" `
             -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/dist" `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
-            -DVCPKG_TARGET_ARCHITECTURE="${{matrix.win_arch}}" `
-            -DVCPKG_TARGET_TRIPLET="${{ matrix.triplet }}" `
-            -DZLIB_USE_STATIC_LIBS=TRUE `
-            -DOPENSSL_USE_STATIC_LIBS=TRUE
-
-      # Restored archives may include packages for older build inputs. Keep
-      # only the ABIs this configuration installed, so the cache does not
-      # grow. This is housekeeping, so it must not block a release.
-      - name: Drop unused vcpkg archives
-        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          $cache = "C:/Users/runneradmin/AppData/Local/vcpkg/archives"
-          $status = "${{github.workspace}}/build/vcpkg_installed/vcpkg/status"
-          if (!(Test-Path $status) -or !(Test-Path $cache)) { exit 0 }
-          $used = Select-String -Path $status -Pattern '^Abi: (\w+)' |
-            ForEach-Object { $_.Matches[0].Groups[1].Value }
-          if (!$used) { exit 0 }
-          Get-ChildItem $cache -Recurse -File -Filter *.zip |
-            Where-Object { $used -notcontains $_.BaseName } |
-            Remove-Item
-
-      # vcpkg installs dependencies during CMake configuration. Persist new
-      # binaries before build or test failures can prevent a cache save.
-      - name: Save the vcpkg archives
-        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: C:/Users/runneradmin/AppData/Local/vcpkg/archives
-          key: ${{steps.vcpkg-cache.outputs.cache-primary-key}}
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -DOPENSSL_ROOT_DIR="$env:OSSLSIGNCODE_DEPS\openssl\Program Files\OpenSSL" `
+            -DOPENSSL_USE_STATIC_LIBS=TRUE `
+            -DZLIB_INCLUDE_DIR="$env:OSSLSIGNCODE_DEPS\zlib\include" `
+            -DZLIB_LIBRARY="$env:OSSLSIGNCODE_DEPS\zlib\lib\zs.lib"
 
       - name: Build
         run: cmake --build build --config ${{ env.BUILD_TYPE }}
+
+      - name: Verify the binary is self-contained
+        run: |
+          $deps = dumpbin /nologo /dependents build/osslsigncode.exe
+          $deps
+          if ($deps -match '(?i)vcruntime|msvcp|api-ms-win-crt|ucrtbase|libcrypto|libssl|zlib') {
+            throw "binary depends on a non-system DLL"
+          }
+          $version = build/osslsigncode.exe --version
+          if (-not ($version -match "OpenSSL $env:OPENSSL_VERSION ")) {
+            $version
+            throw "binary does not use the OpenSSL $env:OPENSSL_VERSION built above"
+          }
 
       - name: Test
         working-directory: build
