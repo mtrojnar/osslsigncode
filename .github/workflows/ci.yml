@@ -111,6 +111,14 @@ jobs:
         restore-keys: |
           ${{matrix.id}}-
 
+    - name: "TEST: plant a stale archive"
+      if: matrix.cache != ''
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force "${{matrix.cache}}/ff" | Out-Null
+        Set-Content "${{matrix.cache}}/ff/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.zip" "stale"
+        Get-ChildItem "${{matrix.cache}}" -Recurse -File | Format-Table Length, FullName -AutoSize | Out-String -Width 300
+
     - name: Configure Visual Studio
       if: matrix.compiler == 'vs'
       uses: step-security/msvc-dev-cmd@v1
@@ -227,6 +235,23 @@ jobs:
 
     # vcpkg installs dependencies during CMake configuration. Persist new
     # binaries before build or test failures can prevent a cache save.
+    - name: "TEST: check pruned archives"
+      if: matrix.cache != ''
+      shell: pwsh
+      run: |
+        $status = "${{github.workspace}}/build/vcpkg_installed/vcpkg/status"
+        Get-Content $status | Select-String '^(Package|Architecture|Abi):'
+        $used = Select-String -Path $status -Pattern '^Abi: (\w+)' | ForEach-Object { $_.Matches[0].Groups[1].Value }
+        $zips = Get-ChildItem "${{matrix.cache}}" -Recurse -File -Filter *.zip
+        $zips | Format-Table Length, FullName -AutoSize | Out-String -Width 300
+        "used ABIs: $($used.Count), archives: $($zips.Count)"
+        $missing = $used | Where-Object { $zips.BaseName -notcontains $_ }
+        if ($missing) { "MISSING: $missing"; exit 1 }
+        if ('${{steps.vcpkg-cache.outputs.cache-hit}}' -ne 'true') {
+          $extra = $zips | Where-Object { $used -notcontains $_.BaseName }
+          if ($extra) { "EXTRA: $($extra.FullName)"; exit 1 }
+        }
+
     - name: Save the vcpkg archives
       if: matrix.cache != '' && steps.vcpkg-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v5
