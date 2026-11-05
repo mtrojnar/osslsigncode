@@ -203,7 +203,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: "${{env.OPENSSL_PREFIX}}"
-          key: openssl-${{ env.OPENSSL_VERSION }}-static-${{ matrix.arch }}-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}
+          key: openssl-${{ env.OPENSSL_VERSION }}-static-${{ matrix.arch }}-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-usr-local
       - name: Build OpenSSL
         if: steps.cache-openssl.outputs.cache-hit != 'true'
         shell: sh
@@ -216,13 +216,16 @@ jobs:
           tar xf openssl.tar.gz
           cd "openssl-${OPENSSL_VERSION}"
           # no-module => legacy provider is compiled into libcrypto.a (no dlopen).
-          # Use the macOS system OpenSSL directory rather than a path that only
-          # exists on the build machine.
+          # Keep the default /usr/local prefix and stage the installation with
+          # DESTDIR: the prefix is compiled in as the engine and provider search
+          # path, so it must not be a directory like /tmp that any local user
+          # can write. Use the macOS system OpenSSL directory for the same
+          # reason.
           ./Configure "darwin64-${{ matrix.osx_arch }}-cc" \
             no-shared no-module no-tests no-docs \
-            --prefix="${{env.OPENSSL_PREFIX}}" --libdir=lib --openssldir=/etc/ssl
+            --libdir=lib --openssldir=/etc/ssl
           make -j"$(sysctl -n hw.ncpu)"
-          make install_sw
+          make install_sw DESTDIR="${{env.OPENSSL_PREFIX}}"
 
       # Setup xcode build environment
       - name: Install Xcode (macOS)
@@ -262,7 +265,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/dist" \
             -DCMAKE_OSX_ARCHITECTURES="${{ matrix.osx_arch }}" \
             -DCMAKE_OSX_DEPLOYMENT_TARGET="${{env.MACOSX_DEPLOYMENT_TARGET}}" \
-            -DOPENSSL_ROOT_DIR="${{env.OPENSSL_PREFIX}}" \
+            -DOPENSSL_ROOT_DIR="${{env.OPENSSL_PREFIX}}/usr/local" \
             -DZLIB_ROOT="${{env.ZLIB_PREFIX}}" \
             -DZLIB_USE_STATIC_LIBS=TRUE \
             -DOPENSSL_USE_STATIC_LIBS=TRUE
@@ -284,6 +287,10 @@ jobs:
           otool -L "$bin"
           if otool -L "$bin" | grep -Ei 'vcpkg|Cellar|libssl|libcrypto'; then
             echo "::error::binary links a non-system dylib"
+            exit 1
+          fi
+          if strings "$bin" | grep -F "${OPENSSL_PREFIX}"; then
+            echo "::error::binary refers to the OpenSSL staging directory"
             exit 1
           fi
           if ! "$bin" --version | grep -q "OpenSSL ${OPENSSL_VERSION} "; then
