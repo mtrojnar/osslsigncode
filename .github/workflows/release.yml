@@ -179,7 +179,7 @@ jobs:
       # current SDKs. Build and cache both libraries instead.
       - name: Restore cached ZLib
         id: cache-zlib
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: "${{env.ZLIB_PREFIX}}"
           key: zlib-${{ env.ZLIB_VERSION }}-static-${{ matrix.arch }}-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}
@@ -197,10 +197,18 @@ jobs:
           CFLAGS="-arch ${{ matrix.osx_arch }}" ./configure --static --prefix="${{env.ZLIB_PREFIX}}"
           make -j"$(sysctl -n hw.ncpu)"
           make install
+      # Save straight after the build, so a later failure in the job does
+      # not discard it.
+      - name: Save ZLib to the cache
+        if: steps.cache-zlib.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: "${{env.ZLIB_PREFIX}}"
+          key: ${{ steps.cache-zlib.outputs.cache-primary-key }}
 
       - name: Restore cached OpenSSL
         id: cache-openssl
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: "${{env.OPENSSL_PREFIX}}"
           key: openssl-${{ env.OPENSSL_VERSION }}-static-${{ matrix.arch }}-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-usr-local
@@ -226,6 +234,14 @@ jobs:
             --libdir=lib --openssldir=/etc/ssl
           make -j"$(sysctl -n hw.ncpu)"
           make install_sw DESTDIR="${{env.OPENSSL_PREFIX}}"
+      # Save straight after the build, so a later failure in the job does
+      # not discard it.
+      - name: Save OpenSSL to the cache
+        if: steps.cache-openssl.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: "${{env.OPENSSL_PREFIX}}"
+          key: ${{ steps.cache-openssl.outputs.cache-primary-key }}
 
       # Setup xcode build environment
       - name: Install Xcode (macOS)
@@ -402,7 +418,7 @@ jobs:
 
       - name: Restore cached ZLib
         id: cache-zlib
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.OSSLSIGNCODE_DEPS }}/zlib
           key: zlib-${{ env.ZLIB_VERSION }}-static-${{ matrix.arch }}-windows-msvc${{ env.VCToolsVersion }}
@@ -426,10 +442,18 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$env:OSSLSIGNCODE_DEPS\zlib"
           cmake --build zlib-build
           cmake --install zlib-build
+      # Save straight after the build, so a later failure in the job does
+      # not discard it.
+      - name: Save ZLib to the cache
+        if: steps.cache-zlib.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.OSSLSIGNCODE_DEPS }}/zlib
+          key: ${{ steps.cache-zlib.outputs.cache-primary-key }}
 
       - name: Restore cached OpenSSL
         id: cache-openssl
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.OSSLSIGNCODE_DEPS }}/openssl
           key: openssl-${{ env.OPENSSL_VERSION }}-static-${{ matrix.arch }}-windows-msvc${{ env.VCToolsVersion }}
@@ -475,6 +499,14 @@ jobs:
           Select-String -Path makefile -Pattern '^(INSTALLTOP|OPENSSLDIR|ENGINESDIR|MODULESDIR)_dir='
           nmake
           nmake install_sw DESTDIR="$env:OSSLSIGNCODE_DEPS\openssl"
+      # Save straight after the build, so a later failure in the job does
+      # not discard it.
+      - name: Save OpenSSL to the cache
+        if: steps.cache-openssl.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.OSSLSIGNCODE_DEPS }}/openssl
+          key: ${{ steps.cache-openssl.outputs.cache-primary-key }}
 
       # Handle the CETCOMPAT patch for older versions to support building
       # past tags.
