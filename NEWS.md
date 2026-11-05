@@ -5,6 +5,7 @@
 - fixed Cygwin compilation by not passing ELF-specific linker flags
 - fixed MSI MsiDigitalSignatureEx digest ordering during signing and verification
 - fixed verification to report failure when timestamp verification fails
+- fixed use-after-free when removing an APPX signature entry from the central directory
 
 ### 2.14 (2026.07.20)
 
