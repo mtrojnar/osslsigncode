@@ -714,6 +714,11 @@ static int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
             entry = entry->next;
             if (prev) {
                 prev->next = entry;
+            } else {
+                zip->centralDirectoryHead = entry;
+            }
+            if (last == current) {
+                last = prev;
             }
             freeZipCentralDirectoryEntry(current);
         }
