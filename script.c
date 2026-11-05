@@ -52,6 +52,7 @@ const SCRIPT_COMMENT comment_text[] = {
 struct script_ctx_st {
     const SCRIPT_COMMENT *comment_text;
     int utf;
+    int has_signature;
     uint32_t sigpos;
     uint32_t fileend;
 };
@@ -455,7 +456,7 @@ static int script_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
  */
 static int script_process_data(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
 {
-    if (ctx->script_ctx->sigpos > 0) {
+    if (ctx->script_ctx->has_signature) {
         /* Strip current signature */
         ctx->script_ctx->fileend = ctx->script_ctx->sigpos;
     }
@@ -602,11 +603,13 @@ static SCRIPT_CTX *script_ctx_get(char *indata, uint32_t filesize, const SCRIPT_
     SCRIPT_CTX *script_ctx;
 
     const char *input_pos, *signature_pos, *ptr;
-    uint32_t line[LINE_MAX_LEN], commented_header[40], cr, lf;
+    uint32_t line[LINE_MAX_LEN], commented_header[40], lf;
+    const uint16_t cr16 = '\r';
     size_t sig_pos = 0, line_pos = 0, commented_header_len = 0;
     size_t commented_header_size = sizeof commented_header / sizeof(uint32_t);
+    size_t unit = (size_t)utf / 8; /* code unit size in bytes */
+    int has_signature = 0;
 
-    utf8DecodeRune("\r", 1, &cr);
     utf8DecodeRune("\n", 1, &lf);
 
     /* compute runes for the commented signature header */
@@ -638,9 +641,15 @@ static SCRIPT_CTX *script_ctx_get(char *indata, uint32_t filesize, const SCRIPT_
         if (!memcmp(line + line_pos, &lf, sizeof lf)) {
             if (line_pos >= commented_header_len &&
                     !memcmp(line, commented_header, commented_header_len * sizeof(uint32_t))) {
+                /* signature_pos is the LF that terminates the previous line,
+                 * or the start of the file if the header is on the first line;
+                 * include the CR of a preceding CRLF in the signature block */
                 sig_pos = (size_t)(signature_pos - indata);
-                if (!memcmp(line + line_pos - 1, &cr, sizeof cr))
-                    sig_pos -= (size_t)utf / 8;
+                if (sig_pos >= unit && (utf == 8 ?
+                        indata[sig_pos - 1] == '\r' :
+                        !memcmp(indata + sig_pos - unit, &cr16, unit)))
+                    sig_pos -= unit;
+                has_signature = 1;
                 break; /* SUCCEEDED */
             }
             line_pos = 0;
@@ -654,6 +663,7 @@ static SCRIPT_CTX *script_ctx_get(char *indata, uint32_t filesize, const SCRIPT_
     script_ctx = OPENSSL_malloc(sizeof(SCRIPT_CTX));
     script_ctx->comment_text = comment;
     script_ctx->utf = utf;
+    script_ctx->has_signature = has_signature;
     script_ctx->fileend = filesize;
     script_ctx->sigpos = (uint32_t)sig_pos;
     return script_ctx; /* OK */
@@ -789,7 +799,7 @@ static BIO *script_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     size_t fileend;
     BIO *hash = BIO_new(BIO_f_md());
 
-    if (ctx->script_ctx->sigpos)
+    if (ctx->script_ctx->has_signature)
         fileend = ctx->script_ctx->sigpos;
     else
         fileend = ctx->script_ctx->fileend;
@@ -872,7 +882,7 @@ static int script_check_file(FILE_FORMAT_CTX *ctx)
         fprintf(stderr, "Init error\n");
         return 0; /* FAILED */
     }
-    if (ctx->script_ctx->sigpos == 0
+    if (!ctx->script_ctx->has_signature
         || ctx->script_ctx->sigpos > ctx->script_ctx->fileend) {
         fprintf(stderr, "No signature found\n");
         return 0; /* FAILED */
