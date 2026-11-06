@@ -45,6 +45,7 @@ if(Python3_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/client_http.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/make_certificates.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/make_large_pe.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/make_crafted_timestamps.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_pe_checksum.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/start_server.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/exec.py"
@@ -695,6 +696,43 @@ if(Python3_FOUND AND NOT cryptography_error)
     else(OPENSSL_VERSION VERSION_GREATER_EQUAL "3.0.0" OR CURL_FOUND)
         message(STATUS "CTest skips some tests")
     endif(OPENSSL_VERSION VERSION_GREATER_EQUAL "3.0.0" OR CURL_FOUND)
+
+### Verify crafted timestamps ###
+
+    # The signer certificate is valid only during 2018; tokens are signed with
+    # the test TSA key and need no timestamping server
+    add_test(NAME "make_crafted_timestamps"
+        COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/make_crafted_timestamps.py"
+        "--osslsigncode" ${OSSLSIGNCODE}
+        "--certs" "${CERTS}"
+        "--in" "${FILES}/unsigned.exe"
+        "--out" "${FILES}")
+    set_tests_properties("make_crafted_timestamps" PROPERTIES
+        DEPENDS "start_server")
+    list(APPEND ALL_TESTS "make_crafted_timestamps")
+
+    # ok: a valid 2018 timestamp; the others are expected to fail:
+    # late: a valid 2030 timestamp, when the certificate had expired
+    # empty, short: an empty or 1-byte message imprint
+    # two_attrs: the 2030 timestamp and a second, unverifiable timestamp attribute
+    foreach(crafted "ok" "late" "empty" "short" "two_attrs")
+        add_test(NAME "verify_crafted_ts_${crafted}"
+            COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "verify"
+            "-CAfile" "${CERTS}/CACert.pem"
+            "-CRLfile" "${CERTS}/CACertCRL.pem"
+            "-TSA-CAfile" "${CERTS}/TSACA.pem"
+            "-TSA-CRLfile" "${CERTS}/TSACertCRL.pem"
+            "-ignore-cdp"
+            "-in" "${FILES}/ts_crafted_${crafted}.exe")
+        set_tests_properties("verify_crafted_ts_${crafted}" PROPERTIES
+            DEPENDS "make_crafted_timestamps")
+        if(NOT crafted STREQUAL "ok")
+            set_tests_properties("verify_crafted_ts_${crafted}" PROPERTIES
+                WILL_FAIL TRUE)
+        endif(NOT crafted STREQUAL "ok")
+        list(APPEND ALL_TESTS "verify_crafted_ts_${crafted}")
+        set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/ts_crafted_${crafted}.exe")
+    endforeach(crafted "ok" "late" "empty" "short" "two_attrs")
 
     # Delete test files
     set(names "signed" "nested" "revoked" "removed" "added")
