@@ -14,6 +14,9 @@
 - fixed heap out-of-bounds reads when parsing malformed APPX ZIP64 extra fields
 - fixed heap out-of-bounds reads when verifying malformed PKCS#7 signature attributes
 - fixed undefined behavior when copying an empty MSI signature blob
+- fixed RFC 3161 timestamp verification accepting tokens whose message
+  imprint is empty or shorter than its digest, which did not bind them to
+  the signature
 - added multiple timestamp support: `add` preserves existing timestamps and
   `-timestamp-all` requires every specified Authenticode/RFC 3161 server
 - verification now tries all timestamps and accepts any trusted timestamp for
