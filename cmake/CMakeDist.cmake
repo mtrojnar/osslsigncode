@@ -9,19 +9,32 @@ set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/COPYING.txt")
 set(CPACK_SOURCE_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}")
 set(CPACK_SOURCE_GENERATOR "TGZ")
-set(CPACK_SOURCE_IGNORE_FILES "\.git/;\.gitignore")
-list(APPEND CPACK_SOURCE_IGNORE_FILES "Makefile")
-list(APPEND CPACK_SOURCE_IGNORE_FILES "CMakeCache.txt")
-list(APPEND CPACK_SOURCE_IGNORE_FILES "CMakeFiles")
-list(APPEND CPACK_SOURCE_IGNORE_FILES "CPackConfig.cmake")
-list(APPEND CPACK_SOURCE_IGNORE_FILES "CPackSourceConfig.cmake")
-list(APPEND CPACK_SOURCE_IGNORE_FILES "CTestTestfile.cmake")
-list(APPEND CPACK_SOURCE_IGNORE_FILES "cmake_install.cmake")
-list(APPEND CPACK_SOURCE_IGNORE_FILES "config.h")
-list(APPEND CPACK_SOURCE_IGNORE_FILES "/CMakeFiles/")
-list(APPEND CPACK_SOURCE_IGNORE_FILES "/Testing/")
-list(APPEND CPACK_SOURCE_IGNORE_FILES "/_CPack_Packages/")
-list(APPEND CPACK_SOURCE_IGNORE_FILES "/build/")
+# Keep repository metadata, local experiments and generated files out of releases.
+set(CPACK_SOURCE_IGNORE_FILES
+    "/[.](git|github|pi|vs|vscode)(/|$)"
+    "/[.]gitignore$"
+    "/(CMakeFiles|Testing|_CPack_Packages)/"
+    "/CMakeCache[.]txt$"
+    "/CPack(Config|SourceConfig)[.]cmake$"
+    "/CTestTestfile[.]cmake$"
+    "/cmake_(install|uninstall)[.]cmake$"
+    "/config[.]h$"
+    "/install_manifest[.]txt$"
+    "/stamp-h1$"
+    "/(build[.]ninja|rules[.]ninja|compile_commands[.]json)$"
+    "/[.]ninja_(deps|log)$"
+    "/__pycache__/"
+    "/misc/softhsm-example-token/(config[.]py|openssl[.]conf)$"
+    "/misc/softhsm-example-token/(test|softhsm)[.][^/]*(/|$)"
+    "[.](log|pyc|pyo|orig|rej|bak)$"
+    "~$")
+
+# Anchor source-root exclusions so example Makefiles remain in the archive.
+list(APPEND CPACK_SOURCE_IGNORE_FILES
+    "${PROJECT_SOURCE_DIR}/(build[^/]*|fuzz[^/]*)/"
+    "${PROJECT_SOURCE_DIR}/Makefile$"
+    "${PROJECT_SOURCE_DIR}/osslsigncode([.]exe|[.]1|[.]html)?$"
+    "${PROJECT_SOURCE_DIR}/osslsigncode-[^/]+[.](tar[.](gz|bz2|xz)|zip)([.](asc|sig))?$")
 
 include(CPack)
 add_custom_target(dist COMMAND ${CMAKE_MAKE_PROGRAM} package_source)
