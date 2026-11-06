@@ -2215,12 +2215,11 @@ static int verify_timestamp_token(PKCS7 *p7, CMS_ContentInfo *timestamp)
         TS_TST_INFO *token = d2i_TS_TST_INFO(NULL, &p, len);
 
         if (token) {
-            BIO *bhash;
             u_char mdbuf[EVP_MAX_MD_SIZE];
             ASN1_OCTET_STRING *hash;
             const ASN1_OBJECT *aoid;
             const u_char *hash_data;
-            int hash_len, md_nid;
+            int hash_len, md_len, md_nid;
             const EVP_MD *md;
             TS_MSG_IMPRINT *msg_imprint = TS_TST_INFO_get_msg_imprint(token);
             const X509_ALGOR *alg = TS_MSG_IMPRINT_get_algo(msg_imprint);
@@ -2230,35 +2229,29 @@ static int verify_timestamp_token(PKCS7 *p7, CMS_ContentInfo *timestamp)
             X509_ALGOR_get0(&aoid, NULL, NULL, alg);
             md_nid = OBJ_obj2nid(aoid);
             md = EVP_get_digestbynid(md_nid);
+            md_len = md ? EVP_MD_size(md) : 0;
 
             /* compute a hash from the encrypted message digest value of the file */
-            bhash = BIO_new(BIO_f_md());
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-qual"
-#endif
-            if (!BIO_set_md(bhash, md)) {
-                fprintf(stderr, "Unable to set the message digest of BIO\n");
-                BIO_free_all(bhash);
+            if (md_len <= 0 || digest_len < 0
+                || !EVP_Digest(digest, (size_t)digest_len, mdbuf, NULL, md, NULL)) {
+                fprintf(stderr, "Unable to compute the timestamp message imprint: %s\n",
+                        (md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2ln(md_nid));
                 TS_TST_INFO_free(token);
                 return 0; /* FAILED */
             }
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-            BIO_push(bhash, BIO_new(BIO_s_null()));
-            BIO_write(bhash, digest, digest_len);
-            BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
-            BIO_free_all(bhash);
 
-            /* compare the provided hash against the computed hash */
-            hash =TS_MSG_IMPRINT_get_msg(msg_imprint);
+            /*
+             * Compare the provided hash against the computed hash.
+             * A shorter imprint would only bind a prefix of the digest,
+             * and an empty one would match any signature.
+             */
+            hash = TS_MSG_IMPRINT_get_msg(msg_imprint);
             hash_data = ASN1_STRING_get0_data(hash);
             hash_len = ASN1_STRING_length(hash);
-            if (memcmp(mdbuf, hash_data, (size_t)hash_len)) {
+            if (hash_len != md_len || memcmp(mdbuf, hash_data, (size_t)md_len)) {
                 printf("Hash value mismatch:\n\tMessage digest algorithm: %s\n",
                         (md_nid == NID_undef) ? "UNKNOWN" : OBJ_nid2ln(md_nid));
-                print_hash("\tComputed message digest", "", mdbuf, EVP_MD_size(md));
+                print_hash("\tComputed message digest", "", mdbuf, md_len);
                 print_hash("\tReceived message digest", "", hash_data, hash_len);
                 printf("\nFile's message digest verification: failed\n");
                 TS_TST_INFO_free(token);
