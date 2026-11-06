@@ -2845,6 +2845,7 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
             /* Authenticode Timestamp - Policy OID: 1.2.840.113549.1.9.6 */
             CMS_ContentInfo *cms;
             PKCS7_SIGNER_INFO *countersi;
+            time_t ts_time;
 
             value = (const ASN1_STRING *)X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
             if (value == NULL)
@@ -2856,17 +2857,21 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
                 ERR_print_errors_fp(stderr);
                 continue;
             }
-            time = time_t_get_si_time(countersi);
-            if (time != INVALID_TIME) {
+            ts_time = time_t_get_si_time(countersi);
+            if (ts_time != INVALID_TIME) {
+                /* cms_get_timestamp() takes ownership of countersi */
                 cms = cms_get_timestamp(p7->d.sign, countersi);
                 if (cms) {
-                    if (!print_cms_timestamp(cms, time)) {
+                    if (!print_cms_timestamp(cms, ts_time)) {
                         CMS_ContentInfo_free(cms);
                         printf("Warning: Authenticode Timestamp could not be decoded correctly\n");
                         ERR_print_errors_fp(stderr);
                         continue;
                     }
+                    /* Only take the time together with the timestamp it came from */
+                    CMS_ContentInfo_free(*timestamp);
                     *timestamp = cms;
+                    time = ts_time;
                 } else {
                     printf("Warning: Corrupt Authenticode Timestamp embedded content\n");
                 }
@@ -2877,6 +2882,7 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
         } else if (!strcmp(object_txt, SPC_RFC3161_OBJID)) {
             /* RFC3161 Timestamp - Policy OID: 1.3.6.1.4.1.311.3.3.1 */
             CMS_ContentInfo *cms;
+            time_t ts_time;
 
             value = (const ASN1_STRING *)X509_ATTRIBUTE_get0_data(attr, 0, V_ASN1_SEQUENCE, NULL);
             if (value == NULL)
@@ -2888,15 +2894,18 @@ static time_t time_t_timestamp_get_attributes(CMS_ContentInfo **timestamp, PKCS7
                 ERR_print_errors_fp(stderr);
                 continue;
             }
-            time = time_t_get_cms_time(cms);
-            if (time != INVALID_TIME) {
-                if (!print_cms_timestamp(cms, time)) {
+            ts_time = time_t_get_cms_time(cms);
+            if (ts_time != INVALID_TIME) {
+                if (!print_cms_timestamp(cms, ts_time)) {
                     CMS_ContentInfo_free(cms);
                     printf("Warning: RFC3161 Timestamp could not be decoded correctly\n");
                     ERR_print_errors_fp(stderr);
                     continue;
                 }
+                /* Only take the time together with the timestamp it came from */
+                CMS_ContentInfo_free(*timestamp);
                 *timestamp = cms;
+                time = ts_time;
             } else {
                 printf("Warning: Corrupt RFC3161 Timestamp embedded content\n");
                 CMS_ContentInfo_free(cms);
@@ -3048,7 +3057,7 @@ static time_t time_t_get_cms_time(CMS_ContentInfo *cms)
  * Create new CMS_ContentInfo struct for Authenticode Timestamp.
  * This struct does not contain any TS_TST_INFO as specified in RFC 3161.
  * [in] p7_signed: PKCS#7 signedData structure
- * [in] countersignature: Authenticode Timestamp decoded to PKCS7_SIGNER_INFO
+ * [in] countersignature: Authenticode Timestamp decoded to PKCS7_SIGNER_INFO (consumed)
  * [returns] pointer to CMS_ContentInfo structure
  */
 static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
@@ -3063,7 +3072,7 @@ static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
 
     p7 = PKCS7_new();
     si = sk_PKCS7_SIGNER_INFO_value(p7_signed->signer_info, 0);
-    if (si == NULL)
+    if (!p7 || !si)
         goto out;
 
     /* Create new signed PKCS7 timestamp structure. */
@@ -3071,6 +3080,7 @@ static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
         goto out;
     if (!PKCS7_add_signer(p7, countersignature))
         goto out;
+    countersignature = NULL; /* owned by p7 */
     for (i = 0; i < sk_X509_num(p7_signed->cert); i++) {
         if (!PKCS7_add_certificate(p7, sk_X509_value(p7_signed->cert, i)))
             goto out;
@@ -3100,6 +3110,7 @@ static CMS_ContentInfo *cms_get_timestamp(PKCS7_SIGNED *p7_signed,
 out:
     if (!cms)
         ERR_print_errors_fp(stderr);
+    PKCS7_SIGNER_INFO_free(countersignature);
     PKCS7_free(p7);
     return cms;
 }

@@ -14,6 +14,8 @@
 - fixed heap out-of-bounds reads when parsing malformed APPX ZIP64 extra fields
 - fixed heap out-of-bounds reads when verifying malformed PKCS#7 signature attributes
 - fixed undefined behavior when copying an empty MSI signature blob
+- fixed timestamp verification of signatures with more than one timestamp
+  attribute
 
 ### 2.14 (2026.07.20)
 
