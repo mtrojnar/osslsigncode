@@ -126,7 +126,7 @@ jobs:
         run: |
           asset="osslsigncode-${VERSION}-linux-${{ matrix.arch }}"
           install -Dm755 build/osslsigncode "stage/${asset}/osslsigncode"
-          cp COPYING "stage/${asset}/" 2>/dev/null || true
+          cp COPYING.txt LICENSE.txt "stage/${asset}/"
           tar -C stage -czf "${asset}.tar.gz" "${asset}"
           sha256sum "${asset}.tar.gz"
 
@@ -337,7 +337,7 @@ jobs:
           asset="osslsigncode-${VERSION}-macos-${{ matrix.arch }}"
           mkdir -p "stage/${asset}"
           cp build/osslsigncode "stage/${asset}/"
-          cp COPYING "stage/${asset}/" 2>/dev/null || true
+          cp COPYING.txt LICENSE.txt "stage/${asset}/"
           (cd stage && zip -r "../${asset}.zip" "${asset}")
           shasum -a 256 "${asset}.zip"
 
@@ -589,7 +589,7 @@ jobs:
           asset="osslsigncode-${VERSION}-windows-${{matrix.arch}}"
           mkdir -p "stage/${asset}"
           cp build/osslsigncode.exe "stage/${asset}/"
-          cp COPYING "stage/${asset}/" 2>/dev/null || true
+          cp COPYING.txt LICENSE.txt "stage/${asset}/"
           (cd stage && 7z a -tzip "../${asset}.zip" "${asset}")
           sha256sum "${asset}.zip"
 
