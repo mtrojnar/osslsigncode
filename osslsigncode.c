@@ -4914,10 +4914,18 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
+            if (options->nturl >= MAX_TS_SERVERS) {
+                fprintf(stderr, "Too many -t options (maximum %d)\n", MAX_TS_SERVERS);
+                return 0; /* FAILED */
+            }
             options->turl[options->nturl++] = *(++argv);
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-ts")) {
             if (--argc < 1) {
                 usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            if (options->ntsurl >= MAX_TS_SERVERS) {
+                fprintf(stderr, "Too many -ts options (maximum %d)\n", MAX_TS_SERVERS);
                 return 0; /* FAILED */
             }
             options->tsurl[options->ntsurl++] = *(++argv);

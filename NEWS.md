@@ -18,6 +18,7 @@
   attribute
 - fixed RFC 3161 timestamp verification to require a full-length message
   imprint
+- fixed a crash with more than 256 "-t" or "-ts" options
 
 ### 2.14 (2026.07.20)
 
