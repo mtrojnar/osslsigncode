@@ -10,13 +10,18 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   codespell:
     name: Check for spelling errors
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
-      - uses: codespell-project/actions-codespell@master
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: codespell-project/actions-codespell@7a561ee34b914687535b2743eac7e439fa364a4f # master
         with:
           skip: '*.pem'

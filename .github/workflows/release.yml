@@ -21,8 +21,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Version string to embed in asset names (e.g. 2.15).'
+        description: 'Existing version tag to build (e.g. 2.15). Releases are never overwritten.'
         required: true
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 env:
   BUILD_TYPE: Release
@@ -31,109 +35,92 @@ permissions:
   contents: read
 
 jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read # inspect the release environment's protection rules
+    outputs:
+      version: ${{ steps.prepare.outputs.version }}
+      sha: ${{ steps.prepare.outputs.sha }}
+    steps:
+      - name: Checkout release helpers
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+          path: ci
+      - name: Validate tag, release state and approval policy
+        id: prepare
+        env:
+          VERSION: ${{ inputs.tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ci/.github/scripts/release.py prepare
+
   # --------------------------------------------------------------------------
   # Linux: fully-static musl binaries. Alpine is the canonical place static
   # linking of OpenSSL + zlib
   # --------------------------------------------------------------------------
   linux:
     name: linux-${{ matrix.arch }}
+    needs: prepare
     strategy:
       fail-fast: true
       matrix:
         include:
           - arch: amd64
             os: ubuntu-24.04
-            py_arch: x64
           - arch: arm64
             os: ubuntu-24.04-arm
-            py_arch: arm64
     runs-on: ${{ matrix.os }}
-    container: alpine:3.24
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      ARCH: ${{ matrix.arch }}
+      # Multi-architecture index: update deliberately along with its digest.
+      ALPINE_IMAGE: alpine:3.24@sha256:3f4d6b32e26703c6082839234f43769d5046b3ac7c910033911d1e71d8cd630a
     steps:
-      # Handle github actions shenanigans on linux alpine arm
-      - uses: laverdet/alpine-arm64@v1
-        if: matrix.arch == 'arm64'
-
-      # Get the version currently being built
-      - name: Resolve version
-        run: echo "VERSION=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_ENV"
-
-      - name: Install system packages
-        shell: sh
-        run: |
-          apk add --update --no-cache \
-            git bash build-base cmake ninja \
-            python3 py3-cryptography py3-pip openssl \
-            openssl-dev openssl-libs-static \
-            wget tar perl \
-            zlib-dev zlib-static linux-headers
-
-      # Ensure the cryptography package is available
-      - name: Validate Python Setup
-        run: |
-          python -c "import sys; print(sys.executable)"
-          python --version
-          python -c "import cryptography; print(f'Python3 cryptography version {cryptography.__version__}')"
-
-      # Checkout the specific tag/reference the run is targeting (for back
-      # porting).
-      - uses: actions/checkout@v7
+      # Keep Actions on the Ubuntu host: no third-party glibc compatibility
+      # binaries are needed inside Alpine, on either native architecture.
+      - name: Checkout release helpers
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.inputs.tag || github.ref_name }}
-          fetch-depth: 0
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+          path: ci
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+          path: source
 
-      - name: Configure
+      - name: Build, verify, test and package in Alpine
         run: |
-          cmake -G 'Unix Makefiles' -S "$GITHUB_WORKSPACE" -B build \
-            -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/dist" \
-            -DZLIB_USE_STATIC_LIBS=TRUE \
-            -DOPENSSL_USE_STATIC_LIBS=TRUE \
-            -DCMAKE_EXE_LINKER_FLAGS="-static -s"
-
-      - name: Build
-        run: cmake --build build
-
-      - name: Verify the binary is fully static
-        run: |
-          bin="build/osslsigncode"
-          file "$bin"
-          # Newer toolchains produce static PIE binaries, which are equally
-          # self-contained.
-          if ! file "$bin" | grep -Eq 'statically linked|static-pie linked'; then
-            echo "::error::binary is not fully static"
-            ldd "$bin" || true
-            exit 1
-          fi
-
-      - name: Test
-        working-directory: build
-        run: |
-          ctest --output-on-failure -C "$BUILD_TYPE"
+          mkdir -p "$GITHUB_WORKSPACE/linux"
+          docker run --rm \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/source,target=/source,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/ci/.github/scripts,target=/ci,readonly" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE/linux,target=/work" \
+            --workdir /work --env VERSION --env BUILD_TYPE --env ARCH \
+            "$ALPINE_IMAGE" sh /ci/build-linux-release.sh
 
       - name: Upload the errors
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: failure()
         with:
           name: errors-${{matrix.os}}
           path: |
-            ${{github.workspace}}/build/Testing/Temporary/LastTest.log
-            ${{github.workspace}}/build/Testing/conf/makecerts.log
-            ${{github.workspace}}/build/Testing/logs/server.log
-            ${{github.workspace}}/build/Testing/logs/port.log
+            linux/build/Testing/Temporary/LastTest.log
+            linux/build/Testing/conf/makecerts.log
+            linux/build/Testing/logs/server.log
+            linux/build/Testing/logs/port.log
 
-      - name: Package
-        run: |
-          asset="osslsigncode-${VERSION}-linux-${{ matrix.arch }}"
-          install -Dm755 build/osslsigncode "stage/${asset}/osslsigncode"
-          cp COPYING.txt LICENSE.txt "stage/${asset}/"
-          tar -C stage -czf "${asset}.tar.gz" "${asset}"
-          sha256sum "${asset}.tar.gz"
-
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: dist-linux-${{ matrix.arch }}
-          path: osslsigncode-*-linux-*.tar.gz
+          path: linux/osslsigncode-*-linux-*.tar.gz
           if-no-files-found: error
 
   # --------------------------------------------------------------------------
@@ -144,6 +131,7 @@ jobs:
   # --------------------------------------------------------------------------
   macos:
     name: macos-${{ matrix.arch }}
+    needs: prepare
     strategy:
       fail-fast: true
       matrix:
@@ -160,6 +148,7 @@ jobs:
             py_arch: x64
     runs-on: ${{ matrix.os }}
     env:
+      VERSION: ${{ needs.prepare.outputs.version }}
       # The minimum supported macOS. clang and CMake both read this, so the
       # dependencies and osslsigncode itself are all built for it.
       MACOSX_DEPLOYMENT_TARGET: "14.0"
@@ -170,19 +159,16 @@ jobs:
       OPENSSL_SHA256: 603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
       OPENSSL_PREFIX: /tmp/opensslinstall
     steps:
-      - name: Resolve version
-        run: echo "VERSION=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_ENV"
-
       # Neither the runner nor vcpkg's pinned baseline provides static
       # libraries built for the minimum supported macOS: Homebrew bottles
       # target the runner's macOS, and the baseline's zlib does not build with
       # current SDKs. Build and cache both libraries instead.
       - name: Restore cached ZLib
         id: cache-zlib
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: "${{env.ZLIB_PREFIX}}"
-          key: zlib-${{ env.ZLIB_VERSION }}-static-${{ matrix.arch }}-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}
+          key: release-v2-zlib-${{ env.ZLIB_SHA256 }}-static-${{ matrix.arch }}-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}
       - name: Build ZLib
         if: steps.cache-zlib.outputs.cache-hit != 'true'
         shell: sh
@@ -201,17 +187,17 @@ jobs:
       # not discard it.
       - name: Save ZLib to the cache
         if: steps.cache-zlib.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: "${{env.ZLIB_PREFIX}}"
           key: ${{ steps.cache-zlib.outputs.cache-primary-key }}
 
       - name: Restore cached OpenSSL
         id: cache-openssl
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: "${{env.OPENSSL_PREFIX}}"
-          key: openssl-${{ env.OPENSSL_VERSION }}-static-${{ matrix.arch }}-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-usr-local
+          key: release-v2-openssl-${{ env.OPENSSL_SHA256 }}-static-${{ matrix.arch }}-macos${{ env.MACOSX_DEPLOYMENT_TARGET }}-usr-local
       - name: Build OpenSSL
         if: steps.cache-openssl.outputs.cache-hit != 'true'
         shell: sh
@@ -238,23 +224,23 @@ jobs:
       # not discard it.
       - name: Save OpenSSL to the cache
         if: steps.cache-openssl.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: "${{env.OPENSSL_PREFIX}}"
           key: ${{ steps.cache-openssl.outputs.cache-primary-key }}
 
       # Setup xcode build environment
       - name: Install Xcode (macOS)
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: latest-stable
 
       # By default cmake 4.0+ is used. However, this project targets a min
       # version of 3.17.
       - name: Setup the oldest supported version of cmake (macOS)
-        uses: jwlawson/actions-setup-cmake@v2
+        uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.13'
           architecture: ${{matrix.py_arch}}
@@ -269,10 +255,10 @@ jobs:
 
       # Checkout the specific tag/reference the run is targeting (for back
       # porting).
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.inputs.tag || github.ref_name }}
-          fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
 
       - name: Configure
         run: |
@@ -322,7 +308,7 @@ jobs:
           ctest --output-on-failure -C "$BUILD_TYPE"
 
       - name: Upload the errors
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: failure()
         with:
           name: errors-${{matrix.os}}
@@ -341,7 +327,7 @@ jobs:
           (cd stage && zip -r "../${asset}.zip" "${asset}")
           shasum -a 256 "${asset}.zip"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: dist-macos-${{ matrix.arch }}
           path: osslsigncode-*-macos-*.zip
@@ -353,6 +339,7 @@ jobs:
   # --------------------------------------------------------------------------
   windows:
     name: windows-${{matrix.arch}}
+    needs: prepare
     strategy:
       fail-fast: true
       matrix:
@@ -367,6 +354,7 @@ jobs:
             openssl_target: VC-WIN64A
     runs-on: ${{matrix.os}}
     env:
+      VERSION: ${{ needs.prepare.outputs.version }}
       ZLIB_VERSION: 1.3.2
       ZLIB_SHA256: bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16
       OPENSSL_VERSION: 3.5.9
@@ -374,17 +362,13 @@ jobs:
       NASM_VERSION: "3.02"
       NASM_SHA256: 161d0bfaff53c2f9e9f3e69fd0672323ebabafd1268976a5cec11be92a19aee7
     steps:
-      - name: Resolve version
-        shell: bash
-        run: echo "VERSION=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_ENV"
-
       - name: Configure Visual Studio
-        uses: step-security/msvc-dev-cmd@v1
+        uses: step-security/msvc-dev-cmd@22c98154b708dbd743e6f27a933cf6ceba3305c4 # v1
         with:
           arch: ${{matrix.vs_arch}}
 
       # Python setup
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.13'
           architecture: x64
@@ -399,10 +383,10 @@ jobs:
 
       # Checkout the specific tag/reference the run is targeting (for back
       # porting).
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.inputs.tag || github.ref_name }}
-          fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
 
       # vcpkg's pinned baseline ships OpenSSL releases that are no longer
       # supported, so build the same pinned OpenSSL as the macOS job, and zlib.
@@ -418,10 +402,10 @@ jobs:
 
       - name: Restore cached ZLib
         id: cache-zlib
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ env.OSSLSIGNCODE_DEPS }}/zlib
-          key: zlib-${{ env.ZLIB_VERSION }}-static-${{ matrix.arch }}-windows-msvc${{ env.VCToolsVersion }}
+          key: release-v2-zlib-${{ env.ZLIB_SHA256 }}-static-${{ matrix.arch }}-windows-msvc${{ env.VCToolsVersion }}
       - name: Build ZLib
         if: steps.cache-zlib.outputs.cache-hit != 'true'
         shell: pwsh
@@ -446,17 +430,17 @@ jobs:
       # not discard it.
       - name: Save ZLib to the cache
         if: steps.cache-zlib.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ env.OSSLSIGNCODE_DEPS }}/zlib
           key: ${{ steps.cache-zlib.outputs.cache-primary-key }}
 
       - name: Restore cached OpenSSL
         id: cache-openssl
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ env.OSSLSIGNCODE_DEPS }}/openssl
-          key: openssl-${{ env.OPENSSL_VERSION }}-static-${{ matrix.arch }}-windows-msvc${{ env.VCToolsVersion }}
+          key: release-v2-openssl-${{ env.OPENSSL_SHA256 }}-static-${{ matrix.arch }}-windows-msvc${{ env.VCToolsVersion }}
       # OpenSSL needs NASM for its x64 assembly; arm64 uses clang-cl instead.
       - name: Install NASM
         if: steps.cache-openssl.outputs.cache-hit != 'true' && matrix.arch == 'amd64'
@@ -503,7 +487,7 @@ jobs:
       # not discard it.
       - name: Save OpenSSL to the cache
         if: steps.cache-openssl.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ env.OSSLSIGNCODE_DEPS }}/openssl
           key: ${{ steps.cache-openssl.outputs.cache-primary-key }}
@@ -511,9 +495,10 @@ jobs:
       # Handle the CETCOMPAT patch for older versions to support building
       # past tags.
       - name: Checkout patch (from workflow ref)
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.ref }} # the release branch/ref, has the patch
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
           sparse-checkout: .github/workflows/patches
           sparse-checkout-cone-mode: false
           path: ci-patches
@@ -573,7 +558,7 @@ jobs:
           ctest -C ${{ env.BUILD_TYPE }} --output-on-failure
 
       - name: Upload the errors
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: failure()
         with:
           name: errors-${{matrix.os}}
@@ -593,7 +578,7 @@ jobs:
           (cd stage && 7z a -tzip "../${asset}.zip" "${asset}")
           sha256sum "${asset}.zip"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: dist-windows-${{matrix.arch}}
           path: osslsigncode-*-windows-*.zip
@@ -603,34 +588,47 @@ jobs:
   # Publish: collect every artifact, generate SHA256SUMS.txt, attach to release.
   # --------------------------------------------------------------------------
   release:
-    needs: [linux, macos, windows]
-    runs-on: ubuntu-latest
+    needs: [prepare, linux, macos, windows]
+    runs-on: ubuntu-24.04
+    # Preflight fails unless this environment has required reviewers and
+    # prevents self-review. Configure it before running the workflow.
+    environment: release
     permissions:
-      contents: write   # required to create/modify the release
+      contents: write
+      actions: read
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+      WORKFLOW_SHA: ${{ github.workflow_sha }}
     steps:
-      - name: Download all build artifacts
-        uses: actions/download-artifact@v8
+      - name: Checkout release helpers
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+          path: ci
+      - name: Download release archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: dist-*
           path: dist
           merge-multiple: true
 
-      - name: Generate checksums
-        run: |
-          cd dist
-          sha256sum * > SHA256SUMS.txt
-          echo "----- SHA256SUMS.txt -----"
-          cat SHA256SUMS.txt
+      - name: Validate archives and generate build metadata and checksums
+        run: python3 ci/.github/scripts/release.py assets
 
-      - name: Create / update the GitHub release
-        uses: softprops/action-gh-release@v3
+      # Authenticate the checksum manifest as well as every archive. The
+      # signed BUILDINFO records the actual source SHA for backport builds.
+      - name: Attest release assets
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: ${{ github.event.inputs.tag || github.ref_name }}
-          draft: true
-          prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: |
-            dist/*.tar.gz
-            dist/*.zip
-            dist/SHA256SUMS.txt
+          subject-path: dist/*
+          create-storage-record: false
+
+      - name: Create a new draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 ci/.github/scripts/release.py publish
