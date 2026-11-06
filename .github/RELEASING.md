@@ -19,8 +19,8 @@ new draft manually only after the workflow has completed successfully.
 
 These settings are not configured by repository files. The workflow token needs
 Contents read access and Actions read access for preflight. Only the approved
-release job receives Contents write, attestations write and OIDC permissions.
-No long-lived publishing or signing secret is needed.
+release job receives Contents write. The attestation jobs receive attestations
+write and OIDC permissions. No long-lived publishing or signing secret is needed.
 
 Dispatch the workflow with a tag such as `2.16` or `2.16-rc1`, or push that tag.
 Arbitrary branch names and commit IDs are not accepted. The tag is resolved once
@@ -31,6 +31,24 @@ from the historical source tag.
 If uploading fails after draft creation, inspect the partial draft. Remove it
 manually before starting a fresh run; reruns intentionally cannot overwrite it.
 Do not publish a partial draft while the upload job is running.
+
+## Manually refreshing an existing draft
+
+Dispatch with `refresh_draft: true` to rebuild and attest files for an existing
+draft without granting any job permission to modify releases. This mode rejects
+published releases and requires the draft's original source archive and GitHub
+SHA-256 digest. It preserves that source archive and includes it in the attested
+checksums. It does not need the publishing environment because it cannot publish.
+
+After all jobs succeed, download the `verified-release-<version>` workflow
+artifact. Verify its attestations against the exact workflow commit and check
+all checksums and build metadata. An authorized maintainer may then replace the
+draft's files manually, checking immediately before each write that the release
+is still a draft and the tag is unchanged. Keep the original source archive.
+Publish only after verifying the uploaded assets against the local digests.
+
+This is an explicit manual approval path, not an automatic overwrite exception.
+The default publisher continues to reject all existing releases.
 
 ## Build inputs
 

@@ -87,17 +87,40 @@ def require_protected_environment(api):
     raise ReleaseError("Configure the release environment with required reviewers and prevent self-review")
 
 
-def require_new_release(api, version):
-    # The by-tag endpoint hides drafts. List all releases, including drafts,
-    # and paginate so old releases cannot accidentally be replaced either.
+def matching_releases(api, version):
+    # The by-tag endpoint hides drafts. Paginate through all releases.
     page = 1
     while True:
         releases = api.api("GET", f"releases?per_page=100&page={page}")
-        if any(release["tag_name"] == version for release in releases):
-            raise ReleaseError(f"A release already exists for {version}; refusing to modify it")
+        yield from (item for item in releases if item["tag_name"] == version)
         if len(releases) < 100:
             return
         page += 1
+
+
+def require_new_release(api, version):
+    if next(matching_releases(api, version), None) is not None:
+        raise ReleaseError(f"A release already exists for {version}; refusing to modify it")
+
+
+def prepare_release(api, version, refresh_draft=False):
+    if not refresh_draft:
+        return {"version": version, "sha": check_release(api, version)}
+    # This mode only produces workflow artifacts. It has no release-write
+    # permission and cannot create, update or publish a GitHub release.
+    sha = resolve_tag(api, version)
+    releases = list(matching_releases(api, version))
+    if len(releases) != 1 or releases[0].get("draft") is not True:
+        raise ReleaseError("Manual refresh requires exactly one existing draft release")
+    sources = [asset for asset in releases[0].get("assets", [])
+               if asset["name"] == f"osslsigncode-{version}.tar.gz"]
+    if len(sources) != 1 or not re.fullmatch(r"sha256:[0-9a-f]{64}", sources[0].get("digest") or ""):
+        raise ReleaseError("Draft must contain a source archive with a GitHub SHA-256 digest")
+    asset_id = int(sources[0]["id"])
+    if asset_id <= 0:
+        raise ReleaseError("Invalid source asset ID")
+    return {"version": version, "sha": sha, "source_asset_id": asset_id,
+            "source_asset_sha256": sources[0]["digest"].removeprefix("sha256:")}
 
 
 def check_release(api, version, expected_sha=None):
@@ -109,10 +132,13 @@ def check_release(api, version, expected_sha=None):
     return sha
 
 
-def archive_names(version):
-    return sorted(f"osslsigncode-{version}-{platform}-{arch}.{extension}"
-                  for platform, extension in (("linux", "tar.gz"), ("macos", "zip"), ("windows", "zip"))
-                  for arch in ("amd64", "arm64"))
+def archive_names(version, include_source=False):
+    names = [f"osslsigncode-{version}-{platform}-{arch}.{extension}"
+             for platform, extension in (("linux", "tar.gz"), ("macos", "zip"), ("windows", "zip"))
+             for arch in ("amd64", "arm64")]
+    if include_source:
+        names.append(f"osslsigncode-{version}.tar.gz")
+    return sorted(names)
 
 
 def check_files(directory, names):
@@ -135,8 +161,8 @@ def checksums(directory, names):
                    for name in sorted(names))
 
 
-def prepare_assets(directory, repository, version, source_sha, workflow_sha):
-    names = archive_names(version)
+def prepare_assets(directory, repository, version, source_sha, workflow_sha, include_source=False):
+    names = archive_names(version, include_source)
     check_files(directory, names)
     (directory / "BUILDINFO.json").write_text(metadata(repository, version, source_sha, workflow_sha), encoding="utf-8")
     (directory / "SHA256SUMS.txt").write_text(checksums(directory, names + ["BUILDINFO.json"]), encoding="utf-8")
@@ -172,18 +198,23 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("prepare", "assets", "publish"))
     parser.add_argument("--dist", type=Path, default=Path("dist"))
+    parser.add_argument("--include-source", action="store_true")
     args = parser.parse_args()
+    if args.include_source and args.command != "assets":
+        parser.error("--include-source is only supported for assets")
     try:
         version = validate_version(os.environ["VERSION"])
         repository = os.environ["GITHUB_REPOSITORY"]
         if args.command == "assets":
-            prepare_assets(args.dist, repository, version, os.environ["SOURCE_SHA"], os.environ["WORKFLOW_SHA"])
+            prepare_assets(args.dist, repository, version, os.environ["SOURCE_SHA"],
+                           os.environ["WORKFLOW_SHA"], args.include_source)
         else:
             api = GitHub(repository, os.environ["GH_TOKEN"])
             if args.command == "prepare":
-                sha = check_release(api, version)
+                values = prepare_release(api, version, os.environ.get("REFRESH_DRAFT") == "true")
                 with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-                    output.write(f"version={version}\nsha={sha}\n")
+                    for name, value in values.items():
+                        output.write(f"{name}={value}\n")
             else:
                 publish(api, args.dist, version, os.environ["SOURCE_SHA"], os.environ["WORKFLOW_SHA"])
     except (ReleaseError, KeyError, OSError, ValueError) as error:

@@ -23,6 +23,10 @@ on:
       tag:
         description: 'Existing version tag to build (e.g. 2.15). Releases are never overwritten.'
         required: true
+      refresh_draft:
+        description: 'Build and attest files for a manual draft refresh; never write to releases.'
+        type: boolean
+        default: false
 
 concurrency:
   group: release-${{ inputs.tag || github.ref_name }}
@@ -43,6 +47,8 @@ jobs:
     outputs:
       version: ${{ steps.prepare.outputs.version }}
       sha: ${{ steps.prepare.outputs.sha }}
+      source_asset_id: ${{ steps.prepare.outputs.source_asset_id }}
+      source_asset_sha256: ${{ steps.prepare.outputs.source_asset_sha256 }}
     steps:
       - name: Checkout release helpers
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -55,6 +61,7 @@ jobs:
         id: prepare
         env:
           VERSION: ${{ inputs.tag || github.ref_name }}
+          REFRESH_DRAFT: ${{ inputs.refresh_draft }}
           GH_TOKEN: ${{ github.token }}
         run: python3 ci/.github/scripts/release.py prepare
 
@@ -585,9 +592,64 @@ jobs:
           if-no-files-found: error
 
   # --------------------------------------------------------------------------
+  # Manual refresh builds signed files only; it never writes to releases.
+  # Publication remains an explicit maintainer action after verification.
+  # --------------------------------------------------------------------------
+  refresh:
+    if: inputs.refresh_draft
+    needs: [prepare, linux, macos, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+      WORKFLOW_SHA: ${{ github.workflow_sha }}
+      SOURCE_ASSET_ID: ${{ needs.prepare.outputs.source_asset_id }}
+      SOURCE_ASSET_SHA256: ${{ needs.prepare.outputs.source_asset_sha256 }}
+    steps:
+      - name: Checkout release helpers
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+          path: ci
+      - name: Download rebuilt archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Preserve and verify the draft's original source archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset="dist/osslsigncode-${VERSION}.tar.gz"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${SOURCE_ASSET_ID}" \
+            -H 'Accept: application/octet-stream' > "$asset"
+          printf '%s  %s\n' "$SOURCE_ASSET_SHA256" "$asset" | sha256sum -c
+      - name: Generate build metadata and checksums
+        run: python3 ci/.github/scripts/release.py assets --include-source
+      - name: Attest files for manual publication
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: dist/*
+          create-storage-record: false
+      - name: Upload verified release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: verified-release-${{ needs.prepare.outputs.version }}
+          path: dist/*
+          if-no-files-found: error
+
+  # --------------------------------------------------------------------------
   # Publish: collect every artifact, generate SHA256SUMS.txt, attach to release.
   # --------------------------------------------------------------------------
   release:
+    if: ${{ !inputs.refresh_draft }}
     needs: [prepare, linux, macos, windows]
     runs-on: ubuntu-24.04
     # Preflight fails unless this environment has required reviewers and
