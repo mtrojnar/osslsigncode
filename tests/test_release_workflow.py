@@ -106,44 +106,30 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "already exists"):
             release.check_release(self.api, VERSION)
 
-    def draft_with_source(self):
-        return {"tag_name": VERSION, "draft": True, "assets": [{
-            "id": 123, "name": f"osslsigncode-{VERSION}.tar.gz",
-            "digest": "sha256:" + "d" * 64,
-        }]}
-
-    def test_manual_refresh_has_no_release_writes_or_environment_requirement(self):
-        self.api.responses[("GET", "releases?per_page=100&page=1")] = [self.draft_with_source()]
+    def test_manual_refresh_needs_no_access_to_draft_or_environment(self):
+        del self.api.responses[("GET", "releases?per_page=100&page=1")]
         del self.api.responses[("GET", "environments/release")]
-        values = release.prepare_release(self.api, VERSION, refresh_draft=True)
-        self.assertEqual(values, {"version": VERSION, "sha": SHA, "source_asset_id": 123,
-                                  "source_asset_sha256": "d" * 64})
-        self.assertTrue(all(method == "GET" for method, _, _ in self.api.calls))
-        self.assertFalse(any(path == "environments/release" for _, path, _ in self.api.calls))
+        values = release.prepare_release(self.api, VERSION, refresh_draft=True,
+                                         source_archive_sha256="d" * 64)
+        self.assertEqual(values, {"version": VERSION, "sha": SHA,
+                                  "source_archive_sha256": "d" * 64})
+        self.assertEqual([(method, path) for method, path, _ in self.api.calls],
+                         [("GET", f"git/ref/tags/{VERSION}")])
 
-    def test_manual_refresh_rejects_published_missing_or_ambiguous_drafts(self):
-        draft = self.draft_with_source()
-        published = {**draft, "draft": False}
-        for releases in ([], [published], [draft, draft]):
-            self.api.responses[("GET", "releases?per_page=100&page=1")] = releases
-            with self.subTest(releases=releases), self.assertRaises(release.ReleaseError):
-                release.prepare_release(self.api, VERSION, refresh_draft=True)
-
-    def test_manual_refresh_requires_source_digest(self):
-        draft = self.draft_with_source()
-        draft["assets"][0]["digest"] = None
-        self.api.responses[("GET", "releases?per_page=100&page=1")] = [draft]
-        with self.assertRaisesRegex(release.ReleaseError, "SHA-256 digest"):
-            release.prepare_release(self.api, VERSION, refresh_draft=True)
+    def test_manual_refresh_requires_valid_source_digest(self):
+        for digest in (None, "", "d" * 63, "D" * 64, "sha256:" + "d" * 64):
+            with self.subTest(digest=digest), self.assertRaisesRegex(release.ReleaseError, "SHA-256 digest"):
+                release.prepare_release(self.api, VERSION, refresh_draft=True,
+                                        source_archive_sha256=digest)
 
     def test_manual_refresh_checksums_include_preserved_source(self):
-        source = self.directory / f"osslsigncode-{VERSION}.tar.gz"
-        source.write_bytes(b"preserved source archive")
         release.prepare_assets(self.directory, REPOSITORY, VERSION, SHA, WORKFLOW_SHA,
-                               include_source=True)
-        self.assertIn(f"  {source.name}\n", (self.directory / "SHA256SUMS.txt").read_text())
-        self.assertEqual(source.read_bytes(), b"preserved source archive")
-        # Manual refresh cannot be used to relax the automatic publisher.
+                               source_archive_sha256="d" * 64)
+        manifest = (self.directory / "SHA256SUMS.txt").read_text()
+        self.assertIn(f'{"d" * 64}  osslsigncode-{VERSION}.tar.gz\n', manifest)
+        info = json.loads((self.directory / "BUILDINFO.json").read_text())
+        self.assertEqual(info["source_archive"]["sha256"], "d" * 64)
+        # The automatic publisher still rejects manual-refresh metadata.
         with self.assertRaises(release.ReleaseError):
             self.publish()
         self.assertEqual(self.api.calls, [])

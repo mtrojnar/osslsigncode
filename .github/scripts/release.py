@@ -103,24 +103,16 @@ def require_new_release(api, version):
         raise ReleaseError(f"A release already exists for {version}; refusing to modify it")
 
 
-def prepare_release(api, version, refresh_draft=False):
+def prepare_release(api, version, refresh_draft=False, source_archive_sha256=None):
     if not refresh_draft:
         return {"version": version, "sha": check_release(api, version)}
-    # This mode only produces workflow artifacts. It has no release-write
-    # permission and cannot create, update or publish a GitHub release.
-    sha = resolve_tag(api, version)
-    releases = list(matching_releases(api, version))
-    if len(releases) != 1 or releases[0].get("draft") is not True:
-        raise ReleaseError("Manual refresh requires exactly one existing draft release")
-    sources = [asset for asset in releases[0].get("assets", [])
-               if asset["name"] == f"osslsigncode-{version}.tar.gz"]
-    if len(sources) != 1 or not re.fullmatch(r"sha256:[0-9a-f]{64}", sources[0].get("digest") or ""):
-        raise ReleaseError("Draft must contain a source archive with a GitHub SHA-256 digest")
-    asset_id = int(sources[0]["id"])
-    if asset_id <= 0:
-        raise ReleaseError("Invalid source asset ID")
-    return {"version": version, "sha": sha, "source_asset_id": asset_id,
-            "source_asset_sha256": sources[0]["digest"].removeprefix("sha256:")}
+    # A read-only workflow token cannot see draft metadata. The maintainer
+    # supplies the original source digest from an authenticated draft lookup
+    # and checks draft state before manually writing or publishing anything.
+    if not re.fullmatch(r"[0-9a-f]{64}", source_archive_sha256 or ""):
+        raise ReleaseError("Manual refresh requires the preserved source archive's SHA-256 digest")
+    return {"version": version, "sha": resolve_tag(api, version),
+            "source_archive_sha256": source_archive_sha256}
 
 
 def check_release(api, version, expected_sha=None):
@@ -132,13 +124,10 @@ def check_release(api, version, expected_sha=None):
     return sha
 
 
-def archive_names(version, include_source=False):
-    names = [f"osslsigncode-{version}-{platform}-{arch}.{extension}"
-             for platform, extension in (("linux", "tar.gz"), ("macos", "zip"), ("windows", "zip"))
-             for arch in ("amd64", "arm64")]
-    if include_source:
-        names.append(f"osslsigncode-{version}.tar.gz")
-    return sorted(names)
+def archive_names(version):
+    return sorted(f"osslsigncode-{version}-{platform}-{arch}.{extension}"
+                  for platform, extension in (("linux", "tar.gz"), ("macos", "zip"), ("windows", "zip"))
+                  for arch in ("amd64", "arm64"))
 
 
 def check_files(directory, names):
@@ -150,10 +139,15 @@ def check_files(directory, names):
             raise ReleaseError(f"Not a non-empty regular release asset: {name}")
 
 
-def metadata(repository, version, source_sha, workflow_sha):
-    return json.dumps({"repository": repository, "tag": version,
-                       "source_sha": validate_sha(source_sha),
-                       "workflow_sha": validate_sha(workflow_sha)}, indent=2, sort_keys=True) + "\n"
+def metadata(repository, version, source_sha, workflow_sha, source_archive_sha256=None):
+    data = {"repository": repository, "tag": version,
+            "source_sha": validate_sha(source_sha), "workflow_sha": validate_sha(workflow_sha)}
+    if source_archive_sha256 is not None:
+        if not re.fullmatch(r"[0-9a-f]{64}", source_archive_sha256):
+            raise ReleaseError("Invalid source archive SHA-256 digest")
+        data["source_archive"] = {"name": f"osslsigncode-{version}.tar.gz",
+                                  "sha256": source_archive_sha256}
+    return json.dumps(data, indent=2, sort_keys=True) + "\n"
 
 
 def checksums(directory, names):
@@ -161,11 +155,15 @@ def checksums(directory, names):
                    for name in sorted(names))
 
 
-def prepare_assets(directory, repository, version, source_sha, workflow_sha, include_source=False):
-    names = archive_names(version, include_source)
+def prepare_assets(directory, repository, version, source_sha, workflow_sha, source_archive_sha256=None):
+    names = archive_names(version)
     check_files(directory, names)
-    (directory / "BUILDINFO.json").write_text(metadata(repository, version, source_sha, workflow_sha), encoding="utf-8")
-    (directory / "SHA256SUMS.txt").write_text(checksums(directory, names + ["BUILDINFO.json"]), encoding="utf-8")
+    info = metadata(repository, version, source_sha, workflow_sha, source_archive_sha256)
+    (directory / "BUILDINFO.json").write_text(info, encoding="utf-8")
+    manifest = checksums(directory, names + ["BUILDINFO.json"])
+    if source_archive_sha256 is not None:
+        manifest += f"{source_archive_sha256}  osslsigncode-{version}.tar.gz\n"
+    (directory / "SHA256SUMS.txt").write_text(manifest, encoding="utf-8")
 
 
 def publish(api, directory, version, source_sha, workflow_sha):
@@ -198,20 +196,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("prepare", "assets", "publish"))
     parser.add_argument("--dist", type=Path, default=Path("dist"))
-    parser.add_argument("--include-source", action="store_true")
     args = parser.parse_args()
-    if args.include_source and args.command != "assets":
-        parser.error("--include-source is only supported for assets")
     try:
         version = validate_version(os.environ["VERSION"])
         repository = os.environ["GITHUB_REPOSITORY"]
         if args.command == "assets":
             prepare_assets(args.dist, repository, version, os.environ["SOURCE_SHA"],
-                           os.environ["WORKFLOW_SHA"], args.include_source)
+                           os.environ["WORKFLOW_SHA"], os.environ.get("SOURCE_ARCHIVE_SHA256") or None)
         else:
             api = GitHub(repository, os.environ["GH_TOKEN"])
             if args.command == "prepare":
-                values = prepare_release(api, version, os.environ.get("REFRESH_DRAFT") == "true")
+                values = prepare_release(api, version, os.environ.get("REFRESH_DRAFT") == "true",
+                                         os.environ.get("SOURCE_ARCHIVE_SHA256"))
                 with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
                     for name, value in values.items():
                         output.write(f"{name}={value}\n")

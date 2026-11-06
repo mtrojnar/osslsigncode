@@ -35,14 +35,18 @@ Do not publish a partial draft while the upload job is running.
 ## Manually refreshing an existing draft
 
 Dispatch with `refresh_draft: true` to rebuild and attest files for an existing
-draft without granting any job permission to modify releases. This mode rejects
-published releases and requires the draft's original source archive and GitHub
-SHA-256 digest. It preserves that source archive and includes it in the attested
-checksums. It does not need the publishing environment because it cannot publish.
+draft without granting any job permission to modify releases. Read-only workflow
+tokens cannot see draft metadata: supply `source_archive_sha256` from the draft's
+authenticated GitHub asset metadata. That digest is included in the authenticated
+build metadata, checksums and attestations without downloading the draft's source
+archive in CI. This mode does not need the publishing environment because it
+cannot publish or update releases; draft-state checks remain the maintainer's
+responsibility.
 
 After all jobs succeed, download the `verified-release-<version>` workflow
-artifact. Verify its attestations against the exact workflow commit and check
-all checksums and build metadata. An authorized maintainer may then replace the
+artifact, and copy the preserved source archive beside those files. Verify all
+attestations against the exact workflow commit and check all checksums and build
+metadata. An authorized maintainer may then replace the
 draft's files manually, checking immediately before each write that the release
 is still a draft and the tag is unchanged. Keep the original source archive.
 Publish only after verifying the uploaded assets against the local digests.
