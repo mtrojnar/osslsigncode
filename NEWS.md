@@ -16,6 +16,8 @@
 - fixed undefined behavior when copying an empty MSI signature blob
 - fixed timestamp verification of signatures with more than one timestamp
   attribute
+- fixed RFC 3161 timestamp verification to require a full-length message
+  imprint
 
 ### 2.14 (2026.07.20)
 
