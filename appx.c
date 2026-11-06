@@ -2841,7 +2841,8 @@ static uint32_t fileGetU32(FILE *file)
     if (size != 4) {
         return 0; /* FAILED */
     }
-    return (uint32_t)(b[3] << 24 | b[2] << 16 | b[1] << 8 | b[0]);
+    return ((uint32_t)b[3] << 24) | ((uint32_t)b[2] << 16) |
+        ((uint32_t)b[1] << 8) | (uint32_t)b[0];
 }
 
 /* coverity[ -tainted_data_return ] */
@@ -2852,7 +2853,7 @@ static uint16_t fileGetU16(FILE *file)
     if (size != 2) {
         return 0; /* FAILED */
     }
-    return (uint16_t)(b[1] << 8 | b[0]);
+    return (uint16_t)((uint32_t)b[1] << 8 | b[0]);
 }
 
 static uint64_t bufferGetU64(uint8_t *buffer, uint64_t *pos)
@@ -2864,17 +2865,17 @@ static uint64_t bufferGetU64(uint8_t *buffer, uint64_t *pos)
 
 static uint32_t bufferGetU32(uint8_t *buffer, uint64_t *pos)
 {
-    uint32_t ret = (uint32_t)(buffer[*pos + 3] << 24 | \
-                              buffer[*pos + 2] << 16 | \
-                              buffer[*pos + 1] << 8 | \
-                              buffer[*pos]);
+    uint32_t ret = ((uint32_t)buffer[*pos + 3] << 24) | \
+                   ((uint32_t)buffer[*pos + 2] << 16) | \
+                   ((uint32_t)buffer[*pos + 1] << 8) | \
+                   (uint32_t)buffer[*pos];
     *pos += 4;
     return ret;
 }
 
 static uint16_t bufferGetU16(uint8_t *buffer, uint64_t *pos)
 {
-    uint16_t ret = (uint16_t)(buffer[*pos + 1] << 8 | buffer[*pos]);
+    uint16_t ret = (uint16_t)((uint32_t)buffer[*pos + 1] << 8 | buffer[*pos]);
     *pos += 2;
     return ret;
 }
