@@ -1,24 +1,48 @@
 # osslsigncode change log
 
-### 2.15 (unreleased)
+### 2.15 (2026.11.06)
 
-- fixed Cygwin compilation by not passing ELF-specific linker flags
-- fixed undefined behavior in little-endian field parsing
-- fixed MSI MsiDigitalSignatureEx digest ordering during signing and verification
-- fixed verification to report failure when timestamp verification fails
+**Security fixes**
+
+This release fixes timestamp verification flaws and memory-safety issues
+present in 2.14. Users processing untrusted files are strongly encouraged
+to upgrade.
+
+- fixed verification to report failure when timestamp verification fails,
+  unless "-ignore-timestamp" is used (thanks to Małgorzata Olszówka)
+- fixed timestamp verification to use the time belonging to the verified
+  timestamp when multiple timestamp attributes are present
+- fixed RFC 3161 timestamp verification to reject truncated or overlong
+  message imprints, preventing incorrect timestamp acceptance and
+  out-of-bounds reads
 - fixed replacing a script signature block that starts the file or follows a
   line with a different line ending, which crashed, deleted script content, or
   produced unverifiable output
-- fixed use-after-free when removing an APPX signature entry from the central directory
-- fixed out-of-bounds read when printing an empty PKCS#7 message digest
+- fixed use-after-free when replacing an existing APPX signature
+- fixed heap out-of-bounds read and possible information disclosure when
+  printing an empty PKCS#7 message digest
 - fixed heap out-of-bounds reads when parsing malformed APPX ZIP64 extra fields
-- fixed heap out-of-bounds reads when verifying malformed PKCS#7 signature attributes
-- fixed undefined behavior when copying an empty MSI signature blob
-- fixed timestamp verification of signatures with more than one timestamp
-  attribute
-- fixed RFC 3161 timestamp verification to require a full-length message
-  imprint
-- fixed a crash with more than 256 "-t" or "-ts" options
+- fixed heap out-of-bounds reads when verifying malformed PKCS#7 signature
+  attributes
+- fixed buffer overflows when more than 256 occurrences of either "-t" or
+  "-ts" are supplied
+
+**Other user-visible changes**
+
+- added prebuilt binaries for Linux, macOS and Windows on x86-64 and ARM64
+  (thanks to Elijah Marusawa)
+- added support for CMS OCTET STRING-encoded Authenticode content
+  (thanks to Małgorzata Olszówka)
+- improved PE checksum calculation performance (thanks to Francois Girinon)
+- fixed compilation on Cygwin
+- fixed compilation on Windows ARM64 (thanks to Elijah Marusawa)
+- fixed signing large PE files with page hashes ("-ph"), including files with
+  large overlays (thanks to Francois Girinon)
+- fixed MSI MsiDigitalSignatureEx digest ordering during signing and
+  verification, and validation of the metadata digest; files previously
+  signed with "-add-msi-dse" whose streams sort before MsiDigitalSignatureEx
+  must be re-signed. Corrected signatures will not verify with versions
+  older than 2.15 (thanks to Małgorzata Olszówka)
 
 ### 2.14 (2026.07.20)
 
