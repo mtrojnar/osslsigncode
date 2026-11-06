@@ -1745,13 +1745,21 @@ static uint32_t stream_read(MSI_FILE *msi, MSI_ENTRY *entry, u_char *p_msi, uint
     if (is_root && !memcmp(entry->name, digital_signature, sizeof digital_signature)) {
         /* DigitalSignature */
         inlen = len_msi;
-        *indata = OPENSSL_malloc((size_t)inlen);
-        memcpy(*indata, p_msi, (size_t)inlen);
+        if (inlen > 0) {
+            *indata = OPENSSL_malloc((size_t)inlen);
+            memcpy(*indata, p_msi, (size_t)inlen);
+        } else {
+            *indata = NULL;
+        }
     } else if (is_root && !memcmp(entry->name, digital_signature_ex, sizeof digital_signature_ex)) {
         /* MsiDigitalSignatureEx */
         inlen = len_msiex;
-        *indata = OPENSSL_malloc((size_t)inlen);
-        memcpy(*indata, p_msiex, (size_t)inlen);
+        if (inlen > 0) {
+            *indata = OPENSSL_malloc((size_t)inlen);
+            memcpy(*indata, p_msiex, (size_t)inlen);
+        } else {
+            *indata = NULL;
+        }
     } else if (inlen != 0) {
         *indata = (char *)OPENSSL_malloc(inlen);
         if (!msi_file_read(msi, entry, 0, *indata, inlen)) {

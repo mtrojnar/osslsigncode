@@ -12,6 +12,7 @@
 - fixed out-of-bounds read when printing an empty PKCS#7 message digest
 - fixed heap out-of-bounds reads when parsing malformed APPX ZIP64 extra fields
 - fixed heap out-of-bounds reads when verifying malformed PKCS#7 signature attributes
+- fixed undefined behavior when copying an empty MSI signature blob
 
 ### 2.14 (2026.07.20)
 
