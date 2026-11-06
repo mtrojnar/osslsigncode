@@ -104,13 +104,13 @@
 
 #define GET_UINT8_LE(p) ((const u_char *)(p))[0]
 
-#define GET_UINT16_LE(p) (uint16_t)(((const u_char *)(p))[0] | \
-                                   (((const u_char *)(p))[1] << 8))
+#define GET_UINT16_LE(p) (uint16_t)((uint32_t)((const u_char *)(p))[0] | \
+                                   ((uint32_t)((const u_char *)(p))[1] << 8))
 
-#define GET_UINT32_LE(p) (uint32_t)(((const u_char *)(p))[0] | \
-                                   (((const u_char *)(p))[1] << 8) | \
-                                   (((const u_char *)(p))[2] << 16) | \
-                                   (((const u_char *)(p))[3] << 24))
+#define GET_UINT32_LE(p) (uint32_t)((uint32_t)((const u_char *)(p))[0] | \
+                                   ((uint32_t)((const u_char *)(p))[1] << 8) | \
+                                   ((uint32_t)((const u_char *)(p))[2] << 16) | \
+                                   ((uint32_t)((const u_char *)(p))[3] << 24))
 
 #define PUT_UINT8_LE(i, p) ((u_char *)(p))[0] = (u_char)((i) & 0xff);
 

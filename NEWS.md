@@ -3,6 +3,7 @@
 ### 2.15 (unreleased)
 
 - fixed Cygwin compilation by not passing ELF-specific linker flags
+- fixed undefined behavior in little-endian field parsing
 - fixed MSI MsiDigitalSignatureEx digest ordering during signing and verification
 - fixed verification to report failure when timestamp verification fails
 - fixed replacing a script signature block that starts the file or follows a
