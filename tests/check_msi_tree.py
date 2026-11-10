@@ -29,6 +29,9 @@ TREES = {
         ("A", [("B", []), ("C", [("D", [])])]),
         ("E", []),
     ],
+    # an invalid file with two adjacent DigitalSignature streams,
+    # which must both be replaced or removed
+    "duplicate_signature": ["a", SIGNATURES[0], SIGNATURES[0], "b"],
 }
 
 
@@ -36,6 +39,8 @@ def expected(tree: list, prefix: str = "") -> dict:
     """Return the paths of the storages (None) and streams (their data)."""
     paths = {}
     for node in tree:
+        if node in SIGNATURES:
+            continue  # replaced or removed by osslsigncode
         if isinstance(node, str):
             paths[prefix + node] = f"data of {prefix}{node}".encode()
         else:
@@ -199,11 +204,14 @@ class CompoundFile:
             seen.add(index)
             entry = self.entry(index)
             pending += [entry["left"], entry["right"]]
+            path = prefix + entry["name"] + ("/" if entry["type"] == STORAGE else "")
+            if path in paths:
+                raise ValueError(f"duplicate directory entry {path!r}")
             if entry["type"] == STORAGE:
-                paths[prefix + entry["name"] + "/"] = None
-                paths.update(self.paths(index, prefix + entry["name"] + "/", seen))
+                paths[path] = None
+                paths.update(self.paths(index, path, seen))
             elif entry["type"] == STREAM:
-                paths[prefix + entry["name"]] = self.read_stream(entry)
+                paths[path] = self.read_stream(entry)
             else:
                 raise ValueError(f"unexpected directory entry type {entry['type']}")
         return paths

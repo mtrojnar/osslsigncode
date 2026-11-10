@@ -1753,7 +1753,8 @@ static int msi_dirent_delete(MSI_DIRENT *dirent, const u_char *name, uint16_t na
 {
     int i;
 
-    for (i = 0; i < sk_MSI_DIRENT_num(dirent->children); i++) {
+    /* iterate backwards, so that no entry is skipped after a deletion */
+    for (i = sk_MSI_DIRENT_num(dirent->children) - 1; i >= 0; i--) {
         MSI_DIRENT *child = sk_MSI_DIRENT_value(dirent->children, i);
         if (memcmp(child->name, name, MIN(child->nameLen, nameLen))) {
             continue;

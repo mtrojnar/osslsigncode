@@ -307,8 +307,9 @@ if(Python3_FOUND AND NOT cryptography_error)
     # the "no_streams" tree has no streams, so the mini stream is empty
     # after removing the signature, and after signing again with additional
     # certificates, which make the signature exceed the 4 KiB mini stream
-    # cutoff.
-    foreach(tree "nested" "no_streams")
+    # cutoff. The invalid "duplicate_signature" tree has two DigitalSignature
+    # streams, which must not be kept when signing or removing the signature.
+    foreach(tree "nested" "no_streams" "duplicate_signature")
         set(tree_file "${FILES}/tree_${tree}")
         add_test(NAME "msi_tree_${tree}_create"
             COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/check_msi_tree.py"
@@ -376,7 +377,7 @@ if(Python3_FOUND AND NOT cryptography_error)
             "msi_tree_${tree}_verify_resigned")
         set(OUTPUT_FILES ${OUTPUT_FILES} "${tree_file}.msi" "${tree_file}_signed.msi"
             "${tree_file}_removed.msi" "${tree_file}_resigned.msi")
-    endforeach(tree "nested" "no_streams")
+    endforeach(tree "nested" "no_streams" "duplicate_signature")
 
 
 ### Verify signature ###
