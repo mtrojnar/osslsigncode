@@ -60,6 +60,8 @@
   with a newline
 - fixed a crash when signing an MSI file if memory for its mini stream could
   not be allocated
+- fixed corrupted output files and failed verification when signing an MSI
+  file with empty storages or storages nested in other storages
 
 ### 2.15 (2026.11.06)
 

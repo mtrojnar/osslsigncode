@@ -2087,61 +2087,86 @@ static char *msi_unused_dirent_get(void)
     return data;
 }
 
-static int dirents_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out, uint32_t *streamId, int count, int last)
+/*
+ * Return the number of directory entries saved for a child of a storage:
+ * the entry itself and, for a storage, the entries of all its descendants.
+ */
+static uint32_t dirents_count(MSI_DIRENT *dirent)
 {
-    int i, childenNum;
-    char *entry;
-    STACK_OF(MSI_DIRENT) *children;
+    uint32_t count = 1;
+    int i;
 
-    if (!dirent || !dirent->children) {
-        return count;
+    if (dirent->type != DIR_STORAGE)
+        return count; /* streams are saved without children */
+    for (i = 0; i < sk_MSI_DIRENT_num(dirent->children); i++)
+        count += dirents_count(sk_MSI_DIRENT_value(dirent->children, i));
+    return count;
+}
+
+static void dirent_save(MSI_ENTRY *entry, BIO *outdata, MSI_OUT *out)
+{
+    char *data = msi_dirent_get(entry);
+
+    BIO_write(outdata, data, DIRENT_SIZE);
+    OPENSSL_free(data);
+    out->dirtreeLen += DIRENT_SIZE;
+}
+
+/*
+ * Save the entry of a storage or the root, followed by the entries of its
+ * descendants in depth-first order, so that the first child directly follows
+ * its parent.  Make everything black, and link the children of each storage
+ * as a list of right siblings rather than a tree.
+ * [in] dirent: storage or root entry
+ * [out] outdata: outdata file BIO
+ * [in, out] out: MSI_OUT structure
+ * [in, out] streamId: ID of the storage on input, ID of the last saved entry on output
+ * [in] rightSiblingID: ID of the next sibling of the storage, or NOSTREAM
+ * [returns] 0 on error or 1 on success
+ */
+static int dirents_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out,
+    uint32_t *streamId, uint32_t rightSiblingID)
+{
+    int i, childrenNum = 0;
+    STACK_OF(MSI_DIRENT) *children = NULL;
+
+    if (dirent->children) {
+        children = sk_MSI_DIRENT_dup(dirent->children);
+        if (!children)
+            return 0; /* FAILED */
+        sk_MSI_DIRENT_set_cmp_func(children, &dirent_cmp_tree);
+        sk_MSI_DIRENT_sort(children);
+        childrenNum = sk_MSI_DIRENT_num(children);
     }
-    children = sk_MSI_DIRENT_dup(dirent->children);
-    sk_MSI_DIRENT_set_cmp_func(children, &dirent_cmp_tree);
-    sk_MSI_DIRENT_sort(children);
-    childenNum = sk_MSI_DIRENT_num(children);
-    /* make everything black */
     dirent->entry->colorFlag = BLACK_COLOR;
     dirent->entry->leftSiblingID = NOSTREAM;
-    if (dirent->type == DIR_STORAGE) {
-        if (last) {
-            dirent->entry->rightSiblingID = NOSTREAM;
-        } else {
-            /* make linked list rather than tree, only use next - right sibling */
-            count += childenNum;
-            dirent->entry->rightSiblingID = *streamId + (uint32_t)count + 1;
-        }
-    } else { /* DIR_ROOT */
-        dirent->entry->rightSiblingID = NOSTREAM;
-    }
-    dirent->entry->childID = *streamId + 1;
-    entry = msi_dirent_get(dirent->entry);
-    BIO_write(outdata, entry, DIRENT_SIZE);
-    OPENSSL_free(entry);
-    out->dirtreeLen += DIRENT_SIZE;
-    for (i = 0; i < childenNum; i++) {
+    dirent->entry->rightSiblingID = rightSiblingID;
+    dirent->entry->childID = childrenNum > 0 ? *streamId + 1 : NOSTREAM;
+    dirent_save(dirent->entry, outdata, out);
+    for (i = 0; i < childrenNum; i++) {
         MSI_DIRENT *child = sk_MSI_DIRENT_value(children, i);
-        int last_dir = i == childenNum - 1 ? 1 : 0;
-        *streamId += 1;
+        uint32_t nextID = NOSTREAM;
+
+        *streamId += 1; /* ID of the child */
+        /* the next sibling follows all the entries saved for this child */
+        if (i < childrenNum - 1)
+            nextID = *streamId + dirents_count(child);
+
         if (child->type == DIR_STORAGE) {
-            count += dirents_save(child, outdata, out, streamId, count, last_dir);
+            if (!dirents_save(child, outdata, out, streamId, nextID)) {
+                sk_MSI_DIRENT_free(children);
+                return 0; /* FAILED */
+            }
         } else { /* DIR_STREAM */
-            count = 0;
             child->entry->colorFlag = BLACK_COLOR;
             child->entry->leftSiblingID = NOSTREAM;
-            if (last_dir) {
-                child->entry->rightSiblingID = NOSTREAM;
-            } else {
-                child->entry->rightSiblingID = *streamId + 1;
-            }
-            entry = msi_dirent_get(child->entry);
-            BIO_write(outdata, entry, DIRENT_SIZE);
-            OPENSSL_free(entry);
-            out->dirtreeLen += DIRENT_SIZE;
+            child->entry->rightSiblingID = nextID;
+            child->entry->childID = NOSTREAM;
+            dirent_save(child->entry, outdata, out);
         }
     }
     sk_MSI_DIRENT_free(children);
-    return count;
+    return 1; /* OK */
 }
 
 static int dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
@@ -2160,7 +2185,9 @@ static int dirtree_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
         memcpy(dirent->entry->size, buf, sizeof dirent->entry->size);
     }
     /* sort and save all directory entries */
-    dirents_save(dirent, outdata, out, &streamId, 0, 0);
+    if (!dirents_save(dirent, outdata, out, &streamId, NOSTREAM)) {
+        return 0; /* FAILED */
+    }
     /* set free (unused) directory entries */
     unused_entry = msi_unused_dirent_get();
     if (out->dirtreeLen % out->sectorSize > 0) {

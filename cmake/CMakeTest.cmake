@@ -47,6 +47,7 @@ if(Python3_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/make_large_pe.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/make_crafted_timestamps.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_pe_checksum.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_msi_tree.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/start_server.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/exec.py"
             DESTINATION "${TEST_DIR}/")
@@ -296,6 +297,44 @@ if(Python3_FOUND AND NOT cryptography_error)
         set(OUTPUT_FILES ${OUTPUT_FILES}
             "${FILES}/checksum_${case}.exe" "${FILES}/checksum_${case}_signed.exe")
     endforeach(case ${checksum_cases})
+
+
+### MSI storages ###
+
+    # Signing must keep the storages of an MSI file, as checked by an
+    # independent parser, and the signature must verify. The "nested" tree
+    # has nested and empty storages.
+    foreach(tree "nested")
+        set(tree_file "${FILES}/tree_${tree}")
+        add_test(NAME "msi_tree_${tree}_create"
+            COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/check_msi_tree.py"
+            "make" "${tree_file}.msi" ${tree})
+        add_test(NAME "msi_tree_${tree}_sign"
+            COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "sign"
+            "-pkcs12" "${CERTS}/cert.p12"
+            "-readpass" "${CERTS}/password.txt"
+            "-add-msi-dse"
+            "-in" "${tree_file}.msi"
+            "-out" "${tree_file}_signed.msi")
+        add_test(NAME "msi_tree_${tree}_check_signed"
+            COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/check_msi_tree.py"
+            "check" "${tree_file}_signed.msi" ${tree})
+        add_test(NAME "msi_tree_${tree}_verify"
+            COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "verify"
+            "-CAfile" "${CERTS}/CACert.pem"
+            "-CRLfile" "${CERTS}/CACertCRL.pem"
+            "-in" "${tree_file}_signed.msi")
+        set_tests_properties("msi_tree_${tree}_create" PROPERTIES
+            DEPENDS "start_server")
+        set_tests_properties("msi_tree_${tree}_sign" PROPERTIES
+            DEPENDS "msi_tree_${tree}_create")
+        set_tests_properties("msi_tree_${tree}_check_signed" "msi_tree_${tree}_verify"
+            PROPERTIES
+            DEPENDS "msi_tree_${tree}_sign")
+        list(APPEND ALL_TESTS "msi_tree_${tree}_create" "msi_tree_${tree}_sign"
+            "msi_tree_${tree}_check_signed" "msi_tree_${tree}_verify")
+        set(OUTPUT_FILES ${OUTPUT_FILES} "${tree_file}.msi" "${tree_file}_signed.msi")
+    endforeach(tree "nested")
 
 
 ### Verify signature ###
