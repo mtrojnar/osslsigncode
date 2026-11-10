@@ -730,6 +730,8 @@ static int write_in_encoding(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *lin
         uint16_t *utf16_data = NULL;
         size_t utf16_len = utf8_to_utf16(line, length, &utf16_data);
 
+        if (length > 0 && !utf16_data)
+            return 0; /* memory allocation failed */
         if (!BIO_write_ex(outdata, utf16_data, utf16_len, &written)
             || written != utf16_len) {
             OPENSSL_free(utf16_data);
@@ -742,6 +744,7 @@ static int write_in_encoding(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *lin
 
 /* convert len bytes of UTF-8 to UTF-16
  * return the number of output bytes
+ * *out_utf16 is NULL for empty input, or if memory allocation failed
  */
 static size_t utf8_to_utf16(const char *data, size_t len, uint16_t **out_utf16)
 {
@@ -860,6 +863,9 @@ static int script_digest_convert(BIO *hash, FILE_FORMAT_CTX *ctx, size_t len)
         size_t utf16_len = utf8_to_utf16(ctx->options->indata,
             len, &utf16_data);
 
+        /* a failed conversion must not yield a digest of no data */
+        if (len > 0 && !utf16_data)
+            return 0; /* memory allocation failed */
         if (!script_write_bio(hash, (char *)utf16_data, utf16_len)) {
             OPENSSL_free(utf16_data);
             return 0; /* FAILED */

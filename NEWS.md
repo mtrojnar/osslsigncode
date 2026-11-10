@@ -65,6 +65,8 @@
 - fixed opening MSI files whose directory starts at the first sector
 - fixed corrupted output files when signing an MSI file, or removing its
   signature, if the result has no streams smaller than 4 KiB
+- fixed signing a UTF-8 script file producing an invalid signature instead
+  of failing if memory for its UTF-16 conversion could not be allocated
 
 ### 2.15 (2026.11.06)
 
