@@ -32,6 +32,8 @@
 - fixed out-of-bounds read of process memory into the output file when
   signing, removing the signature of, or extracting data from a CAB file
   whose signature offset lies inside its header
+- fixed out-of-bounds reads past the end of a CAB file with an unterminated
+  next cabinet name or a truncated header
 - fixed out-of-bounds reads past the end of an MSI file referencing a sector
   that starts at the end of the file
 - fixed stack exhaustion when parsing an MSI file with a long chain of

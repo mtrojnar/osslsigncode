@@ -80,7 +80,7 @@ FILE_FORMAT file_format_cab = {
 /* Prototypes */
 static CAB_CTX *cab_ctx_get(char *indata, uint32_t filesize);
 static int cab_add_jp_attribute(PKCS7 *p7, int jp);
-static size_t cab_write_optional_names(BIO *outdata, char *indata, size_t len, uint16_t flags);
+static size_t cab_write_optional_names(BIO *outdata, char *indata, size_t i, size_t fileend, uint16_t flags);
 static int cab_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static int cab_add_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static int cab_check_file(FILE_FORMAT_CTX *ctx);
@@ -260,44 +260,13 @@ static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
         */
         /* u22 abReserve: 56-59 */
         BIO_write(bhash, ctx->options->indata + 56, 4);
-        idx = 60;
         fileend = ctx->cab_ctx->sigpos;
-        /* TODO */
-        if (flags & FLAG_PREV_CABINET) {
-            uint8_t byte;
-            /* szCabinetPrev */
-            do {
-                byte = GET_UINT8_LE(ctx->options->indata + idx);
-                BIO_write(bhash, ctx->options->indata + idx, 1);
-                idx++;
-            } while (byte && idx < fileend);
-            /* szDiskPrev */
-            do {
-                byte = GET_UINT8_LE(ctx->options->indata + idx);
-                BIO_write(bhash, ctx->options->indata + idx, 1);
-                idx++;
-            } while (byte && idx < fileend);
-        }
-        if (flags & FLAG_NEXT_CABINET) {
-            uint8_t byte;
-            /* szCabinetNext */
-            do {
-                byte = GET_UINT8_LE(ctx->options->indata + idx);
-                BIO_write(bhash, ctx->options->indata + idx, 1);
-                idx++;
-            } while (byte && idx < fileend);
-            /* szDiskNext */
-            do {
-                byte = GET_UINT8_LE(ctx->options->indata + idx);
-                BIO_write(bhash, ctx->options->indata + idx, 1);
-                idx++;
-            } while (byte && idx < fileend);
-        }
+        idx = (uint32_t)cab_write_optional_names(bhash, ctx->options->indata, 60, fileend, flags);
         /*
          * (u8 * cFolders) CFFOLDER - structure contains information about
          * one of the folders or partial folders stored in this cabinet file
          */
-        while (nfolders && idx < fileend) {
+        while (nfolders && idx < fileend && fileend - idx >= 8) {
             BIO_write(bhash, ctx->options->indata + idx, 8);
             idx += 8;
             nfolders--;
@@ -436,7 +405,7 @@ static int cab_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
      * u2 iCabinet - number of this cabinet file in a set: 34-35
      */
     BIO_write(outdata, ctx->options->indata + 32, 4);
-    idx = cab_write_optional_names(outdata, ctx->options->indata, 60, flags);
+    idx = cab_write_optional_names(outdata, ctx->options->indata, 60, ctx->cab_ctx->sigpos, flags);
     /* the header must end before the signature */
     if (idx >= ctx->cab_ctx->sigpos) {
         fprintf(stderr, "Corrupt CAB file - too short\n");
@@ -665,6 +634,11 @@ static CAB_CTX *cab_ctx_get(char *indata, uint32_t filesize)
         return NULL; /* FAILED */
     }
     if (flags & FLAG_RESERVE_PRESENT) {
+        /* the header including the reserved field ends at offset 60 */
+        if (filesize < 60) {
+            fprintf(stderr, "CAB file is too short\n");
+            return NULL; /* FAILED */
+        }
         /*
         * Additional headers is located at offset 36 (cbCFHeader, cbCFFolder, cbCFData);
         * size of header (4 bytes, little-endian order) must be 20 (checkpoint).
@@ -758,43 +732,26 @@ static int cab_add_jp_attribute(PKCS7 *p7, int jp)
  * Multivolume cabinet file is unsupported TODO.
  * [out] outdata: outdata file BIO
  * [in] indata: mapped CAB file
- * [in] len: offset
+ * [in] i: offset
+ * [in] fileend: end of the data that can contain the names
  * [in] flags: FLAG_PREV_CABINET, FLAG_NEXT_CABINET
- * [returns] offset
+ * [returns] offset after the names, or fileend if a name is not terminated before fileend
  */
-static size_t cab_write_optional_names(BIO *outdata, char *indata, size_t i, uint16_t flags)
+static size_t cab_write_optional_names(BIO *outdata, char *indata, size_t i, size_t fileend, uint16_t flags)
 {
-    if (flags & FLAG_PREV_CABINET) {
-        /* szCabinetPrev */
-        while (GET_UINT8_LE(indata + i)) {
+    int n, names = 0;
+
+    if (flags & FLAG_PREV_CABINET)
+        names += 2; /* szCabinetPrev, szDiskPrev */
+    if (flags & FLAG_NEXT_CABINET)
+        names += 2; /* szCabinetNext, szDiskNext */
+    for (n = 0; n < names; n++) {
+        /* write a NUL-terminated string including its terminator */
+        do {
+            if (i >= fileend)
+                return fileend; /* FAILED, unterminated name */
             BIO_write(outdata, indata + i, 1);
-            i++;
-        }
-        BIO_write(outdata, indata + i, 1);
-        i++;
-        /* szDiskPrev */
-        while (GET_UINT8_LE(indata + i)) {
-            BIO_write(outdata, indata + i, 1);
-            i++;
-        }
-        BIO_write(outdata, indata + i, 1);
-        i++;
-    }
-    if (flags & FLAG_NEXT_CABINET) {
-        /* szCabinetNext */
-        while (GET_UINT8_LE(indata + i)) {
-            BIO_write(outdata, indata + i, 1);
-            i++;
-        }
-        BIO_write(outdata, indata + i, 1);
-        i++;
-        /* szDiskNext */
-        while (GET_UINT8_LE(indata + i)) {
-            BIO_write(outdata, indata + i, 1);
-            i++;
-        }
-        BIO_write(outdata, indata + i, 1);
-        i++;
+        } while (GET_UINT8_LE(indata + i++));
     }
     return i;
 }
@@ -846,7 +803,7 @@ static int cab_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     /* u4 abReserve: 56-59 */
     BIO_write(hash, ctx->options->indata + 56, 4);
 
-    idx = cab_write_optional_names(outdata, ctx->options->indata, 60, flags);
+    idx = cab_write_optional_names(outdata, ctx->options->indata, 60, ctx->cab_ctx->sigpos, flags);
     /* the header must end before the signature */
     if (idx >= ctx->cab_ctx->sigpos) {
         fprintf(stderr, "Corrupt CAB file - too short\n");
@@ -931,7 +888,7 @@ static int cab_add_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     BIO_write(outdata, cabsigned, 20);
     BIO_write(hash, cabsigned+20, 4);
 
-    idx = cab_write_optional_names(outdata, ctx->options->indata, 36, flags);
+    idx = cab_write_optional_names(outdata, ctx->options->indata, 36, ctx->cab_ctx->fileend, flags);
     if (idx >= ctx->cab_ctx->fileend) {
         fprintf(stderr, "Corrupt CAB file - too short\n");
         OPENSSL_free(buf);
