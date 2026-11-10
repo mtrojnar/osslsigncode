@@ -4230,8 +4230,8 @@ static int read_pkcs7_certfile(GLOBAL_OPTIONS *options)
         return 0; /* FAILED */
     }
     p7 = d2i_PKCS7_bio(btmp, NULL);
-    /* d.sign is only valid for signedData */
-    if (!p7 || !PKCS7_type_is_signed(p7) || !p7->d.sign) {
+    /* d.sign is only valid for signedData, and its certificates are OPTIONAL */
+    if (!p7 || !PKCS7_type_is_signed(p7) || !p7->d.sign || !p7->d.sign->cert) {
         fprintf(stderr, "No certificate found\n");
         PKCS7_free(p7);
         BIO_free(btmp);

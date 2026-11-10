@@ -49,7 +49,7 @@
 - fixed NULL pointer dereferences when verifying a PKCS#7 signature, or a
   nested signature, without signedData or inner content
 - fixed invalid pointer use when the "-spc" or "-certs" file is a PKCS#7
-  structure other than signedData
+  structure other than signedData, or signedData without certificates
 - fixed stack buffer overflow on Windows when the "-readpass" file is larger
   than 4 KiB
 - fixed stack buffer underflow when a password entered with "-askpass"
