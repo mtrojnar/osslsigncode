@@ -54,6 +54,7 @@
 
 #define DIRENT_SIZE                 0x80   /* 128 bytes */
 #define DIRENT_MAX_NAME_SIZE        0x40   /* 64 bytes */
+#define DIRENT_MAX_DEPTH            256    /* storages are processed recursively */
 
 #define DIRENT_NAME                 0x00
 #define DIRENT_NAME_LEN             0x40   /* length in bytes incl 0 terminator */
@@ -99,6 +100,9 @@ static const u_char msi_root_entry[] = {
 static const u_char msi_zeroes[] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
+
+/* padding for streams, kept off the stack of the recursive stream_handle() */
+static const char msi_zero_sector[MAX_SECTOR_SIZE] = {0};
 
 typedef struct {
     u_char signature[8];      /* 0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1 */
@@ -147,6 +151,13 @@ typedef struct msi_dirent_struct {
 } MSI_DIRENT;
 
 DEFINE_STACK_OF(MSI_DIRENT)
+
+/* Directory entry waiting to be added to the tree of MSI_DIRENT structures */
+typedef struct {
+    uint32_t entryID;
+    MSI_DIRENT *parent;
+    uint32_t depth; /* nesting level of the entry, 0 for the root entry */
+} MSI_PENDING_ENTRY;
 
 typedef struct {
     const u_char *m_buffer;
@@ -226,7 +237,8 @@ FILE_FORMAT file_format_msi = {
 /* Prototypes */
 static MSI_CTX *msi_ctx_get(char *indata, uint32_t filesize);
 static PKCS7 *msi_pkcs7_get_digital_signature(FILE_FORMAT_CTX *ctx, MSI_ENTRY *ds);
-static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent);
+static int pending_entry_push(MSI_PENDING_ENTRY **stack, size_t *num, size_t *size,
+        uint32_t entryID, MSI_DIRENT *parent, uint32_t depth);
 static int msi_file_write(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint32_t len_msi,
         u_char *p_msiex, uint32_t len_msiex, BIO *outdata);
 static MSI_ENTRY *msi_signatures_get(MSI_DIRENT *dirent, MSI_ENTRY **dse);
@@ -239,7 +251,8 @@ static int msi_hash_dir(MSI_CTX *msi_ctx, MSI_DIRENT *dirent, BIO *hash, int is_
 static MSI_ENTRY *msi_root_entry_get(MSI_FILE *msi);
 static void msi_file_free(MSI_FILE *msi);
 static MSI_FILE *msi_file_new(char *buffer, uint32_t len);
-static int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT **ret);
+static int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *root, MSI_DIRENT **ret);
+static MSI_DIRENT *msi_dirent_node_new(MSI_ENTRY *entry, MSI_DIRENT *parent);
 static void msi_dirent_free(MSI_DIRENT *dirent);
 static int msi_prehash_dir(MSI_DIRENT *dirent, BIO *hash, int is_root);
 static int msi_check_file(FILE_FORMAT_CTX *ctx);
@@ -743,7 +756,7 @@ static MSI_CTX *msi_ctx_get(char *indata, uint32_t filesize)
         msi_file_free(msi);
         return NULL; /* FAILED */
     }
-    if (!msi_dirent_new(msi, root, NULL, &(dirent))) {
+    if (!msi_dirent_new(msi, root, &dirent)) {
         fprintf(stderr, "Failed to parse MSI_DIRENT struct\n");
         msi_file_free(msi);
         if (dirent)
@@ -1269,26 +1282,122 @@ static MSI_FILE *msi_file_new(char *buffer, uint32_t len)
     return msi;
 }
 
-/* Recursively create a tree of MSI_DIRENT structures */
-static int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, MSI_DIRENT **ret)
+/*
+ * Create a tree of MSI_DIRENT structures.
+ * Siblings and children are added with an explicit stack rather than
+ * recursion, as a chain of siblings can be as long as the number of
+ * directory entries in the file.  The entries are visited in the same
+ * depth-first order as in a recursive traversal: an entry, its left
+ * sibling, its right sibling, and then its child.
+ * [in] msi: MSI_FILE structure
+ * [in] root: root directory entry (consumed)
+ * [out] ret: root of the tree, freed by the caller also on error
+ * [returns] 0 on error or 1 on success
+ */
+static int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *root, MSI_DIRENT **ret)
+{
+    MSI_PENDING_ENTRY *stack = NULL;
+    size_t num = 0, size = 0;
+    /* every directory entry is visited once in a valid file */
+    uint32_t count = 1, max_count = msi->m_bufferLen / DIRENT_SIZE;
+    MSI_DIRENT *dirent;
+    int ok = 0;
+
+    *ret = dirent = msi_dirent_node_new(root, NULL);
+    if (!dirent)
+        return 0; /* FAILED */
+    /* the root entry has no siblings, ignore any in a corrupted file */
+    if (!pending_entry_push(&stack, &num, &size, dirent->entry->childID, dirent, 1))
+        goto out;
+    while (num > 0) {
+        MSI_PENDING_ENTRY pending = stack[--num];
+        MSI_ENTRY *entry;
+
+        if (++count > max_count) {
+            fprintf(stderr, "Too many directory entries\n");
+            goto out;
+        }
+        entry = get_entry(msi, pending.entryID, FALSE);
+        if (!entry) {
+            fprintf(stderr, "Corrupted ID: 0x%08X\n", pending.entryID);
+            goto out;
+        }
+        dirent = msi_dirent_node_new(entry, pending.parent);
+        if (!dirent)
+            goto out;
+        if (entry->childID != NOSTREAM && pending.depth >= DIRENT_MAX_DEPTH) {
+            fprintf(stderr, "Too deeply nested storages\n");
+            goto out;
+        }
+        /* the last pushed entry is visited first */
+        if (!pending_entry_push(&stack, &num, &size, entry->childID, dirent, pending.depth + 1)
+            || !pending_entry_push(&stack, &num, &size, entry->rightSiblingID, pending.parent, pending.depth)
+            || !pending_entry_push(&stack, &num, &size, entry->leftSiblingID, pending.parent, pending.depth))
+            goto out;
+    }
+    ok = 1; /* OK */
+out:
+    if (!ok)
+        fprintf(stderr, "Failed to add a sibling or a child to the tree\n");
+    OPENSSL_free(stack);
+    return ok;
+}
+
+/*
+ * Push a directory entry to be added to the tree.
+ * [in, out] stack: stack of pending entries
+ * [in, out] num: number of pending entries
+ * [in, out] size: allocated number of pending entries
+ * [in] entryID: directory entry ID
+ * [in] parent: parent directory of the entry
+ * [in] depth: nesting level of the entry
+ * [returns] 0 on error or 1 on success
+ */
+static int pending_entry_push(MSI_PENDING_ENTRY **stack, size_t *num, size_t *size,
+        uint32_t entryID, MSI_DIRENT *parent, uint32_t depth)
+{
+    /* The special NOSTREAM (0xFFFFFFFF) value is used as a terminator */
+    if (entryID == NOSTREAM)
+        return 1; /* OK */
+    if (*num == *size) {
+        size_t new_size = *size ? 2 * *size : 64;
+        MSI_PENDING_ENTRY *new_stack = OPENSSL_realloc(*stack, new_size * sizeof(MSI_PENDING_ENTRY));
+
+        if (!new_stack)
+            return 0; /* FAILED */
+        *stack = new_stack;
+        *size = new_size;
+    }
+    (*stack)[*num].entryID = entryID;
+    (*stack)[*num].parent = parent;
+    (*stack)[*num].depth = depth;
+    (*num)++;
+    return 1; /* OK */
+}
+
+/*
+ * Create an MSI_DIRENT structure and add it to its parent directory.
+ * [in] entry: directory entry (consumed)
+ * [in, out] parent: parent directory, NULL for the root entry
+ * [returns] pointer to MSI_DIRENT structure or NULL on error
+ */
+static MSI_DIRENT *msi_dirent_node_new(MSI_ENTRY *entry, MSI_DIRENT *parent)
 {
     MSI_DIRENT *dirent;
     static int cnt;
     static MSI_DIRENT *tortoise, *hare;
 
-    if (!entry) {
-        return 1; /* OK */
-    }
     if (entry->nameLen == 0 || entry->nameLen > 64) {
         fprintf(stderr, "Corrupted Directory Entry Name Length\n");
-        return 0; /* FAILED */
+        OPENSSL_free(entry);
+        return NULL; /* FAILED */
     }
     /* detect cycles in previously visited entries (parents, siblings) */
-    if (!ret) { /* initialized (non-root entry) */
+    if (parent) { /* initialized (non-root entry) */
         if (!memcmp(entry, tortoise->entry, sizeof(MSI_ENTRY))) {
             fprintf(stderr, "MSI_ENTRY cycle detected at level %d\n", cnt);
             OPENSSL_free(entry);
-            return 0; /* FAILED */
+            return NULL; /* FAILED */
         }
     }
 
@@ -1301,8 +1410,8 @@ static int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, M
     dirent->next = NULL; /* fail-safe */
 
     /* Floyd's cycle-finding algorithm */
-    if (!ret) { /* initialized (non-root entry) */
-        if (cnt++ & 1) /* move the tortoise every other invocation of msi_dirent_new() */
+    if (parent) { /* initialized (non-root entry) */
+        if (cnt++ & 1) /* move the tortoise every other new non-root entry */
             tortoise = tortoise->next;
         hare->next = dirent; /* build a linked list of visited entries */
         hare = dirent; /* move the hare every time */
@@ -1314,43 +1423,10 @@ static int msi_dirent_new(MSI_FILE *msi, MSI_ENTRY *entry, MSI_DIRENT *parent, M
 
     if (parent && !sk_MSI_DIRENT_push(parent->children, dirent)) {
         fprintf(stderr, "Failed to insert MSI_DIRENT\n");
-        return 0; /* FAILED */
+        msi_dirent_free(dirent);
+        return NULL; /* FAILED */
     }
-
-    if (ret)
-        *ret = dirent;
-
-    if (!recurse_entry(msi, entry->leftSiblingID, parent)
-        || !recurse_entry(msi, entry->rightSiblingID, parent)
-        || !recurse_entry(msi, entry->childID, dirent)) {
-        fprintf(stderr, "Failed to add a sibling or a child to the tree\n");
-        return 0; /* FAILED */
-    }
-
-    return 1; /* OK */
-}
-
-/* Add a sibling or a child to the tree */
-/* NOTE: These links are a tree, not a linked list */
-static int recurse_entry(MSI_FILE *msi, uint32_t entryID, MSI_DIRENT *parent)
-{
-    MSI_ENTRY *node;
-
-    /* The special NOSTREAM (0xFFFFFFFF) value is used as a terminator */
-    if (entryID == NOSTREAM) /* stop condition */
-        return 1; /* OK */
-
-    node = get_entry(msi, entryID, FALSE);
-    if (!node) {
-        fprintf(stderr, "Corrupted ID: 0x%08X\n", entryID);
-        return 0; /* FAILED */
-    }
-
-    if (!msi_dirent_new(msi, node, parent, NULL)) {
-        return 0; /* FAILED */
-    }
-
-    return 1; /* OK */
+    return dirent;
 }
 
 /* Return DigitalSignature and MsiDigitalSignatureEx */
@@ -1602,7 +1678,7 @@ out:
     return ret;
 }
 
-static int ministream_append(MSI_OUT *out, char *buf, uint32_t len)
+static int ministream_append(MSI_OUT *out, const char *buf, uint32_t len)
 {
     uint32_t needSectors = (len + out->sectorSize - 1) / out->sectorSize;
     if (out->miniStreamLen + len >= (uint64_t)out->ministreamsMemallocCount * out->sectorSize) {
@@ -1804,7 +1880,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
                 return 0; /* FAILED */
             }
         } else { /* DIR_STREAM */
-            char buf[MAX_SECTOR_SIZE];
+            char buf[4];
             char *indata = NULL;
             uint32_t inlen = GET_UINT32_LE(child->entry->size);
             if (inlen >= MAXREGSECT) {
@@ -1818,8 +1894,8 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
                 continue; /* skip a null stream */
             }
             /* set the size of the user-defined data if this is a stream object */
-            PUT_UINT32_LE(inlen, buf);
-            memcpy(child->entry->size, buf, sizeof child->entry->size);
+            memset(child->entry->size, 0, sizeof child->entry->size);
+            PUT_UINT32_LE(inlen, child->entry->size);
 
             if (inlen < MINI_STREAM_CUTOFF_SIZE) {
                 /* set the index into the mini FAT to track the chain of sectors through the mini stream */
@@ -1831,8 +1907,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
                 /* fill to the end with known data, such as all zeroes */
                 if (inlen % msi->m_minisectorSize > 0) {
                     uint32_t remain = msi->m_minisectorSize - inlen % msi->m_minisectorSize;
-                    memset(buf, 0, (size_t)remain);
-                    if (!ministream_append(out, buf, remain)) {
+                    if (!ministream_append(out, msi_zero_sector, remain)) {
                         OPENSSL_free(indata);
                         return 0; /* FAILED */
                     }
@@ -1860,8 +1935,7 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
                 /* fill to the end with known data, such as all zeroes */
                 if (inlen % out->sectorSize > 0) {
                     uint32_t remain = out->sectorSize - inlen % out->sectorSize;
-                    memset(buf, 0, (size_t)remain);
-                    BIO_write(outdata, buf, (int)remain);
+                    BIO_write(outdata, msi_zero_sector, (int)remain);
                 }
                 /* set a sector chain in the FAT */
                 while (inlen > out->sectorSize) {

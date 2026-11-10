@@ -34,6 +34,8 @@
   whose signature offset lies inside its header
 - fixed out-of-bounds reads past the end of an MSI file referencing a sector
   that starts at the end of the file
+- fixed stack exhaustion when parsing an MSI file with a long chain of
+  directory entries or deeply nested storages
 - fixed out-of-bounds reads past the end of a script file whose signature
   block starts at the beginning of the file, or of a UTF-16 script file with
   an odd size
