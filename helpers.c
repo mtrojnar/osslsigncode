@@ -617,7 +617,12 @@ ASN1_TYPE *catalog_content_get(CatalogAuthAttr *attribute)
     ASN1_TYPE *content;
     const u_char *contents_data;
 
-    value = attribute->contents->value.sequence;
+    /* contents is OPTIONAL, and value.set is only an ASN1_STRING for some types */
+    if (!attribute->contents || attribute->contents->type != V_ASN1_SET)
+        return NULL; /* FAILED */
+    value = attribute->contents->value.set;
+    if (!value)
+        return NULL; /* FAILED */
     contents_data = ASN1_STRING_get0_data(value);
     contents = d2i_ASN1_SET_ANY(NULL, &contents_data, ASN1_STRING_length(value));
     if (!contents)

@@ -22,6 +22,8 @@
 - fixed dereference of an attacker-controlled pointer when adding a nested
   signature to an MSI file whose DigitalSignature stream is not PKCS#7
   signedData
+- fixed NULL and invalid pointer dereferences when listing or verifying
+  catalog file members with missing or unexpected content
 
 ### 2.15 (2026.11.06)
 

@@ -3127,14 +3127,10 @@ static int verify_content_member_digest(FILE_FORMAT_CTX *ctx, ASN1_TYPE *content
     int mdlen, mdtype = -1;
     u_char mdbuf[EVP_MAX_MD_SIZE];
     SpcIndirectDataContent *idc;
-    const u_char *data;
-    ASN1_STRING *value;
     const EVP_MD *md;
     u_char *cmdbuf = NULL;
 
-    value = content->value.sequence;
-    data = ASN1_STRING_get0_data(value);
-    idc = d2i_SpcIndirectDataContent(NULL, &data, ASN1_STRING_length(value));
+    idc = asn1_type_get_indirect_data_content(content);
     if (!idc) {
         fprintf(stderr, "Failed to extract SpcIndirectDataContent data\n");
         return 1; /* FAILED */

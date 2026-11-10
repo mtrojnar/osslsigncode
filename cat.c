@@ -423,7 +423,15 @@ static int cat_print_content_member_name(ASN1_TYPE *content)
     const u_char *data = NULL;
     ASN1_STRING *value;
 
-    value = content->value.sequence;
+    /* value.sequence is only an ASN1_STRING for some types */
+    if (content->type == V_ASN1_SEQUENCE)
+        value = content->value.sequence;
+    else if (content->type == V_ASN1_OCTET_STRING)
+        value = content->value.octet_string;
+    else
+        return 0; /* FAILED */
+    if (!value)
+        return 0; /* FAILED */
     data = ASN1_STRING_get0_data(value);
     nvc = d2i_CatNameValueContent(NULL, &data, ASN1_STRING_length(value));
     if (!nvc) {
