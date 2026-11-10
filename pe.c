@@ -880,8 +880,9 @@ static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype,
     int sequence_len, classid_len, serialized_len, l, l2;
     char buf[128];
 
-    /* Validate input object */
-    if (!obj || !obj->value)
+    /* Validate input object, value.sequence is only an ASN1_STRING for some types */
+    if (!obj || !obj->value || obj->value->type != V_ASN1_SEQUENCE
+        || !obj->value->value.sequence)
         return 0; /* FAILED */
 
     /* Decode SpcPeImageData from ASN.1 sequence */
@@ -924,6 +925,10 @@ static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype,
 
     /* Skip ASN.1 SET header */
     l = asn1_simple_hdr_len(serialized_data, serialized_len);
+    if (l >= serialized_len) {
+        SpcPeImageData_free(id);
+        return 0; /* FAILED */
+    }
     blob = serialized_data + l;
 
     /* Decode nested SpcAttributeTypeAndOptionalValue */
@@ -947,16 +952,32 @@ static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype,
 
     /* IMPORTANT:
      * obj now points to the newly decoded structure,
-     * so refresh sequence_data/sequence_len */
-    sequence_data = ASN1_STRING_get0_data(obj->value->value.sequence);
-    sequence_len = ASN1_STRING_length(obj->value->value.sequence);
+     * so refresh sequence_data/sequence_len.
+     * The page hashes are a SET, but also accept a SEQUENCE,
+     * as both are stored with their ASN.1 header */
+    if (!obj->value
+        || (obj->value->type != V_ASN1_SET && obj->value->type != V_ASN1_SEQUENCE)
+        || !obj->value->value.set) {
+        SpcAttributeTypeAndOptionalValue_free(obj);
+        return 0; /* FAILED */
+    }
+    sequence_data = ASN1_STRING_get0_data(obj->value->value.set);
+    sequence_len = ASN1_STRING_length(obj->value->value.set);
 
     /* Skip ASN.1 SET header */
     l2 = asn1_simple_hdr_len(sequence_data, sequence_len);
+    if (l2 >= sequence_len) {
+        SpcAttributeTypeAndOptionalValue_free(obj);
+        return 0; /* FAILED */
+    }
 
     /* Skip ASN.1 OCTET STRING header */
     l = asn1_simple_hdr_len(sequence_data + l2, sequence_len - l2);
     l += l2;
+    if (l >= sequence_len) {
+        SpcAttributeTypeAndOptionalValue_free(obj);
+        return 0; /* FAILED */
+    }
 
     /* Extract raw page hash blob */
     *phlen = sequence_len - l;

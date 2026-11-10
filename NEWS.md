@@ -24,6 +24,8 @@
   signedData
 - fixed NULL and invalid pointer dereferences when listing or verifying
   catalog file members with missing or unexpected content
+- fixed NULL and invalid pointer dereferences when verifying a PE signature
+  with missing or unexpected SpcPeImageData or page hash values
 
 ### 2.15 (2026.11.06)
 
