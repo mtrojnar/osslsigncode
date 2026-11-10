@@ -4098,21 +4098,31 @@ static int read_password(GLOBAL_OPTIONS *options)
 #ifdef WIN32
             HANDLE fhandle, fmap;
             LPVOID faddress;
+            DWORD filesize;
+
             fhandle = CreateFile(options->readpass, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
             if (fhandle == INVALID_HANDLE_VALUE) {
                 return 0; /* FAILED */
             }
+            filesize = GetFileSize(fhandle, NULL);
+            if (filesize == INVALID_FILE_SIZE) {
+                CloseHandle(fhandle);
+                return 0; /* FAILED */
+            }
             fmap = CreateFileMapping(fhandle, NULL, PAGE_READONLY, 0, 0, NULL);
             if (fmap == NULL) {
+                CloseHandle(fhandle);
                 return 0; /* FAILED */
             }
             faddress = MapViewOfFile(fmap, FILE_MAP_READ, 0, 0, 0);
             CloseHandle(fmap);
             if (faddress == NULL) {
+                CloseHandle(fhandle);
                 return 0; /* FAILED */
             }
-            passlen = (int)GetFileSize(fhandle, NULL);
-            memcpy(passbuf, faddress, passlen);
+            /* read at most as much as read() does on other platforms */
+            passlen = (int)MIN(filesize, sizeof passbuf - 1);
+            memcpy(passbuf, faddress, (size_t)passlen);
             UnmapViewOfFile(faddress);
             CloseHandle(fhandle);
 #else /* WIN32 */

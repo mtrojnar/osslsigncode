@@ -37,6 +37,8 @@
 - fixed out-of-bounds reads past the end of a script file whose signature
   block starts at the beginning of the file, or of a UTF-16 script file with
   an odd size
+- fixed stack buffer overflow on Windows when the "-readpass" file is larger
+  than 4 KiB
 
 **Other user-visible changes**
 
