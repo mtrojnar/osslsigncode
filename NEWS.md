@@ -39,11 +39,15 @@
   an odd size
 - fixed stack buffer overflow on Windows when the "-readpass" file is larger
   than 4 KiB
+- fixed stack buffer underflow when a password entered with "-askpass"
+  starts with a NUL character
 
 **Other user-visible changes**
 
 - fixed "remove-signature" reporting success and keeping a truncated output
   file for a CAB file with a corrupted header
+- fixed "-askpass" removing the last character of a password not terminated
+  with a newline
 
 ### 2.15 (2026.11.06)
 

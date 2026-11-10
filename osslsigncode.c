@@ -4071,7 +4071,7 @@ static char *getpassword(const char *prompt)
         fprintf(stderr, "Failed to read password\n");
         return NULL; /* FAILED */
     }
-    passbuf[strlen(passbuf)-1] = 0x00;
+    passbuf[strcspn(passbuf, "\n")] = 0x00;
     pass = OPENSSL_strdup(passbuf);
     memset(passbuf, 0, sizeof passbuf);
     return pass;
