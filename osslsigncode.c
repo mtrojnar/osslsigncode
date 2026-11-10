@@ -518,7 +518,7 @@ static int attach_rfc3161_response(PKCS7 *p7, TS_RESP *response, int verbose)
  * the PKCS7 SignerInfo structure as an unauthenticated attribute - cont[1]:
  * p7->d.sign->signer_info->unauth_attr
  * [in, out] p7: new PKCS#7 signature
- * [in] resp: PKCS#7 authenticode response
+ * [in] resp: PKCS#7 authenticode response (consumed)
  * [in] verbose: additional output mode
  * [returns] 1 on error or 0 on success
  */
@@ -530,6 +530,13 @@ static int attach_authenticode_response(PKCS7 *p7, PKCS7 *resp, int verbose)
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
 
     if (!resp) {
+        return 1; /* FAILED */
+    }
+    /* the response comes from the network, d.sign is only valid for signedData */
+    if (!PKCS7_type_is_signed(resp) || !resp->d.sign) {
+        if (verbose)
+            fprintf(stderr, "Authenticode timestamp response is not PKCS#7 signedData\n");
+        PKCS7_free(resp);
         return 1; /* FAILED */
     }
     for(i = sk_X509_num(resp->d.sign->cert)-1; i>=0; i--) {

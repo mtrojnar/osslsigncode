@@ -13,6 +13,9 @@
 - fixed use-after-free and double free of CRLs embedded in a verified
   signature; such CRLs are not covered by the signature, so they can be added
   to any signed file
+- fixed heap out-of-bounds reads and invalid pointer use when an Authenticode
+  timestamp server or a network attacker returns a PKCS#7 response that is
+  not signedData
 
 ### 2.15 (2026.11.06)
 
