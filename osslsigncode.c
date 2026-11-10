@@ -2425,8 +2425,12 @@ static int verify_pkcs7_data(PKCS7 *p7, X509_STORE *store)
      * Otherwise, indata should be NULL, and then the signed data must be in p7.
      * The OpenSSL error workaround is to put the inner content into BIO *indata parameter
      * https://github.com/openssl/openssl/pull/22575
+     * Like OpenSSL 3.5, only accept SEQUENCE or OCTET STRING content,
+     * as value.sequence is not an ASN1_STRING for some other types.
      */
     if (PKCS7_type_is_other(contents) && (contents->d.other != NULL)
+        && (contents->d.other->type == V_ASN1_SEQUENCE
+            || contents->d.other->type == V_ASN1_OCTET_STRING)
         && (contents->d.other->value.sequence != NULL)
         && (contents->d.other->value.sequence->length > 0)) {
         if (contents->d.other->type == V_ASN1_SEQUENCE) {

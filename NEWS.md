@@ -16,6 +16,9 @@
 - fixed heap out-of-bounds reads and invalid pointer use when an Authenticode
   timestamp server or a network attacker returns a PKCS#7 response that is
   not signedData
+- fixed invalid pointer use and out-of-bounds reads when verifying a signature
+  with unexpected inner content, such as a crafted CAT file, in builds using
+  OpenSSL older than 3.5
 
 ### 2.15 (2026.11.06)
 
