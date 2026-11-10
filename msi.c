@@ -781,6 +781,12 @@ static PKCS7 *msi_pkcs7_get_digital_signature(FILE_FORMAT_CTX *ctx, MSI_ENTRY *d
         fprintf(stderr, "Failed to extract PKCS7 data\n");
         return NULL;
     }
+    /* callers access p7->d.sign, which is only valid for signedData */
+    if (!PKCS7_type_is_signed(p7) || !p7->d.sign) {
+        fprintf(stderr, "DigitalSignature stream is not PKCS#7 signedData\n");
+        PKCS7_free(p7);
+        return NULL;
+    }
     return p7;
 }
 
@@ -2448,10 +2454,11 @@ static int msi_check_MsiDigitalSignatureEx(FILE_FORMAT_CTX *ctx, MSI_ENTRY *dse,
 {
     if (dse && GET_UINT32_LE(dse->size) != (uint32_t)EVP_MD_size(ctx->options->md)) {
         X509_ALGOR *alg;
-        const ASN1_OBJECT *aoid;
+        const ASN1_OBJECT *aoid = NULL;
 
         alg = sk_X509_ALGOR_value(p7->d.sign->md_algs, 0);
-        X509_ALGOR_get0(&aoid, NULL, NULL, alg);
+        if (alg)
+            X509_ALGOR_get0(&aoid, NULL, NULL, alg);
         fprintf(stderr, "Message digest algorithm found : %s\n", OBJ_nid2sn(OBJ_obj2nid(aoid)));
         fprintf(stderr, "It is not possible to add a nested signature of a different MD type to the MSI file "
             "without invalidating the initial signature, as the file contains MsiDigitalSignatureEx.\n"

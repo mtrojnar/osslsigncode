@@ -19,6 +19,9 @@
 - fixed invalid pointer use and out-of-bounds reads when verifying a signature
   with unexpected inner content, such as a crafted CAT file, in builds using
   OpenSSL older than 3.5
+- fixed dereference of an attacker-controlled pointer when adding a nested
+  signature to an MSI file whose DigitalSignature stream is not PKCS#7
+  signedData
 
 ### 2.15 (2026.11.06)
 
