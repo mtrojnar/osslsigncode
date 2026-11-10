@@ -29,6 +29,9 @@
 - fixed out-of-bounds read of process memory into the output file when
   signing or removing the signature of a PE file whose Certificate Table
   overlaps its headers
+- fixed out-of-bounds read of process memory into the output file when
+  signing, removing the signature of, or extracting data from a CAB file
+  whose signature offset lies inside its header
 
 ### 2.15 (2026.11.06)
 

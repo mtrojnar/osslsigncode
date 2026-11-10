@@ -437,7 +437,8 @@ static int cab_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
      */
     BIO_write(outdata, ctx->options->indata + 32, 4);
     idx = cab_write_optional_names(outdata, ctx->options->indata, 60, flags);
-    if (idx >= ctx->cab_ctx->fileend) {
+    /* the header must end before the signature */
+    if (idx >= ctx->cab_ctx->sigpos) {
         fprintf(stderr, "Corrupt CAB file - too short\n");
         OPENSSL_free(buf);
         return 0; /* FAILED */
@@ -447,7 +448,7 @@ static int cab_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
      * one of the folders or partial folders stored in this cabinet file
      */
     nfolders = GET_UINT16_LE(ctx->options->indata + 26);
-    if (nfolders * 8 >= ctx->cab_ctx->fileend - idx) {
+    if (nfolders * 8 >= ctx->cab_ctx->sigpos - idx) {
         fprintf(stderr, "Corrupt cFolders value: 0x%08X\n", nfolders);
         OPENSSL_free(buf);
         return 0; /* FAILED */
@@ -846,7 +847,8 @@ static int cab_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     BIO_write(hash, ctx->options->indata + 56, 4);
 
     idx = cab_write_optional_names(outdata, ctx->options->indata, 60, flags);
-    if (idx >= ctx->cab_ctx->fileend) {
+    /* the header must end before the signature */
+    if (idx >= ctx->cab_ctx->sigpos) {
         fprintf(stderr, "Corrupt CAB file - too short\n");
         return 0; /* FAILED */
     }
@@ -855,7 +857,7 @@ static int cab_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
      * one of the folders or partial folders stored in this cabinet file
      */
     nfolders = GET_UINT16_LE(ctx->options->indata + 26);
-    if (nfolders * 8 >= ctx->cab_ctx->fileend - idx) {
+    if (nfolders * 8 >= ctx->cab_ctx->sigpos - idx) {
         fprintf(stderr, "Corrupt cFolders value: 0x%08X\n", nfolders);
         return 0; /* FAILED */
     }
