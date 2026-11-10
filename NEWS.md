@@ -10,6 +10,9 @@
 - fixed double free when verifying a signature with unexpected PKCS#7
   content in builds using OpenSSL older than 3.5 (thanks to smaeljaish771
   for reporting the issue)
+- fixed use-after-free and double free of CRLs embedded in a verified
+  signature; such CRLs are not covered by the signature, so they can be added
+  to any signed file
 
 ### 2.15 (2026.11.06)
 

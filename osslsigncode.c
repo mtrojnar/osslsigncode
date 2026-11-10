@@ -246,6 +246,7 @@ static PKCS7 *pkcs7_get_sigfile(FILE_FORMAT_CTX *ctx);
 static STACK_OF(PKCS7) *get_signature_list(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options);
 static void print_cert(X509 *cert, int i);
 static int x509_store_load_crlfile(X509_STORE *store, char *cafile, char *crlfile);
+static STACK_OF(X509_CRL) *X509_CRL_chain_up_ref(STACK_OF(X509_CRL) *chain);
 static void load_objects_from_store(const char *url, char *pass, EVP_PKEY **pkey, STACK_OF(X509) *certs, STACK_OF(X509_CRL) *crls);
 static BIO *bio_new_file(const char *filename, const char *mode);
 #ifndef OPENSSL_NO_ENGINE
@@ -2150,22 +2151,19 @@ static X509_CRL *x509_crl_get(FILE_FORMAT_CTX *ctx, char *url)
 
 /*
  * Create CRLs from p7->d.sign->crl and x509_CRL (from CRL distribution point).
+ * The returned list holds its own reference to each CRL, so it must be freed
+ * with sk_X509_CRL_pop_free(crls, X509_CRL_free).
  * [in] p7: PKCS#7 signature
- * [in] crl: X509 Certificate Revocation List
+ * [in] crl: X509 Certificate Revocation List (consumed)
  * [returns] X509 Certificate Revocation Lists (CRLs)
  */
 static STACK_OF(X509_CRL) *x509_crl_list_get(PKCS7 *p7, X509_CRL *crl)
 {
-    int i;
-    STACK_OF(X509_CRL) *crls = sk_X509_CRL_new_null();
+    /* X509_CRL_chain_up_ref() does not accept NULL with OpenSSL 1.1.1 */
+    STACK_OF(X509_CRL) *crls = p7->d.sign->crl ?
+        X509_CRL_chain_up_ref(p7->d.sign->crl) : sk_X509_CRL_new_null();
 
-    for (i = 0; i < sk_X509_CRL_num(p7->d.sign->crl); i++) {
-        if (!sk_X509_CRL_push(crls, sk_X509_CRL_value(p7->d.sign->crl, i))) {
-            sk_X509_CRL_pop_free(crls, X509_CRL_free);
-            return NULL;
-        }
-    }
-    if (crl && !sk_X509_CRL_push(crls, crl)) {
+    if (!crls || (crl && !sk_X509_CRL_push(crls, crl))) {
         sk_X509_CRL_pop_free(crls, X509_CRL_free);
         X509_CRL_free(crl);
         return NULL;
