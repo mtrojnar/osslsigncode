@@ -441,7 +441,7 @@ static int cab_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     if (idx >= ctx->cab_ctx->sigpos) {
         fprintf(stderr, "Corrupt CAB file - too short\n");
         OPENSSL_free(buf);
-        return 0; /* FAILED */
+        return 1; /* FAILED */
     }
     /*
      * (u8 * cFolders) CFFOLDER - structure contains information about
@@ -451,7 +451,7 @@ static int cab_remove_pkcs7(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata)
     if (nfolders * 8 >= ctx->cab_ctx->sigpos - idx) {
         fprintf(stderr, "Corrupt cFolders value: 0x%08X\n", nfolders);
         OPENSSL_free(buf);
-        return 0; /* FAILED */
+        return 1; /* FAILED */
     }
     while (nfolders) {
         tmp = GET_UINT32_LE(ctx->options->indata + idx);

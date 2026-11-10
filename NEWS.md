@@ -33,6 +33,11 @@
   signing, removing the signature of, or extracting data from a CAB file
   whose signature offset lies inside its header
 
+**Other user-visible changes**
+
+- fixed "remove-signature" reporting success and keeping a truncated output
+  file for a CAB file with a corrupted header
+
 ### 2.15 (2026.11.06)
 
 **Security fixes**
