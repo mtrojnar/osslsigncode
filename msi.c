@@ -936,8 +936,10 @@ static int read_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *bu
         memcpy(buffer, address, copylen);
         buffer += copylen;
         len -= copylen;
+        if (len == 0)
+            break; /* the last sector of the stream has been read */
         sector = get_next_sector(msi, sector);
-        if (sector == 0) {
+        if (sector == NOSTREAM) {
             fprintf(stderr, "Failed to get a next sector\n");
             return 0; /* FAILED */
         }
