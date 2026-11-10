@@ -32,6 +32,8 @@
 - fixed out-of-bounds read of process memory into the output file when
   signing, removing the signature of, or extracting data from a CAB file
   whose signature offset lies inside its header
+- fixed out-of-bounds reads past the end of an MSI file referencing a sector
+  that starts at the end of the file
 
 **Other user-visible changes**
 

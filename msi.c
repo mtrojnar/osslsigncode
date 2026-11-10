@@ -272,7 +272,7 @@ static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
     if (!options->indata) {
         return NULL; /* FAILED */
     }
-    if (memcmp(options->indata, msi_magic, sizeof msi_magic)) {
+    if (filesize < sizeof msi_magic || memcmp(options->indata, msi_magic, sizeof msi_magic)) {
         unmap_file(options->indata, filesize);
         return NULL; /* FAILED */
     }
@@ -790,15 +790,21 @@ static PKCS7 *msi_pkcs7_get_digital_signature(FILE_FORMAT_CTX *ctx, MSI_ENTRY *d
     return p7;
 }
 
-/* Get absolute address from sector and offset */
-static const u_char *sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset)
+/*
+ * Get absolute address from sector and offset.
+ * Verify that len bytes starting at this address are within the sector and the file.
+ */
+static const u_char *sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset, uint32_t len)
 {
+    /* the header occupies the first sector */
+    uint64_t pos = ((uint64_t)sector + 1) * msi->m_sectorSize + offset;
+
     if (sector >= MAXREGSECT || offset >= msi->m_sectorSize
-        || (msi->m_bufferLen - offset) / msi->m_sectorSize <= sector) {
+        || len > msi->m_sectorSize - offset || pos + len > msi->m_bufferLen) {
         fprintf(stderr, "Corrupted file\n");
         return NULL; /* FAILED */
     }
-    return msi->m_buffer + (sector + 1) * msi->m_sectorSize + offset;
+    return msi->m_buffer + pos;
 }
 
 static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber)
@@ -814,14 +820,14 @@ static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber)
         difatSectorLocation = msi->m_hdr->firstDIFATSectorLocation;
         while (fatSectorNumber >= entriesPerSector) {
             fatSectorNumber -= entriesPerSector;
-            address = sector_offset_to_address(msi, difatSectorLocation, msi->m_sectorSize - 4);
+            address = sector_offset_to_address(msi, difatSectorLocation, msi->m_sectorSize - 4, 4);
             if (!address) {
                 fprintf(stderr, "Failed to get a next sector address\n");
                 return NOSTREAM; /* FAILED */
             }
             difatSectorLocation = GET_UINT32_LE(address);
         }
-        address = sector_offset_to_address(msi, difatSectorLocation, fatSectorNumber * 4);
+        address = sector_offset_to_address(msi, difatSectorLocation, fatSectorNumber * 4, 4);
         if (!address) {
             fprintf(stderr, "Failed to get a next sector address\n");
             return NOSTREAM; /* FAILED */
@@ -847,7 +853,7 @@ static uint32_t get_next_sector(MSI_FILE *msi, uint32_t sector)
         fprintf(stderr, "Failed to get a fat sector location\n");
         return NOSTREAM; /* FAILED */
     }
-    address = sector_offset_to_address(msi, fatSectorLocation, sector % entriesPerSector * 4);
+    address = sector_offset_to_address(msi, fatSectorLocation, sector % entriesPerSector * 4, 4);
     if (!address) {
         fprintf(stderr, "Failed to get a next sector address\n");
         return NOSTREAM; /* FAILED */
@@ -876,8 +882,11 @@ static int locate_final_sector(MSI_FILE *msi, uint32_t sector, uint32_t offset, 
     return 1; /* OK */
 }
 
-/* Get absolute address from mini sector and offset */
-static const u_char *mini_sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset)
+/*
+ * Get absolute address from mini sector and offset.
+ * Verify that len bytes starting at this address are within the file.
+ */
+static const u_char *mini_sector_offset_to_address(MSI_FILE *msi, uint32_t sector, uint32_t offset, uint32_t len)
 {
     if (sector >= MAXREGSECT || offset >= msi->m_minisectorSize ||
             (msi->m_bufferLen - offset) / msi->m_minisectorSize <= sector) {
@@ -888,7 +897,7 @@ static const u_char *mini_sector_offset_to_address(MSI_FILE *msi, uint32_t secto
         fprintf(stderr, "Failed to locate a final sector\n");
         return NULL; /* FAILED */
     }
-    return sector_offset_to_address(msi, sector, offset);
+    return sector_offset_to_address(msi, sector, offset, len);
 }
 
 /*
@@ -904,14 +913,11 @@ static int read_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, char *bu
     while (len > 0) {
         const u_char *address;
         uint32_t copylen;
-        address = sector_offset_to_address(msi, sector, offset);
+
+        copylen = MIN(len, msi->m_sectorSize - offset);
+        address = sector_offset_to_address(msi, sector, offset, copylen);
         if (!address) {
             fprintf(stderr, "Failed to get a next sector address\n");
-            return 0; /* FAILED */
-        }
-        copylen = MIN(len, msi->m_sectorSize - offset);
-        if (msi->m_buffer + msi->m_bufferLen < address + copylen) {
-            fprintf(stderr, "Corrupted file\n");
             return 0; /* FAILED */
         }
         memcpy(buffer, address, copylen);
@@ -937,7 +943,7 @@ static uint32_t get_next_mini_sector(MSI_FILE *msi, uint32_t miniSector)
         fprintf(stderr, "Failed to locate a final sector\n");
         return NOSTREAM; /* FAILED */
     }
-    address = sector_offset_to_address(msi, sector, offset);
+    address = sector_offset_to_address(msi, sector, offset, 4);
     if (!address) {
         fprintf(stderr, "Failed to get a next mini sector address\n");
         return NOSTREAM; /* FAILED */
@@ -975,14 +981,11 @@ static int read_mini_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, cha
     while (len > 0) {
         const u_char *address;
         uint32_t copylen;
-        address = mini_sector_offset_to_address(msi, sector, offset);
+
+        copylen = MIN(len, msi->m_minisectorSize - offset);
+        address = mini_sector_offset_to_address(msi, sector, offset, copylen);
         if (!address) {
             fprintf(stderr, "Failed to get a next mini sector address\n");
-            return 0; /* FAILED */
-        }
-        copylen = MIN(len, msi->m_minisectorSize - offset);
-        if (msi->m_buffer + msi->m_bufferLen < address + copylen) {
-            fprintf(stderr, "Corrupted file\n");
             return 0; /* FAILED */
         }
         memcpy(buffer, address, copylen);
@@ -1192,7 +1195,8 @@ static MSI_ENTRY *get_entry(MSI_FILE *msi, uint32_t entryID, int is_root)
         fprintf(stderr, "Failed to locate a final sector\n");
         return NULL; /* FAILED */
     }
-    address = sector_offset_to_address(msi, sector, offset);
+    /* parse_entry() reads a whole directory entry */
+    address = sector_offset_to_address(msi, sector, offset, DIRENT_SIZE);
     if (!address) {
         fprintf(stderr, "Failed to get a final address\n");
         return NULL; /* FAILED */
@@ -1224,6 +1228,11 @@ static MSI_FILE *msi_file_new(char *buffer, uint32_t len)
         fprintf(stderr, "Invalid argument\n");
         return NULL; /* FAILED */
     }
+    /* parse_header() reads the whole header */
+    if (len < HEADER_SIZE) {
+        fprintf(stderr, "Wrong file format\n");
+        return NULL; /* FAILED */
+    }
     header = parse_header(buffer);
     if (!header) {
         fprintf(stderr, "Failed to parse MSI_FILE_HDR struct\n");
@@ -1237,8 +1246,7 @@ static MSI_FILE *msi_file_new(char *buffer, uint32_t len)
     msi->m_minisectorSize = 1 << msi->m_hdr->miniSectorShift;
     msi->m_miniStreamStartSector = 0;
 
-    if (msi->m_bufferLen < sizeof *(msi->m_hdr) ||
-            memcmp(msi->m_hdr->signature, msi_magic, sizeof msi_magic)) {
+    if (memcmp(msi->m_hdr->signature, msi_magic, sizeof msi_magic)) {
         fprintf(stderr, "Wrong file format\n");
         msi_file_free(msi);
         return NULL; /* FAILED */
