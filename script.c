@@ -633,7 +633,9 @@ static SCRIPT_CTX *script_ctx_get(char *indata, uint32_t filesize, const SCRIPT_
         ptr = utf8DecodeRune(ptr, 1, commented_header + commented_header_len);
 
     /* find the signature header */
-    for (signature_pos = input_pos = indata; input_pos < indata + filesize; ) {
+    /* the decoders expect a NUL-terminated string if no code unit is left */
+    for (signature_pos = input_pos = indata;
+            (size_t)(indata + filesize - input_pos) >= unit; ) {
         const char *input_prev = input_pos;
 
         input_pos = utf == 8 ?
@@ -743,7 +745,14 @@ static int write_in_encoding(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *lin
  */
 static size_t utf8_to_utf16(const char *data, size_t len, uint16_t **out_utf16)
 {
-    size_t utf16_len = utf8UTF16Count(data, len);
+    size_t utf16_len;
+
+    /* utf8UTF16Count() expects a NUL-terminated string for zero length */
+    if (len == 0) {
+        *out_utf16 = NULL;
+        return 0;
+    }
+    utf16_len = utf8UTF16Count(data, len);
     *out_utf16 = OPENSSL_malloc(utf16_len * sizeof(uint16_t));
     if (!*out_utf16)
         return 0; /* memory allocation failed */
@@ -771,7 +780,14 @@ static size_t utf8_to_utf16(const char *data, size_t len, uint16_t **out_utf16)
  */
 static size_t utf16_to_utf8(const uint16_t *data, size_t len, char **out_utf8)
 {
-    size_t utf8_len = utf16UTF8Count(data, len/2);
+    size_t utf8_len;
+
+    /* utf16UTF8Count() expects a NUL-terminated string for zero length */
+    if (len/2 == 0) {
+        *out_utf8 = NULL;
+        return 0;
+    }
+    utf8_len = utf16UTF8Count(data, len/2);
     *out_utf8 = OPENSSL_malloc(utf8_len);
     if (!*out_utf8)
         return 0; /* memory allocation failed */
