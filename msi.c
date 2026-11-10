@@ -1197,12 +1197,6 @@ static MSI_ENTRY *get_entry(MSI_FILE *msi, uint32_t entryID, int is_root)
         fprintf(stderr, "Invalid argument entryID\n");
         return NULL; /* FAILED */
     }
-    /* The first entry in the first sector of the directory chain is known as
-       the root directory entry so it can not contain the directory stream */
-    if (msi->m_hdr->firstDirectorySectorLocation == 0 && entryID == 0) {
-        fprintf(stderr, "Corrupted First Directory Sector Location\n");
-        return NULL; /* FAILED */
-    }
     if (!locate_final_sector(msi, msi->m_hdr->firstDirectorySectorLocation,
             entryID * sizeof(MSI_ENTRY), &sector, &offset)) {
         fprintf(stderr, "Failed to locate a final sector\n");

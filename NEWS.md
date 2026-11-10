@@ -62,6 +62,7 @@
   not be allocated
 - fixed corrupted output files and failed verification when signing an MSI
   file with empty storages or storages nested in other storages
+- fixed opening MSI files whose directory starts at the first sector
 
 ### 2.15 (2026.11.06)
 
