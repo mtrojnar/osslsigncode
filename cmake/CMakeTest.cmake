@@ -301,10 +301,14 @@ if(Python3_FOUND AND NOT cryptography_error)
 
 ### MSI storages ###
 
-    # Signing must keep the storages of an MSI file, as checked by an
-    # independent parser, and the signature must verify. The "nested" tree
-    # has nested and empty storages.
-    foreach(tree "nested")
+    # Signing and removing the signature must keep the storages of an MSI file,
+    # as checked by an independent parser, and osslsigncode must be able to
+    # open the results again. The "nested" tree has nested and empty storages,
+    # the "no_streams" tree has no streams, so the mini stream is empty
+    # after removing the signature, and after signing again with additional
+    # certificates, which make the signature exceed the 4 KiB mini stream
+    # cutoff.
+    foreach(tree "nested" "no_streams")
         set(tree_file "${FILES}/tree_${tree}")
         add_test(NAME "msi_tree_${tree}_create"
             COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/check_msi_tree.py"
@@ -324,17 +328,55 @@ if(Python3_FOUND AND NOT cryptography_error)
             "-CAfile" "${CERTS}/CACert.pem"
             "-CRLfile" "${CERTS}/CACertCRL.pem"
             "-in" "${tree_file}_signed.msi")
+        add_test(NAME "msi_tree_${tree}_remove"
+            COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "remove-signature"
+            "-in" "${tree_file}_signed.msi"
+            "-out" "${tree_file}_removed.msi")
+        add_test(NAME "msi_tree_${tree}_check_removed"
+            COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/check_msi_tree.py"
+            "check" "${tree_file}_removed.msi" ${tree})
+        add_test(NAME "msi_tree_${tree}_resign"
+            COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "sign"
+            "-pkcs12" "${CERTS}/cert.p12"
+            "-readpass" "${CERTS}/password.txt"
+            "-ac" "${CERTS}/tsa-chain.pem"
+            "-in" "${tree_file}_removed.msi"
+            "-out" "${tree_file}_resigned.msi")
+        add_test(NAME "msi_tree_${tree}_check_resigned"
+            COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/check_msi_tree.py"
+            "check" "${tree_file}_resigned.msi" ${tree})
+        add_test(NAME "msi_tree_${tree}_verify_resigned"
+            COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "verify"
+            "-CAfile" "${CERTS}/CACert.pem"
+            "-CRLfile" "${CERTS}/CACertCRL.pem"
+            "-in" "${tree_file}_resigned.msi")
         set_tests_properties("msi_tree_${tree}_create" PROPERTIES
             DEPENDS "start_server")
         set_tests_properties("msi_tree_${tree}_sign" PROPERTIES
             DEPENDS "msi_tree_${tree}_create")
         set_tests_properties("msi_tree_${tree}_check_signed" "msi_tree_${tree}_verify"
-            PROPERTIES
+            "msi_tree_${tree}_remove" PROPERTIES
             DEPENDS "msi_tree_${tree}_sign")
+        set_tests_properties("msi_tree_${tree}_check_removed" "msi_tree_${tree}_resign"
+            PROPERTIES
+            DEPENDS "msi_tree_${tree}_remove")
+        set_tests_properties("msi_tree_${tree}_check_resigned"
+            "msi_tree_${tree}_verify_resigned" PROPERTIES
+            DEPENDS "msi_tree_${tree}_resign")
+        if(tree STREQUAL "no_streams")
+            # make sure that the case of an empty mini stream is still tested
+            set_tests_properties("msi_tree_${tree}_check_removed"
+                "msi_tree_${tree}_check_resigned" PROPERTIES
+                PASS_REGULAR_EXPRESSION "mini stream empty")
+        endif(tree STREQUAL "no_streams")
         list(APPEND ALL_TESTS "msi_tree_${tree}_create" "msi_tree_${tree}_sign"
-            "msi_tree_${tree}_check_signed" "msi_tree_${tree}_verify")
-        set(OUTPUT_FILES ${OUTPUT_FILES} "${tree_file}.msi" "${tree_file}_signed.msi")
-    endforeach(tree "nested")
+            "msi_tree_${tree}_check_signed" "msi_tree_${tree}_verify"
+            "msi_tree_${tree}_remove" "msi_tree_${tree}_check_removed"
+            "msi_tree_${tree}_resign" "msi_tree_${tree}_check_resigned"
+            "msi_tree_${tree}_verify_resigned")
+        set(OUTPUT_FILES ${OUTPUT_FILES} "${tree_file}.msi" "${tree_file}_signed.msi"
+            "${tree_file}_removed.msi" "${tree_file}_resigned.msi")
+    endforeach(tree "nested" "no_streams")
 
 
 ### Verify signature ###

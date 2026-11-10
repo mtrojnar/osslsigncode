@@ -23,6 +23,12 @@ TREES = {
         ("E", []),
         "r2",
     ],
+    # no streams, so the mini stream is empty without a signature,
+    # and enough entries for a directory of several sectors
+    "no_streams": [
+        ("A", [("B", []), ("C", [("D", [])])]),
+        ("E", []),
+    ],
 }
 
 
@@ -206,7 +212,8 @@ class CompoundFile:
 def check(path: str, tree: list) -> int:
     """Return 0 when the file contains exactly the storages and streams of the tree."""
     try:
-        found = CompoundFile(path).paths()
+        compound_file = CompoundFile(path)
+        found = compound_file.paths()
     except (ValueError, IndexError, struct.error) as err:
         print(f"{path}: {err}", file=sys.stderr)
         return 1
@@ -215,7 +222,9 @@ def check(path: str, tree: list) -> int:
     if found != expected(tree):
         print(f"{path}: unexpected storages or streams:\n{found}", file=sys.stderr)
         return 1
-    print(f"{path}: storages and streams preserved")
+    # reported so that a test can require the case of an empty mini stream
+    empty = ", mini stream empty" if not compound_file.ministream else ""
+    print(f"{path}: storages and streams preserved{empty}")
     return 0
 
 

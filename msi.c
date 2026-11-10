@@ -1967,6 +1967,11 @@ static int ministream_save(MSI_DIRENT *dirent, BIO *outdata, MSI_OUT *out)
     uint32_t i, remain;
     uint32_t ministreamSectorsCount = (out->miniStreamLen + out->sectorSize - 1) / out->sectorSize;
 
+    /* an empty mini stream has no sectors, so it must not have a FAT entry */
+    if (out->miniStreamLen == 0) {
+        dirent->entry->startSectorLocation = ENDOFCHAIN;
+        return 1; /* OK */
+    }
     /* set the first sector of the mini stream in the entry root object */
     dirent->entry->startSectorLocation = out->sectorNum;
     /* ministream save */
