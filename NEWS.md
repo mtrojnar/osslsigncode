@@ -2,6 +2,12 @@
 
 ### 2.16 (unreleased)
 
+**Security fixes**
+
+- fixed heap out-of-bounds write when extracting a script signature block
+  containing more than 2 GiB of data (thanks to Lucidsec for reporting the
+  issue)
+
 ### 2.15 (2026.11.06)
 
 **Security fixes**

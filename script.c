@@ -325,7 +325,7 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     BIO *bio_mem, *bio_b64 = NULL;
     char *base64_data = NULL;
     char *clean_base64 = NULL;
-    int clean_base64_len = 0;
+    size_t clean_base64_len = 0;
     const char *open_tag = ctx->script_ctx->comment_text->open;
     const char *close_tag = ctx->script_ctx->comment_text->close;
     size_t open_tag_len = strlen(open_tag);
@@ -401,8 +401,14 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
         }
     }
 
+    /* BIO_new_mem_buf() takes an int length */
+    if (clean_base64_len > INT_MAX) {
+        fprintf(stderr, "Signature too long\n");
+        goto cleanup;
+    }
+
     /* prepare for Base64 decoding */
-    bio_mem = BIO_new_mem_buf(clean_base64, clean_base64_len);
+    bio_mem = BIO_new_mem_buf(clean_base64, (int)clean_base64_len);
     bio_b64 = BIO_new(BIO_f_base64());
     BIO_push(bio_b64, bio_mem);
     BIO_set_flags(bio_b64, BIO_FLAGS_BASE64_NO_NL);
