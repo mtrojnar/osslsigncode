@@ -2434,7 +2434,6 @@ static int verify_pkcs7_data(PKCS7 *p7, X509_STORE *store)
                 contents->d.other->value.sequence->length);
             if (inf != V_ASN1_CONSTRUCTED || tag != V_ASN1_SEQUENCE) {
                 fprintf(stderr, "Corrupted data content\n");
-                X509_STORE_free(store);
                 return 0; /* FAILED */
             }
             bio = BIO_new_mem_buf(data, (int)len);
@@ -2445,7 +2444,6 @@ static int verify_pkcs7_data(PKCS7 *p7, X509_STORE *store)
         }
     } else {
         fprintf(stderr, "Corrupted data content\n");
-        X509_STORE_free(store);
         return 0; /* FAILED */
     }
     verok = PKCS7_verify(p7, NULL, store, bio, NULL, 0);

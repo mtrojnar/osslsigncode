@@ -7,6 +7,9 @@
 - fixed heap out-of-bounds write when extracting a script signature block
   containing more than 2 GiB of data (thanks to Lucidsec for reporting the
   issue)
+- fixed double free when verifying a signature with unexpected PKCS#7
+  content in builds using OpenSSL older than 3.5 (thanks to smaeljaish771
+  for reporting the issue)
 
 ### 2.15 (2026.11.06)
 
