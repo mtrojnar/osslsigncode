@@ -584,6 +584,13 @@ static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize)
         sigpos = 0;
         siglen = 0;
     }
+    /* The signature cannot overlap the headers up to the end of the
+     * Certificate Table field, which are hashed and modified separately */
+    if (sigpos != 0 && sigpos < header_size + 160 + pe32plus * 16) {
+        printf("Warning: Ignoring PE signature overlapping the PE header\n");
+        sigpos = 0;
+        siglen = 0;
+    }
     pe_ctx = OPENSSL_zalloc(sizeof(PE_CTX));
     pe_ctx->header_size = header_size;
     pe_ctx->pe32plus = pe32plus;

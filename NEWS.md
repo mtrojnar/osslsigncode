@@ -26,6 +26,9 @@
   catalog file members with missing or unexpected content
 - fixed NULL and invalid pointer dereferences when verifying a PE signature
   with missing or unexpected SpcPeImageData or page hash values
+- fixed out-of-bounds read of process memory into the output file when
+  signing or removing the signature of a PE file whose Certificate Table
+  overlaps its headers
 
 ### 2.15 (2026.11.06)
 
