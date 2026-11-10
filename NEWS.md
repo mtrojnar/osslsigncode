@@ -29,6 +29,8 @@
 - fixed out-of-bounds read of process memory into the output file when
   signing or removing the signature of a PE file whose Certificate Table
   overlaps its headers
+- fixed integer overflow and out-of-bounds reads when parsing a PE file of
+  almost 4 GiB whose PE header starts near its end
 - fixed out-of-bounds read of process memory into the output file when
   signing, removing the signature of, or extracting data from a CAB file
   whose signature offset lies inside its header

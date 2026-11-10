@@ -543,7 +543,7 @@ static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize)
         fprintf(stderr, "Unexpected SizeOfHeaders field: 0x%08X\n", header_size);
         return NULL; /* FAILED */
     }
-    if (filesize < header_size + 176) {
+    if (filesize - header_size < 176) { /* header_size <= filesize, no overflow */
         fprintf(stderr, "Corrupt PE file - too short\n");
         return NULL; /* FAILED */
     }
