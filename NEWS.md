@@ -54,6 +54,8 @@
   file for a CAB file with a corrupted header
 - fixed "-askpass" removing the last character of a password not terminated
   with a newline
+- fixed a crash when signing an MSI file if memory for its mini stream could
+  not be allocated
 
 ### 2.15 (2026.11.06)
 

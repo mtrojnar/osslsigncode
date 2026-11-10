@@ -1682,12 +1682,16 @@ static int ministream_append(MSI_OUT *out, const char *buf, uint32_t len)
 {
     uint32_t needSectors = (len + out->sectorSize - 1) / out->sectorSize;
     if (out->miniStreamLen + len >= (uint64_t)out->ministreamsMemallocCount * out->sectorSize) {
-        out->ministreamsMemallocCount += needSectors;
-        out->ministream = OPENSSL_realloc(out->ministream, (size_t)(out->ministreamsMemallocCount * out->sectorSize));
-        if (!out->ministream) {
+        uint64_t size = ((uint64_t)out->ministreamsMemallocCount + needSectors) * out->sectorSize;
+        /* keep the current buffer if reallocation fails */
+        char *ministream = size > SIZE_MAX ? NULL : OPENSSL_realloc(out->ministream, (size_t)size);
+
+        if (!ministream) {
             fprintf(stderr, "Memory allocation failure\n");
             return 0; /* FAILED */
         }
+        out->ministream = ministream;
+        out->ministreamsMemallocCount += needSectors;
     }
     memcpy(out->ministream + out->miniStreamLen, buf, (size_t)len);
     out->miniStreamLen += len;
@@ -1872,6 +1876,9 @@ static int stream_handle(MSI_FILE *msi, MSI_DIRENT *dirent, u_char *p_msi, uint3
         }
         out->ministreamsMemallocCount = (GET_UINT32_LE(dirent->entry->size) + out->sectorSize - 1)/out->sectorSize;
         out->ministream = OPENSSL_malloc((uint64_t)out->ministreamsMemallocCount * out->sectorSize);
+        /* ministream_append() allocates the mini stream if this fails */
+        if (!out->ministream)
+            out->ministreamsMemallocCount = 0;
     }
     for (i = 0; i < sk_MSI_DIRENT_num(dirent->children); i++) {
         MSI_DIRENT *child = sk_MSI_DIRENT_value(dirent->children, i);
