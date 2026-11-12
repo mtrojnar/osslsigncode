@@ -839,6 +839,7 @@ static BIO *socket_bio_read(BIO *s_bio)
             ok = 1;
             retry = 0; /* HTTP EOF */
         } else if (BIO_should_retry(s_bio)) {
+            /* transient failure (e.g. EINTR), read again */
         } else {
             unsigned long err = ERR_get_error();
 
