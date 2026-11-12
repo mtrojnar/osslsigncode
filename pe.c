@@ -821,12 +821,12 @@ static BIO *pe_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     }
     if (!ctx->pe_ctx->sigpos) {
         /* pad (with 0's) unsigned PE file to 8 byte boundary */
-        int len = 8 - ctx->pe_ctx->fileend % 8;
-        if (len > 0 && len != 8) {
-            char *buf = OPENSSL_malloc(8);
-            memset(buf, 0, (size_t)len);
-            BIO_write(bhash, buf, len);
-            OPENSSL_free(buf);
+        static const u_char pad[8] = {0};
+        size_t len = 8 - ctx->pe_ctx->fileend % 8;
+
+        if (len != 8 && (!BIO_write_ex(bhash, pad, len, &written) || written != len)) {
+            BIO_free_all(bhash);
+            return 0; /* FAILED */
         }
     }
     return bhash;
@@ -1061,7 +1061,7 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
     /* SizeOfHeaders is the combined size of an MS-DOS stub, PE header,
      * and section headers rounded up to a multiple of FileAlignment. */
     hdrsize = GET_UINT32_LE(ctx->options->indata + ctx->pe_ctx->header_size + 84);
-    if (hdrsize < ctx->pe_ctx->header_size || hdrsize > UINT32_MAX) {
+    if (hdrsize < ctx->pe_ctx->header_size) {
         fprintf(stderr, "Corrupted headers size: 0x%08X\n", hdrsize);
         return NULL; /* FAILED */
     }
