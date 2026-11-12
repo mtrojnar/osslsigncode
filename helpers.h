@@ -5,6 +5,9 @@
  * Author: Małgorzata Olszówka <Malgorzata.Olszowka@stunnel.org>
  */
 
+#ifndef OSSLSIGNCODE_HELPERS_H
+#define OSSLSIGNCODE_HELPERS_H
+
 /* Common functions */
 uint32_t get_file_size(const char *infile);
 char *map_file(const char *infile, const size_t size);
@@ -29,6 +32,8 @@ ASN1_TYPE *catalog_content_get(CatalogAuthAttr *attribute);
 SpcLink *spc_link_obsolete_get(void);
 int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype);
 int spc_indirect_data_content_get_digest(SpcIndirectDataContent *idc, u_char *mdbuf, int *mdtype);
+
+#endif /* OSSLSIGNCODE_HELPERS_H */
 
 /*
 Local Variables:

@@ -1,6 +1,9 @@
 // utf by pietro gagliardi (andlabs) — https://github.com/andlabs/utf/
 // 10 november 2016
 
+#ifndef OSSLSIGNCODE_UTF_H
+#define OSSLSIGNCODE_UTF_H
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -59,3 +62,5 @@ inline size_t utf16UTF8Count(const __wchar_t *s, size_t nElem)
 #endif
 
 #endif
+
+#endif /* OSSLSIGNCODE_UTF_H */

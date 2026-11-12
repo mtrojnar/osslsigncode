@@ -3,6 +3,9 @@
  * Author: Małgorzata Olszówka <Malgorzata.Olszowka@stunnel.org>
  */
 
+#ifndef OSSLSIGNCODE_H
+#define OSSLSIGNCODE_H
+
 #define OPENSSL_API_COMPAT 0x10100000L
 #define OPENSSL_NO_DEPRECATED
 
@@ -563,6 +566,8 @@ struct file_format_st {
     void (*ctx_cleanup) (FILE_FORMAT_CTX *ctx);
     int (*is_detaching_supported) (void);
 };
+
+#endif /* OSSLSIGNCODE_H */
 
 /*
 Local Variables:
