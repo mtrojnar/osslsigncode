@@ -108,12 +108,6 @@ static FILE_FORMAT_CTX *cat_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
 
     if (options->cmd == CMD_VERIFY)
         printf("Warning: Use -catalog option to verify that a file, listed in catalog file, is signed\n");
-    if (options->jp >= 0)
-        printf("Warning: -jp option is only valid for CAB files\n");
-    if (options->pagehash == 1)
-        printf("Warning: -ph option is only valid for PE files\n");
-    if (options->add_msi_dse == 1)
-        printf("Warning: -add-msi-dse option is only valid for MSI files\n");
     return ctx;
 }
 

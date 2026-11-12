@@ -302,10 +302,6 @@ static FILE_FORMAT_CTX *msi_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
     if (hash)
         BIO_push(hash, BIO_new(BIO_s_null()));
 
-    if (options->pagehash == 1)
-        printf("Warning: -ph option is only valid for PE files\n");
-    if (options->jp >= 0)
-        printf("Warning: -jp option is only valid for CAB files\n");
     return ctx;
 }
 

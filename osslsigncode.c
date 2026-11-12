@@ -5181,6 +5181,23 @@ static void engine_control_set(GLOBAL_OPTIONS *options, const char *arg)
 }
 #endif /* OPENSSL_NO_ENGINE */
 
+/*
+ * Warn about options that are ignored for the detected file format.
+ * [in] ctx: structure holds input and output data
+ * [returns] none
+ */
+static void print_unsupported_options(FILE_FORMAT_CTX *ctx)
+{
+    GLOBAL_OPTIONS *options = ctx->options;
+
+    if (options->pagehash == 1 && ctx->format != &file_format_pe)
+        printf("Warning: -ph option is only valid for PE files\n");
+    if (options->jp >= 0 && ctx->format != &file_format_cab)
+        printf("Warning: -jp option is only valid for CAB files\n");
+    if (options->add_msi_dse == 1 && ctx->format != &file_format_msi)
+        printf("Warning: -add-msi-dse option is only valid for MSI files\n");
+}
+
 static int main_execute(int argc, char **argv)
 {
     FILE_FORMAT_CTX *ctx = NULL;
@@ -5246,6 +5263,7 @@ static int main_execute(int argc, char **argv)
         ret = 1; /* FAILED */
         DO_EXIT_0("Initialization error or unsupported input file type.\n");
     }
+    print_unsupported_options(ctx);
     if (options.cmd == CMD_VERIFY) {
         ret = verify_signed_file(ctx, &options, 1);
         goto skip_signing;

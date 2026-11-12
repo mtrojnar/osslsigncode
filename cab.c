@@ -127,10 +127,6 @@ static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
     /* Push hash on outdata, if hash is NULL the function does nothing */
     BIO_push(hash, outdata);
 
-    if (options->pagehash == 1)
-        printf("Warning: -ph option is only valid for PE files\n");
-    if (options->add_msi_dse == 1)
-        printf("Warning: -add-msi-dse option is only valid for MSI files\n");
     return ctx;
 }
 

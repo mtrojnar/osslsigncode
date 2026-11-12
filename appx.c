@@ -363,12 +363,6 @@ static FILE_FORMAT_CTX *appx_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *ou
         || options->cmd==CMD_ADD || options->cmd == CMD_EXTRACT_DATA) {
         printf("Warning: Ignore -h option, use the hash algorithm specified in AppxBlockMap.xml\n");
     }
-    if (options->pagehash == 1)
-        printf("Warning: -ph option is only valid for PE files\n");
-    if (options->jp >= 0)
-        printf("Warning: -jp option is only valid for CAB files\n");
-    if (options->add_msi_dse == 1)
-        printf("Warning: -add-msi-dse option is only valid for MSI files\n");
     return ctx;
 }
 
