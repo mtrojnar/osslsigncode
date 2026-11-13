@@ -1,5 +1,7 @@
 # osslsigncode change log
 
+### 2.17 (unreleased)
+
 ### 2.16 (2026.11.13)
 
 **Security fixes**
