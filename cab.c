@@ -258,6 +258,12 @@ static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
         BIO_write(bhash, ctx->options->indata + 56, 4);
         fileend = ctx->cab_ctx->sigpos;
         idx = (uint32_t)cab_write_optional_names(bhash, ctx->options->indata, 60, fileend, flags);
+        if (idx >= fileend) {
+            fprintf(stderr, "Corrupt CAB file - too short\n");
+            BIO_free_all(bhash);
+            return NULL; /* FAILED */
+        }
+
         /*
          * (u8 * cFolders) CFFOLDER - structure contains information about
          * one of the folders or partial folders stored in this cabinet file
@@ -270,7 +276,7 @@ static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
         if (idx != coffFiles) {
             fprintf(stderr, "Corrupt coffFiles value: 0x%08X\n", coffFiles);
             BIO_free_all(bhash);
-            return 0;  /* FAILED */
+            return NULL; /* FAILED */
         }
     } else {
         /* read what's left of the unsigned CAB file */
@@ -281,7 +287,7 @@ static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     if (!bio_hash_data(bhash, ctx->options->indata, idx, fileend)) {
         fprintf(stderr, "Unable to calculate digest\n");
         BIO_free_all(bhash);
-        return 0;  /* FAILED */
+        return NULL; /* FAILED */
     }
     mdbuf = OPENSSL_malloc((size_t)EVP_MD_size(md));
     BIO_gets(bhash, (char*)mdbuf, EVP_MD_size(md));
