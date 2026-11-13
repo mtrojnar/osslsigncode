@@ -16,7 +16,7 @@ permissions:
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
-  version: osslsigncode-2.16-dev
+  version: osslsigncode-2.16
 
 jobs:
   release-checks:

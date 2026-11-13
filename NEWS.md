@@ -1,77 +1,55 @@
 # osslsigncode change log
 
-### 2.16 (unreleased)
+### 2.16 (2026.11.13)
 
 **Security fixes**
 
-- fixed heap out-of-bounds write when extracting a script signature block
-  containing more than 2 GiB of data (thanks to Lucidsec for reporting the
-  issue)
-- fixed double free when verifying a signature with unexpected PKCS#7
-  content in builds using OpenSSL older than 3.5 (thanks to smaeljaish771
-  for reporting the issue)
-- fixed use-after-free and double free of CRLs embedded in a verified
-  signature; such CRLs are not covered by the signature, so they can be added
-  to any signed file
-- fixed heap out-of-bounds reads and invalid pointer use when an Authenticode
-  timestamp server or a network attacker returns a PKCS#7 response that is
-  not signedData
-- fixed invalid pointer use and out-of-bounds reads when verifying a signature
-  with unexpected inner content, such as a crafted CAT file, in builds using
-  OpenSSL older than 3.5
-- fixed dereference of an attacker-controlled pointer when adding a nested
-  signature to an MSI file whose DigitalSignature stream is not PKCS#7
-  signedData
-- fixed NULL and invalid pointer dereferences when listing or verifying
-  catalog file members with missing or unexpected content
-- fixed NULL and invalid pointer dereferences when verifying a PE signature
-  with missing or unexpected SpcPeImageData or page hash values
-- fixed out-of-bounds read of process memory into the output file when
-  signing or removing the signature of a PE file whose Certificate Table
-  overlaps its headers
-- fixed integer overflow and out-of-bounds reads when parsing a PE file of
-  almost 4 GiB whose PE header starts near its end
-- fixed out-of-bounds read of process memory into the output file when
-  signing, removing the signature of, or extracting data from a CAB file
-  whose signature offset lies inside its header
-- fixed out-of-bounds reads past the end of a CAB file with an unterminated
-  next cabinet name or a truncated header
-- fixed out-of-bounds reads past the end of an MSI file referencing a sector
-  that starts at the end of the file
-- fixed stack exhaustion when parsing an MSI file with a long chain of
-  directory entries or deeply nested storages
-- fixed out-of-bounds reads past the end of a script file whose signature
-  block starts at the beginning of the file, or of a UTF-16 script file with
-  an odd size
-- fixed heap out-of-bounds writes in 32-bit builds when signing or verifying
-  a UTF-8 script file of at least 2 GiB, or a UTF-16 script file with a
-  signature block of more than 2.6 GiB
-- fixed NULL pointer dereferences when verifying a PKCS#7 signature, or a
-  nested signature, without signedData or inner content
-- fixed invalid pointer use when the "-spc" or "-certs" file is a PKCS#7
-  structure other than signedData, or signedData without certificates
-- fixed stack buffer overflow on Windows when the "-readpass" file is larger
-  than 4 KiB
-- fixed stack buffer underflow when a password entered with "-askpass"
-  starts with a NUL character
+- fixed heap overflow when extracting script signature blocks larger than
+  2 GiB (thanks to Lucidsec for reporting the issue)
+- fixed buffer overflows in script UTF conversions on 32-bit builds, and
+  out-of-bounds reads in scripts with odd UTF-16 sizes or signature blocks
+  at the start of the file
+- fixed double free and invalid memory reads when verifying malformed
+  PKCS#7 content with OpenSSL older than 3.5 (thanks to smaeljaish771 for
+  reporting the double free)
+- fixed use-after-free and double free of CRLs embedded in signatures;
+  these CRLs can be added to signed files without invalidating signatures
+- fixed invalid pointer use with non-signedData Authenticode timestamp
+  responses, MSI signatures, and "-spc" or "-certs" files
+- fixed crashes on signatures or nested signatures with missing PKCS#7
+  content (thanks to Małgorzata Olszówka)
+- fixed invalid pointer dereferences when processing malformed catalog
+  members, PE page hashes, or PKCS#7 certificate files without certificates
+- fixed process memory disclosure into output files when PE or CAB
+  signature offsets overlap headers, and out-of-bounds reads when parsing
+  PE headers near the end of files approaching 4 GiB
+- fixed out-of-bounds reads and possible memory disclosure with truncated
+  CAB headers or unterminated cabinet names; malformed names are also
+  rejected during digest calculation (thanks to Małgorzata Olszówka)
+- fixed out-of-bounds reads in truncated MSI files and invalid sector
+  references, and stack exhaustion with long directory chains or deeply
+  nested storages
+- fixed stack buffer overflow with oversized "-readpass" files on Windows,
+  and buffer underflow with "-askpass" input starting with a NUL character
+- enabled ASLR in prebuilt Linux binaries through static PIE, and added
+  release asset attestations and build metadata
 
 **Other user-visible changes**
 
-- fixed "remove-signature" reporting success and keeping a truncated output
-  file for a CAB file with a corrupted header
-- fixed "-askpass" removing the last character of a password not terminated
-  with a newline
-- fixed a crash when signing an MSI file if memory for its mini stream could
-  not be allocated
-- fixed corrupted output files and failed verification when signing an MSI
-  file with empty storages or storages nested in other storages
-- fixed opening MSI files whose directory starts at the first sector
-- fixed corrupted output files when signing an MSI file, or removing its
-  signature, if the result has no streams smaller than 4 KiB
-- fixed keeping an old DigitalSignature stream when signing an MSI file, or
-  removing its signature, if the file contains more than one such stream
-- fixed signing a UTF-8 script file producing an invalid signature instead
-  of failing if memory for its UTF-16 conversion could not be allocated
+- fixed corrupted output and failed verification when signing MSI files
+  with empty or nested storages, or signing/removing signatures when the
+  output has no streams smaller than 4 KiB
+- fixed replacing or removing duplicate MSI DigitalSignature streams
+- fixed opening MSI files whose directory starts at the first sector, and
+  spurious sector-chain errors when reading MSI streams
+- fixed crashes and invalid output on memory allocation failures during
+  MSI signing and script UTF conversion
+- fixed "remove-signature" reporting success and keeping truncated output
+  for CAB files with corrupted headers
+- fixed "-askpass" truncating passwords not terminated with a newline
+- made warnings about ignored file-format options consistent and removed
+  duplicate warnings
+- included license files in prebuilt binary archives
 
 ### 2.15 (2026.11.06)
 
