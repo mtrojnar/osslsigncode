@@ -78,15 +78,6 @@ def resolve_tag(api, version):
     raise ReleaseError("Release tag does not resolve to a commit")
 
 
-def require_protected_environment(api):
-    environment = api.api("GET", "environments/release")
-    for rule in environment.get("protection_rules", []):
-        if (rule.get("type") == "required_reviewers" and rule.get("reviewers")
-                and rule.get("prevent_self_review") is True):
-            return
-    raise ReleaseError("Configure the release environment with required reviewers and prevent self-review")
-
-
 def matching_releases(api, version):
     # The by-tag endpoint hides drafts. Paginate through all releases.
     page = 1
@@ -119,7 +110,6 @@ def check_release(api, version, expected_sha=None):
     sha = resolve_tag(api, version)
     if expected_sha is not None and sha != validate_sha(expected_sha):
         raise ReleaseError("Release tag moved after the build was prepared")
-    require_protected_environment(api)
     require_new_release(api, version)
     return sha
 

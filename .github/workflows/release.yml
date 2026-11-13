@@ -46,7 +46,6 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      actions: read # inspect the release environment's protection rules
     outputs:
       version: ${{ steps.prepare.outputs.version }}
       sha: ${{ steps.prepare.outputs.sha }}
@@ -59,7 +58,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: .github/scripts
           path: ci
-      - name: Validate tag, release state and approval policy
+      - name: Validate tag and release state
         id: prepare
         env:
           VERSION: ${{ inputs.tag || github.ref_name }}
@@ -651,12 +650,10 @@ jobs:
     if: ${{ !inputs.refresh_draft }}
     needs: [prepare, linux, macos, windows]
     runs-on: ubuntu-24.04
-    # Preflight fails unless this environment has required reviewers and
-    # prevents self-review. Configure it before running the workflow.
-    environment: release
+    # Create a draft only. A maintainer reviews and publishes it manually
+    # after this workflow succeeds; no separate reviewer is required.
     permissions:
       contents: write
-      actions: read
       id-token: write
       attestations: write
     env:

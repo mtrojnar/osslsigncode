@@ -1,26 +1,23 @@
 # Binary releases
 
 The release workflow builds an **existing version tag**, tests all six binaries,
-then waits for approval before attesting the assets and creating a new draft.
-It never updates an existing draft or published release. Review and publish the
-new draft manually only after the workflow has completed successfully.
+attests the assets and creates a new draft. It never publishes a release or
+updates an existing draft or published release. A maintainer reviews and
+publishes the new draft manually only after the workflow has completed
+successfully. No GitHub environment or separate reviewer is required.
 
 ## Repository settings required before the first run
 
-1. Create an environment named **release** in Settings → Environments.
-2. Add trusted **required reviewers** and enable **Prevent self-review**. Disable
-   administrator bypass where available. The workflow checks the reviewer rules
-   before building and again before creating the draft; missing rules fail closed.
-3. Protect version tags with a repository ruleset: restrict creation to release
+1. Protect version tags with a repository ruleset: restrict creation to release
    maintainers and disallow tag updates and deletion. Protect the default branch
    and review changes to workflows and release helpers.
-4. Enable **immutable releases** in the repository settings before publishing.
+2. Enable **immutable releases** in the repository settings before publishing.
    This prevents subsequent asset or tag replacement outside this workflow too.
 
 These settings are not configured by repository files. The workflow token needs
-Contents read access and Actions read access for preflight. Only the approved
-release job receives Contents write. The attestation jobs receive attestations
-write and OIDC permissions. No long-lived publishing or signing secret is needed.
+Contents read access for preflight. Only the draft-creation job receives
+Contents write. The attestation jobs receive attestations write and OIDC
+permissions. No long-lived publishing or signing secret is needed.
 
 Dispatch the workflow with a tag such as `2.16` or `2.16-rc1`, or push that tag.
 Arbitrary branch names and commit IDs are not accepted. The tag is resolved once
@@ -39,9 +36,8 @@ draft without granting any job permission to modify releases. Read-only workflow
 tokens cannot see draft metadata: supply `source_archive_sha256` from the draft's
 authenticated GitHub asset metadata. That digest is included in the authenticated
 build metadata, checksums and attestations without downloading the draft's source
-archive in CI. This mode does not need the publishing environment because it
-cannot publish or update releases; draft-state checks remain the maintainer's
-responsibility.
+archive in CI. This mode cannot create or update releases; draft-state checks
+remain the maintainer's responsibility.
 
 After all jobs succeed, download the `verified-release-<version>` workflow
 artifact, and copy the preserved source archive beside those files. Verify all

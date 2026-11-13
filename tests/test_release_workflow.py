@@ -26,10 +26,6 @@ class FakeGitHub:
         self.calls = []
         self.responses = {
             ("GET", f"git/ref/tags/{VERSION}"): {"object": {"type": "commit", "sha": SHA}},
-            ("GET", "environments/release"): {"protection_rules": [{
-                "type": "required_reviewers", "prevent_self_review": True,
-                "reviewers": [{"reviewer": {"login": "maintainer"}}],
-            }]},
             ("GET", "releases?per_page=100&page=1"): [],
             ("POST", "releases"): {"id": 42},
             ("GET", "releases/42"): {"draft": True, "tag_name": VERSION},
@@ -85,12 +81,16 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "tag moved"):
             release.check_release(self.api, VERSION, "c" * 40)
 
-    def test_unprotected_environment(self):
-        for rules in ([], [{"type": "required_reviewers", "reviewers": []}],
-                      [{"type": "required_reviewers", "reviewers": [{}], "prevent_self_review": False}]):
-            self.api.responses[("GET", "environments/release")] = {"protection_rules": rules}
-            with self.subTest(rules=rules), self.assertRaisesRegex(release.ReleaseError, "required reviewers"):
-                release.check_release(self.api, VERSION)
+    def test_new_release_needs_no_environment(self):
+        values = release.prepare_release(self.api, VERSION)
+        self.assertEqual(values, {"version": VERSION, "sha": SHA})
+        self.assertEqual([(method, path) for method, path, _ in self.api.calls],
+                         [("GET", f"git/ref/tags/{VERSION}"),
+                          ("GET", "releases?per_page=100&page=1")])
+
+    def test_workflow_needs_no_environment(self):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertNotRegex(workflow, r"(?m)^\s*environment:")
 
     def test_existing_draft_or_published_release_is_never_modified(self):
         self.prepare_assets()
@@ -106,9 +106,8 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "already exists"):
             release.check_release(self.api, VERSION)
 
-    def test_manual_refresh_needs_no_access_to_draft_or_environment(self):
+    def test_manual_refresh_needs_no_access_to_draft(self):
         del self.api.responses[("GET", "releases?per_page=100&page=1")]
-        del self.api.responses[("GET", "environments/release")]
         values = release.prepare_release(self.api, VERSION, refresh_draft=True,
                                          source_archive_sha256="d" * 64)
         self.assertEqual(values, {"version": VERSION, "sha": SHA,
