@@ -581,7 +581,7 @@ int is_content_type(PKCS7 *p7, const char *objid)
         return 0; /* FAILED */
     }
     /* signedData and its EXPLICIT content are OPTIONAL in the ASN.1 template */
-    ret = p7 && PKCS7_type_is_signed(p7) && p7->d.sign &&
+    ret = p7 && PKCS7_type_is_signed(p7) && p7->d.sign && p7->d.sign->contents &&
         !OBJ_cmp(p7->d.sign->contents->type, indir_objid) &&
         p7->d.sign->contents->d.other &&
         (p7->d.sign->contents->d.other->type == V_ASN1_SEQUENCE ||
