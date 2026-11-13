@@ -342,6 +342,8 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     } else {
         base64_len = utf16_to_utf8((const void *)signature_data,
             signature_len, &base64_data);
+        if (!base64_data)
+            return NULL; /* FAILED */
     }
 
     /* allocate memory for cleaned Base64 */
@@ -739,7 +741,7 @@ static int write_in_encoding(FILE_FORMAT_CTX *ctx, BIO *outdata, const char *lin
 
 /* convert len bytes of UTF-8 to UTF-16
  * return the number of output bytes
- * *out_utf16 is NULL for empty input, or if memory allocation failed
+ * *out_utf16 is NULL for empty input, or if the conversion failed
  */
 static size_t utf8_to_utf16(const char *data, size_t len, uint16_t **out_utf16)
 {
@@ -751,6 +753,12 @@ static size_t utf8_to_utf16(const char *data, size_t len, uint16_t **out_utf16)
         return 0;
     }
     utf16_len = utf8UTF16Count(data, len);
+    /* each byte yields at most one code unit, but the size in bytes
+       can overflow a 32-bit size_t */
+    if (utf16_len > SIZE_MAX / sizeof(uint16_t)) {
+        *out_utf16 = NULL;
+        return 0; /* FAILED */
+    }
     *out_utf16 = OPENSSL_malloc(utf16_len * sizeof(uint16_t));
     if (!*out_utf16)
         return 0; /* memory allocation failed */
@@ -775,6 +783,7 @@ static size_t utf8_to_utf16(const char *data, size_t len, uint16_t **out_utf16)
 
 /* convert len bytes of UTF-16 to UTF-8
  * return the number of output bytes
+ * *out_utf8 is NULL for empty input, or if the conversion failed
  */
 static size_t utf16_to_utf8(const uint16_t *data, size_t len, char **out_utf8)
 {
@@ -784,6 +793,12 @@ static size_t utf16_to_utf8(const uint16_t *data, size_t len, char **out_utf8)
     if (len/2 == 0) {
         *out_utf8 = NULL;
         return 0;
+    }
+    /* each code unit yields at most 3 bytes, and utf16UTF8Count()
+       could overflow a 32-bit size_t while summing them */
+    if (len/2 > SIZE_MAX / 3) {
+        *out_utf8 = NULL;
+        return 0; /* FAILED */
     }
     utf8_len = utf16UTF8Count(data, len/2);
     *out_utf8 = OPENSSL_malloc(utf8_len);

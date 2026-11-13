@@ -43,6 +43,9 @@
 - fixed out-of-bounds reads past the end of a script file whose signature
   block starts at the beginning of the file, or of a UTF-16 script file with
   an odd size
+- fixed heap out-of-bounds writes in 32-bit builds when signing or verifying
+  a UTF-8 script file of at least 2 GiB, or a UTF-16 script file with a
+  signature block of more than 2.6 GiB
 - fixed NULL pointer dereferences when verifying a PKCS#7 signature, or a
   nested signature, without signedData or inner content
 - fixed invalid pointer use when the "-spc" or "-certs" file is a PKCS#7
