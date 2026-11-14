@@ -822,6 +822,13 @@ static uint32_t get_fat_sector_location(MSI_FILE *msi, uint32_t fatSectorNumber)
     uint32_t entriesPerSector, difatSectorLocation, fatSectorLocation;
     const u_char *address;
 
+    /* Reject numbers the header does not account for before walking the DIFAT
+     * chain: a corrupt sector reference can otherwise be as large as 0xFFFFFFFF,
+     * which made the subtraction loop below iterate millions of times. */
+    if (fatSectorNumber >= msi->m_hdr->numFATSector) {
+        fprintf(stderr, "Invalid FAT sector number 0x%08X\n", fatSectorNumber);
+        return NOSTREAM; /* FAILED */
+    }
     if (fatSectorNumber < DIFAT_IN_HEADER) {
         return LE_UINT32(msi->m_hdr->headerDIFAT[fatSectorNumber]);
     } else {
@@ -869,7 +876,9 @@ static uint32_t get_next_sector(MSI_FILE *msi, uint32_t sector)
         return NOSTREAM; /* FAILED */
     }
     nextSectorLocation = GET_UINT32_LE(address);
-    if (nextSectorLocation == 0 || nextSectorLocation >= FREESECT) {
+    /* ENDOFCHAIN terminates a chain; reaching it means the chain is shorter than
+     * the requested offset, so it must not be treated as a sector number. */
+    if (nextSectorLocation == 0 || nextSectorLocation >= ENDOFCHAIN) {
         fprintf(stderr, "Get corrupted sector location 0x%08X\n", nextSectorLocation);
         return NOSTREAM; /* FAILED */
     }
@@ -961,7 +970,7 @@ static uint32_t get_next_mini_sector(MSI_FILE *msi, uint32_t miniSector)
         return NOSTREAM; /* FAILED */
     }
     nextMiniSectorLocation = GET_UINT32_LE(address);
-    if (nextMiniSectorLocation == 0 || nextMiniSectorLocation >= FREESECT) {
+    if (nextMiniSectorLocation == 0 || nextMiniSectorLocation >= ENDOFCHAIN) {
         fprintf(stderr, "Get corrupted sector location 0x%08X\n", nextMiniSectorLocation);
         return NOSTREAM; /* FAILED */
     }
@@ -1003,6 +1012,8 @@ static int read_mini_stream(MSI_FILE *msi, uint32_t sector, uint32_t offset, cha
         memcpy(buffer, address, copylen);
         buffer += copylen;
         len -= copylen;
+        if (len == 0)
+            break; /* the last mini sector of the stream has been read */
         sector = get_next_mini_sector(msi, sector);
         if (sector == NOSTREAM) {
             fprintf(stderr, "Failed to get a next mini sector\n");

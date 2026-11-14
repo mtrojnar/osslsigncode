@@ -9,6 +9,7 @@
   cannot be loaded
 - fixed allocation-failure crashes when decoding Base64 script signatures
   and timestamp responses, or creating signature content
+- fixed excessive CPU use when parsing malformed MSI sector chains
 
 ### 2.16 (2026.11.13)
 
