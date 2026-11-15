@@ -205,7 +205,7 @@ static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #endif
-    if (!BIO_set_md(bhash, md)) {
+    if (!bhash || !BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return 0;  /* FAILED */
@@ -493,6 +493,7 @@ static PKCS7 *cab_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
     content = spc_indirect_data_content_get(hash, ctx);
     if (!content) {
         fprintf(stderr, "Failed to get spcIndirectDataContent\n");
+        PKCS7_free(p7);
         return NULL; /* FAILED */
     }
     if (!sign_spc_indirect_data_content(p7, content)) {
@@ -723,8 +724,11 @@ static int cab_add_jp_attribute(PKCS7 *p7, int jp)
     if (attrs) {
         astr = ASN1_STRING_new();
         ASN1_STRING_set(astr, attrs, sizeof java_attrs_low);
-        return PKCS7_add_signed_attribute(si, OBJ_txt2nid(MS_JAVA_SOMETHING),
-                V_ASN1_SEQUENCE, astr);
+        if (!PKCS7_add_signed_attribute(si, OBJ_txt2nid(MS_JAVA_SOMETHING),
+                V_ASN1_SEQUENCE, astr)) {
+            ASN1_STRING_free(astr);
+            return 0; /* FAILED */
+        }
     }
     return 1; /* OK */
 }

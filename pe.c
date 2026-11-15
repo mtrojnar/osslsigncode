@@ -39,6 +39,7 @@ struct pe_ctx_st {
     uint32_t sigpos;
     uint32_t siglen;
     uint32_t fileend;
+    uint32_t filesize; /* original mapping length */
 };
 
 /* FILE_FORMAT method prototypes */
@@ -500,7 +501,7 @@ static void pe_bio_free(BIO *hash, BIO *outdata)
  */
 static void pe_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 {
-    unmap_file(ctx->options->indata, ctx->pe_ctx->fileend);
+    unmap_file(ctx->options->indata, ctx->pe_ctx->filesize);
     OPENSSL_free(ctx->pe_ctx);
     OPENSSL_free(ctx);
 }
@@ -596,6 +597,7 @@ static PE_CTX *pe_ctx_get(char *indata, uint32_t filesize)
     pe_ctx->sigpos = sigpos;
     pe_ctx->siglen = siglen;
     pe_ctx->fileend = filesize;
+    pe_ctx->filesize = filesize;
     return pe_ctx; /* OK */
 }
 
@@ -782,7 +784,7 @@ static BIO *pe_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #endif
-    if (!BIO_set_md(bhash, md)) {
+    if (!bhash || !BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return 0; /* FAILED */

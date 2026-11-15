@@ -730,13 +730,13 @@ static int appx_append_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7)
     blob = OPENSSL_malloc((size_t)(len + 4));
     memcpy(blob, PKCX_SIGNATURE, 4);
     memcpy(blob + 4, der, (size_t)len);
+    OPENSSL_free(der);
     len += 4;
     if (!zipAppendSignatureFile(outdata, zip, blob, (uint64_t)len)) {
         OPENSSL_free(blob);
         fprintf(stderr, "Failed to append zip file\n");
         return 1; /* FAILED */
     }
-    OPENSSL_free(der);
     OPENSSL_free(blob);
     if (!get_current_position(outdata, &cdOffset)) {
         fprintf(stderr, "Unable to get offset\n");
@@ -798,6 +798,11 @@ static BIO *appx_calculate_hashes(FILE_FORMAT_CTX *ctx)
 {
     uint64_t cdOffset = 0;
 
+    OPENSSL_free(ctx->appx_ctx->calculatedBMHash);
+    OPENSSL_free(ctx->appx_ctx->calculatedCTHash);
+    OPENSSL_free(ctx->appx_ctx->calculatedDataHash);
+    OPENSSL_free(ctx->appx_ctx->calculatedCDHash);
+    OPENSSL_free(ctx->appx_ctx->calculatedCIHash);
     ctx->appx_ctx->calculatedBMHash = zipCalcDigest(ctx->appx_ctx->zip, BLOCK_MAP_FILENAME, ctx->appx_ctx->md);
     ctx->appx_ctx->calculatedCTHash = zipCalcDigest(ctx->appx_ctx->zip, CONTENT_TYPES_FILENAME, ctx->appx_ctx->md);
     ctx->appx_ctx->calculatedDataHash = appx_calc_zip_data_hash(&cdOffset, ctx->appx_ctx->zip, ctx->appx_ctx->md);
@@ -873,6 +878,8 @@ static uint8_t *appx_calc_zip_central_directory_hash(ZIP_FILE *zip, const EVP_MD
     u_char *mdbuf = NULL;
     BIO *bhash = BIO_new(BIO_f_md());
 
+    if (!bhash)
+        return NULL; /* FAILED */
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
@@ -1007,6 +1014,8 @@ static uint8_t *appx_calc_zip_data_hash(uint64_t *cdOffset, ZIP_FILE *zip, const
     BIO *bhash = BIO_new(BIO_f_md());
     uint64_t noEntries = 0;
 
+    if (!bhash)
+        return NULL; /* FAILED */
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
@@ -1092,25 +1101,29 @@ static int appx_extract_hashes(FILE_FORMAT_CTX *ctx, SpcIndirectDataContent *con
         return 0; /* FAILED */
     }
     while (pos + mdlen + 4 <= len) {
+        u_char **hash;
+
         if (!memcmp(data + pos, AXPC_SIGNATURE, 4)) {
-            ctx->appx_ctx->existingDataHash = OPENSSL_malloc((size_t)mdlen);
-            memcpy(ctx->appx_ctx->existingDataHash, data + pos + 4, (size_t)mdlen);
+            hash = &ctx->appx_ctx->existingDataHash;
         } else if (!memcmp(data + pos, AXCD_SIGNATURE, 4)) {
-            ctx->appx_ctx->existingCDHash = OPENSSL_malloc((size_t)mdlen);
-            memcpy(ctx->appx_ctx->existingCDHash, data + pos + 4, (size_t)mdlen);
+            hash = &ctx->appx_ctx->existingCDHash;
         } else if (!memcmp(data + pos, AXCT_SIGNATURE, 4)) {
-            ctx->appx_ctx->existingCTHash = OPENSSL_malloc((size_t)mdlen);
-            memcpy(ctx->appx_ctx->existingCTHash, data + pos + 4, (size_t)mdlen);
+            hash = &ctx->appx_ctx->existingCTHash;
         } else if (!memcmp(data + pos, AXBM_SIGNATURE, 4)) {
-            ctx->appx_ctx->existingBMHash = OPENSSL_malloc((size_t)mdlen);
-            memcpy(ctx->appx_ctx->existingBMHash, data + pos + 4, (size_t)mdlen);
+            hash = &ctx->appx_ctx->existingBMHash;
         } else if (!memcmp(data + pos, AXCI_SIGNATURE, 4)) {
-            ctx->appx_ctx->existingCIHash = OPENSSL_malloc((size_t)mdlen);
-            memcpy(ctx->appx_ctx->existingCIHash, data + pos + 4, (size_t)mdlen);
+            hash = &ctx->appx_ctx->existingCIHash;
         } else {
             fprintf(stderr, "Invalid hash signature\n");
             return 0; /* FAILED */
         }
+        /* The digest size is fixed for this context; reuse buffers for repeated tags. */
+        if (!*hash) {
+            *hash = OPENSSL_malloc((size_t)mdlen);
+            if (!*hash)
+                return 0; /* FAILED */
+        }
+        memcpy(*hash, data + pos + 4, (size_t)mdlen);
         pos += mdlen + 4;
     }
     if (!ctx->appx_ctx->existingDataHash) {
@@ -1780,7 +1793,7 @@ static u_char *zipCalcDigest(ZIP_FILE *zip, const char *fileName, const EVP_MD *
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #endif
-    if (!BIO_set_md(bhash, md)) {
+    if (!bhash || !BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         OPENSSL_free(data);
         BIO_free_all(bhash);

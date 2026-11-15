@@ -248,6 +248,7 @@ int add_indirect_data_object(PKCS7 *p7)
 {
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
     PKCS7_SIGNER_INFO *si;
+    ASN1_OBJECT *object;
 
     signer_info = PKCS7_get_signer_info(p7);
     if (!signer_info)
@@ -255,9 +256,14 @@ int add_indirect_data_object(PKCS7 *p7)
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si)
         return 0; /* FAILED */
-    if (!PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
-        V_ASN1_OBJECT, OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1)))
+    object = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+    if (!object)
         return 0; /* FAILED */
+    if (!PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
+        V_ASN1_OBJECT, object)) {
+        ASN1_OBJECT_free(object);
+        return 0; /* FAILED */
+    }
     return 1; /* OK */
 }
 
@@ -305,40 +311,40 @@ int sign_spc_indirect_data_content(PKCS7 *p7, ASN1_OCTET_STRING *content)
 
 /*
  * Add encapsulated content to signed PKCS7 structure.
- * [in] content: spcIndirectDataContent
+ * [in] content: spcIndirectDataContent (consumed, also on error)
  * [returns] new PKCS#7 signature with encapsulated content
  */
 PKCS7 *pkcs7_set_content(ASN1_OCTET_STRING *content)
 {
-    PKCS7 *p7, *td7;
+    PKCS7 *p7 = NULL, *td7 = NULL;
 
+    if (!content)
+        return NULL; /* FAILED */
     p7 = PKCS7_new();
-    if (!p7) {
-        return NULL; /* FAILED */
-    }
-    if (!PKCS7_set_type(p7, NID_pkcs7_signed)) {
-        PKCS7_free(p7);
-        return NULL; /* FAILED */
-    }
-    if (!PKCS7_content_new(p7, NID_pkcs7_data)) {
-        PKCS7_free(p7);
-        return NULL; /* FAILED */
-    }
+    if (!p7 || !PKCS7_set_type(p7, NID_pkcs7_signed)
+        || !PKCS7_content_new(p7, NID_pkcs7_data))
+        goto err;
     td7 = PKCS7_new();
-    if (!td7) {
-        PKCS7_free(p7);
-        return NULL; /* FAILED */
-    }
+    if (!td7)
+        goto err;
     td7->type = OBJ_txt2obj(SPC_INDIRECT_DATA_OBJID, 1);
+    if (!td7->type)
+        goto err;
     td7->d.other = ASN1_TYPE_new();
+    if (!td7->d.other)
+        goto err;
     td7->d.other->type = V_ASN1_SEQUENCE;
     td7->d.other->value.sequence = content;
-    if (!PKCS7_set_content(p7, td7)) {
-        PKCS7_free(td7);
-        PKCS7_free(p7);
-        return NULL; /* FAILED */
-    }
+    content = NULL; /* owned by td7 */
+    if (!PKCS7_set_content(p7, td7))
+        goto err;
     return p7;
+
+err:
+    ASN1_OCTET_STRING_free(content);
+    PKCS7_free(td7);
+    PKCS7_free(p7);
+    return NULL; /* FAILED */
 }
 
 /*
@@ -458,17 +464,34 @@ ASN1_OCTET_STRING *spc_indirect_data_content_get(BIO *hash, FILE_FORMAT_CTX *ctx
         return NULL; /* FAILED */
     }
     hashlen = ctx->format->hash_length_get(ctx);
+    if (hashlen <= 0 || hashlen > (int)sizeof mdbuf) {
+        fprintf(stderr, "Unsupported message digest length: %d\n", hashlen);
+        OPENSSL_free(p);
+        ASN1_OCTET_STRING_free(content);
+        return NULL; /* FAILED */
+    }
     if (hashlen > EVP_MAX_MD_SIZE) {
         /* APPX format specific */
         mdlen = BIO_read(hash, (char*)mdbuf, hashlen);
     } else {
         mdlen = BIO_gets(hash, (char*)mdbuf, EVP_MAX_MD_SIZE);
     }
-    data = OPENSSL_malloc((size_t)(len + mdlen));
+    if (mdlen != hashlen) {
+        fprintf(stderr, "Failed to read the message digest\n");
+        OPENSSL_free(p);
+        ASN1_OCTET_STRING_free(content);
+        return NULL; /* FAILED */
+    }
+    data = OPENSSL_malloc((size_t)(len + hashlen));
+    if (!data) {
+        OPENSSL_free(p);
+        ASN1_OCTET_STRING_free(content);
+        return NULL; /* FAILED */
+    }
     memcpy(data, p, (size_t)len);
     OPENSSL_free(p);
-    memcpy(data + len, mdbuf, (size_t)mdlen);
-    if (!ASN1_OCTET_STRING_set(content, data, len + mdlen)) {
+    memcpy(data + len, mdbuf, (size_t)hashlen);
+    if (!ASN1_OCTET_STRING_set(content, data, len + hashlen)) {
         ASN1_OCTET_STRING_free(content);
         OPENSSL_free(data);
         return NULL; /* FAILED */
@@ -629,8 +652,8 @@ ASN1_TYPE *catalog_content_get(CatalogAuthAttr *attribute)
     contents = d2i_ASN1_SET_ANY(NULL, &contents_data, ASN1_STRING_length(value));
     if (!contents)
         return 0; /* FAILED */
-    content = sk_ASN1_TYPE_value(contents, 0);
-    sk_ASN1_TYPE_free(contents);
+    content = sk_ASN1_TYPE_shift(contents);
+    sk_ASN1_TYPE_pop_free(contents, ASN1_TYPE_free);
     return content;
 }
 
@@ -744,12 +767,22 @@ static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx)
  */
 static int spc_indirect_data_content_create(u_char **blob, int *len, FILE_FORMAT_CTX *ctx)
 {
-    u_char *p = NULL;
-    int mdtype, hashlen, l = 0;
-    void *hash;
-    SpcIndirectDataContent *idc = SpcIndirectDataContent_new();
+    u_char *p = NULL, *der;
+    int mdtype, hashlen, derlen, l = 0;
+    void *hash = NULL;
+    SpcIndirectDataContent *idc = NULL;
 
     if (!ctx->format->data_blob_get || !ctx->format->hash_length_get) {
+        return 0; /* FAILED */
+    }
+    hashlen = ctx->format->hash_length_get(ctx);
+    if (hashlen <= 0) {
+        return 0; /* FAILED */
+    }
+    *blob = NULL;
+    *len = 0;
+    idc = SpcIndirectDataContent_new();
+    if (!idc) {
         return 0; /* FAILED */
     }
     if (ctx->format->md_get) {
@@ -759,35 +792,64 @@ static int spc_indirect_data_content_create(u_char **blob, int *len, FILE_FORMAT
         mdtype = EVP_MD_nid(ctx->options->md);
     }
     idc->data->value = ASN1_TYPE_new();
+    if (!idc->data->value) {
+        goto err;
+    }
     idc->data->value->type = V_ASN1_SEQUENCE;
     idc->data->value->value.sequence = ASN1_STRING_new();
+    if (!idc->data->value->value.sequence) {
+        goto err;
+    }
     idc->data->type = ctx->format->data_blob_get(&p, &l, ctx);
     if (!idc->data->type) {
-        SpcIndirectDataContent_free(idc);
-        return 0; /* FAILED */
+        goto err;
     }
     if (!ASN1_STRING_set(idc->data->value->value.sequence, p, l)) {
-        OPENSSL_free(p);
-        SpcIndirectDataContent_free(idc);
-        return 0; /* FAILED */
+        goto err;
     }
     OPENSSL_free(p);
+    p = NULL;
     idc->messageDigest->digestAlgorithm->algorithm = OBJ_nid2obj(mdtype);
     idc->messageDigest->digestAlgorithm->parameters = ASN1_TYPE_new();
+    if (!idc->messageDigest->digestAlgorithm->parameters) {
+        goto err;
+    }
     idc->messageDigest->digestAlgorithm->parameters->type = V_ASN1_NULL;
 
-    hashlen = ctx->format->hash_length_get(ctx);
+    /* reserve the message digest appended by the caller */
     hash = OPENSSL_zalloc((size_t)hashlen);
-    ASN1_OCTET_STRING_set(idc->messageDigest->digest, hash, hashlen);
+    if (!hash) {
+        goto err;
+    }
+    if (!ASN1_OCTET_STRING_set(idc->messageDigest->digest, hash, hashlen)) {
+        goto err;
+    }
     OPENSSL_free(hash);
+    hash = NULL;
 
-    *len  = i2d_SpcIndirectDataContent(idc, NULL);
-    *blob = OPENSSL_malloc((size_t)*len);
-    p = *blob;
-    i2d_SpcIndirectDataContent(idc, &p);
+    derlen = i2d_SpcIndirectDataContent(idc, NULL);
+    if (derlen <= hashlen) {
+        goto err;
+    }
+    *blob = OPENSSL_malloc((size_t)derlen);
+    if (!*blob) {
+        goto err;
+    }
+    der = *blob;
+    if (i2d_SpcIndirectDataContent(idc, &der) != derlen) {
+        OPENSSL_free(*blob);
+        *blob = NULL;
+        goto err;
+    }
     SpcIndirectDataContent_free(idc);
-    *len -= hashlen;
+    *len = derlen - hashlen;
     return 1; /* OK */
+
+err:
+    OPENSSL_free(hash);
+    OPENSSL_free(p);
+    SpcIndirectDataContent_free(idc);
+    return 0; /* FAILED */
 }
 
 /*
@@ -814,8 +876,12 @@ static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FO
     ASN1_STRING_set(astr, p, len);
     OPENSSL_free(p);
     SpcSpOpusInfo_free(opus);
-    return PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_SP_OPUS_INFO_OBJID),
-            V_ASN1_SEQUENCE, astr);
+    if (!PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_SP_OPUS_INFO_OBJID),
+            V_ASN1_SEQUENCE, astr)) {
+        ASN1_STRING_free(astr);
+        return 0; /* FAILED */
+    }
+    return 1; /* OK */
 }
 
 /*
@@ -830,10 +896,18 @@ static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FO
  */
 static int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
 {
+    ASN1_TIME *time;
+
     if (ctx->options->time == INVALID_TIME) /* -time option was not specified */
         return 1; /* SUCCESS */
-    return PKCS7_add_signed_attribute(si, NID_pkcs9_signingTime, V_ASN1_UTCTIME,
-        ASN1_TIME_adj(NULL, ctx->options->time, 0, 0));
+    time = ASN1_TIME_adj(NULL, ctx->options->time, 0, 0);
+    if (!time)
+        return 0; /* FAILED */
+    if (!PKCS7_add_signed_attribute(si, NID_pkcs9_signingTime, V_ASN1_UTCTIME, time)) {
+        ASN1_TIME_free(time);
+        return 0; /* FAILED */
+    }
+    return 1; /* OK */
 }
 
 /*
@@ -858,8 +932,12 @@ static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX 
     } else {
         ASN1_STRING_set(purpose, purpose_ind, sizeof purpose_ind);
     }
-    return PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_STATEMENT_TYPE_OBJID),
-            V_ASN1_SEQUENCE, purpose);
+    if (!PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_STATEMENT_TYPE_OBJID),
+            V_ASN1_SEQUENCE, purpose)) {
+        ASN1_STRING_free(purpose);
+        return 0; /* FAILED */
+    }
+    return 1; /* OK */
 }
 
 /*
@@ -877,8 +955,12 @@ static int pkcs7_signer_info_add_sequence_number(PKCS7_SIGNER_INFO *si, FILE_FOR
         ASN1_INTEGER_free(number);
         return 0; /* FAILED */
     }
-    return PKCS7_add_signed_attribute(si, OBJ_txt2nid(PKCS9_SEQUENCE_NUMBER),
-            V_ASN1_INTEGER, number);
+    if (!PKCS7_add_signed_attribute(si, OBJ_txt2nid(PKCS9_SEQUENCE_NUMBER),
+            V_ASN1_INTEGER, number)) {
+        ASN1_INTEGER_free(number);
+        return 0; /* FAILED */
+    }
+    return 1; /* OK */
 }
 
 /*

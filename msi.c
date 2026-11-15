@@ -386,7 +386,7 @@ static u_char *msi_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #endif
-    if (!BIO_set_md(bhash, md)) {
+    if (!bhash || !BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         return NULL;  /* FAILED */
@@ -434,7 +434,7 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #endif
-    if (!BIO_set_md(hash, md)) {
+    if (!hash || !BIO_set_md(hash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(hash);
         return 0; /* FAILED */
@@ -455,7 +455,7 @@ static int msi_verify_digests(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #endif
-        if (!BIO_set_md(prehash, md)) {
+        if (!prehash || !BIO_set_md(prehash, md)) {
             fprintf(stderr, "Unable to set the message digest of BIO\n");
             BIO_free_all(hash);
             BIO_free_all(prehash);
@@ -647,6 +647,7 @@ static PKCS7 *msi_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
     content = spc_indirect_data_content_get(hash, ctx);
     if (!content) {
         fprintf(stderr, "Failed to get spcIndirectDataContent\n");
+        PKCS7_free(p7);
         return NULL; /* FAILED */
     }
     if (!sign_spc_indirect_data_content(p7, content)) {
@@ -1698,11 +1699,12 @@ static int minifat_append(MSI_OUT *out, char *buf, uint32_t len)
             fprintf(stderr, "Failed to append MiniFAT sector\n");
             return 0; /* FAILED */
         }
-        out->minifat = OPENSSL_realloc(out->minifat, (size_t)(out->minifatMemallocCount * out->sectorSize));
-        if (!out->minifat) {
+        char *minifat = OPENSSL_realloc(out->minifat, (size_t)(out->minifatMemallocCount * out->sectorSize));
+        if (!minifat) {
             fprintf(stderr, "Memory allocation failure\n");
             return 0; /* FAILED */
         }
+        out->minifat = minifat;
     }
     memcpy(out->minifat + out->minifatLen, buf, (size_t)len);
     out->minifatLen += len;
@@ -1717,11 +1719,12 @@ static int fat_append(MSI_OUT *out, char *buf, uint32_t len)
             fprintf(stderr, "Failed to append FAT sector\n");
             return 0; /* FAILED */
         }
-        out->fat = OPENSSL_realloc(out->fat, (size_t)(out->fatMemallocCount * out->sectorSize));
-        if (!out->fat) {
+        char *fat = OPENSSL_realloc(out->fat, (size_t)(out->fatMemallocCount * out->sectorSize));
+        if (!fat) {
             fprintf(stderr, "Memory allocation failure\n");
             return 0; /* FAILED */
         }
+        out->fat = fat;
     }
     memcpy(out->fat + out->fatLen, buf, (size_t)len);
     out->fatLen += len;
@@ -1736,11 +1739,12 @@ static int difat_append(MSI_OUT *out, char *buf, uint32_t len)
             fprintf(stderr, "Failed to append DIFAT sector\n");
             return 0; /* FAILED */
         }
-        out->difat = OPENSSL_realloc(out->difat, (size_t)(out->difatMemallocCount * out->sectorSize));
-        if (!out->difat) {
+        char *difat = OPENSSL_realloc(out->difat, (size_t)(out->difatMemallocCount * out->sectorSize));
+        if (!difat) {
             fprintf(stderr, "Memory allocation failure\n");
             return 0; /* FAILED */
         }
+        out->difat = difat;
     }
     memcpy(out->difat + out->difatLen, buf, (size_t)len);
     out->difatLen += len;
@@ -1804,7 +1808,10 @@ static int dirent_insert(MSI_DIRENT *dirent, const u_char *name, uint16_t nameLe
     }
     /* create new dirent */
     new_dirent = dirent_add(name, nameLen);
-    sk_MSI_DIRENT_push(dirent->children, new_dirent);
+    if (!sk_MSI_DIRENT_push(dirent->children, new_dirent)) {
+        msi_dirent_free(new_dirent);
+        return 0; /* FAILED */
+    }
 
     return 1; /* OK */
 }

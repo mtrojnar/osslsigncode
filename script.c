@@ -55,6 +55,7 @@ struct script_ctx_st {
     int has_signature;
     uint32_t sigpos;
     uint32_t fileend;
+    uint32_t filesize; /* original mapping length */
 };
 
 #define LINE_MAX_LEN 100
@@ -247,6 +248,9 @@ static u_char *script_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
     u_char *mdbuf;
     BIO *hash = BIO_new(BIO_f_md());
 
+    if (!hash)
+        return NULL; /* FAILED */
+
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
@@ -405,8 +409,12 @@ static PKCS7 *script_pkcs7_extract(FILE_FORMAT_CTX *ctx)
     }
 
     /* prepare for Base64 decoding */
-    bio_mem = BIO_new_mem_buf(clean_base64, (int)clean_base64_len);
     bio_b64 = BIO_new(BIO_f_base64());
+    if (!bio_b64)
+        goto cleanup;
+    bio_mem = BIO_new_mem_buf(clean_base64, (int)clean_base64_len);
+    if (!bio_mem)
+        goto cleanup;
     BIO_push(bio_b64, bio_mem);
     BIO_set_flags(bio_b64, BIO_FLAGS_BASE64_NO_NL);
 
@@ -493,6 +501,7 @@ static PKCS7 *script_pkcs7_signature_new(FILE_FORMAT_CTX *ctx, BIO *hash)
     content = spc_indirect_data_content_get(hash, ctx);
     if (!content) {
         fprintf(stderr, "Failed to get spcIndirectDataContent\n");
+        PKCS7_free(p7);
         return NULL; /* FAILED */
     }
     if (!sign_spc_indirect_data_content(p7, content)) {
@@ -587,7 +596,7 @@ static void script_bio_free(BIO *hash, BIO *outdata)
  */
 static void script_ctx_cleanup(FILE_FORMAT_CTX *ctx)
 {
-    unmap_file(ctx->options->indata, ctx->script_ctx->fileend);
+    unmap_file(ctx->options->indata, ctx->script_ctx->filesize);
     OPENSSL_free(ctx->script_ctx);
     OPENSSL_free(ctx);
 }
@@ -670,6 +679,7 @@ static SCRIPT_CTX *script_ctx_get(char *indata, uint32_t filesize, const SCRIPT_
     script_ctx->utf = utf;
     script_ctx->has_signature = has_signature;
     script_ctx->fileend = filesize;
+    script_ctx->filesize = filesize;
     script_ctx->sigpos = (uint32_t)sig_pos;
     return script_ctx; /* OK */
 }
@@ -833,6 +843,9 @@ static BIO *script_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md)
 {
     size_t fileend;
     BIO *hash = BIO_new(BIO_f_md());
+
+    if (!hash)
+        return NULL; /* FAILED */
 
     if (ctx->script_ctx->has_signature)
         fileend = ctx->script_ctx->sigpos;
