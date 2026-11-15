@@ -54,8 +54,8 @@ struct script_ctx_st {
     int utf;
     int has_signature;
     uint32_t sigpos;
-    uint32_t fileend;
-    uint32_t filesize; /* original mapping length */
+    uint32_t fileend; /* logical end; may exclude an existing signature */
+    uint32_t filesize; /* immutable mapping length, used by ctx_cleanup */
 };
 
 #define LINE_MAX_LEN 100

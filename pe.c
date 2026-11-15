@@ -38,8 +38,8 @@ struct pe_ctx_st {
     uint32_t nrvas;
     uint32_t sigpos;
     uint32_t siglen;
-    uint32_t fileend;
-    uint32_t filesize; /* original mapping length */
+    uint32_t fileend; /* logical end; may exclude an existing signature */
+    uint32_t filesize; /* immutable mapping length, used by ctx_cleanup */
 };
 
 /* FILE_FORMAT method prototypes */
