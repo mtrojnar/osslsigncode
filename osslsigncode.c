@@ -316,7 +316,7 @@ static BIO *bio_encode_rfc3161_request(PKCS7 *p7, const EVP_MD *md)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #endif
-    if (!BIO_set_md(bhash, md)) {
+    if (!bhash || !BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         goto out;
     }
@@ -687,17 +687,27 @@ static BIO *bio_get_http_curl(long *http_code, char *url, BIO *req, char *proxy,
         }
     }
     if (req) { /* POST */
-        if (rfc3161) {
-            /* RFC3161 Timestamp */
-            slist = curl_slist_append(slist, "Content-Type: application/timestamp-query");
-            slist = curl_slist_append(slist, "Accept: application/timestamp-reply");
-        } else {
-            /* Authenticode Timestamp */
-            slist = curl_slist_append(slist, "Content-Type: application/octet-stream");
-            slist = curl_slist_append(slist, "Accept: application/octet-stream");
+        const char *headers[] = {
+            rfc3161 ? "Content-Type: application/timestamp-query" :
+                "Content-Type: application/octet-stream",
+            rfc3161 ? "Accept: application/timestamp-reply" :
+                "Accept: application/octet-stream",
+            "User-Agent: Transport",
+            "Cache-Control: no-cache"
+        };
+        size_t i;
+
+        for (i = 0; i < sizeof headers / sizeof headers[0]; i++) {
+            struct curl_slist *next = curl_slist_append(slist, headers[i]);
+
+            if (!next) {
+                fprintf(stderr, "CURL failure: unable to allocate HTTP headers\n");
+                curl_slist_free_all(slist);
+                curl_easy_cleanup(curl);
+                return NULL; /* FAILED */
+            }
+            slist = next;
         }
-        slist = curl_slist_append(slist, "User-Agent: Transport");
-        slist = curl_slist_append(slist, "Cache-Control: no-cache");
         res = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
         if (res != CURLE_OK) {
             fprintf(stderr, "CURL failure: %s %s\n", curl_easy_strerror(res), url);
@@ -890,10 +900,21 @@ static void check_authenticode_timestamp(BIO **resp)
         /* BASE64 encoded Authenticode Timestamp */
         BIO *b64 = BIO_new(BIO_f_base64());
 
+        if (!b64) {
+            BIO_free_all(*resp);
+            *resp = NULL;
+            return;
+        }
         if (!memchr(ptr, '\n', (size_t)len)) {
             BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
         } else {
             BIO *bio_mem = BIO_new_mem_buf(ptr, len);
+            if (!bio_mem) {
+                BIO_free(b64);
+                BIO_free_all(*resp);
+                *resp = NULL;
+                return;
+            }
             BIO_push(b64, bio_mem);
         }
         *resp = BIO_push(b64, *resp);
@@ -1251,10 +1272,17 @@ static STACK_OF(X509) *X509_chain_read_certs(BIO *bin, char *certpass)
 {
     STACK_OF(X509) *certs = sk_X509_new_null();
     X509 *x509;
+
+    if (!certs)
+        return NULL;
     (void)BIO_seek(bin, 0);
     x509 = PEM_read_bio_X509(bin, NULL, NULL, certpass);
     while (x509) {
-        sk_X509_push(certs, x509);
+        if (!sk_X509_push(certs, x509)) {
+            X509_free(x509);
+            sk_X509_pop_free(certs, X509_free);
+            return NULL;
+        }
         x509 = PEM_read_bio_X509(bin, NULL, NULL, certpass);
     }
     ERR_clear_error();
@@ -1273,16 +1301,16 @@ static STACK_OF(X509) *X509_chain_read_certs(BIO *bin, char *certpass)
 static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
 {
     BIO *btmp, *bout;
-    STACK_OF(X509) *chain;
+    STACK_OF(X509) *chain = NULL;
     X509 *signer_cert = NULL;
-    EVP_PKEY *signer_key;
+    EVP_PKEY *signer_key = NULL;
     TS_RESP *response = NULL;
     int i, res = 1;
 
     btmp = bio_new_file(ctx->options->tsa_certfile, "rb");
     if (!btmp) {
         fprintf(stderr, "Failed to read Time-Stamp Authority certificate file: %s\n", ctx->options->tsa_certfile);
-        return 0; /* FAILED */
+        goto out;
     }
     /* .pem certificate file */
     chain = X509_chain_read_certs(btmp, NULL);
@@ -1290,13 +1318,13 @@ static int add_timestamp_builtin(PKCS7 *p7, FILE_FORMAT_CTX *ctx)
     btmp = bio_new_file(ctx->options->tsa_keyfile, "rb");
     if (!btmp) {
         fprintf(stderr, "Failed to read private key file: %s\n", ctx->options->tsa_keyfile);
-        return 0; /* FAILED */
+        goto out;
     }
     signer_key = PEM_read_bio_PrivateKey(btmp, NULL, NULL, NULL);
     BIO_free(btmp);
     if(!chain || !signer_key) {
         fprintf(stderr, "Failed to load Time-Stamp Authority crypto parameters\n");
-        return 0; /* FAILED */
+        goto out;
     }
     /* find the signer's certificate located somewhere in the whole certificate chain */
     for (i=0; i<sk_X509_num(chain); i++) {
@@ -1512,10 +1540,6 @@ static int add_nested_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx, int in
     PKCS7 *p7_tmp;
     int i;
 
-    p7_tmp = PKCS7_dup(p7);
-    if (!p7_tmp) {
-        return 1; /* FAILED */
-    }
     signer_info = PKCS7_get_signer_info(p7);
     if (!signer_info) {
         fprintf(stderr, "Failed to obtain PKCS#7 signer info list\n");
@@ -1524,6 +1548,10 @@ static int add_nested_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx, int in
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si) {
         fprintf(stderr, "Failed to obtain PKCS#7 signer info value\n");
+        return 1; /* FAILED */
+    }
+    p7_tmp = PKCS7_dup(p7);
+    if (!p7_tmp) {
         return 1; /* FAILED */
     }
     unauth_attr = PKCS7_get_attributes(si); /* cont[1] */
@@ -1542,6 +1570,7 @@ static int add_nested_timestamp_and_blob(PKCS7 *p7, FILE_FORMAT_CTX *ctx, int in
     signatures = signature_list_create(p7_tmp);
     if (!signatures) {
         fprintf(stderr, "Failed to create signature list\n\n");
+        PKCS7_free(p7_tmp);
         return 1; /* FAILED */
     }
     /* append all nested signature to the primary signature */
@@ -1868,7 +1897,7 @@ static int trusted_cert(X509 *cert, int error) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #endif
-    if (!BIO_set_md(bhash, md)) {
+    if (!bhash || !BIO_set_md(bhash, md)) {
         BIO_free_all(bhash);
         return 0; /* FAILED */
     }
@@ -2610,7 +2639,7 @@ static int verify_leaf_hash(X509 *cert, const char *leafhash)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #endif
-    if (!BIO_set_md(bhash, md)) {
+    if (!bhash || !BIO_set_md(bhash, md)) {
         fprintf(stderr, "Unable to set the message digest of BIO\n");
         BIO_free_all(bhash);
         OPENSSL_free(mdbuf);
@@ -3415,7 +3444,10 @@ static STACK_OF(PKCS7) *signature_list_create(PKCS7 *p7)
     /* sort signatures in ascending order by signing time */
     sk_PKCS7_sort(signatures);
     /* insert the prime signature at index 0 */
-    sk_PKCS7_unshift(signatures, p7);
+    if (!sk_PKCS7_unshift(signatures, p7)) {
+        sk_PKCS7_pop_free(signatures, PKCS7_free);
+        return NULL; /* FAILED, p7 is still owned by the caller */
+    }
     return signatures; /* OK */
 }
 
@@ -4325,6 +4357,7 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
     }
     if (options->login && !ENGINE_ctrl_cmd_string(engine, "FORCE_LOGIN", 0, 0)) {
         fprintf(stderr, "Failed to force a login to the pkcs11 engine\n");
+        ENGINE_finish(engine);
         ENGINE_free(engine);
         return 0; /* FAILED */
     }
@@ -4361,8 +4394,11 @@ static int read_token(GLOBAL_OPTIONS *options, ENGINE *engine)
             fprintf(stderr, "Failed to load certificate %s\n", options->p11cert);
             ENGINE_finish(engine);
             return 0; /* FAILED */
-        } else
-            sk_X509_push(options->certs, params.cert);
+        } else if (!sk_X509_push(options->certs, params.cert)) {
+            X509_free(params.cert);
+            ENGINE_finish(engine);
+            return 0; /* FAILED */
+        }
     }
 
     options->pkey = ENGINE_load_private_key(engine, options->keyfile, NULL, NULL);
@@ -4561,16 +4597,24 @@ static void load_objects_from_store(const char *url, char *pass, EVP_PKEY **pkey
         type = OSSL_STORE_INFO_get_type(object);
         switch (type) {
         case OSSL_STORE_INFO_PKEY:
-            if (pkey)
+            if (pkey) {
+                EVP_PKEY_free(*pkey);
                 *pkey = OSSL_STORE_INFO_get1_PKEY(object);
+            }
             break;
         case OSSL_STORE_INFO_CERT:
-            if (certs)
-                sk_X509_push(certs, OSSL_STORE_INFO_get1_CERT(object));
+            if (certs) {
+                X509 *cert = OSSL_STORE_INFO_get1_CERT(object);
+                if (!sk_X509_push(certs, cert))
+                    X509_free(cert);
+            }
             break;
         case OSSL_STORE_INFO_CRL:
-            if (crls)
-                sk_X509_CRL_push(crls, OSSL_STORE_INFO_get1_CRL(object));
+            if (crls) {
+                X509_CRL *crl = OSSL_STORE_INFO_get1_CRL(object);
+                if (!sk_X509_CRL_push(crls, crl))
+                    X509_CRL_free(crl);
+            }
             break;
         default:
             break; /* skip any other type */
@@ -4662,6 +4706,7 @@ static int provider_load(const char *pname)
         providers = sk_OSSL_PROVIDER_new_null();
     }
     if (providers == NULL || !sk_OSSL_PROVIDER_push(providers, prov)) {
+        OSSL_PROVIDER_unload(prov);
         providers_cleanup();
         return 0; /* FAILED */
     }
@@ -4861,6 +4906,8 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
+            if (options->pass)
+                OPENSSL_clear_free(options->pass, strlen(options->pass));
             options->pass = OPENSSL_strdup(*(++argv));
             memset(*argv, 0, strlen(*argv));
 #ifdef PROVIDE_ASKPASS
@@ -5007,6 +5054,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
+            OPENSSL_free(options->crlfile);
             options->crlfile = OPENSSL_strdup(*++argv);
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD || cmd == CMD_VERIFY)
                 && !strcmp(*argv, "-HTTPS-CAfile")) {
@@ -5022,6 +5070,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
+            OPENSSL_free(options->https_crlfile);
             options->https_crlfile = OPENSSL_strdup(*++argv);
         } else if (cmd == CMD_VERIFY && (!strcmp(*argv, "-untrusted") || !strcmp(*argv, "-TSA-CAfile"))) {
             if (--argc < 1) {
@@ -5035,6 +5084,7 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
+            OPENSSL_free(options->tsa_crlfile);
             options->tsa_crlfile = OPENSSL_strdup(*++argv);
         } else if (cmd == CMD_VERIFY && !strcmp(*argv, "-require-leaf-hash")) {
             if (--argc < 1) {
@@ -5177,7 +5227,8 @@ static void engine_control_set(GLOBAL_OPTIONS *options, const char *arg)
         ASN1_STRING_set(engine_ctrl->param, tmp_str, (int)strlen(tmp_str));
     }
     ASN1_STRING_set(engine_ctrl->cmd, arg, (int)strlen(arg));
-    sk_EngineControl_push(options->engine_ctrls, engine_ctrl);
+    if (!sk_EngineControl_push(options->engine_ctrls, engine_ctrl))
+        EngineControl_free(engine_ctrl);
 }
 #endif /* OPENSSL_NO_ENGINE */
 
@@ -5228,7 +5279,7 @@ static int main_execute(int argc, char **argv)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-qual"
 #endif
-        if (!BIO_set_md(hash, options.md)) {
+        if (!hash || !BIO_set_md(hash, options.md)) {
             DO_EXIT_0("Unable to set the message digest of BIO\n");
         }
 #if defined(__GNUC__)
@@ -5238,6 +5289,7 @@ static int main_execute(int argc, char **argv)
         outdata = bio_new_file(options.outfile, "w+b");
         if (!outdata) {
             BIO_free_all(hash);
+            hash = NULL;
             DO_EXIT_1("Failed to create file: %s\n", options.outfile);
          }
     }
@@ -5258,6 +5310,7 @@ static int main_execute(int argc, char **argv)
             remove_file(options.outfile);
         }
         BIO_free_all(hash);
+        hash = NULL;
         BIO_free_all(outdata);
         outdata = NULL;
         ret = 1; /* FAILED */
@@ -5276,7 +5329,6 @@ static int main_execute(int argc, char **argv)
             DO_EXIT_0("Unable to extract pkcs7 contents\n");
         }
         ret = data_write_pkcs7(ctx, outdata, p7);
-        PKCS7_free(p7);
         goto skip_signing;
     } else if (options.cmd == CMD_EXTRACT) {
         if (!ctx->format->pkcs7_extract) {
@@ -5287,7 +5339,6 @@ static int main_execute(int argc, char **argv)
             DO_EXIT_0("Unable to extract existing signature\n");
         }
         ret = data_write_pkcs7(ctx, outdata, p7);
-        PKCS7_free(p7);
         goto skip_signing;
     } else if (options.cmd == CMD_REMOVE) {
         if (!ctx->format->remove_pkcs7) {
@@ -5327,7 +5378,6 @@ static int main_execute(int argc, char **argv)
                 }
                 options.nested_number = nested_signatures_number_get(cursig);
                 if (options.nested_number < 0) {
-                    PKCS7_free(cursig);
                     DO_EXIT_0("Unable to get number of nested signatures\n");
                 }
             }
@@ -5335,7 +5385,6 @@ static int main_execute(int argc, char **argv)
         /* Obtain an existing PKCS#7 signature from a "sigin" file */
         p7 = pkcs7_get_sigfile(ctx);
         if (!p7) {
-            PKCS7_free(cursig);
             DO_EXIT_0("Unable to extract valid signature\n");
         }
         if (ctx->format->process_data) {
@@ -5355,7 +5404,6 @@ static int main_execute(int argc, char **argv)
                 }
                 options.nested_number = nested_signatures_number_get(cursig);
                 if (options.nested_number < 0) {
-                    PKCS7_free(cursig);
                     DO_EXIT_0("Unable to get number of nested signatures\n");
                 }
             }
@@ -5382,7 +5430,6 @@ static int main_execute(int argc, char **argv)
         ret = add_timestamp_and_blob(p7, ctx);
     }
     if (ret) {
-        PKCS7_free(p7);
         DO_EXIT_0("Unable to set unauthenticated attributes\n");
     }
     if (cursig) {
@@ -5396,18 +5443,17 @@ static int main_execute(int argc, char **argv)
     if (ctx->format->append_pkcs7) {
         ret = ctx->format->append_pkcs7(ctx, outdata, p7);
         if (ret) {
-            PKCS7_free(p7);
             DO_EXIT_0("Append signature to outfile failed\n");
         }
     }
     if (ctx->format->update_data_size) {
         ctx->format->update_data_size(ctx, outdata, p7);
     }
-    PKCS7_free(p7);
 
 skip_signing:
     if (ctx->format->bio_free) {
         ctx->format->bio_free(hash, outdata);
+        hash = NULL;
         outdata = NULL;
     }
     if (!ret && options.cmd == CMD_ATTACH) {
@@ -5424,6 +5470,8 @@ skip_signing:
     }
 
 err_cleanup:
+    PKCS7_free(p7);
+    PKCS7_free(cursig);
     if (outdata) {
         BIO *head = hash;
         int outdata_in_hash = 0;
@@ -5443,6 +5491,8 @@ err_cleanup:
             /* unlink outfile */
             remove_file(options.outfile);
         }
+    } else {
+        BIO_free_all(hash);
     }
     if (ctx && ctx->format->ctx_cleanup) {
         ctx->format->ctx_cleanup(ctx);

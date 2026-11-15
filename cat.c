@@ -256,6 +256,7 @@ static CAT_CTX *cat_ctx_get(char *indata, uint32_t filesize)
 static int cat_add_content_type(PKCS7 *p7, PKCS7 *cursig)
 {
     const char *content_type;
+    ASN1_OBJECT *object;
     STACK_OF(PKCS7_SIGNER_INFO) *signer_info;
     PKCS7_SIGNER_INFO *si;
 
@@ -275,9 +276,14 @@ static int cat_add_content_type(PKCS7 *p7, PKCS7 *cursig)
     si = sk_PKCS7_SIGNER_INFO_value(signer_info, 0);
     if (!si)
         return 0; /* FAILED */
-    if (!PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
-        V_ASN1_OBJECT, OBJ_txt2obj(content_type, 1)))
+    object = OBJ_txt2obj(content_type, 1);
+    if (!object)
         return 0; /* FAILED */
+    if (!PKCS7_add_signed_attribute(si, NID_pkcs9_contentType,
+        V_ASN1_OBJECT, object)) {
+        ASN1_OBJECT_free(object);
+        return 0; /* FAILED */
+    }
     return 1; /* OK */
 }
 

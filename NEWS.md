@@ -2,6 +2,14 @@
 
 ### 2.17 (unreleased)
 
+**Other user-visible changes**
+
+- fixed memory leaks in signature processing, built-in timestamping and
+  private key loading, and incorrect success reports when TSA parameters
+  cannot be loaded
+- fixed allocation-failure crashes when decoding Base64 script signatures
+  and timestamp responses, or creating signature content
+
 ### 2.16 (2026.11.13)
 
 **Security fixes**
