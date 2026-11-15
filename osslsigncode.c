@@ -3386,8 +3386,9 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options,
 
 /*
  * Insert PKCS#7 signature and its nested signatures to the sorted signature list
- * [in] p7: PKCS#7 signature
- * [returns] sorted signature list
+ * [in] p7: ownership transfers to the returned list only on success
+ * [returns] owned signature list, or NULL with p7 still owned by the caller
+ * Free the returned list with sk_PKCS7_pop_free(signatures, PKCS7_free).
  */
 static STACK_OF(PKCS7) *signature_list_create(PKCS7 *p7)
 {
@@ -5253,6 +5254,7 @@ static int main_execute(int argc, char **argv)
 {
     FILE_FORMAT_CTX *ctx = NULL;
     GLOBAL_OPTIONS options;
+    /* Owned here; every exit path releases the remaining signatures at err_cleanup. */
     PKCS7 *p7 = NULL, *cursig = NULL;
     BIO *outdata = NULL;
     BIO *hash = NULL;

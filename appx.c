@@ -226,6 +226,7 @@ IMPLEMENT_ASN1_FUNCTIONS(AppxSpcSipInfo)
 
 struct appx_ctx_st {
     ZIP_FILE *zip;
+    /* Hash buffers are owned by this context and freed by appx_ctx_cleanup(). */
     u_char *calculatedBMHash;
     u_char *calculatedCTHash;
     u_char *calculatedCDHash;

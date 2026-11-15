@@ -17,6 +17,7 @@ int data_write_pkcs7(FILE_FORMAT_CTX *ctx, BIO *outdata, PKCS7 *p7);
 PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx);
 int add_indirect_data_object(PKCS7 *p7);
 int sign_spc_indirect_data_content(PKCS7 *p7, ASN1_OCTET_STRING *content);
+/* Consumes content even on failure; free a non-NULL result with PKCS7_free(). */
 PKCS7 *pkcs7_set_content(ASN1_OCTET_STRING *content);
 int pkcs7_get_content_digest(PKCS7 *p7, u_char *mdbuf, int *mdtype);
 SpcIndirectDataContent *pkcs7_get_indirect_data_content(PKCS7 *p7);
@@ -28,6 +29,7 @@ int bio_hash_data(BIO *hash, char *indata, size_t idx, size_t fileend);
 void print_hash(const char *descript1, const char *descript2, const u_char *hashbuf, int length);
 int is_content_type(PKCS7 *p7, const char *objid);
 MsCtlContent *ms_ctl_content_get(PKCS7 *p7);
+/* Borrows attribute; free a non-NULL result with ASN1_TYPE_free(). */
 ASN1_TYPE *catalog_content_get(CatalogAuthAttr *attribute);
 SpcLink *spc_link_obsolete_get(void);
 int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype);
