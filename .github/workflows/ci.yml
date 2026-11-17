@@ -135,11 +135,29 @@ jobs:
         restore-keys: |
           ${{matrix.id}}-
 
+    # Use Visual Studio's own vcvarsall.bat: the StepSecurity action that
+    # wraps it requires a paid subscription in private repositories.
     - name: Configure Visual Studio
       if: matrix.compiler == 'vs'
-      uses: step-security/msvc-dev-cmd@22c98154b708dbd743e6f27a933cf6ceba3305c4 # v1
-      with:
-        arch: ${{matrix.arch}}
+      shell: pwsh
+      run: |
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        $vcvarsall = & $vswhere -latest -products * -find VC\Auxiliary\Build\vcvarsall.bat |
+          Select-Object -First 1
+        if (!$vcvarsall) { throw "vcvarsall.bat not found" }
+        $script = "$env:RUNNER_TEMP\vcvars.cmd"
+        "@call `"$vcvarsall`" ${{matrix.arch}} >&2 && set" | Set-Content -Encoding ascii $script
+        $vars = cmd.exe /d /c $script
+        if ($LASTEXITCODE -ne 0 -or !($vars -match '^VSCMD_ARG_TGT_ARCH=')) {
+          throw "vcvarsall.bat ${{matrix.arch}} failed"
+        }
+        foreach ($var in $vars) {
+          $name, $value = $var -split '=', 2
+          if ($name -and $null -ne $value -and
+              [Environment]::GetEnvironmentVariable($name) -cne $value) {
+            "$name=$value" >> $env:GITHUB_ENV
+          }
+        }
 
     - name: Install MSYS2
       if: matrix.compiler == 'mingw'
