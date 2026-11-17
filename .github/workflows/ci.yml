@@ -49,12 +49,6 @@ jobs:
             os: ubuntu-22.04
             generator: Unix Makefiles
             vcpkg_root:
-          - id: macOS
-            triplet: arm64-osx
-            compiler: clang
-            os: macOS-latest
-            generator: Unix Makefiles
-            vcpkg_root: /usr/local/share/vcpkg
           - id: windows-x64-vs
             triplet: x64-windows
             compiler: vs
@@ -87,12 +81,12 @@ jobs:
             vcpkg_root: C:/vcpkg
             cache: C:/Users/runneradmin/AppData/Local/vcpkg/archives
 
-    runs-on: ${{matrix.os}}
+    runs-on: &runs-on ${{matrix.os}}
 
-    env:
+    env: &env
       VCPKG_ROOT: ${{matrix.vcpkg_root}}
 
-    steps:
+    steps: &build-steps
     - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       with:
         persist-credentials: false
@@ -322,3 +316,26 @@ jobs:
       with:
         name: ${{env.version}}-${{matrix.id}}
         path: ${{github.workspace}}/dist
+
+  # macOS minutes cost about six times as much as Windows minutes, which
+  # quickly exhausts the included usage of private repositories. Their
+  # portable changes are covered on other platforms, so private repositories
+  # build on macOS only when the workflow is run manually.
+  build-macos:
+    name: build
+    if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
+    strategy:
+      matrix:
+        include:
+          - id: macOS
+            triplet: arm64-osx
+            compiler: clang
+            os: macOS-latest
+            generator: Unix Makefiles
+            vcpkg_root: /usr/local/share/vcpkg
+
+    runs-on: *runs-on
+
+    env: *env
+
+    steps: *build-steps
