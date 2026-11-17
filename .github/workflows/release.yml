@@ -371,10 +371,28 @@ jobs:
       NASM_VERSION: "3.02"
       NASM_SHA256: 161d0bfaff53c2f9e9f3e69fd0672323ebabafd1268976a5cec11be92a19aee7
     steps:
+      # Use Visual Studio's own vcvarsall.bat: the StepSecurity action that
+      # wraps it requires a paid subscription in private repositories.
       - name: Configure Visual Studio
-        uses: step-security/msvc-dev-cmd@22c98154b708dbd743e6f27a933cf6ceba3305c4 # v1
-        with:
-          arch: ${{matrix.vs_arch}}
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vcvarsall = & $vswhere -latest -products * -find VC\Auxiliary\Build\vcvarsall.bat |
+            Select-Object -First 1
+          if (!$vcvarsall) { throw "vcvarsall.bat not found" }
+          $script = "$env:RUNNER_TEMP\vcvars.cmd"
+          "@call `"$vcvarsall`" ${{matrix.vs_arch}} >&2 && set" | Set-Content -Encoding ascii $script
+          $vars = cmd.exe /d /c $script
+          if ($LASTEXITCODE -ne 0 -or !($vars -match '^VSCMD_ARG_TGT_ARCH=')) {
+            throw "vcvarsall.bat ${{matrix.vs_arch}} failed"
+          }
+          foreach ($var in $vars) {
+            $name, $value = $var -split '=', 2
+            if ($name -and $null -ne $value -and
+                [Environment]::GetEnvironmentVariable($name) -cne $value) {
+              "$name=$value" >> $env:GITHUB_ENV
+            }
+          }
 
       # Python setup
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7

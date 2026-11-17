@@ -12,6 +12,8 @@ on:
 jobs:
   analyze:
     name: Analyze
+    # Code scanning of private repositories requires GitHub Code Security.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
