@@ -2144,6 +2144,46 @@ out:
 }
 
 /*
+ * Warn that the certificate has CRL distribution points, but none of them
+ * provides a supported (http://) URL, so its revocation status was not
+ * checked.  Only call this function if no CRL was available, which implies
+ * that clrdp_url_get_x509() returned NULL.
+ * [in] cert: X509 certificate
+ * [in] crlfile_option: option used to supply CRLs manually
+ * [returns] none
+ */
+static void clrdp_unsupported_warning(X509 *cert, const char *crlfile_option)
+{
+    STACK_OF(DIST_POINT) *crldp;
+    DIST_POINT *dp;
+    GENERAL_NAMES *gens;
+    BIO *bio;
+    int i, j;
+
+    crldp = X509_get_ext_d2i(cert, NID_crl_distribution_points, NULL, NULL);
+    if (!crldp)
+        return;
+
+    printf("Warning: No http:// CRL distribution point, revocation status not checked\n");
+    bio = BIO_new_fp(stdout, BIO_NOCLOSE);
+    for (i = 0; bio && i < sk_DIST_POINT_num(crldp); i++) {
+        dp = sk_DIST_POINT_value(crldp, i);
+        if (!dp->distpoint || dp->distpoint->type != 0)
+            continue;
+        gens = dp->distpoint->name.fullname;
+        for (j = 0; j < sk_GENERAL_NAME_num(gens); j++) {
+            BIO_puts(bio, "Unsupported CRL distribution point: ");
+            GENERAL_NAME_print(bio, sk_GENERAL_NAME_value(gens, j));
+            BIO_puts(bio, "\n");
+        }
+    }
+    BIO_free(bio);
+    printf("Use the \"%s\" option to add one or more CRLs in PEM format.\n",
+        crlfile_option);
+    sk_DIST_POINT_pop_free(crldp, DIST_POINT_free);
+}
+
+/*
  * Get Certificate Revocation List from a CRL distribution point
  * and write it into the X509_CRL structure.
  * [in] ctx: structure holds input and output data
@@ -2395,6 +2435,8 @@ static int verify_timestamp(FILE_FORMAT_CTX *ctx, PKCS7 *p7, CMS_ContentInfo *ti
         if (!crlok)
             goto out;
     } else {
+        if (!ctx->options->ignore_crl)
+            clrdp_unsupported_warning(signer, "-TSA-CRLfile");
         printf("\n");
     }
     /* check extended key usage flag XKU_TIMESTAMP */
@@ -2573,6 +2615,8 @@ static int verify_authenticode(FILE_FORMAT_CTX *ctx, PKCS7 *p7, time_t time, X50
         printf("Signature CRL verification: %s\n", crlok ? "ok" : "failed");
         if (!crlok)
             goto out;
+    } else if (!ctx->options->ignore_crl) {
+        clrdp_unsupported_warning(signer, "-CRLfile");
     }
     /* keyUsage, if present, must permit digitalSignature (RFC 5280 section 4.2.1.3) */
     if (!(X509_get_key_usage(signer) & X509v3_KU_DIGITAL_SIGNATURE)) {
