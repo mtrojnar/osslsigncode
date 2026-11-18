@@ -155,6 +155,13 @@ Verification may include digest consistency, certificate chain validation,
 certificate revocation checking, timestamp validation, and optional checking
 of the signer's leaf certificate hash.
 
+CRLs are downloaded only from `http://` CRL Distribution Points.  A signer
+or timestamp certificate without one is checked for revocation only against
+CRLs embedded in the signature or supplied with `-CRLfile` or
+`-TSA-CRLfile`.  If no such CRLs are available and the certificate lists
+only other CRL Distribution Points, such as `https://` or `ldap://` URLs,
+a warning is printed.
+
 When verifying that a file is covered by a catalog, use `verify -catalog
 catalog.cat -in file`.  Verifying the CAT file by itself validates the
 catalog signature; verifying with `-catalog` checks whether the specified

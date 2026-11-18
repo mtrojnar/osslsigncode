@@ -9,6 +9,10 @@
   cannot be loaded
 - fixed allocation-failure crashes when decoding Base64 script signatures
   and timestamp responses, or creating signature content
+- added a warning when a signer or timestamp certificate lists CRL
+  Distribution Points, but none with an http:// URL, so its revocation
+  status is not checked online (thanks to SecBuddyF of Tencent Keen
+  Security Lab for reporting the issue)
 
 ### 2.16 (2026.11.13)
 
