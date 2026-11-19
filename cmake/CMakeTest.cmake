@@ -47,6 +47,7 @@ if(Python3_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/make_large_pe.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/make_crafted_timestamps.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_pe_checksum.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_signtool_compat.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_msi_tree.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/start_server.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/exec.py"
@@ -117,14 +118,12 @@ if(Python3_FOUND AND NOT cryptography_error)
 ### Sign ###
 
     # Sign with PKCS#12 container with private key and certificate encryption algorithm
-    # Signing time: May  1 00:00:00 2019 GMT (1556668800)
     foreach(ext ${extensions_all})
         add_test(NAME "signed_${ext}"
             COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "sign"
             "-pkcs12" "${CERTS}/cert.p12"
             "-readpass" "${CERTS}/password.txt"
             "-ac" "${CERTS}/CAcross.pem"
-            "-time" "1556668800"
             "-add-msi-dse"
             "-comm"
             "-ph"
@@ -146,7 +145,6 @@ if(Python3_FOUND AND NOT cryptography_error)
             "-key" "${CERTS}/keyp.pem"
             "-readpass" "${CERTS}/password.txt"
             "-ac" "${CERTS}/CAcross.pem"
-            "-time" "1556668800" # Signing time: May  1 00:00:00 2019 GMT
             "-add-msi-dse"
             "-comm"
             "-ph"
@@ -237,7 +235,6 @@ if(Python3_FOUND AND NOT cryptography_error)
             "-key" "${CERTS}/key.der"
             "-pass" "passme"
             "-ac" "${CERTS}/CAcross.pem"
-            "-time" "1556755200" # Signing time: May  2 00:00:00 2019 GMT
             "-add-msi-dse"
             "-comm"
             "-ph"
@@ -251,6 +248,14 @@ if(Python3_FOUND AND NOT cryptography_error)
             DEPENDS "signed_${ext}")
         list(APPEND ALL_TESTS "nested_${ext}")
     endforeach(ext ${extensions_all})
+
+
+### SignTool-compatible default attributes (all supported OpenSSL versions) ###
+
+    add_test(NAME "signtool_compat"
+        COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/check_signtool_compat.py"
+        ${OSSLSIGNCODE} ${FILES})
+    list(APPEND ALL_TESTS "signtool_compat")
 
 
 ### PE checksum ###
@@ -496,7 +501,6 @@ if(Python3_FOUND AND NOT cryptography_error)
                 "-pkcs12" "${CERTS}/cert.p12"
                 "-readpass" "${CERTS}/password.txt"
                 "-ac" "${CERTS}/CAcross.pem"
-                "-time" "1556668800" # Signing time: May  1 00:00:00 2019 GMT
                 "-add-msi-dse"
                 "-comm"
                 "-ph"
@@ -518,7 +522,6 @@ if(Python3_FOUND AND NOT cryptography_error)
                 "-pkcs12" "${CERTS}/cert.p12"
                 "-readpass" "${CERTS}/password.txt"
                 "-ac" "${CERTS}/CAcross.pem"
-                "-time" "1556668800" # Signing time: May  1 00:00:00 2019 GMT
                 "-add-msi-dse"
                 "-comm"
                 "-ph"
@@ -615,7 +618,6 @@ if(Python3_FOUND AND NOT cryptography_error)
                     "-h" "sha384"
                     "-i" "https://www.osslsigncode.com/"
                     "-n" "osslsigncode"
-                    "-time" "1556668800" # Signing time: May  1 00:00:00 2019 GMT
                     "-ts" "FILE ${LOGS}/url.log"
                     "-in" "${FILES}/unsigned.${ext}"
                     "-out" "${FILES}/ts_${cert}.${ext}")

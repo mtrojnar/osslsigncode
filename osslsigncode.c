@@ -3758,7 +3758,6 @@ static void usage(const char *argv0, const char *cmd)
         printf("%12s[ -TSA-time <unix-time> ]\n", "");
         printf("%12s[ -HTTPS-CAfile <file> ]\n", "");
         printf("%12s[ -HTTPS-CRLfile <file> ]\n", "");
-        printf("%12s[ -time <unix-time> ]\n", "");
         printf("%12s[ -addUnauthenticatedBlob [ -blobFile <file> ] ]\n", "");
         printf("%12s[ -nest ]\n", "");
         printf("%12s[ -verbose ]\n", "");
@@ -3882,7 +3881,7 @@ static void help_for(const char *argv0, const char *cmd)
     const char *cmds_readpass[] = {"sign", NULL};
     const char *cmds_require_leaf_hash[] = {"verify", NULL};
     const char *cmds_sigin[] = {"attach-signature", NULL};
-    const char *cmds_time[] = {"sign", "verify", NULL};
+    const char *cmds_time[] = {"verify", NULL};
     const char *cmds_ignore_timestamp[] = {"verify", NULL};
     const char *cmds_ignore_cdp[] = {"verify", NULL};
     const char *cmds_ignore_crl[] = {"verify", NULL};
@@ -4056,7 +4055,7 @@ static void help_for(const char *argv0, const char *cmd)
         printf("%26sthis option cannot be used with the -t option\n", "");
     }
     if (on_list(cmd, cmds_time))
-        printf("%-24s= the unix-time to set the signing and/or verifying time\n", "-time");
+        printf("%-24s= the unix-time to use for certificate verification\n", "-time, -st");
     if (on_list(cmd, cmds_CAfileHTTPS))
         printf("%-24s= the file containing one or more HTTPS certificates in PEM format\n", "-HTTPS-CAfile");
     if (on_list(cmd, cmds_CRLfileHTTPS))
@@ -4966,13 +4965,39 @@ static int main_configure(int argc, char **argv, GLOBAL_OPTIONS *options)
                 return 0; /* FAILED */
             }
             options->url = *(++argv);
-        } else if ((cmd == CMD_SIGN || cmd == CMD_VERIFY)
-                && (!strcmp(*argv, "-time") || !strcmp(*argv, "-st"))) {
+        } else if (cmd == CMD_SIGN && (!strcmp(*argv, "-st") || !strcmp(*argv, "-time"))) {
+            const char *option = *argv;
+
             if (--argc < 1) {
                 usage(argv0, "all");
                 return 0; /* FAILED */
             }
-            options->time = (time_t)strtoull(*(++argv), NULL, 10);
+            /* Keep old signing scripts working; do not parse or encode a time. */
+            ++argv;
+            fprintf(stderr, "Warning: %s is deprecated and ignored when signing\n", option);
+        } else if (!strcmp(*argv, "-time") || !strcmp(*argv, "-st")) {
+            char *end;
+            long long value;
+
+            if (cmd != CMD_VERIFY) {
+                fprintf(stderr, "%s is only supported by verify\n", *argv);
+                return 0; /* FAILED */
+            }
+            if (--argc < 1) {
+                usage(argv0, "all");
+                return 0; /* FAILED */
+            }
+            ++argv;
+            errno = 0;
+            value = strtoll(*argv, &end, 10);
+            options->time = (time_t)value;
+            /* Reject malformed/overflowing input, narrowing to time_t, and
+             * the internal 'unspecified' sentinel. */
+            if (errno == ERANGE || end == *argv || *end != '\0' ||
+                    (long long)options->time != value || options->time == INVALID_TIME) {
+                fprintf(stderr, "Invalid verification time: %s\n", *argv);
+                return 0; /* FAILED */
+            }
         } else if ((cmd == CMD_SIGN || cmd == CMD_ADD) && !strcmp(*argv, "-t")) {
             if (--argc < 1) {
                 usage(argv0, "all");

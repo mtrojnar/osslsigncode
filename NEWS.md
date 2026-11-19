@@ -4,6 +4,11 @@
 
 **Other user-visible changes**
 
+- match SignTool's Authenticode attributes: omit primary signingTime and always
+  include SpcSpOpusInfo, even without description or URL
+- accept `-st` and `-time` as deprecated no-ops when signing, with a warning;
+  `verify -time` and its compatibility alias `verify -st` continue to select
+  the verification time
 - fixed memory leaks in signature processing, built-in timestamping and
   private key loading, and incorrect success reports when TSA parameters
   cannot be loaded
