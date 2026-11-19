@@ -9,6 +9,8 @@
 - accept `-st` and `-time` as deprecated no-ops when signing, with a warning;
   `verify -time` and its compatibility alias `verify -st` continue to select
   the verification time
+- use empty PE image flags and an empty Unicode file link when not generating
+  page hashes, matching the PE SIP's default encoding
 - fixed memory leaks in signature processing, built-in timestamping and
   private key loading, and incorrect success reports when TSA parameters
   cannot be loaded

@@ -156,7 +156,10 @@ static ASN1_OBJECT *pe_spc_image_data_get(u_char **p, int *plen, FILE_FORMAT_CTX
     ASN1_OBJECT *dtype;
     SpcPeImageData *pid = SpcPeImageData_new();
 
-    ASN1_BIT_STRING_set_bit(pid->flags, 0, 1);
+    if (!pid)
+        return NULL;
+    /* Match the PE SIP: empty image flags, also when page hashes are present.
+     * This is PE subject data, not a rule for other formats' SIP data. */
     if (ctx->options->pagehash) {
         SpcLink *link;
         phtype = NID_sha1;
@@ -169,7 +172,11 @@ static ASN1_OBJECT *pe_spc_image_data_get(u_char **p, int *plen, FILE_FORMAT_CTX
         }
         pid->file = link;
     } else {
-        pid->file = spc_link_obsolete_get();
+        pid->file = spc_link_file_get();
+        if (!pid->file) {
+            SpcPeImageData_free(pid);
+            return NULL;
+        }
     }
     *plen = i2d_SpcPeImageData(pid, NULL);
     *p = OPENSSL_malloc((size_t)*plen);

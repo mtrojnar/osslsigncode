@@ -679,7 +679,31 @@ ASN1_TYPE *catalog_content_get(CatalogAuthAttr *attribute)
 }
 
 /*
- * PE and CAB format specific
+ * Build the empty Unicode file link used by the PE SIP.
+ * [returns] pointer to SpcLink, or NULL on allocation failure
+ */
+SpcLink *spc_link_file_get(void)
+{
+    SpcLink *link = SpcLink_new();
+
+    if (!link)
+        return NULL;
+    link->type = 2;
+    link->value.file = SpcString_new();
+    if (!link->value.file)
+        goto err;
+    link->value.file->type = 0;
+    link->value.file->value.unicode = ASN1_BMPSTRING_new();
+    if (!link->value.file->value.unicode)
+        goto err;
+    return link;
+err:
+    SpcLink_free(link);
+    return NULL;
+}
+
+/*
+ * CAB format specific
  * [in] none
  * [returns] pointer to SpcLink
  */

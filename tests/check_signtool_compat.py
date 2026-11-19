@@ -189,6 +189,8 @@ def main():
             attrs, flags, link = sign("default-" + digest, [], digest)
             assert SIGNING_TIME not in attrs
             assert attrs[OPUS_INFO].encoded == bytes.fromhex("31023000")
+            assert flags.encoded == bytes.fromhex("030100")
+            assert link.encoded == bytes.fromhex("a2028000")
 
         attrs, _, _ = sign("metadata", ["-n", "description", "-i", "https://example.test/"])
         opus = attrs[OPUS_INFO].children()[0].children()
@@ -225,7 +227,7 @@ def main():
         run(verify + ["-time", now, "-st", "0"], "certificate is not yet valid")
         run(verify + ["-st", now, "-time", "0"], "certificate is not yet valid")
         attrs, flags, link = sign("pagehash", ["-ph"])
-        assert SIGNING_TIME not in attrs
+        assert SIGNING_TIME not in attrs and flags.encoded == bytes.fromhex("030100")
         assert link.tag == 0xa1 and len(link.body) > 16  # Serialized page-hash object.
         for ext in ("ex_", "msi", "cat", "ps1", "psc1", "mof", "js", "256appx", "512appx"):
             digest = "sha512" if ext == "512appx" else "sha256"
