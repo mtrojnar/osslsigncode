@@ -12,7 +12,6 @@
 static SpcSpOpusInfo *spc_sp_opus_info_create(FILE_FORMAT_CTX *ctx);
 static int spc_indirect_data_content_create(u_char **blob, int *len, FILE_FORMAT_CTX *ctx);
 static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
-static int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 static int pkcs7_signer_info_add_purpose(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 static int pkcs7_signer_info_add_sequence_number(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx);
 static STACK_OF(X509) *X509_chain_get_sorted(FILE_FORMAT_CTX *ctx, int signer);
@@ -200,14 +199,13 @@ PKCS7 *pkcs7_create(FILE_FORMAT_CTX *ctx)
         goto err;
     }
 
-    if (!pkcs7_signer_info_add_signing_time(si, ctx)) {
-        goto err;
-    }
     if (!pkcs7_signer_info_add_purpose(si, ctx)) {
         goto err;
     }
-    if ((ctx->options->desc || ctx->options->url) &&
-            !pkcs7_signer_info_add_spc_sp_opus_info(si, ctx)) {
+    /* SignTool's shared I_CreateAuthCodeAttrs/CreateOpusInfo path emits OpusInfo,
+     * including an empty SEQUENCE when neither -n nor -i was supplied. This
+     * applies to all SIP formats, not just PE files. */
+    if (!pkcs7_signer_info_add_spc_sp_opus_info(si, ctx)) {
         fprintf(stderr, "Couldn't allocate memory for opus info\n");
         goto err;
     }
@@ -501,27 +499,50 @@ ASN1_OCTET_STRING *spc_indirect_data_content_get(BIO *hash, FILE_FORMAT_CTX *ctx
 }
 
 /*
- * Signs the data and place the signature in p7
- * [in, out] p7: new PKCS#7 signature
+ * Sign the prepared Authenticode content, without synthesizing signingTime.
+ * Both callers embed the content separately after this function returns;
+ * data contains the SEQUENCE contents, not its ASN.1 tag and length.
+ * [in, out] p7: new signedData with signed attributes and signing keys
  * [in] data: content data
  * [in] len: content length
+ * [returns] 0 on error or 1 on success
  */
 int pkcs7_sign_content(PKCS7 *p7, const u_char *data, int len)
 {
-    BIO *p7bio;
+    STACK_OF(PKCS7_SIGNER_INFO) *signers = PKCS7_get_signer_info(p7);
+    int i;
 
-    if ((p7bio = PKCS7_dataInit(p7, NULL)) == NULL) {
-        fprintf(stderr, "PKCS7_dataInit failed\n");
+    /* PKCS7_dataFinal() inserts a missing signingTime by default, unlike
+     * SignTool. Use the public signer-level API on every supported OpenSSL
+     * version (including 1.1.1): supply the content digest, then sign the
+     * existing attributes once. PKCS7_SIGNER_INFO_sign() does not add a time.
+     * This uses the supplied key and attributes directly, without adding a
+     * temporary time or signing twice.
+     *
+     * This helper only handles newly constructed Authenticode signedData:
+     * contentType and the other signed attributes are already present, and
+     * its callers install the encapsulated content. It is not a general
+     * replacement for PKCS7_dataFinal() (encryption, streaming, no-attrs). */
+    if (len < 0 || !signers || sk_PKCS7_SIGNER_INFO_num(signers) <= 0)
         return 0; /* FAILED */
+    for (i = 0; i < sk_PKCS7_SIGNER_INFO_num(signers); i++) {
+        PKCS7_SIGNER_INFO *si = sk_PKCS7_SIGNER_INFO_value(signers, i);
+        X509_ALGOR *alg;
+        EVP_PKEY *key;
+        const EVP_MD *md;
+        unsigned char digest[EVP_MAX_MD_SIZE];
+        unsigned int digest_len;
+
+        PKCS7_SIGNER_INFO_get0_algs(si, &key, &alg, NULL);
+        md = EVP_get_digestbyobj(alg->algorithm);
+        if (!key || !md || sk_X509_ATTRIBUTE_num(PKCS7_get_signed_attributes(si)) <= 0 ||
+                !EVP_Digest(data, (size_t)len, digest, &digest_len, md, NULL) ||
+                !PKCS7_add1_attrib_digest(si, digest, (int)digest_len) ||
+                !PKCS7_SIGNER_INFO_sign(si)) {
+            fprintf(stderr, "Failed to sign Authenticode attributes\n");
+            return 0; /* FAILED */
+        }
     }
-    BIO_write(p7bio, data, len);
-    (void)BIO_flush(p7bio);
-    if (!PKCS7_dataFinal(p7, p7bio)) {
-        fprintf(stderr, "PKCS7_dataFinal failed\n");
-        BIO_free_all(p7bio);
-        return 0; /* FAILED */
-    }
-    BIO_free_all(p7bio);
     return 1; /* OK */
 }
 
@@ -658,25 +679,27 @@ ASN1_TYPE *catalog_content_get(CatalogAuthAttr *attribute)
 }
 
 /*
- * PE and CAB format specific
- * [in] none
- * [returns] pointer to SpcLink
+ * Build the empty Unicode file link used by the PE SIP.
+ * [returns] pointer to SpcLink, or NULL on allocation failure
  */
-SpcLink *spc_link_obsolete_get(void)
+SpcLink *spc_link_file_get(void)
 {
-    const u_char obsolete[] = {
-        0x00, 0x3c, 0x00, 0x3c, 0x00, 0x3c, 0x00, 0x4f,
-        0x00, 0x62, 0x00, 0x73, 0x00, 0x6f, 0x00, 0x6c,
-        0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3e,
-        0x00, 0x3e, 0x00, 0x3e
-    };
     SpcLink *link = SpcLink_new();
+
+    if (!link)
+        return NULL;
     link->type = 2;
     link->value.file = SpcString_new();
+    if (!link->value.file)
+        goto err;
     link->value.file->type = 0;
     link->value.file->value.unicode = ASN1_BMPSTRING_new();
-    ASN1_STRING_set(link->value.file->value.unicode, obsolete, sizeof obsolete);
+    if (!link->value.file->value.unicode)
+        goto err;
     return link;
+err:
+    SpcLink_free(link);
+    return NULL;
 }
 
 /*
@@ -879,32 +902,6 @@ static int pkcs7_signer_info_add_spc_sp_opus_info(PKCS7_SIGNER_INFO *si, FILE_FO
     if (!PKCS7_add_signed_attribute(si, OBJ_txt2nid(SPC_SP_OPUS_INFO_OBJID),
             V_ASN1_SEQUENCE, astr)) {
         ASN1_STRING_free(astr);
-        return 0; /* FAILED */
-    }
-    return 1; /* OK */
-}
-
-/*
- * Add a custom, non-trusted time to the PKCS7 structure to prevent OpenSSL
- * adding the _current_ time. This allows to create a deterministic signature
- * when no trusted timestamp server was specified, making osslsigncode
- * behaviour closer to signtool.exe (which doesn't include any non-trusted
- * time in this case.)
- * [in, out] si: PKCS7_SIGNER_INFO structure
- * [in] ctx: structure holds input and output data
- * [returns] 0 on error or 1 on success
- */
-static int pkcs7_signer_info_add_signing_time(PKCS7_SIGNER_INFO *si, FILE_FORMAT_CTX *ctx)
-{
-    ASN1_TIME *time;
-
-    if (ctx->options->time == INVALID_TIME) /* -time option was not specified */
-        return 1; /* SUCCESS */
-    time = ASN1_TIME_adj(NULL, ctx->options->time, 0, 0);
-    if (!time)
-        return 0; /* FAILED */
-    if (!PKCS7_add_signed_attribute(si, NID_pkcs9_signingTime, V_ASN1_UTCTIME, time)) {
-        ASN1_TIME_free(time);
         return 0; /* FAILED */
     }
     return 1; /* OK */

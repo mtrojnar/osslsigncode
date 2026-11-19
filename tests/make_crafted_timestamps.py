@@ -239,7 +239,7 @@ def main():  # pylint: disable=too-many-locals
         "-certs", os.path.join(args.certs, "expired.pem"),
         "-key", os.path.join(args.certs, "key.pem"),
         "-ac", os.path.join(args.certs, "CAcross.pem"),
-        "-h", "sha256", "-time", str(int(SIGNING_TIME.timestamp())),
+        "-h", "sha256",
         "-in", args.infile, "-out", signed)
     run(args.osslsigncode, "extract-signature", "-in", signed, "-out", sig_file)
     with open(sig_file, "rb") as file:

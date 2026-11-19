@@ -25,7 +25,6 @@ osslsigncode - Authenticode signing, timestamping, extraction, attachment, remov
 [`-t` *URL* ... | `-ts` *URL* ...]
 [`-TSA-certs` *file* `-TSA-key` *file-or-URI* [`-TSA-time` *unix-time*]]
 [`-HTTPS-CAfile` *file*] [`-HTTPS-CRLfile` *file*]
-[`-time` *unix-time*]
 [`-addUnauthenticatedBlob` [`-blobFile` *file*]]
 [`-nest`] [`-add-msi-dse`] [`-verbose`] [`-pem`]
 `-in` *input* `-out` *output*
@@ -253,7 +252,12 @@ build.
 : Add the Java CAB permission attribute.  Only `low` is currently supported.
 
 `-ph`  
-: Generate page hashes for executable files.
+: Generate page hashes for executable files. SHA-256, SHA-384 and SHA-512
+  signatures use the selected digest for page hashes; MD5 and SHA-1 signatures
+  use SHA-1 page hashes.
+
+`-st`, `-time` *unix-time*\
+: Deprecated when signing; accepted and ignored with a warning.
 
 `-add-msi-dse`  
 : For MSI files, enable the `MsiDigitalSignatureEx` signing mode.  In this
@@ -343,9 +347,10 @@ The following timestamping modes are **mutually exclusive** within a single
 `-TSA-CRLfile`, `-CRLuntrusted` *file*  
 : PEM file containing CRLs for timestamp validation.
 
-`-time`, `-st` *unix-time*  
-: Verification time.  If a valid timestamp is present and used, chain
-  validation is normally performed at the timestamp time.
+`-time`, `-st` *unix-time*\
+: Select the verification time (`-1` is reserved). `-st` is a compatibility
+  alias for `-time`. If a valid timestamp is used, chain validation is normally
+  performed at the timestamp time.
 
 `-ignore-timestamp`  
 : Skip verification of the timestamp signature.
