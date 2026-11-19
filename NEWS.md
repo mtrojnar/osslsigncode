@@ -11,6 +11,8 @@
   the verification time
 - use empty PE image flags and an empty Unicode file link when not generating
   page hashes, matching the PE SIP's default encoding
+- generate SHA-384 and SHA-512 PE page hashes with the selected signing digest,
+  matching SignTool; verify these and legacy SHA-256 page-hash tables
 - match the CAB SIP's v2 subject OID and serialized cabinet-size hash
 - fixed memory leaks in signature processing, built-in timestamping and
   private key loading, and incorrect success reports when TSA parameters

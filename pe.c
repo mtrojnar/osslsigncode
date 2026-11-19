@@ -92,7 +92,7 @@ static int pe_modify_header(FILE_FORMAT_CTX *ctx, BIO *hash, BIO *outdata);
 static BIO *pe_digest_calc_bio(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
 static int pkcs7_get_page_hash(PKCS7 *p7, u_char **ph, int *phlen, int *phtype);
 static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype, SpcAttributeTypeAndOptionalValue *obj);
-static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype);
+static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int *phtype, int expected_phlen);
 static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype);
 static SpcLink *pe_page_hash_link_get(FILE_FORMAT_CTX *ctx, int phtype);
 static int pe_check_file(FILE_FORMAT_CTX *ctx);
@@ -162,9 +162,11 @@ static ASN1_OBJECT *pe_spc_image_data_get(u_char **p, int *plen, FILE_FORMAT_CTX
      * This is PE subject data, not a rule for other formats' SIP data. */
     if (ctx->options->pagehash) {
         SpcLink *link;
-        phtype = NID_sha1;
-        if (EVP_MD_size(ctx->options->md) > EVP_MD_size(EVP_sha1()))
-            phtype = NID_sha256;
+        /* The PE SIP uses the selected SHA-2 algorithm, not always SHA-256.
+         * Keep SHA-1 page hashes for MD5 and SHA-1 signatures. */
+        phtype = EVP_MD_nid(ctx->options->md);
+        if (EVP_MD_size(ctx->options->md) <= EVP_MD_size(EVP_sha1()))
+            phtype = NID_sha1;
         link = pe_page_hash_link_get(ctx, phtype);
         if (!link) {
             SpcPeImageData_free(pid);
@@ -949,7 +951,8 @@ static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype,
     if (!obj)
         return 0; /* FAILED */
 
-    /* Determine page hash algorithm */
+    /* V1 identifies SHA-1. V2 covers SHA-256/384/512; use NID_sha256 as
+     * its initial type and resolve the digest width during verification. */
     *phtype = 0;
     buf[0] = 0x00;
     OBJ_obj2txt(buf, sizeof buf, obj->type, 1);
@@ -1008,10 +1011,12 @@ static int pe_page_hash_get(u_char **ph, int *phlen, int *phtype,
  * Calculate page hash for the PE file.
  * [out] rphlen: page hash length
  * [in] ctx: structure holds input and output data
- * [in] phtype: NID_sha1 or NID_sha256
+ * [in, out] phtype: page hash algorithm (NID_sha1 or a SHA-2 NID)
+ * [in] expected_phlen: serialized table length for verification, or 0 when signing;
+ *     for V2, resolve phtype from this length and the PE's page count
  * [returns] pointer to calculated page hash
  */
-static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
+static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int *phtype, int expected_phlen)
 {
     uint16_t nsections, opthdr_size;
     uint32_t alignment, pagesize, hdrsize;
@@ -1021,21 +1026,15 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
     size_t written, off, sect_off, sect_tbl, need;
     u_char *res = NULL, *zeroes = NULL;
     char *sections;
-    const EVP_MD *md = EVP_get_digestbynid(phtype);
+    const EVP_MD *md;
     BIO *bhash = NULL;
     uint32_t filebound;
     size_t pphlen_sz, sections_factor;
     uint64_t pages;
 
-    if (rphlen == NULL || ctx == NULL || ctx->options == NULL || ctx->pe_ctx == NULL
+    if (rphlen == NULL || phtype == NULL || expected_phlen < 0
+        || ctx == NULL || ctx->options == NULL || ctx->pe_ctx == NULL
         || ctx->options->indata == NULL)
-        return NULL;
-
-    if (md == NULL)
-        return NULL;
-
-    mdlen = EVP_MD_size(md);
-    if (mdlen <= 0)
         return NULL;
 
     /* NumberOfSections indicates the size of the section table,
@@ -1084,8 +1083,6 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
                 pagesize, hdrsize);
         return NULL; /* FAILED */
     }
-    pphlen = 4 + mdlen;
-
     /* Determine the file boundary for section data validation */
     filebound = ctx->pe_ctx->sigpos ? ctx->pe_ctx->sigpos : ctx->pe_ctx->fileend;
 
@@ -1116,6 +1113,32 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
         }
         pages += ((uint64_t)rs + pagesize - 1) / pagesize;
     }
+    if (expected_phlen > 0 && *phtype == NID_sha256) {
+        /* V2 has no separate OIDs for the SHA-2 digest widths. There is one
+         * record per page, plus the header and terminating records, each
+         * containing a 4-byte offset and a digest. Resolve the width using
+         * the actual PE geometry, not the enclosing signature's algorithm:
+         * older osslsigncode versions always emitted SHA-256 page hashes.
+         * The caller still compares the entire calculated table. */
+        if ((uint64_t)expected_phlen == (pages + 2) * (4 + 32))
+            *phtype = NID_sha256;
+        else if ((uint64_t)expected_phlen == (pages + 2) * (4 + 48))
+            *phtype = NID_sha384;
+        else if ((uint64_t)expected_phlen == (pages + 2) * (4 + 64))
+            *phtype = NID_sha512;
+        else {
+            fprintf(stderr, "Invalid V2 page hash table length: %d\n", expected_phlen);
+            return NULL; /* FAILED */
+        }
+    }
+    md = EVP_get_digestbynid(*phtype);
+    if (md == NULL)
+        return NULL;
+    mdlen = EVP_MD_size(md);
+    if (mdlen <= 0)
+        return NULL;
+    pphlen = 4 + mdlen;
+
     /* Never more than the pages of the whole file, overlapping sections
      * that would need more are rejected while computing the page hash */
     if (pages > (uint64_t)nsections + ctx->pe_ctx->fileend / pagesize)
@@ -1123,8 +1146,7 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
     /* header page + last entry (end of the last section) + 1 spare */
     sections_factor = 3 + (size_t)pages;
     pphlen_sz = (size_t)pphlen;
-    /* Sanity limit - a PE file is at most 4 GB, so even with 512 byte pages
-     * the page hash stays below 512 MB */
+    /* Bound the allocation even for overlapping sections and wide digests. */
     if (sections_factor > SIZE_512M / pphlen_sz) {
         fprintf(stderr, "Page hash size exceeds limit: %zu\n", sections_factor * pphlen_sz);
         return NULL; /* FAILED */
@@ -1321,7 +1343,7 @@ static u_char *pe_page_hash_calc(int *rphlen, FILE_FORMAT_CTX *ctx, int phtype)
  * [in] ctx: structure holds input and output data
  * [in] ph: page hash
  * [in] phlen: page hash length
- * [in] phtype: NID_sha1 or NID_sha256
+ * [in] phtype: NID_sha1 for V1, NID_sha256 for V2 (resolved from the table length)
  * [returns] 0 on error or 1 on success
  */
 static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int phtype)
@@ -1331,7 +1353,7 @@ static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int 
 
     if (!ph)
         return 1; /* OK */
-    cph = pe_page_hash_calc(&cphlen, ctx, phtype);
+    cph = pe_page_hash_calc(&cphlen, ctx, &phtype, phlen);
     if (!cph) {
         fprintf(stderr, "Page hash verification failed: could not calculate page hash\n");
         return 0; /* FAILED */
@@ -1352,7 +1374,7 @@ static int pe_verify_page_hash(FILE_FORMAT_CTX *ctx, u_char *ph, int phlen, int 
 /*
  * Create a new SpcLink structure.
  * [in] ctx: structure holds input and output data
- * [in] phtype: NID_sha1 or NID_sha256
+ * [in] phtype: NID_sha1, NID_sha256, NID_sha384 or NID_sha512
  * [returns] pointer to SpcLink structure
  */
 static SpcLink *pe_page_hash_link_get(FILE_FORMAT_CTX *ctx, int phtype)
@@ -1366,7 +1388,7 @@ static SpcLink *pe_page_hash_link_get(FILE_FORMAT_CTX *ctx, int phtype)
     SpcLink *link;
     STACK_OF(ASN1_TYPE) *oset, *aset;
 
-    ph = pe_page_hash_calc(&phlen, ctx, phtype);
+    ph = pe_page_hash_calc(&phlen, ctx, &phtype, 0);
     if (!ph) {
         fprintf(stderr, "Failed to calculate page hash\n");
         return NULL; /* FAILED */

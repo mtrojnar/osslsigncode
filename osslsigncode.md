@@ -252,7 +252,9 @@ build.
 : Add the Java CAB permission attribute.  Only `low` is currently supported.
 
 `-ph`  
-: Generate page hashes for executable files.
+: Generate page hashes for executable files. SHA-256, SHA-384 and SHA-512
+  signatures use the selected digest for page hashes; MD5 and SHA-1 signatures
+  use SHA-1 page hashes.
 
 `-st`, `-time` *unix-time*\
 : Deprecated when signing; accepted and ignored with a warning.

@@ -47,6 +47,7 @@ if(Python3_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/make_large_pe.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/make_crafted_timestamps.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_pe_checksum.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_pe_page_hashes.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_signtool_compat.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_sip_formats.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_msi_tree.py"
@@ -261,6 +262,10 @@ if(Python3_FOUND AND NOT cryptography_error)
         COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/check_sip_formats.py"
         ${OSSLSIGNCODE} "${FILES}")
     list(APPEND ALL_TESTS "sip_formats")
+    add_test(NAME "pe_page_hashes"
+        COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/check_pe_page_hashes.py"
+        ${OSSLSIGNCODE} "${FILES}")
+    list(APPEND ALL_TESTS "pe_page_hashes")
 
 
 ### PE checksum ###

@@ -186,7 +186,7 @@
 #define SPC_CAB_DATA_OBJID           "1.3.6.1.4.1.311.2.1.28"
 #define SPC_SIPINFO_OBJID            "1.3.6.1.4.1.311.2.1.30"
 #define SPC_PE_IMAGE_PAGE_HASHES_V1  "1.3.6.1.4.1.311.2.3.1" /* SHA1 */
-#define SPC_PE_IMAGE_PAGE_HASHES_V2  "1.3.6.1.4.1.311.2.3.2" /* SHA256 */
+#define SPC_PE_IMAGE_PAGE_HASHES_V2  "1.3.6.1.4.1.311.2.3.2" /* SHA256, SHA384, SHA512 */
 #define SPC_NESTED_SIGNATURE_OBJID   "1.3.6.1.4.1.311.2.4.1"
 /* Microsoft OID Time Stamping */
 #define SPC_TIME_STAMP_REQUEST_OBJID "1.3.6.1.4.1.311.3.2.1"
