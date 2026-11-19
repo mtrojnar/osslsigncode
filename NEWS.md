@@ -11,6 +11,7 @@
   the verification time
 - use empty PE image flags and an empty Unicode file link when not generating
   page hashes, matching the PE SIP's default encoding
+- match the CAB SIP's v2 subject OID and serialized cabinet-size hash
 - fixed memory leaks in signature processing, built-in timestamping and
   private key loading, and incorrect success reports when TSA parameters
   cannot be loaded

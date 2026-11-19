@@ -48,6 +48,7 @@ if(Python3_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/make_crafted_timestamps.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_pe_checksum.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_signtool_compat.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_sip_formats.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_msi_tree.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/start_server.py"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/exec.py"
@@ -256,6 +257,10 @@ if(Python3_FOUND AND NOT cryptography_error)
         COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/check_signtool_compat.py"
         ${OSSLSIGNCODE} ${FILES})
     list(APPEND ALL_TESTS "signtool_compat")
+    add_test(NAME "sip_formats"
+        COMMAND ${Python3_EXECUTABLE} "${TEST_DIR}/check_sip_formats.py"
+        ${OSSLSIGNCODE} "${FILES}")
+    list(APPEND ALL_TESTS "sip_formats")
 
 
 ### PE checksum ###

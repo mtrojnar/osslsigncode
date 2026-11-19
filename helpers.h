@@ -32,7 +32,6 @@ MsCtlContent *ms_ctl_content_get(PKCS7 *p7);
 /* Borrows attribute; free a non-NULL result with ASN1_TYPE_free(). */
 ASN1_TYPE *catalog_content_get(CatalogAuthAttr *attribute);
 SpcLink *spc_link_file_get(void);
-SpcLink *spc_link_obsolete_get(void);
 int compare_digests(u_char *mdbuf, u_char *cmdbuf, int mdtype);
 int spc_indirect_data_content_get_digest(SpcIndirectDataContent *idc, u_char *mdbuf, int *mdtype);
 

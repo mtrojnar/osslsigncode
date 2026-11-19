@@ -703,28 +703,6 @@ err:
 }
 
 /*
- * CAB format specific
- * [in] none
- * [returns] pointer to SpcLink
- */
-SpcLink *spc_link_obsolete_get(void)
-{
-    const u_char obsolete[] = {
-        0x00, 0x3c, 0x00, 0x3c, 0x00, 0x3c, 0x00, 0x4f,
-        0x00, 0x62, 0x00, 0x73, 0x00, 0x6f, 0x00, 0x6c,
-        0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3e,
-        0x00, 0x3e, 0x00, 0x3e
-    };
-    SpcLink *link = SpcLink_new();
-    link->type = 2;
-    link->value.file = SpcString_new();
-    link->value.file->type = 0;
-    link->value.file->value.unicode = ASN1_BMPSTRING_new();
-    ASN1_STRING_set(link->value.file->value.unicode, obsolete, sizeof obsolete);
-    return link;
-}
-
-/*
  * [in] mdbuf, cmdbuf: message digests
  * [in] mdtype: message digest algorithm type
  * [returns] 0 on error or 1 on success

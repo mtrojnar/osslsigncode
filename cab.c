@@ -42,7 +42,7 @@ struct cab_ctx_st {
 
 /* FILE_FORMAT method prototypes */
 static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *outdata);
-static ASN1_OBJECT *cab_obsolete_link_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
+static ASN1_OBJECT *cab_link_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx);
 static PKCS7 *cab_pkcs7_contents_get(FILE_FORMAT_CTX *ctx, BIO *hash, const EVP_MD *md);
 static int cab_hash_length_get(FILE_FORMAT_CTX *ctx);
 static u_char *cab_digest_calc(FILE_FORMAT_CTX *ctx, const EVP_MD *md);
@@ -60,7 +60,7 @@ static int cab_is_detaching_supported(void);
 
 FILE_FORMAT file_format_cab = {
     .ctx_new = cab_ctx_new,
-    .data_blob_get = cab_obsolete_link_get,
+    .data_blob_get = cab_link_get,
     .pkcs7_contents_get = cab_pkcs7_contents_get,
     .hash_length_get = cab_hash_length_get,
     .digest_calc = cab_digest_calc,
@@ -134,24 +134,71 @@ static FILE_FORMAT_CTX *cab_ctx_new(GLOBAL_OPTIONS *options, BIO *hash, BIO *out
  * Allocate and return SpcLink object.
  * [out] p: SpcLink data
  * [out] plen: SpcLink data length
- * [in] ctx: structure holds input and output data (unused)
- * [returns] pointer to ASN1_OBJECT structure corresponding to SPC_CAB_DATA_OBJID
+ * [in] ctx: structure holds input and output data
+ * [returns] CAB SIP version 2 subject OID, or NULL on failure
  */
-static ASN1_OBJECT *cab_obsolete_link_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx)
+static ASN1_OBJECT *cab_link_get(u_char **p, int *plen, FILE_FORMAT_CTX *ctx)
 {
-    ASN1_OBJECT *dtype;
-    SpcLink *link = spc_link_obsolete_get();
+    static const u_char classid[] = {
+        0xa6, 0xb5, 0x86, 0xd5, 0xb4, 0xa1, 0x24, 0x66,
+        0xae, 0x05, 0xa2, 0x17, 0xda, 0x8e, 0x60, 0xd6
+    };
+    u_char size[4], digest[EVP_MAX_MD_SIZE], *serialized = NULL, *q;
+    unsigned int digest_len;
+    uint32_t cabinet_size = GET_UINT32_LE(ctx->options->indata + 8);
+    ASN1_OBJECT *oid = NULL, *dtype = NULL;
+    X509_ATTRIBUTE *attribute = NULL;
+    SpcLink *link = NULL;
+    int len, serialized_len;
 
-    /* squash the unused parameter warning */
-    (void)ctx;
-
-    *plen = i2d_SpcLink(link, NULL);
-    *p = OPENSSL_malloc((size_t)*plen);
-    i2d_SpcLink(link, p);
-    *p -= *plen;
+    /* The SIP hashes cbCabinet after reserving the signature header, not
+     * the total file length including the PKCS#7. Re-signing keeps it. */
+    if (!(ctx->cab_ctx->flags & FLAG_RESERVE_PRESENT)) {
+        if (cabinet_size > UINT32_MAX - 24)
+            goto cleanup;
+        cabinet_size += 24;
+    }
+    PUT_UINT32_LE(cabinet_size, size);
+    if (!EVP_Digest(size, sizeof size, digest, &digest_len, ctx->options->md, NULL))
+        goto cleanup;
+    oid = OBJ_txt2obj("1.3.6.1.4.1.311.2.5.1", 1);
+    if (!oid)
+        goto cleanup;
+    attribute = X509_ATTRIBUTE_create_by_OBJ(NULL, oid, V_ASN1_OCTET_STRING,
+        digest, (int)digest_len);
+    if (!attribute || (len = i2d_X509_ATTRIBUTE(attribute, NULL)) <= 0)
+        goto cleanup;
+    /* serializedData is a SET OF attributes, containing the size hash. */
+    serialized_len = ASN1_object_size(1, len, V_ASN1_SET);
+    serialized = OPENSSL_malloc((size_t)serialized_len);
+    link = SpcLink_new();
+    if (!serialized || !link)
+        goto cleanup;
+    q = serialized;
+    ASN1_put_object(&q, 1, len, V_ASN1_SET, V_ASN1_UNIVERSAL);
+    if (i2d_X509_ATTRIBUTE(attribute, &q) != len)
+        goto cleanup;
+    link->type = 1;
+    link->value.moniker = SpcSerializedObject_new();
+    if (!link->value.moniker
+        || !ASN1_OCTET_STRING_set(link->value.moniker->classId, classid, sizeof classid)
+        || !ASN1_OCTET_STRING_set(link->value.moniker->serializedData, serialized, serialized_len))
+        goto cleanup;
     dtype = OBJ_txt2obj(SPC_CAB_DATA_OBJID, 1);
+    if (!dtype)
+        goto cleanup;
+    *p = NULL;
+    *plen = i2d_SpcLink(link, p);
+    if (*plen <= 0) {
+        ASN1_OBJECT_free(dtype);
+        dtype = NULL;
+    }
+cleanup:
     SpcLink_free(link);
-    return dtype; /* OK */
+    X509_ATTRIBUTE_free(attribute);
+    ASN1_OBJECT_free(oid);
+    OPENSSL_free(serialized);
+    return dtype;
 }
 
 /*
