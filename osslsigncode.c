@@ -3325,7 +3325,8 @@ static int verify_signature(FILE_FORMAT_CTX *ctx, PKCS7 *p7)
  * [in] options: verification options
  * [in] verify_signature_flag:
  *      - non-zero: verify both digest and cryptographic signature
- *      - zero: verify only digest/content consistency (no signature validation)
+ *      - zero: verify only digest/content consistency of every signature
+ *        (no signature validation)
  * [returns] 1 on error or 0 on success
  */
 static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options,
@@ -3364,16 +3365,18 @@ static int verify_signed_file(FILE_FORMAT_CTX *ctx, GLOBAL_OPTIONS *options,
         } else {
             digest_ok = (ctx->format->verify_digests(ctx, sig) != 0);
         }
-        if (digest_ok) {
-            if (!verify_signature_flag) {
-                /* success: at least one digest matches */
-                ret = 0;
-            } else {
-                /* success if at least one valid signature is found */
-                ret &= verify_signature(ctx, sig);
-            }
-        }
         verified++;
+        if (!verify_signature_flag) {
+            /* every signature must match the data it is attached to */
+            if (!digest_ok) {
+                ret = 1;
+                break;
+            }
+            ret = 0;
+        } else if (digest_ok) {
+            /* success if at least one valid signature is found */
+            ret &= verify_signature(ctx, sig);
+        }
     }
     printf("Number of verified signatures: %d\n", verified);
     sk_PKCS7_pop_free(signatures, PKCS7_free);

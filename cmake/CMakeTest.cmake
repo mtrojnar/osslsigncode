@@ -213,6 +213,26 @@ if(Python3_FOUND AND NOT cryptography_error)
         endforeach(format ${formats})
     endforeach(ext ${extensions_nocat})
 
+    # Attach a nested signature of another file
+    # The primary signature still matches, the nested one must not be accepted
+    # Unsupported nesting for APPX files
+    set(mismatches "exe:ex_" "ex_:exe" "ps1:js" "psc1:ps1" "mof:js" "js:ps1")
+    foreach(mismatch ${mismatches})
+        string(REPLACE ":" ";" pair ${mismatch})
+        list(GET pair 0 ext)
+        list(GET pair 1 sigext)
+        add_test(NAME "attached_mismatch_${ext}"
+            COMMAND ${Python3_EXECUTABLE} ${EXEC} ${OSSLSIGNCODE} "attach-signature"
+            "-nest"
+            "-sigin" "${FILES}/${sigext}.der"
+            "-in" "${FILES}/signed.${ext}"
+            "-out" "${FILES}/attached_mismatch.${ext}")
+        set_tests_properties("attached_mismatch_${ext}" PROPERTIES
+            DEPENDS "signed_${ext};extract_der_${sigext}"
+            PASS_REGULAR_EXPRESSION "Signature mismatch")
+        list(APPEND ALL_TESTS "attached_mismatch_${ext}")
+    endforeach(mismatch ${mismatches})
+
     # Add an unauthenticated blob to a previously-signed file
     foreach(ext ${extensions_all})
         add_test(NAME "added_${ext}"
@@ -817,7 +837,7 @@ if(Python3_FOUND AND NOT cryptography_error)
     endforeach(crafted "ok" "late" "empty" "short" "two_attrs")
 
     # Delete test files
-    set(names "signed" "nested" "revoked" "removed" "added")
+    set(names "signed" "nested" "revoked" "removed" "added" "attached_mismatch")
     foreach(ext ${extensions_all})
         foreach(name ${names})
             set(OUTPUT_FILES ${OUTPUT_FILES} "${FILES}/${name}.${ext}")
